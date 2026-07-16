@@ -15,6 +15,26 @@
   </head>
   <body>
     <canvas id="app"></canvas>
+    <div class="fx vignette"></div>
+    <div class="fx grain"></div>
+    <div class="hud">
+      <div class="bp"><span id="bp">0</span> BP</div>
+      <div class="rate" id="rate">0 / Sek · +1 pro Shake</div>
+      <div class="combo" id="combo"></div>
+      <div class="move" id="moveName">TWERK</div>
+    </div>
+    <button class="toggleShop" id="toggleShop">🛒 Shop</button>
+    <div class="hintbar">👆 Klick / Leertaste = Shaken · Klicken pusht Tempo &amp; Moves</div>
+    <div class="shop" id="shop">
+      <div class="tabs">
+        <div class="tab active" data-t="up">⚡ Upgrades</div>
+        <div class="tab" data-t="sk">🕺 Skins</div>
+        <div class="tab" data-t="bg">🌆 Kulisse</div>
+      </div>
+      <div class="tabbody" id="tabUp"></div>
+      <div class="tabbody" id="tabSk" style="display: none"></div>
+      <div class="tabbody" id="tabBg" style="display: none"></div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

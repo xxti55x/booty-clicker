@@ -31,5 +31,24 @@ here (spec §7).
   folds upgrade levels so stats can be reconstructed from a save (needed for M1).
 
 - **2026-07-16 — M0 delivered in two commits:** (1) scaffold + toolchain + economy
-  tests (this commit), (2) full behavioural port of the prototype into modules.
+  tests, (2) full behavioural port of the prototype into modules.
   Keeps each commit independently green and reviewable.
+
+- **2026-07-16 — `noUncheckedIndexedAccess` disabled.** It is not part of `strict`
+  and added heavy friction across the ported Three.js code (palette lookups, pose
+  channels, geometry attributes). `strict` plus `noUnusedLocals/Parameters`,
+  `noImplicitReturns` and `noFallthroughCasesInSwitch` stay on.
+
+- **2026-07-16 — Port structure.** The 646-line prototype was split by spec §3
+  directory: `engine/` (scene, renderer, lights, env, OrbitControls camera,
+  material helpers), `character/` (rig, physics, skins), `choreo/` (moves +
+  `Choreographer`), `world/` (backgrounds + `World`), `game/` (economy, state),
+  `ui/` (hud, shop, format), wired in `main.ts`. Transient runtime signals
+  (combo, drive) live outside the serializable `GameState`. Three r128 deprecations
+  updated: `outputEncoding`→`outputColorSpace`, texture `.encoding`→`.colorSpace`,
+  `physicallyCorrectLights` dropped (physical lighting is the r0.180 default).
+
+- **2026-07-16 — M0 verified.** Headless Chromium smoke test: no page/console
+  errors, WebGL context created, HUD/shop render (7 upgrades), clicking increments
+  BP with the combo bonus. `npm run build` → dist 552 KB (< 5 MB budget); `npm test`
+  9 green; lint + format clean.
