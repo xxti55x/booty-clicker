@@ -3,6 +3,53 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M1 — Persistenz
+
+- **2026-07-16 — `suppressSave` guard on reset.** `reset()` wipes the save and
+  reloads the page; without a guard, the 10 s autosave interval or a
+  `visibilitychange`/`beforeunload` firing between the wipe and the reload
+  could resurrect the just-deleted save. `suppressSave` is flipped before
+  `resetSave()` runs so `persist()` becomes a no-op for the remainder of that
+  page's lifetime.
+
+- **2026-07-16 — Armed-button double-confirm instead of `window.confirm`.**
+  The reset button arms on first click (visual state + 4 s auto-revert) and
+  only fires on a second click while armed. Keeps the destructive action
+  in-page and stylable, matching the game's UI language, rather than a native
+  browser dialog.
+
+- **2026-07-16 — Settings folded into the shop as a 4th tab.** No new panel
+  chrome, no extra toggle — reuses `Shop`'s existing tab/tabbody plumbing
+  (generalized from a hard-coded 3-way switch to a `data-t` → element map) so
+  Export/Import/Reset live where players already look for game controls.
+
+- **2026-07-16 — UTF-8-safe base64 via `TextEncoder`/`TextDecoder`.** Plain
+  `btoa(JSON.stringify(...))` breaks on multi-byte characters (skin/BG names
+  contain emoji). Encoding routes bytes through `TextEncoder` before `btoa`
+  and reverses via `atob` + `TextDecoder`, so export/import codes survive
+  round-tripping any save content.
+
+- **2026-07-16 — `SaveStorage` injected behind a 3-method interface.** Vitest
+  runs in the `node` environment (no jsdom, per project convention) with no
+  `localStorage`. Every persistence function takes an optional `SaveStorage`
+  (defaulting to `globalThis.localStorage` wrapped in a try/catch) so tests
+  inject an in-memory `Map`-backed fake and the whole save layer is
+  unit-testable without a DOM.
+
+- **2026-07-16 — Derived stats (`perClick`/`perSec`/`mult`) are never
+  persisted or trusted from disk.** The save stores only `bp` and upgrade
+  _levels_ keyed by id; on load, levels are applied to a fresh
+  `createUpgrades()` and stats are rebuilt via the existing pure
+  `deriveStats`. A tampered or stale stored multiplier can never leak into a
+  loaded game — it's simply never read.
+
+- **2026-07-16 — v1 schema defined retroactively.** M0 never shipped a save
+  format, so `SaveDataV1` (positional upgrade array, derived stats stored
+  directly, no `lastSeen`) is a reconstruction of "what the naive M0
+  serialization would have looked like," giving the migration registry
+  (`MIGRATIONS[1] = migrateV1toV2`) a real predecessor to prove the upgrade
+  path against instead of starting the chain at v2 only.
+
 ## M0 — Scaffold & Port
 
 - **2026-07-16 — Spec kept as `booty-clicker-spec.md`, `AGENTS.md` is a pointer.**
