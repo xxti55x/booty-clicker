@@ -194,4 +194,12 @@ describe('isSaveDataV2', () => {
     const save = serialize(state, upgrades);
     expect(isSaveDataV2({ ...save, upgrades: { hips: 2.5 } })).toBe(false);
   });
+
+  it('rejects prototype-chain keys for skin/bg (own-property check, not `in`)', () => {
+    const state = createGameState();
+    const upgrades = createUpgrades();
+    const save = serialize(state, upgrades);
+    expect(isSaveDataV2({ ...save, bg: 'toString' })).toBe(false);
+    expect(isSaveDataV2({ ...save, skin: 'constructor' })).toBe(false);
+  });
 });

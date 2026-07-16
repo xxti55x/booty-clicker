@@ -50,8 +50,10 @@ export function isSaveDataV2(raw: unknown): raw is SaveDataV2 {
     if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) return false;
   }
 
-  if (typeof raw.skin !== 'string' || !(raw.skin in SKIN_KEYS)) return false;
-  if (typeof raw.bg !== 'string' || !(raw.bg in BG_KEYS)) return false;
+  // Object.hasOwn (not `in`) — `in` walks the prototype chain, so a save with
+  // e.g. bg: "toString" would otherwise pass and later crash setBackground().
+  if (typeof raw.skin !== 'string' || !Object.hasOwn(SKIN_KEYS, raw.skin)) return false;
+  if (typeof raw.bg !== 'string' || !Object.hasOwn(BG_KEYS, raw.bg)) return false;
 
   if (!isRecord(raw.unlocked)) return false;
   for (const v of Object.values(raw.unlocked)) {

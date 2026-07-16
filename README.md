@@ -44,11 +44,12 @@ Three.js kommt als npm-Paket (kein CDN). Projekt-Struktur & Milestones: siehe
 ## Roadmap (siehe Gameplan)
 
 1. Boss-Fight + Balancing (Pflicht)
-2. Save/Load via localStorage (Pflicht)
-3. Audio (Beat-Klatschen, SFX, Musik)
-4. Achievements, Partikel, Random Events
-5. Mobile/UX, Settings
-6. Testing + itch.io Release
+2. Audio (Beat-Klatschen, SFX, Musik)
+3. Achievements, Partikel, Random Events
+4. Mobile/UX, Settings
+5. Testing + itch.io Release
+
+Save/Load via localStorage ist erledigt — siehe "Persistenz (M1)" oben.
 
 ## Lizenz-Hinweise
 

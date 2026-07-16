@@ -107,6 +107,9 @@ describe('loadGame — corrupt data never throws, always falls back to fresh sta
     JSON.stringify({ ...validElse, bp: 1, skin: 'hackerman' }),
     JSON.stringify({ ...validElse, bp: 1, upgrades: { hips: 2.5 } }),
     JSON.stringify({ ...validElse, bp: null }),
+    // Prototype-chain key: `'toString' in BG_KEYS` is true, so a naive `in`
+    // check would accept this and later crash BGS['toString'].build(...).
+    JSON.stringify({ ...validElse, bp: 1, bg: 'toString' }),
   ];
 
   it.each(badRaws)('raw payload %#: results in null, never throws', (raw) => {
