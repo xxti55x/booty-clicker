@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Booty Clicker · Anatomy Edition</title>
+    <meta name="description" content="Booty Clicker — Joke-Clicker-Game in Three.js." />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🍑%3C/text%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <canvas id="app"></canvas>
+    <div class="fx vignette"></div>
+    <div class="fx grain"></div>
+    <div class="hud">
+      <div class="bp"><span id="bp">0</span> BP</div>
+      <div class="rate" id="rate">0 / Sek · +1 pro Shake</div>
+      <div class="combo" id="combo"></div>
+      <div class="move" id="moveName">TWERK</div>
+    </div>
+    <button class="toggleShop" id="toggleShop">🛒 Shop</button>
+    <div class="hintbar">👆 Klick / Leertaste = Shaken · Klicken pusht Tempo &amp; Moves</div>
+    <div class="shop" id="shop">
+      <div class="tabs">
+        <div class="tab active" data-t="up">⚡ Upgrades</div>
+        <div class="tab" data-t="sk">🕺 Skins</div>
+        <div class="tab" data-t="bg">🌆 Kulisse</div>
+      </div>
+      <div class="tabbody" id="tabUp"></div>
+      <div class="tabbody" id="tabSk" style="display: none"></div>
+      <div class="tabbody" id="tabBg" style="display: none"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

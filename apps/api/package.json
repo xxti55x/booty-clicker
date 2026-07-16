@@ -1,0 +1,10 @@
+{
+  "name": "@booty-clicker/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker (Hono) for the global leaderboard. Implemented in milestone M5.",
+  "scripts": {
+    "dev": "echo \"apps/api is a stub — implemented in milestone M5\" && exit 0"
+  }
+}

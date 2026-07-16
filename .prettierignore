@@ -1,0 +1,6 @@
+node_modules
+dist
+legacy
+booty-clicker.zip
+package-lock.json
+*.min.js
