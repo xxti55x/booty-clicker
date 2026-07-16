@@ -10,8 +10,10 @@ import { createControls } from './engine/camera';
 import { createScene } from './engine/scene';
 import { COMBO_WINDOW_S, clickGain, createUpgrades, passiveGain } from './game/economy';
 import { createGameState, createRuntimeState } from './game/state';
+import { applySave, computeOfflineEarnings, loadGame, resetSave, saveGame } from './save/store';
 import { fmt } from './ui/format';
 import { Hud } from './ui/hud';
+import { Settings } from './ui/settings';
 import { Shop } from './ui/shop';
 import { World } from './world/backgrounds';
 
@@ -28,6 +30,16 @@ const controls = createControls(camera, renderer.domElement);
 const state = createGameState();
 const runtime = createRuntimeState();
 const upgrades = createUpgrades();
+
+const loaded = loadGame();
+let offlineEarnedMs = 0;
+let offlineEarned = 0;
+if (loaded) {
+  applySave(loaded, state, upgrades);
+  offlineEarnedMs = Math.max(0, Date.now() - loaded.lastSeen);
+  offlineEarned = computeOfflineEarnings(offlineEarnedMs, state.perSec, state.mult);
+  state.bp += offlineEarned;
+}
 
 const hud = new Hud();
 const choreo = new Choreographer();
@@ -50,6 +62,38 @@ const shop = new Shop({
 world.setBackground(state.bg);
 choreo.setMove(0);
 hud.update(state);
+
+// ---------- persistence ----------
+let suppressSave = false;
+const persist = (): void => {
+  if (!suppressSave) saveGame(state, upgrades);
+};
+window.setInterval(persist, 10_000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') persist();
+});
+window.addEventListener('beforeunload', persist);
+
+const settings = new Settings({
+  state,
+  upgrades,
+  applyImported: (save) => {
+    applySave(save, state, upgrades);
+    char = buildCharacter(scene, SKINS[state.skin], char);
+    world.setBackground(state.bg);
+    shop.renderUpgrades();
+    shop.renderSkins();
+    shop.renderBgs();
+    hud.update(state);
+    persist();
+  },
+  reset: () => {
+    suppressSave = true;
+    resetSave();
+    window.location.reload();
+  },
+});
+if (offlineEarned >= 1) settings.showWelcomeBack(offlineEarnedMs, offlineEarned);
 
 // ---------- input ----------
 function doShake(cx?: number, cy?: number): void {

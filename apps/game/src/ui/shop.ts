@@ -22,11 +22,18 @@ export interface ShopDeps {
   setBackground: (key: BackgroundKey) => void;
 }
 
-/** The right-hand shop panel: Upgrades / Skins / Backgrounds tabs. */
+/** The right-hand shop panel: Upgrades / Skins / Backgrounds / Settings tabs. */
 export class Shop {
   private readonly tabUp = byId('tabUp');
   private readonly tabSk = byId('tabSk');
   private readonly tabBg = byId('tabBg');
+  /** data-t -> tab body element, so extra tabs (e.g. Settings) just work. */
+  private readonly bodies: Record<string, HTMLElement> = {
+    up: this.tabUp,
+    sk: this.tabSk,
+    bg: this.tabBg,
+    set: byId('tabSet'),
+  };
 
   constructor(private readonly deps: ShopDeps) {
     document.querySelectorAll<HTMLElement>('.tab').forEach((t) => {
@@ -34,9 +41,9 @@ export class Shop {
         document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
         t.classList.add('active');
         const m = t.dataset.t;
-        this.tabUp.style.display = m === 'up' ? 'block' : 'none';
-        this.tabSk.style.display = m === 'sk' ? 'block' : 'none';
-        this.tabBg.style.display = m === 'bg' ? 'block' : 'none';
+        for (const [key, el] of Object.entries(this.bodies)) {
+          el.style.display = key === m ? 'block' : 'none';
+        }
       };
     });
     const shop = byId('shop');

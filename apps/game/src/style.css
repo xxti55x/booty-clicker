@@ -259,3 +259,86 @@ body {
     transform: translate(-50%, -70px) scale(1);
   }
 }
+.settings-section {
+  margin-bottom: 18px;
+}
+.settings-section h3 {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #8a8a99;
+  margin-bottom: 8px;
+}
+.settings-section textarea {
+  width: 100%;
+  min-height: 64px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: #e8e8ef;
+  font-size: 11px;
+  font-family: monospace;
+  padding: 8px;
+  resize: vertical;
+}
+.btn {
+  background: #a8e831;
+  color: #12140a;
+  width: 100%;
+  padding: 9px 0;
+  margin-top: 6px;
+  border: none;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+.btn.danger {
+  background: #ff6b6b;
+}
+.btn.danger.armed {
+  background: #d32f2f;
+  color: #fff;
+}
+.msg {
+  font-size: 11px;
+  margin-top: 6px;
+}
+.msg.ok {
+  color: #a8e831;
+}
+.msg.bad {
+  color: #ff6b6b;
+}
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+}
+.overlay.hidden {
+  display: none;
+}
+.dialog {
+  background: rgba(20, 20, 28, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 24px 28px;
+  max-width: 320px;
+  text-align: center;
+}
+.dialog .dt {
+  font-size: 16px;
+  font-weight: 800;
+}
+.dialog .dd {
+  font-size: 12.5px;
+  color: #9a9aad;
+  margin: 10px 0 16px;
+  line-height: 1.4;
+}
