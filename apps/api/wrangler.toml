@@ -1,0 +1,13 @@
+# Cloudflare Worker config for the leaderboard API. Wired up in milestone M5.
+name = "booty-clicker-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "booty-clicker"
+# database_id = "<set-in-M5>"
+
+# [[kv_namespaces]]
+# binding = "RATE_LIMIT"
+# id = "<set-in-M5>"

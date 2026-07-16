@@ -1,0 +1,33 @@
+{
+  "name": "booty-clicker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Booty Clicker · Anatomy Edition — browser-based joke clicker game (Three.js + TypeScript + Vite).",
+  "workspaces": [
+    "apps/game",
+    "apps/api"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/game",
+    "build": "npm run build -w apps/game",
+    "preview": "npm run preview -w apps/game",
+    "test": "npm run test -w apps/game",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "eslint": "^9.18.0",
+    "eslint-config-prettier": "^9.1.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

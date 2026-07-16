@@ -21,19 +21,19 @@ Verhalten 1:1 erhalten, dann erweitern.
 
 ## 2. Tech-Stack (verbindlich)
 
-| Bereich | Entscheidung | Begründung |
-|---|---|---|
-| Sprache | TypeScript (strict) | Agent-freundlich, Refactor-sicher |
-| Build | Vite | Zero-Config, HMR, statischer Output |
-| 3D | Three.js (aktuelle Version, npm-Paket, kein CDN) | bereits im Prototyp; OrbitControls aus `three/examples` nutzen statt Eigenbau |
-| State | Zustand (Store) ohne Framework; UI in Vanilla TS + CSS | Kein React/Angular — Spiel-UI ist klein, Overhead vermeiden |
-| Audio | Web Audio API direkt (kein Howler) | Beat-Sync braucht Low-Level-Kontrolle |
-| Tests | Vitest (Unit: Ökonomie, Save-Migration, Physik-Step) | schnell, Vite-nativ |
-| Lint/Format | ESLint + Prettier, CI-enforced | Konsistenz über Agent-Sessions |
-| Backend | Cloudflare Worker (Hono) — **nur** für globales Leaderboard | Spiel bleibt offline-fähig; Worker ist optional zuschaltbar |
-| Datenbank | Cloudflare D1 (SQLite) | eine Tabelle reicht, kostenlos, kein Ops-Aufwand |
-| Hosting | Cloudflare Pages (Frontend) + Worker (API); itch.io als ZIP-Export | Free Tier, CI via GitHub Actions |
-| Saves | `localStorage` (primär), Export/Import als Base64-String | kein Account-System — bewusste Entscheidung, hält Scope klein |
+| Bereich     | Entscheidung                                                       | Begründung                                                                    |
+| ----------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| Sprache     | TypeScript (strict)                                                | Agent-freundlich, Refactor-sicher                                             |
+| Build       | Vite                                                               | Zero-Config, HMR, statischer Output                                           |
+| 3D          | Three.js (aktuelle Version, npm-Paket, kein CDN)                   | bereits im Prototyp; OrbitControls aus `three/examples` nutzen statt Eigenbau |
+| State       | Zustand (Store) ohne Framework; UI in Vanilla TS + CSS             | Kein React/Angular — Spiel-UI ist klein, Overhead vermeiden                   |
+| Audio       | Web Audio API direkt (kein Howler)                                 | Beat-Sync braucht Low-Level-Kontrolle                                         |
+| Tests       | Vitest (Unit: Ökonomie, Save-Migration, Physik-Step)               | schnell, Vite-nativ                                                           |
+| Lint/Format | ESLint + Prettier, CI-enforced                                     | Konsistenz über Agent-Sessions                                                |
+| Backend     | Cloudflare Worker (Hono) — **nur** für globales Leaderboard        | Spiel bleibt offline-fähig; Worker ist optional zuschaltbar                   |
+| Datenbank   | Cloudflare D1 (SQLite)                                             | eine Tabelle reicht, kostenlos, kein Ops-Aufwand                              |
+| Hosting     | Cloudflare Pages (Frontend) + Worker (API); itch.io als ZIP-Export | Free Tier, CI via GitHub Actions                                              |
+| Saves       | `localStorage` (primär), Export/Import als Base64-String           | kein Account-System — bewusste Entscheidung, hält Scope klein                 |
 
 **Explizit NICHT bauen:** Accounts/Auth, Multiplayer, Payments, Analytics-SDKs, Cookies (→ kein Consent-Banner nötig; Leaderboard speichert nur Nickname + Score).
 
@@ -79,12 +79,14 @@ booty-clicker/
 ## 5. Milestones (strikte Reihenfolge)
 
 ### M0 — Scaffold & Port (Fundament)
+
 - Repo-Struktur wie oben, Vite + TS strict + ESLint/Prettier/Vitest + CI.
 - `legacy/index.html` in Module portieren (Rig, Moves, Physik, Kulissen, Shop, HUD). Verhalten identisch.
 - Eigenbau-Orbit durch `OrbitControls` ersetzen (Zoom-Limits 5–24, Polar-Limits wie Prototyp).
 - **AC:** Spiel läuft via `npm run dev` funktional identisch zum Prototyp; Build < 5 MB; 3 Unit-Tests für `economy.ts` (Kostenformel, Combo-Bonus, Multiplikator-Stacking).
 
 ### M1 — Persistenz
+
 - Save/Load `localStorage`, Autosave 10 s + `visibilitychange`/`beforeunload`.
 - Versioniertes Schema + Migrationsgerüst (Test: v1-Save lädt in v2).
 - Offline-Earnings beim Laden: `min(elapsed, 2h) × BP/s × 0.5`, mit Welcome-Back-Dialog.
@@ -92,6 +94,7 @@ booty-clicker/
 - **AC:** Reload erhält kompletten Zustand; manipulierter/korrupter Save ⇒ sauberer Neustart statt Crash (Test).
 
 ### M2 — Progression & Boss-Finale
+
 - Balancing als Daten: Ziel-Kurve laut Kommentarblock in `economy.ts` (erste 5 min: Kauf ≤ 60 s Abstand; Minute 5–30: 2–4 min; Endgame-Ziel 50k BP für Boss-Unlock bei ~35–45 min).
 - Content-Gates: Skins/Kulissen erscheinen erst ab BP-Meilensteinen im Shop (Config-Feld `revealAt`).
 - Boss-Fight: Goldener Twerk-Tyrann als Gegner-Instanz (zweites Rig gespiegelt), HP-Balken, 90-s-Timer, Klick-DPS = `perClick`-Skalierung; Win ⇒ Credits-Screen + "Tyrann"-Skin freigeschaltet; Lose ⇒ Retry mit 25 % HP-Erleichterung.
@@ -99,11 +102,13 @@ booty-clicker/
 - **AC:** Simulierter Bot-Playthrough (Test-Skript, das optimal kauft) erreicht Boss in 30–50 simulierten Minuten; Boss gewinn-/verlierbar; Rebirth-Werte überleben Reload.
 
 ### M3 — Audio
+
 - `audio/engine.ts`: AudioContext nach erster User-Geste; Master-/SFX-/Musik-Gain, Mute persistiert.
 - Beat-Klatschen synchron zur Choreo-`phase`; Kauf-/Unlock-/Combo-/Boss-SFX; 1 Loop-Track pro Kulisse (CC0-Quellen, Lizenzliste in `public/CREDITS.md`).
 - **AC:** Kein Autoplay-Fehler in Chrome/Firefox; Mute wirkt sofort und persistiert; alle Assets CC0-dokumentiert.
 
 ### M4 — Game Feel & Content
+
 - 18 Achievements (Config + Toast-System + eigener Shop-Tab).
 - Klick-Partikel (instanced Sprites, Pool, max 200), Screen-Shake bei Combo-Meilensteinen (dezent, abschaltbar).
 - Random Event "Goldener Pfirsich": alle 90–240 s, 8 s klickbar, +60 s Einkommens-Boost ×3.
@@ -111,12 +116,14 @@ booty-clicker/
 - **AC:** Achievements triggern korrekt (Tests für 3 Stück), Partikel kosten < 1 ms/Frame (gemessen), Event-Timing im Save persistiert.
 
 ### M5 — Leaderboard (Worker + D1)
+
 - `schema.sql`: `scores(id INTEGER PK, nickname TEXT CHECK(length(nickname) BETWEEN 2 AND 16), best_time_s INTEGER, created_at TEXT)`.
 - Hono-Endpoints: `POST /api/scores` (Boss-Kill-Zeit; Rate-Limit 5/min/IP via KV; Nickname-Filter: nur `[a-zA-Z0-9_ ]`), `GET /api/scores/top?limit=50`.
 - Client: Submit-Dialog nach Boss-Win (überspringbar), Top-50-Ansicht im Menü; komplett fail-silent.
 - **AC:** Worker lokal via `wrangler dev` testbar; Spiel voll spielbar ohne erreichbare API; kein PII außer frei gewähltem Nickname.
 
 ### M6 — UX, Polish & Release
+
 - Onboarding (3 Tooltips beim Erststart), Settings (Grafikqualität: pixelRatio/Schatten-Stufen, FPS-Cap, Effekte aus).
 - Mobile: `pointerdown`, responsives Shop-Panel, Touch-Orbit.
 - Loading-Screen, Favicon, OG-Meta (Titelbild), `document.title` mit BP.
