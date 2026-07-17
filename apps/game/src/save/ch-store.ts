@@ -4,10 +4,12 @@
  * untouched. Never throws; injectable storage for node unit tests.
  */
 import { goldFor, monsterHp } from '../game/combat';
-import type { ChState } from '../game/ch-state';
+import { type ChStats, type ChState, createStats } from '../game/ch-state';
+import type { CrewLevels } from '../game/heroes';
+import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 1;
+export const CH_SCHEMA = 2;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -19,8 +21,27 @@ export interface ChStorage {
   removeItem(key: string): void;
 }
 
-interface ChSaveV1 extends ChState {
+/**
+ * The v1 persisted shape (MVP): the original ChState slice + envelope, defined
+ * explicitly so the migration chain has a real predecessor even though the live
+ * `ChState` has since grown (rng/stats/legacyImported).
+ */
+export interface ChSaveV1 {
   v: 1;
+  lastSeen: number;
+  gold: number;
+  zone: number;
+  killsThisZone: number;
+  runMaxZone: number;
+  crew: CrewLevels;
+  souls: number;
+  lifetimeMaxZone: number;
+  totalClicks: number;
+}
+
+/** The v2 persisted shape (M7): the current ChState + envelope. */
+interface ChSaveV2 extends ChState {
+  v: 2;
   lastSeen: number;
 }
 
@@ -42,8 +63,16 @@ function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
-/** Never-throw validation of a stored CH save. */
-export function isChSave(raw: unknown): raw is ChSaveV1 {
+/**
+ * Never-throw validation of a stored CH save (the v2 guard). The gameplay-
+ * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
+ * The v2 meta fields (rng/stats/legacyImported) are deliberately NOT gated here:
+ * they are runtime bookkeeping and get repaired (fresh seed / zeroed stats /
+ * false flag) in `stateFromSave` — the same "repair, don't nuke progress" spirit
+ * as the runMaxZone invariant. Per-field type+range checks for them live in
+ * `repairRng`/`repairStats`.
+ */
+export function isChSave(raw: unknown): raw is ChSaveV2 {
   if (!isRecord(raw)) return false;
   if (raw.v !== CH_SCHEMA) return false;
   if (!isFiniteNumber(raw.gold) || raw.gold < 0) return false;
@@ -61,12 +90,34 @@ export function isChSave(raw: unknown): raw is ChSaveV1 {
 
 /** Serialize state + timestamp to a JSON string. */
 export function serializeCh(state: ChState, now: number): string {
-  const save: ChSaveV1 = { v: CH_SCHEMA, lastSeen: now, ...state };
+  const save: ChSaveV2 = { v: CH_SCHEMA, lastSeen: now, ...state };
   return JSON.stringify(save);
 }
 
+/** Repair the persisted RNG slice: a corrupt/absent value ⇒ a fresh random seed. */
+function repairRng(v: unknown): RngState {
+  if (isRecord(v) && isFiniteNumber(v.seed) && Number.isInteger(v.seed) && isNonNegInt(v.cursor)) {
+    return { seed: v.seed | 0, cursor: v.cursor };
+  }
+  return createRngState();
+}
+
+/** Repair the persisted stats slice: missing/negative/non-finite counters ⇒ 0. */
+function repairStats(v: unknown): ChStats {
+  const src = isRecord(v) ? v : {};
+  const num = (x: unknown): number => (isFiniteNumber(x) && x >= 0 ? x : 0);
+  return {
+    crits: num(src.crits),
+    onBeatClicks: num(src.onBeatClicks),
+    bossKills: num(src.bossKills),
+    bossTimeouts: num(src.bossTimeouts),
+    goldLifetime: num(src.goldLifetime),
+    playTimeS: num(src.playTimeS),
+  };
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
-function stateFromSave(save: ChSaveV1): ChState {
+function stateFromSave(save: ChSaveV2): ChState {
   return {
     gold: save.gold,
     zone: save.zone,
@@ -76,10 +127,52 @@ function stateFromSave(save: ChSaveV1): ChState {
     souls: save.souls,
     lifetimeMaxZone: Math.max(save.lifetimeMaxZone, save.runMaxZone, save.zone),
     totalClicks: save.totalClicks,
+    rng: repairRng(save.rng),
+    stats: repairStats(save.stats),
+    legacyImported: save.legacyImported === true,
   };
 }
 
-/** Parse + validate a save JSON string into a clean state (null if invalid). */
+type ChMigration = (raw: Record<string, unknown>) => Record<string, unknown>;
+
+/** v1 → v2: fill the M7 defaults (fresh RNG seed, zeroed stats, no legacy import). */
+function migrateChV1toV2(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    v: 2,
+    rng: createRngState(),
+    stats: createStats(),
+    legacyImported: false,
+  };
+}
+
+const CH_MIGRATIONS: Record<number, ChMigration> = {
+  1: migrateChV1toV2,
+};
+
+/**
+ * Migrate an unknown parsed value up to the current CH schema, then validate.
+ * Never throws; unknown/future/corrupt data ⇒ null ⇒ clean fresh start.
+ * (Registry pattern mirrors `save/migrate.ts`.)
+ */
+function migrateCh(raw: unknown): ChSaveV2 | null {
+  if (!isRecord(raw)) return null;
+  let version = raw.v;
+  if (typeof version !== 'number' || !Number.isInteger(version)) return null;
+  if (version < 1 || version > CH_SCHEMA) return null;
+
+  let data: Record<string, unknown> = raw;
+  while (version < CH_SCHEMA) {
+    const step = CH_MIGRATIONS[version];
+    if (!step) return null;
+    data = step(data);
+    if (data.v !== version + 1) return null;
+    version += 1;
+  }
+  return isChSave(data) ? data : null;
+}
+
+/** Parse + migrate + validate a save JSON string into a clean state (null if invalid). */
 export function deserializeCh(json: string): ChState | null {
   let parsed: unknown;
   try {
@@ -87,7 +180,8 @@ export function deserializeCh(json: string): ChState | null {
   } catch {
     return null;
   }
-  return isChSave(parsed) ? stateFromSave(parsed) : null;
+  const migrated = migrateCh(parsed);
+  return migrated ? stateFromSave(migrated) : null;
 }
 
 // UTF-8-safe base64 (mirrors the legacy store) so export codes survive emoji.
@@ -151,8 +245,9 @@ export function loadCh(storage: ChStorage | null = defaultStorage()): LoadedCh |
   } catch {
     return null;
   }
-  if (!isChSave(parsed)) return null;
-  return { state: stateFromSave(parsed), lastSeen: parsed.lastSeen };
+  const migrated = migrateCh(parsed);
+  if (migrated === null) return null;
+  return { state: stateFromSave(migrated), lastSeen: migrated.lastSeen };
 }
 
 /** Wipe the CH save (reset). */
@@ -176,4 +271,13 @@ export function offlineGold(dps: number, zone: number, elapsedMs: number): numbe
   const killsPerSec = dps / monsterHp(zone);
   const goldPerSec = killsPerSec * goldFor(zone, false);
   return Math.floor(goldPerSec * seconds * OFFLINE_EFF);
+}
+
+/**
+ * BP to grant when a hidden tab becomes visible again (B5): identical accrual to
+ * boot-time offline gold over the interval the tab was hidden. A thin named seam
+ * so `main.ts` reads clearly and the grant is unit-testable with injected times.
+ */
+export function visibilityGrant(dps: number, zone: number, hiddenMs: number): number {
+  return offlineGold(dps, zone, hiddenMs);
 }

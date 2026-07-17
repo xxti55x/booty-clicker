@@ -14,9 +14,14 @@ import { ParticleSystem } from './engine/particles';
 import { effectivePixelRatio, qualityPreset } from './engine/quality';
 import { createScene } from './engine/scene';
 import { ascendState, clickDamageOf, createChState, dpsOf } from './game/ch-state';
+import { COMBO_WINDOW_S, effectiveClick, rollCrit } from './game/click';
 import { type CombatState, hit, spawnFor, tickBoss } from './game/combat';
+import { shouldShakeOnKey } from './game/input';
+import { applyLegacyInheritance } from './game/legacy-import';
 import { loadSettings, type Quality, saveSettings } from './game/settings';
 import { loadCh, offlineGold, resetCh, saveCh } from './save/ch-store';
+import { loadGame } from './save/store';
+import { Rng } from './util/rng';
 import { ChHud, spawnPop } from './ui/ch-hud';
 import { ChSettings } from './ui/ch-settings';
 import { Crew } from './ui/crew';
@@ -34,18 +39,13 @@ import { World } from './world/backgrounds';
  */
 
 // ---------- click-juice tuning ----------
-const CRIT_CHANCE = 0.2;
-const CRIT_MULT = 5;
-const COMBO_STEP = 0.02;
-const COMBO_CAP = 50;
-const COMBO_WINDOW_S = 1.5;
+// Crit/combo math lives in the pure `game/click.ts` core (N2); only the
+// choreography cadence stays here as glue.
 const MOVE_SWITCH_CLICKS = 18;
 
 const BG_BY_TIER = ['club', 'synth', 'beach', 'space'] as const;
 const bgForZone = (zone: number): (typeof BG_BY_TIER)[number] =>
   BG_BY_TIER[Math.floor((zone - 1) / 10) % BG_BY_TIER.length];
-
-const comboMult = (combo: number): number => 1 + Math.min(combo, COMBO_CAP) * COMBO_STEP;
 
 // ---------- scene / engine ----------
 const canvas = document.getElementById('app') as HTMLCanvasElement;
@@ -77,6 +77,15 @@ if (loaded) {
   state = loaded.state;
   offlineEarnedMs = Math.max(0, Date.now() - loaded.lastSeen);
 }
+
+// „Erbe der alten Tour" — one-time legacy-save inheritance (§9.2.3). Idempotent:
+// the `legacyImported` flag (persisted below) guarantees no double bonus.
+state = applyLegacyInheritance(state, loadGame());
+
+// Seedable RNG for all gameplay rolls (crit now; loot/quests later). Resumes the
+// persisted stream so save-scumming a crit is impossible.
+let rng = new Rng(state.rng);
+
 let combat: CombatState = spawnFor(state.zone, state.killsThisZone, state.runMaxZone);
 
 let dps = 0;
@@ -90,6 +99,7 @@ recompute();
 if (loaded) {
   offlineEarned = offlineGold(dps, combat.zone, offlineEarnedMs);
   state.gold += offlineEarned;
+  state.stats.goldLifetime += offlineEarned;
 }
 
 // ---------- visuals ----------
@@ -114,6 +124,7 @@ function syncMaxZones(): void {
   state.killsThisZone = combat.killsThisZone;
   state.runMaxZone = Math.max(state.runMaxZone, combat.maxZone);
   state.lifetimeMaxZone = Math.max(state.lifetimeMaxZone, state.runMaxZone);
+  state.rng = rng.toState(); // fold the live RNG cursor back into the save
 }
 const persist = (): void => {
   if (suppressSave) return;
@@ -121,8 +132,27 @@ const persist = (): void => {
   saveCh(state, Date.now());
 };
 window.setInterval(persist, 10_000);
+
+// Tab-return grant (B5): while hidden the rAF loop is paused, so idle earnings
+// stall. On return, credit `offlineGold` over the hidden interval (same pure
+// accrual as boot-time offline) and show Welcome-Back only for > 60 s away.
+let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') persist();
+  if (document.visibilityState === 'hidden') {
+    hiddenAt = Date.now();
+    persist();
+  } else if (document.visibilityState === 'visible' && hiddenAt > 0) {
+    const elapsed = Math.max(0, Date.now() - hiddenAt);
+    hiddenAt = 0;
+    const grant = offlineGold(dps, combat.zone, elapsed);
+    if (grant >= 1) {
+      state.gold += grant;
+      state.stats.goldLifetime += grant;
+      hud.update(state, combat, dps, clickDmg);
+      if (elapsed > 60_000) showWelcomeBack(grant, elapsed);
+      persist();
+    }
+  }
 });
 window.addEventListener('beforeunload', persist);
 
@@ -161,6 +191,7 @@ new ChSettings({
   },
   applyImported: (imported) => {
     Object.assign(state, imported); // mutate in place — panels hold this ref
+    rng = new Rng(state.rng); // resume the imported save's RNG stream
     combat = spawnFor(state.zone, state.killsThisZone, state.runMaxZone);
     recompute();
     updateBackground(true);
@@ -183,8 +214,8 @@ const welcomeBack = document.getElementById('welcomeBack') as HTMLElement;
 document.getElementById('wbClose')?.addEventListener('click', () => {
   welcomeBack.classList.add('hidden');
 });
-if (offlineEarned >= 1) {
-  const mins = Math.floor(offlineEarnedMs / 60_000);
+function showWelcomeBack(earned: number, elapsedMs: number): void {
+  const mins = Math.floor(elapsedMs / 60_000);
   const dur =
     mins < 1
       ? '< 1 min'
@@ -192,9 +223,10 @@ if (offlineEarned >= 1) {
         ? `${mins} min`
         : `${Math.floor(mins / 60)} h ${mins % 60} min`;
   (document.getElementById('wbText') as HTMLElement).textContent =
-    `Du warst ${dur} weg. Deine Crew hat weitergetwerkt: +${fmt(offlineEarned)} BP (Idle-Rate 50 %, max. 8 h).`;
+    `Du warst ${dur} weg. Deine Crew hat weitergetwerkt: +${fmt(earned)} BP (Idle-Rate 50 %, max. 8 h).`;
   welcomeBack.classList.remove('hidden');
 }
+if (offlineEarned >= 1) showWelcomeBack(offlineEarned, offlineEarnedMs);
 
 // ---------- tabs ----------
 const tabBodies: Record<string, string> = { crew: 'tabCrew', pr: 'tabPr', set: 'tabSet' };
@@ -240,10 +272,13 @@ let shakeMag = 0;
 function onKillProgress(
   r: ReturnType<typeof hit>,
   fromClick: boolean,
+  wasBoss: boolean,
   x?: number,
   y?: number,
 ): void {
   state.gold += r.gold;
+  state.stats.goldLifetime += r.gold;
+  if (wasBoss) state.stats.bossKills += 1;
   if (r.bossSpawned) {
     toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
     audio.unlockJingle();
@@ -266,7 +301,7 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
   const r = hit(combat, dmg);
   combat = r.state;
   if (r.killed) {
-    onKillProgress(r, fromClick, x, y);
+    onKillProgress(r, fromClick, wasBoss, x, y);
   } else if (wasBoss && fromClick) {
     audio.bossHit();
   }
@@ -283,8 +318,9 @@ function doShake(x?: number, y?: number): void {
   comboTimer = COMBO_WINDOW_S;
   drive = Math.min(drive + 1.2, 6);
 
-  const crit = Math.random() < CRIT_CHANCE;
-  const dmg = clickDmg * comboMult(combo) * (crit ? CRIT_MULT : 1);
+  const crit = rollCrit(rng.next());
+  if (crit) state.stats.crits += 1;
+  const dmg = effectiveClick({ baseClick: clickDmg, combo, crit });
   const px = x ?? window.innerWidth / 2;
   const py = y ?? window.innerHeight / 2;
 
@@ -321,11 +357,9 @@ canvas.addEventListener('pointerup', (e) => {
 });
 window.addEventListener('keydown', (e) => {
   audio.unlock();
-  if (e.code === 'Space') {
-    e.preventDefault();
-    if (e.repeat) return; // B4: no key-repeat autoclicker
-    doShake();
-  }
+  if (e.code === 'Space') e.preventDefault();
+  // shouldShakeOnKey guards B4: a held (auto-repeating) space is not an autoclicker.
+  if (shouldShakeOnKey(e.code, e.repeat)) doShake();
 });
 
 // ---------- runtime signals ----------
@@ -354,6 +388,10 @@ const onboarding = new Onboarding(() => {
 
 hud.update(state, combat, dps, clickDmg);
 
+// Persist once at boot so the legacy import (souls + legacyImported) and any
+// offline grant are locked in even if the tab closes before the first autosave.
+persist();
+
 // ---------- loop ----------
 const clock = new THREE.Clock();
 let acc = 0;
@@ -368,6 +406,7 @@ function loop(nowMs: number): void {
   lastRenderMs = nowMs;
   const dt = Math.min(clock.getDelta(), 0.05);
   t0 += dt;
+  state.stats.playTimeS += dt;
 
   // Idle DPS chips away at the current target; boss timer ticks down.
   if (dps > 0) applyHit(dps * dt, false);
@@ -375,6 +414,7 @@ function loop(nowMs: number): void {
     const bt = tickBoss(combat, dt);
     combat = bt.state;
     if (bt.failed) {
+      state.stats.bossTimeouts += 1;
       toasts.show('⏱', 'Zeit um!', 'Farm die Bühne & fordere den Boss erneut.');
       audio.bossLose();
     }

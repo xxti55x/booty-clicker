@@ -38,6 +38,8 @@ body {
 .hud {
   position: fixed;
   top: 14px;
+  /* B13b: keep the HUD clear of a notch/status bar (0 on non-notched devices). */
+  top: calc(14px + env(safe-area-inset-top, 0px));
   left: 50%;
   transform: translateX(-50%);
   text-align: center;
@@ -93,6 +95,10 @@ body {
   flex-direction: column;
   transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
   z-index: 20;
+  /* B13b: keep tabs/content inside the safe area on notched phones. */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 .shop.hidden {
   transform: translateX(100%);
@@ -215,6 +221,9 @@ body {
   position: fixed;
   top: 14px;
   left: 16px;
+  /* B13b: nudge below the notch / clear of a rounded corner. */
+  top: calc(14px + env(safe-area-inset-top, 0px));
+  left: calc(16px + env(safe-area-inset-left, 0px));
   z-index: 25;
   background: #a8e831;
   color: #12140a;
@@ -229,6 +238,8 @@ body {
 .hintbar {
   position: fixed;
   bottom: 16px;
+  /* B13b: keep the hint above the home indicator. */
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   font-size: 12px;
@@ -359,6 +370,9 @@ body {
   position: fixed;
   top: 14px;
   left: 112px;
+  /* B13b: match the shop toggle's safe-area offset. */
+  top: calc(14px + env(safe-area-inset-top, 0px));
+  left: calc(112px + env(safe-area-inset-left, 0px));
   z-index: 25;
   width: 40px;
   height: 40px;
@@ -777,6 +791,8 @@ body {
 .rival {
   position: fixed;
   top: 120px;
+  /* B13b: shift the rival HP widget down with the HUD on notched phones. */
+  top: calc(120px + env(safe-area-inset-top, 0px));
   left: 50%;
   transform: translateX(-50%);
   width: min(520px, 92vw);

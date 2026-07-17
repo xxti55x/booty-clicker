@@ -9,6 +9,35 @@
 import { applyAscension } from './ascension';
 import { soulMult } from './ascension';
 import { type CrewLevels, clickDamageRaw, createCrew, totalRawDps } from './heroes';
+import { createRngState, type RngState } from '../util/rng';
+
+/** Lifetime bookkeeping counters (spec §9.2, CH-save v2). All non-negative. */
+export interface ChStats {
+  /** Crit clicks landed (lifetime). */
+  crits: number;
+  /** On-beat clicks (stays 0 until M8 wires the beat bonus). */
+  onBeatClicks: number;
+  /** Bosses defeated (lifetime). */
+  bossKills: number;
+  /** Boss timers that expired (lifetime). */
+  bossTimeouts: number;
+  /** Total gold ever earned (lifetime, never reset by ascension). */
+  goldLifetime: number;
+  /** Seconds of active play accumulated in the loop. */
+  playTimeS: number;
+}
+
+/** A zeroed stats block. */
+export function createStats(): ChStats {
+  return {
+    crits: 0,
+    onBeatClicks: 0,
+    bossKills: 0,
+    bossTimeouts: 0,
+    goldLifetime: 0,
+    playTimeS: 0,
+  };
+}
 
 /** The serializable CH-mode state. */
 export interface ChState {
@@ -28,6 +57,12 @@ export interface ChState {
   lifetimeMaxZone: number;
   /** Lifetime shake count (stat). */
   totalClicks: number;
+  /** Seedable RNG stream position — all gameplay rolls draw from here. */
+  rng: RngState;
+  /** Lifetime bookkeeping counters. */
+  stats: ChStats;
+  /** True once the one-time legacy-save inheritance has run (§9.2.3). */
+  legacyImported: boolean;
 }
 
 /** A brand-new run/profile. */
@@ -41,6 +76,9 @@ export function createChState(): ChState {
     souls: 0,
     lifetimeMaxZone: 1,
     totalClicks: 0,
+    rng: createRngState(),
+    stats: createStats(),
+    legacyImported: false,
   };
 }
 
@@ -64,5 +102,15 @@ export function ascendState(state: ChState): ChState {
     state.lifetimeMaxZone,
     state.souls,
   );
-  return { ...createChState(), souls, lifetimeMaxZone, totalClicks: state.totalClicks };
+  // Souls, lifetime record and all meta (RNG stream, lifetime stats, the
+  // legacy-import flag) persist; only the run itself (gold/crew/zone) resets.
+  return {
+    ...createChState(),
+    souls,
+    lifetimeMaxZone,
+    totalClicks: state.totalClicks,
+    rng: state.rng,
+    stats: state.stats,
+    legacyImported: state.legacyImported,
+  };
 }

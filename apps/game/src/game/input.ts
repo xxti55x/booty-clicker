@@ -12,3 +12,12 @@ export const TAP_MAX_MS = 500;
 export function isTap(distancePx: number, durationMs: number): boolean {
   return distancePx <= TAP_MAX_DIST && durationMs <= TAP_MAX_MS;
 }
+
+/**
+ * Should a keydown trigger a shake? Only the spacebar, and never an auto-repeat
+ * (holding the key). Pure so the B4 "held space = one shake" guard is unit
+ * tested without a DOM KeyboardEvent.
+ */
+export function shouldShakeOnKey(code: string, repeat: boolean): boolean {
+  return code === 'Space' && !repeat;
+}

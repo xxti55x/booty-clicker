@@ -3,6 +3,75 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M7 — MVP-Härtung & Kern-Hygiene
+
+- **2026-07-17 — Klick-Mathe zieht in ein pures `game/click.ts` (N2).** Die
+  Krit-/Combo-Konstanten (`CRIT_CHANCE=0.2`, `CRIT_MULT=5`, `COMBO_STEP=0.02`,
+  `COMBO_CAP=50`, `COMBO_WINDOW_S=1.5`) und die Funktionen `comboMult`,
+  `rollCrit`, `effectiveClick` sind jetzt Daten + reine Funktionen mit Tests;
+  `main.ts` ruft nur noch auf. `effectiveClick({baseClick,combo,crit,extraMult=1})`
+  ist bewusst als erweiterbare Pipeline geschnitten — Beat/Frenzy/Gear/Event
+  (M8/M11/M12) multiplizieren später über `extraMult` ein, ohne die Call-Site zu
+  ändern. Die Werte 20 %/×5 (EV ×1,8) sind die Spec-Baseline (§4.2.1); die
+  Pacing-Tabellen (§4.8) sind darauf kalibriert, deshalb unverändert übernommen.
+
+- **2026-07-17 — Seedbarer RNG: splitmix32 counter-based statt mulberry32.** Die
+  Spec (§9.4) skizziert mulberry32; gewählt wurde stattdessen ein
+  **counter-basierter splitmix32-Finalizer**: die n-te Ziehung ist
+  `hash32((seed + cursor) | 0)`, danach `cursor++`. Grund: aus dem persistierten
+  `{seed, cursor}` lässt sich der Strom in **O(1)** exakt fortsetzen — kein
+  Replay-Loop über `cursor` Schritte (den mulberry32 als stateful Generator
+  bräuchte). splitmix ist genau für gut verteilte Ausgaben aufeinanderfolgender
+  Counter-Werte gebaut, also ideal für diesen Zugriff. `Math.random`/`Date.now`
+  sind nur in `randomSeed()` erlaubt (Seed-Erzeugung = einzige Nicht-Determinik);
+  alle spielrelevanten Rolls (Krit jetzt, Loot/Quests später) ziehen aus `Rng`.
+  Kosmetik (Partikel, Kamera-Shake) darf weiter `Math.random` nutzen.
+
+- **2026-07-17 — CH-Save v2 (`bootyclicker.ch`).** Neue Felder auf `ChState`
+  (Runtime-State, nicht abgeleitet): `rng: {seed,cursor}`,
+  `stats: {crits,onBeatClicks,bossKills,bossTimeouts,goldLifetime,playTimeS}`,
+  `legacyImported: boolean`. `onBeatClicks` bleibt bis M8 bei 0. Migration
+  `migrateChV1toV2` nach dem Registry-Muster von `save/migrate.ts` (never-throw,
+  Zukunfts-/Unsinns-Version ⇒ null ⇒ Fresh-Start): füllt frischen RNG-Seed,
+  genullte Stats, `legacyImported=false`. Abgeleitete Kampfwerte werden wie
+  gehabt **nicht** persistiert.
+
+- **2026-07-17 — Guard streng auf Kern, Repair auf Meta.** `isChSave` (v2-Guard)
+  prüft die spielkritischen Felder strikt (korrupt ⇒ Save verworfen ⇒
+  Fresh-Start). Die Meta-Felder (`rng`/`stats`/`legacyImported`) werden **nicht**
+  vom Guard verworfen, sondern in `stateFromSave` repariert (korruptes/fehlendes
+  `rng` ⇒ frischer Seed; negative/fehlende Stats ⇒ 0) — gleiche „reparieren statt
+  Fortschritt vernichten"-Haltung wie die `runMaxZone`-Invariante. Ein kaputtes
+  RNG-Feld kostet also nie die Crew/Bühne des Spielers.
+
+- **2026-07-17 — „Erbe der alten Tour" (§9.2.3, einmalig, idempotent).**
+  `applyLegacyInheritance(ch, loadGame())` gewährt beim ersten CH-Boot mit
+  vorhandenem Legacy-Save `souls += 7 · rebirths` und setzt danach **immer**
+  `legacyImported=true` (kein Doppel-Bonus, kein Re-Check ohne Legacy-Save). Boot
+  persistiert sofort, damit ein Reload vor dem ersten Autosave nicht erneut
+  gewährt. Der Legacy-Key (`bootyclicker.save`) wird **nicht** gelöscht (Archiv).
+  Die §9.2.3-Vormerkungen **Tyrann-Skin** (`bossDefeated`) und **Goldtruhe**
+  (`maxBp ≥ 50 000`) zielen auf die M11/M12-Systeme (Gear/Truhen), die es noch
+  nicht gibt — bewusst **keine** spekulativen Save-Felder dafür; sie werden mit
+  M11/M12 verdrahtet. In M7-Scope liegen nur der RS-Grant + das Idempotenz-Flag.
+
+- **2026-07-17 — Tab-Rückkehr-Grant (B5).** `visibilitychange → hidden` merkt
+  sich `Date.now()`; bei `→ visible` wird die Weg-Zeit über dieselbe pure
+  `offlineGold(dps, zone, elapsed)` gutgeschrieben (Welcome-Back-Dialog erst ab
+  mehr als 60 s Abwesenheit), dann persistiert. So verdient auch ein pausierter
+  Tab, dessen rAF-Loop stand, seine Idle-Zeit — der 0,05-s-`dt`-Clamp schluckte
+  die Wegzeit vorher.
+
+- **2026-07-17 — B4 als pure Predicate testbar.** `shouldShakeOnKey(code,repeat)`
+  (`= code==='Space' && !repeat`) kapselt die Leertaste-Repeat-Sperre, damit
+  „gehaltene Leertaste = genau 1 Shake" ohne DOM unit-getestet ist.
+
+- **2026-07-17 — Safe-Area (B13b).** `viewport-fit=cover` war gesetzt; jetzt
+  bekommen alle fixed-Elemente (`.hud`/`.toggleShop`/`.muteBtn`/`.shop`/
+  `.hintbar`/`.rival`) `env(safe-area-inset-*)`-Offsets mit `0px`-Fallback per
+  Progressive-Enhancement (Basis-Regel bleibt als Fallback stehen, `calc(...+env)`
+  überschreibt in unterstützenden Browsern).
+
 ## CH-MVP — Umbau auf Clicker-Heroes-Loop (endlos)
 
 - **2026-07-17 — Produkt-Pivot auf einen Clicker-Heroes-Kern.** Auf Wunsch
