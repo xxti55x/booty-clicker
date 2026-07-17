@@ -9,20 +9,24 @@ import { DT, renderCheeks, stepPhysics } from './character/physics';
 import { SKINS } from './character/skins';
 import { Choreographer } from './choreo/moves';
 import { createControls } from './engine/camera';
+import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
+import { effectivePixelRatio, qualityPreset } from './engine/quality';
 import { createScene } from './engine/scene';
 import { buildAchievementCtx, newlyUnlocked } from './game/achievements';
 import { COMBO_WINDOW_S, clickGain, createUpgrades, passiveGain } from './game/economy';
 import { activateBoost, incomeMultiplier, PEACH_VISIBLE_S, rollNextPeachAt } from './game/events';
+import { isTap } from './game/input';
 import { applyRebirth, BOSS_UNLOCK_BP } from './game/progression';
-import { loadSettings } from './game/settings';
+import { loadSettings, type Quality, saveSettings } from './game/settings';
 import { createGameState, createRuntimeState } from './game/state';
 import { applySave, computeOfflineEarnings, loadGame, resetSave, saveGame } from './save/store';
 import { AchievementsUI } from './ui/achievements';
 import { BossFight } from './ui/boss';
 import { Leaderboard } from './ui/leaderboard';
-import { fmt } from './ui/format';
+import { fmt, titleFor } from './ui/format';
 import { Hud } from './ui/hud';
+import { Onboarding } from './ui/onboarding';
 import { Settings } from './ui/settings';
 import { Shop } from './ui/shop';
 import { Toasts } from './ui/toasts';
@@ -53,6 +57,22 @@ if (loaded) {
 }
 if (state.nextPeachAt === 0) state.nextPeachAt = rollNextPeachAt(Date.now());
 const effects = loadSettings();
+
+/** Apply the graphics preset to the renderer (pixel ratio + shadow mapping). */
+function applyQuality(q: Quality): void {
+  const preset = qualityPreset(q);
+  renderer.setPixelRatio(effectivePixelRatio(q, window.devicePixelRatio));
+  if (renderer.shadowMap.enabled !== preset.shadows) {
+    renderer.shadowMap.enabled = preset.shadows;
+    renderer.shadowMap.needsUpdate = true;
+    scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material;
+      if (Array.isArray(m)) m.forEach((mm) => (mm.needsUpdate = true));
+      else if (m) (m as THREE.Material).needsUpdate = true;
+    });
+  }
+}
+applyQuality(effects.quality);
 
 const hud = new Hud();
 const choreo = new Choreographer();
@@ -134,6 +154,7 @@ const settings = new Settings({
   },
   effects,
   showLeaderboard: () => void leaderboard.openTop(),
+  onGraphicsChange: () => applyQuality(effects.quality),
 });
 if (offlineEarned >= 1) settings.showWelcomeBack(offlineEarnedMs, offlineEarned);
 
@@ -295,22 +316,21 @@ function doShake(cx?: number, cy?: number): void {
   checkAchievements();
 }
 
-// A pointer that moved past a small threshold is an orbit drag, not a shake.
+// Unified pointer input (mouse + touch): a quick, near-stationary press/release
+// is a shake; anything longer or draggier is an orbit-camera gesture (handled by
+// OrbitControls) and must not double as a shake.
 let downX = 0;
 let downY = 0;
-let moved = false;
+let downT = 0;
 canvas.addEventListener('pointerdown', (e) => {
   audio.unlock();
   downX = e.clientX;
   downY = e.clientY;
-  moved = false;
+  downT = performance.now();
 });
-window.addEventListener('pointermove', (e) => {
-  if (Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > 4) moved = true;
-});
-canvas.addEventListener('click', (e) => {
-  if (moved) return;
-  doShake(e.clientX, e.clientY);
+canvas.addEventListener('pointerup', (e) => {
+  const dist = Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY);
+  if (isTap(dist, performance.now() - downT)) doShake(e.clientX, e.clientY);
 });
 window.addEventListener('keydown', (e) => {
   audio.unlock();
@@ -331,13 +351,24 @@ function resize(): void {
 window.addEventListener('resize', resize);
 resize();
 
+// ---------- onboarding + loading screen ----------
+const loadingEl = document.getElementById('loading');
+const onboarding = new Onboarding(() => {
+  effects.onboarded = true;
+  saveSettings(effects);
+});
+
 // ---------- loop ----------
 const clock = new THREE.Clock();
 let acc = 0;
 let t0 = 0;
 let uiTimer = 0;
-function loop(): void {
+let lastRenderMs = 0;
+let firstFrame = true;
+function loop(nowMs: number): void {
   requestAnimationFrame(loop);
+  if (!frameDue(nowMs, lastRenderMs, effects.fpsCap)) return;
+  lastRenderMs = nowMs;
   const dt = Math.min(clock.getDelta(), 0.05);
   t0 += dt;
   if (!bossFight.engaged) {
@@ -373,6 +404,7 @@ function loop(): void {
     checkAchievements();
     updatePeach(now);
     boostBadge.classList.toggle('hidden', incomeMultiplier(state.boostUntil, now) <= 1);
+    document.title = titleFor(state.bp);
   }
 
   controls.update();
@@ -389,5 +421,11 @@ function loop(): void {
     shakeMag = 0;
     renderer.render(scene, camera);
   }
+
+  if (firstFrame) {
+    firstFrame = false;
+    loadingEl?.classList.add('hidden');
+    if (!effects.onboarded) onboarding.start();
+  }
 }
-loop();
+requestAnimationFrame(loop);

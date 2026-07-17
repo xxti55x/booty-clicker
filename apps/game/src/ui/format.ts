@@ -10,3 +10,8 @@ export function fmt(n: number): string {
   }
   return n.toFixed(2) + SUFFIXES[i];
 }
+
+/** Browser-tab title reflecting current BP (spec §5 M6). */
+export function titleFor(bp: number): string {
+  return `${fmt(bp)} BP · Booty Clicker`;
+}

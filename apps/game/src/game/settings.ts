@@ -1,15 +1,26 @@
 /**
- * Client effect settings (spec §5 M4: screen-shake is "abschaltbar"). Persisted
- * separately from the game save under its own key so toggling effects never
- * forces a save migration. Pure + storage-injectable, never throws. M6 extends
- * this with graphics quality / FPS cap.
+ * Client settings (spec §5 M4 effects + M6 graphics/onboarding). Persisted
+ * separately from the game save under its own key so toggling never forces a
+ * save migration. Pure + storage-injectable, never throws.
  */
 
 export const SETTINGS_KEY = 'bootyclicker.settings';
 
+export type Quality = 'low' | 'medium' | 'high';
+const QUALITIES: readonly Quality[] = ['low', 'medium', 'high'];
+
+/** Allowed FPS caps (0 = uncapped). */
+export const FPS_CAPS: readonly number[] = [0, 30, 60];
+
 export interface GameSettings {
   screenShake: boolean;
   particles: boolean;
+  /** Graphics preset: pixel ratio + shadows. */
+  quality: Quality;
+  /** Frame-rate cap (0 = uncapped). */
+  fpsCap: number;
+  /** Whether the first-run onboarding has been shown. */
+  onboarded: boolean;
 }
 
 export interface SettingsStorage {
@@ -18,7 +29,7 @@ export interface SettingsStorage {
 }
 
 export function defaultSettings(): GameSettings {
-  return { screenShake: true, particles: true };
+  return { screenShake: true, particles: true, quality: 'high', fpsCap: 0, onboarded: false };
 }
 
 function defaultStorage(): SettingsStorage | null {
@@ -27,6 +38,16 @@ function defaultStorage(): SettingsStorage | null {
   } catch {
     return null;
   }
+}
+
+function asQuality(v: unknown, fallback: Quality): Quality {
+  return typeof v === 'string' && (QUALITIES as readonly string[]).includes(v)
+    ? (v as Quality)
+    : fallback;
+}
+
+function asFpsCap(v: unknown, fallback: number): number {
+  return typeof v === 'number' && FPS_CAPS.includes(v) ? v : fallback;
 }
 
 export function loadSettings(storage: SettingsStorage | null = defaultStorage()): GameSettings {
@@ -50,6 +71,9 @@ export function loadSettings(storage: SettingsStorage | null = defaultStorage())
   return {
     screenShake: typeof p.screenShake === 'boolean' ? p.screenShake : d.screenShake,
     particles: typeof p.particles === 'boolean' ? p.particles : d.particles,
+    quality: asQuality(p.quality, d.quality),
+    fpsCap: asFpsCap(p.fpsCap, d.fpsCap),
+    onboarded: typeof p.onboarded === 'boolean' ? p.onboarded : d.onboarded,
   };
 }
 
