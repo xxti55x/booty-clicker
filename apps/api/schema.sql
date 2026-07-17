@@ -1,4 +1,5 @@
--- Booty Clicker leaderboard — Cloudflare D1 (SQLite). Implemented in M5.
+-- Booty Clicker leaderboard — Cloudflare D1 (SQLite). Spec §5 M5.
+-- Apply: npx wrangler d1 execute booty-clicker --file=./schema.sql
 CREATE TABLE IF NOT EXISTS scores (
   id          INTEGER PRIMARY KEY,
   nickname    TEXT NOT NULL CHECK (length(nickname) BETWEEN 2 AND 16),

@@ -68,6 +68,23 @@
         <button class="btn ghost" id="bossResultSecondary"></button>
       </div>
     </div>
+    <div class="overlay hidden" id="lbSubmit">
+      <div class="dialog">
+        <div class="dt">🏅 Bestenliste</div>
+        <div class="dd" id="lbSubmitText"></div>
+        <input class="lb-input" id="lbNick" maxlength="16" placeholder="Nickname (2–16 Zeichen)" />
+        <div class="msg" id="lbMsg"></div>
+        <button class="btn" id="lbSubmitBtn" type="button">Absenden</button>
+        <button class="btn ghost" id="lbSkipBtn" type="button">Überspringen</button>
+      </div>
+    </div>
+    <div class="overlay hidden" id="lbTop">
+      <div class="dialog wide">
+        <div class="dt">🏅 Top 50</div>
+        <div class="lb-list" id="lbList"></div>
+        <button class="btn" id="lbClose" type="button">Schließen</button>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

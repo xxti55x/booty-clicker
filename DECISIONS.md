@@ -3,6 +3,30 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M5 — Leaderboard (Worker + D1)
+
+- **2026-07-17 — Storage + rate-limit behind interfaces → testable without
+  wrangler.** The Hono app is built by `createApp(makeRepo, makeLimiter)`; D1 and
+  KV are thin adapters, and tests drive the real request logic via `app.request()`
+  with in-memory fakes (9 tests: nickname filter, 1-based rank, 5/min rate-limit,
+  top ordering + limit clamp). This satisfies "lokal testbar" more robustly than a
+  manual `wrangler dev`, which stays available via `npx wrangler dev`.
+
+- **2026-07-17 — The client is fail-silent and off by default.** Every call
+  returns `null` on timeout (3 s), network error, or when `VITE_API_BASE` is unset,
+  so the game is fully playable with no reachable API (spec §4.4, AC). The
+  post-boss submit dialog only appears when a leaderboard is configured; the ⚙️-tab
+  "Top 50" view shows an offline message otherwise.
+
+- **2026-07-17 — Nickname is the only stored field, validated on both ends.**
+  `[a-zA-Z0-9_ ]{2,16}` (trimmed) client-side and server-side, plus a D1 `CHECK`
+  constraint — no PII (spec §2, §4.5). Server-returned nicknames are additionally
+  HTML-escaped before rendering the top list (defense in depth).
+
+- **2026-07-17 — Rank = "how many stored times beat you, + 1".** Lower boss-kill
+  time is better; `SELECT COUNT(*) WHERE best_time_s < ?` keeps it a single indexed
+  query. `wrangler.toml` + `schema.sql` are deploy-ready with placeholder ids.
+
 ## M4 — Game Feel & Content
 
 - **2026-07-17 — Achievements are data-driven pure predicates.** 18 achievements

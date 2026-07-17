@@ -20,6 +20,7 @@ import { createGameState, createRuntimeState } from './game/state';
 import { applySave, computeOfflineEarnings, loadGame, resetSave, saveGame } from './save/store';
 import { AchievementsUI } from './ui/achievements';
 import { BossFight } from './ui/boss';
+import { Leaderboard } from './ui/leaderboard';
 import { fmt } from './ui/format';
 import { Hud } from './ui/hud';
 import { Settings } from './ui/settings';
@@ -88,6 +89,7 @@ hud.update(state);
 const toasts = new Toasts();
 const achUI = new AchievementsUI(state);
 const particles = new ParticleSystem(scene);
+const leaderboard = new Leaderboard();
 
 // ---------- persistence ----------
 let suppressSave = false;
@@ -131,6 +133,7 @@ const settings = new Settings({
     checkAchievements();
   },
   effects,
+  showLeaderboard: () => void leaderboard.openTop(),
 });
 if (offlineEarned >= 1) settings.showWelcomeBack(offlineEarnedMs, offlineEarned);
 
@@ -165,7 +168,7 @@ const bossFight = new BossFight({
     hud.spawnPop(`-${fmt(dmg)}`);
     audio.bossHit();
   },
-  onWin: () => {
+  onWin: (bestTimeS) => {
     state.bossDefeated = true;
     state.unlocked.boss = true;
     shop.renderSkins();
@@ -174,6 +177,7 @@ const bossFight = new BossFight({
     syncEndgameUi();
     audio.bossWin();
     checkAchievements();
+    leaderboard.promptSubmit(bestTimeS);
   },
   onLose: () => audio.bossLose(),
   onExit: () => {

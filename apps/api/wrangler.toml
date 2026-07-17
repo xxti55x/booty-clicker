@@ -1,13 +1,19 @@
-# Cloudflare Worker config for the leaderboard API. Wired up in milestone M5.
+# Cloudflare Worker config for the leaderboard API (spec §5 M5).
+# Run locally: `npx wrangler dev` (miniflare emulates D1 + KV, ids below are
+# placeholders for local dev). Before deploying, create the resources and paste
+# the real ids:
+#   npx wrangler d1 create booty-clicker
+#   npx wrangler kv:namespace create RATE_LIMIT
+#   npx wrangler d1 execute booty-clicker --file=./schema.sql
 name = "booty-clicker-api"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
 
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "booty-clicker"
-# database_id = "<set-in-M5>"
+[[d1_databases]]
+binding = "DB"
+database_name = "booty-clicker"
+database_id = "REPLACE_WITH_D1_ID"
 
-# [[kv_namespaces]]
-# binding = "RATE_LIMIT"
-# id = "<set-in-M5>"
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "REPLACE_WITH_KV_ID"

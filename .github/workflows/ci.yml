@@ -31,8 +31,11 @@ jobs:
       - name: ESLint
         run: npm run lint
 
-      - name: Unit tests
+      - name: Unit tests (game + api)
         run: npm test
+
+      - name: Typecheck API worker
+        run: npm run typecheck -w apps/api
 
       - name: Build
         run: npm run build
