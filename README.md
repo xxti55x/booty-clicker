@@ -34,6 +34,20 @@ Three.js kommt als npm-Paket (kein CDN). Projekt-Struktur & Milestones: siehe
 - **Rebirth (NG+)**: ab 100 000 BP im ⚙️-Tab — setzt BP & Upgrades zurück und
   gewährt dauerhaft +100 % Multiplikator (kumulativ), NG+-Badge im HUD.
 
+## UX, Mobile & Release (M6)
+
+- **Onboarding**: drei nicht-blockierende Coach-Marks beim ersten Start (danach
+  nie wieder), gespeichert im `bootyclicker.settings`-Key.
+- **Grafik-Einstellungen** im ⚙️-Tab: Qualität (Niedrig/Mittel/Hoch → Pixel-Ratio
+  & Schatten) und optionales FPS-Limit (0/30/60) — live angewendet & gespeichert.
+- **Mobile**: Tippen = Shaken, Ziehen = Kamera drehen (Pointer-Events + Tap-Test),
+  responsiver Vollbild-Shop und größere Touch-Targets unter 640 px.
+- **Loading-Screen** bis zum ersten Frame; Tab-Titel zeigt die aktuellen BP;
+  OpenGraph/Twitter-Meta.
+- **itch.io-Export**: `npm run build:itch` erzeugt `apps/game/release/booty-clicker-itch.zip`
+  (relative Pfade, läuft aus einem lokalen Ordner). Cloudflare-Pages-Deploy via CI
+  auf `main` (übersprungen ohne Secrets). QA-Checkliste: [`TESTPLAN.md`](./TESTPLAN.md).
+
 ## Bestenliste (M5)
 
 - **Optionaler** globaler Highscore (Boss-Kill-Zeit) über einen Cloudflare Worker
@@ -87,10 +101,9 @@ Three.js kommt als npm-Paket (kein CDN). Projekt-Struktur & Milestones: siehe
 
 ## Roadmap (siehe Gameplan)
 
-1. M6 — UX, Polish & Release (Onboarding, Mobile, Loading-Screen, itch.io-Export)
-
-M1–M5 (Persistenz, Boss + Balancing, Audio, Game Feel & Content, Bestenliste)
-sind erledigt — siehe oben.
+Alle Meilensteine **M0–M6** sind erledigt — Persistenz, Boss + Balancing, Audio,
+Game Feel & Content, Bestenliste sowie UX/Mobile/Release (siehe oben). Release-QA
+und Playthrough-Timing: [`TESTPLAN.md`](./TESTPLAN.md).
 
 ## Lizenz-Hinweise
 

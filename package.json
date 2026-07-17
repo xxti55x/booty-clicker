@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "npm run dev -w apps/game",
     "build": "npm run build -w apps/game",
+    "build:itch": "npm run build:itch -w apps/game",
     "preview": "npm run preview -w apps/game",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint .",

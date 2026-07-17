@@ -3,6 +3,44 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M6 — UX, Polish & Release
+
+- **2026-07-17 — Settings extended in place, not a new schema.** `quality`
+  (low/medium/high), `fpsCap` (0/30/60) and `onboarded` join screen-shake/particles
+  in the same `bootyclicker.settings` key — still pure, injectable and never-throw,
+  with per-field validation (`asQuality`/`asFpsCap`) so a corrupt value falls back
+  to its default. No game-save migration is involved (client settings ≠ progress).
+
+- **2026-07-17 — Graphics knobs are a pure preset + a thin renderer apply.**
+  `engine/quality.ts` maps a preset to `{ pixelRatioCap, shadows }` and clamps the
+  effective pixel ratio (unit-tested, no THREE import); `main.applyQuality` is the
+  only place that touches `renderer.setPixelRatio` / `shadowMap.enabled` and forces
+  a one-shot material recompile when shadows toggle. FPS-cap pacing is the pure
+  `frameDue(now,last,cap)` gate (0 = uncapped) at the top of the render loop, so
+  frame-skips never corrupt the fixed-timestep physics (dt still comes from the clock).
+
+- **2026-07-17 — Mobile input unified on pointer events + a pure tap test.**
+  Replaced the desktop `click` handler with `pointerdown`/`pointerup` and
+  `isTap(distancePx, durationMs)` (≤10 px, ≤500 ms) so a quick touch/click shakes
+  while an OrbitControls drag does not — one code path for mouse and touch. Verified
+  by the M6 smoke test (tap increases BP, drag does not).
+
+- **2026-07-17 — Onboarding is three non-blocking coach marks, shown once.**
+  The card floats above the HUD but only it captures pointer events, so the player
+  can already shake / open the shop underneath. It highlights the target control per
+  step and, on finish, sets the persisted `onboarded` flag — never shown again.
+
+- **2026-07-17 — itch export = `base:'./'` + zip the dist _contents_.** `build:itch`
+  builds then runs `scripts/pack-itch.mjs`, which zips the contents of `dist/` (so
+  `index.html` is at the archive root, an itch requirement) via the `zip` CLI into
+  `release/booty-clicker-itch.zip` (git-ignored). Verified end-to-end: extracted and
+  served over a plain static server with zero failed requests and working gameplay.
+
+- **2026-07-17 — Cloudflare Pages deploy is opt-in, never breaks CI.** A `main`-only
+  `deploy-pages` job checks for `CLOUDFLARE_API_TOKEN` and _skips_ (green `::notice::`)
+  when secrets are absent, so forks and unconfigured repos still pass CI. Release QA
+  and the ~40 min playthrough timing are documented in `TESTPLAN.md`.
+
 ## M5 — Leaderboard (Worker + D1)
 
 - **2026-07-17 — Storage + rate-limit behind interfaces → testable without
