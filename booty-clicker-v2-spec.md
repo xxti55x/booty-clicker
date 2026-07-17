@@ -1,13 +1,77 @@
 # Booty Clicker v2 — „Endless Twerk" · Design- & Implementation-Spec (M7+)
 
 > Zielgruppe dieses Dokuments: autonome Coding-Agents (z. B. Claude Code) **und** menschliche Reviewer.
-> Es baut auf `booty-clicker-spec.md` (M0–M6, alle grün: 141 Unit-Tests, Build ~578 KB) auf und ersetzt
-> dessen Produktziel „30–60 min Playtime" durch ein neues: **ein endloses Spiel, das nie „durchgespielt" ist**.
+> **Revision 2:** Der Product Owner hat den Pivot zur **kompletten Clicker-Heroes-MVP („auf Booty
+> Clicker umgestellt")** entschieden; die MVP-Kernmodule sind bereits committet und unit-getestet
+> (`game/combat.ts`, `game/heroes.ts`, `game/ascension.ts`, `game/ch-state.ts`, `save/ch-store.ts`,
+> plus der endless-sichere `ui/format.ts`). Diese Spec baut **auf diesem MVP** auf — alle Formeln,
+> Zahlen und Milestones sind mit dem tatsächlichen Code abgeglichen; Abweichungen von der
+> ursprünglichen v2-Skizze sind ausgewiesen und begründet.
 > Arbeite die Milestones **strikt in Reihenfolge** ab (M7 → …). Ein Milestone gilt erst als fertig,
 > wenn alle Akzeptanzkriterien erfüllt sind und `npm run build` + `npm test` grün sind.
 > Bei Unklarheiten: konservativ entscheiden, Entscheidung in `DECISIONS.md` dokumentieren.
-> Die Architektur-Regeln aus Spec §4 (pure testbare Kernmodule, Daten statt Code, versioniertes Save-Schema,
-> fail-silent Netcode, keine echten Personen, < 5 MB) gelten **unverändert weiter**.
+> Die Architektur-Regeln aus Spec §4 (pure testbare Kernmodule, Daten statt Code, versionierte
+> Saves mit never-throw-Validierung, fail-silent Netcode, keine echten Personen, < 5 MB) gelten
+> **unverändert weiter**.
+
+---
+
+## §0 Agenten-Handover — so arbeitest du dieses Dokument ab
+
+Dieses Dokument ist der **verbindliche Bauplan** für alles nach dem MVP. Wer übernimmt
+(Agent oder Mensch), braucht nichts außer dieser Datei + dem Repo. Lies §0 zuerst.
+
+### 0.1 Arbeitsschleife (pro Milestone)
+
+1. **Kontext laden:** §1 (Vision + die HARTE REGEL), §2 (Ist-Zustand — was bereits existiert),
+   §3 (offene Bugs mit Status).
+2. **Nächsten offenen Milestone wählen** — **strikt in Reihenfolge** aus dem Index (§0.3) bzw.
+   §10. Nicht vorgreifen; ein Milestone ist erst „fertig", wenn alle seine Akzeptanzkriterien
+   erfüllt sind.
+3. **Detail lesen:** Jeder Milestone in §10 verlinkt die Fach-§§ (§4–§9) mit Formeln,
+   Datentabellen, Save-Version und Akzeptanzkriterien.
+4. **Implementieren:** pures, DOM-freies **Kernmodul zuerst** (Pfeiler P6), dünner Glue danach;
+   jeder Balancing-Wert ist **Daten**, kein im Code vergrabenes Literal.
+5. **Alle Akzeptanzkriterien** des Milestones erfüllen — sie sind die Definition of Done.
+6. **Gates grün:** `npm run lint` · `npm run format:check` · `npm test` · `npm run build`
+   (< 5 MB) — plus Headless-Smoke, wo UI/Loop betroffen sind.
+7. **Doku:** `README.md` + `DECISIONS.md` aktualisieren; jede nicht-offensichtliche Entscheidung
+   in `DECISIONS.md` (newest-first) loggen.
+8. **Commit + Push** auf den Feature-Branch (ein Milestone = ≥ 1 in sich grüner Commit).
+
+### 0.2 Unumstößliche Regeln (gelten in JEDEM Milestone)
+
+- **P1 — Klick ist König:** Kein System darf den aktiven Klick entwerten; `clickDamage ∝ ΣDPS`
+  bleibt erhalten; Invariante **E4** (§4.8) wird per Sim abgesichert.
+- **Endlos & soft-lock-frei:** keine Content-Decke; Boss-Timeout ⇒ Farmen, **nie** Bühnenverlust.
+- **Pure Kernmodule + Daten statt Code** (P6): Spiel-Logik lebt in `game/*`, deterministisch
+  unit-getestet; DOM/Three/Audio bleiben dünner Glue.
+- **Saves:** eigener Key `bootyclicker.ch`, versioniert, **never-throw**, `Object.hasOwn`-
+  Validierung, korruptes Teilobjekt ⇒ sauberer Fresh-Start; **ein Schema-Bump pro
+  bedarfstragendem Milestone** (§9.2.1), mit Migrations- und Validator-Test.
+- **Netcode fail-silent & default-aus** (`VITE_API_BASE`); **keine echten Personen, kein
+  Echtgeld, keine Accounts**.
+- **Budget:** Bundle < 5 MB, 60 fps, Partikel < 1 ms/Frame; **kein `innerHTML`-Rebuild im
+  Klick-Hot-Path**.
+- **RNG:** alle spielrelevanten Zufallszüge über den seedbaren RNG (§9.4), damit alles
+  testbar und save-scum-fest bleibt.
+
+### 0.3 Milestone-Index (Status auf einen Blick)
+
+| M         | Titel                            | Kernziel                                                                                                  | Save | Status                                                                                           |
+| --------- | -------------------------------- | --------------------------------------------------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------ |
+| **M-MVP** | Clicker-Heroes-Umbau             | Bühnen/Boss-Loop, Crew-DPS, Ruhm-Seelen, Klick-Juice-Basis, CH-Save + Offline, neue UI                    | v1   | ✅ **committet & headless-verifiziert** (175 Game- + 9 API-Tests, Build ~566 KB, 15-Check-Smoke) |
+| M7        | MVP-Härtung & Kern-Hygiene       | Klick-Mathe → pures `click.ts`, seedbarer RNG, Tab-Rückkehr-Grant, Legacy-Erbe, Doku                      | v2   | ⬜ offen (**nächster**)                                                                          |
+| M8        | Klick-Juice 2.0                  | Combo-Tiers + Soft-Decay, On-Beat, Twerk-Ekstase, Popup-Pool, Mobile-Sheet                                | v3   | ⬜                                                                                               |
+| M9        | Endless-Skalierung               | Seelen-Retune, +5 Crew-Tiers + endlose Meilensteine, Vergoldungen, Travel-UI, `simulateEndless` (CI-Gate) | v4   | ⬜                                                                                               |
+| M10       | Ahnen & Himmelfahrt (Schicht 2)  | Twerk-Ahnen (Seelen-Sink), Himmelspfirsiche + Himmelsbaum, Coach-Offline                                  | v5   | ⬜                                                                                               |
+| M11       | Skins als Gear                   | Skin-/Kulissen-Wahl **mit Buffs**, Level/Sterne, Set-Boni                                                 | v6   | ⬜                                                                                               |
+| M12       | Pfirsich-Truhen & Loot           | Truhen/Schlüssel/Pity/Luck, Rückkehr des Goldenen Pfirsichs                                               | v7   | ⬜                                                                                               |
+| M13       | Meta, Retention & Leaderboard v2 | Daily/Quests/Achievements/Stats, `maxZone`-Bestenliste (Upsert)                                           | v8   | ⬜                                                                                               |
+| M14       | Endless-QA & Release 2.0         | `simulateEndless` voll (E1–E4), Transzendenz-Gerüst (Flag), Perf-Pass, Release                            | —    | ⬜                                                                                               |
+
+> **Der MVP (M-MVP) ist fertig, committet und headless-verifiziert** — die einzige
+> Voraussetzung für M7 ist damit erfüllt. Ein übernehmender Agent startet direkt mit **M7**.
 
 ---
 
@@ -16,1040 +80,1166 @@
 ### 1.1 Die Fantasie
 
 Du bist Manager:in des größten Twerk-Phänomens der Galaxis. Jeder Klick ist ein Hüftschwung,
-jeder Hüftschwung verdient Booty Points (BP), und mit BP kaufst du dir eine immer absurdere
-Entourage — vom Hüftschwung-Training bis zum Booty-Blackhole. Ton: überdreht, humorvoll,
-technisch sauber. Keine echten Personen, kein Echtgeld, kein Account-Zwang.
+der die **Ausdauer** des aktuellen Twerk-Rivalen drainiert; deine **Crew** (vom Hype-Girl bis
+zur Twerk-Legende) tanzt idle mit. Bühne für Bühne, Boss für Boss, Tour für Tour — und wenn die
+Wand zu hoch wird, gehst du in Rente und kassierst **Ruhm-Seelen** für die nächste, stärkere
+Karriere. Ton: überdreht, humorvoll, technisch sauber. Keine echten Personen, kein Echtgeld,
+kein Account-Zwang.
 
 ### 1.2 Die HARTE REGEL (vom Product Owner gesetzt)
 
-> **Der Hauptinhalt ist das KLICKEN/TWERKEN selbst.** Jedes System — Generatoren, Prestige,
-> Skins, Truhen, Events — muss in den aktiven Klick zurückfüttern und ihn lohnender,
-> saftiger und spektakulärer machen. Idle-Einkommen ist willkommen (damit Fortschritt
-> auch über Nacht passiert), aber es ist **immer zweitrangig** gegenüber dem, was eine
-> aktive Session an Payoff liefert.
+> **Der Hauptinhalt ist das KLICKEN/TWERKEN selbst.** Jedes System — Crew, Prestige, Skins,
+> Truhen, Events — muss in den aktiven Klick zurückfüttern und ihn lohnender, saftiger und
+> spektakulärer machen. Idle-DPS ist willkommen (damit Fortschritt auch über Nacht passiert),
+> aber **immer zweitrangig** gegenüber dem, was eine aktive Session an Payoff liefert.
 
-Konkretisierung als Balancing-Invariante (testbar, siehe §9.5):
+Das MVP verankert das bereits strukturell: `clickDamageRaw = CLICK_BASE + 0.2 · totalDPS`
+(`heroes.ts:140–142`) — ein Shake schlägt immer mit einem satten Anteil der **gesamten**
+Crew-DPS zu, plus Krit und Combo obendrauf. Konkretisierung als messbare Invariante (§4.8, E4):
 
-> **Klick-Invariante:** Eine aktiv klickende Spielerin (3 Klicks/s, Combo + Krits + Fähigkeiten
-> genutzt) erzielt zu jedem Zeitpunkt der Progression **mindestens das 3-fache** des reinen
-> Idle-Einkommens derselben Spielminute. Im Fähigkeits-Fenster („Twerk-Ekstase") das 10-fache+.
+> **Klick-Invariante (gemessen):** Eine aktive Spielerin (3 Klicks/s, Combo + Krits genutzt)
+> steht nach 45 Minuten ~10 Bühnen vor einer Gelegenheitsspielerin (1 Klick/s, ohne Juice) —
+> das entspricht ≈ ×1,6¹⁰ ≈ **×110 Ausdauer**. Diese Lücke darf durch kein späteres System
+> unter ~8 Bühnen schrumpfen.
 
 ### 1.3 Endlosigkeit als Produktziel
 
-Das Spiel darf **nie** einen Zustand erreichen, in dem es „fertig" ist:
+Das Spiel darf **nie** „fertig" sein:
 
-1. **Endlose Zonen-Leiter** („Welttournee", §4.4) statt eines einmaligen Boss-Finales — es gibt
-   immer eine nächste Wand.
-2. **Gestapelte Prestige-Schichten** (§4.5): Rebirth → Aszension → Transzendenz. Jede Schicht
-   resettet die darunterliegende und schaltet Wachstum frei, das die vorherige Schleife
-   beschleunigt. Wenn Schicht n stagniert, lockt Schicht n+1.
-3. **Kein „Content-Ende"**: Achievements, Skins, Ahnen und Quests werden datengetrieben erweitert;
-   Kern-Systeme (Zonen, Truhen, Meilenstein-Multiplikatoren) sind formelbasiert und damit unendlich.
+1. **Endlose Bühnen-Leiter** (implementiert, `combat.ts`): Ausdauer wächst mit ×1,6 pro Bühne —
+   es gibt immer eine nächste Wand, und niemals einen Soft-Lock (Boss-Timeout ⇒ Farmen, nie
+   Bühnenverlust).
+2. **Gestapelte Prestige-Schichten:** Schicht 1 (Ruhm-Seelen) ist implementiert; §4.5 stapelt
+   Aszension (Himmelspfirsiche) und Transzendenz darauf. Wenn Schicht n stagniert, lockt n+1.
+3. **Ehrliche Endlos-Kriterien:** Die Messungen in §4.8 zeigen, dass ein _linearer_
+   Seelen-Multiplikator gegen _exponentielle_ Ausdauer strukturell plateaut. „Endlos" heißt
+   deshalb nicht „feste Runs geben ewig Seelen", sondern: **die Zeit bis zur nächsten Bestzone
+   bzw. bis +50 % Gesamtmacht bleibt beschränkt** (Kriterien E1–E4, per Sim in CI asserted).
 
 ### 1.4 Design-Pfeiler
 
-| # | Pfeiler | Bedeutung |
-| - | ------- | --------- |
-| P1 | **Click is King** | Der Klick ist die beste BP-Quelle, die beste Schadensquelle und der beste Show-Moment. Alles buff't den Klick. |
-| P2 | **Immer eine nächste Wand** | Zonen-HP wächst exponentiell; wer stecken bleibt, hat immer eine sinnvolle Reset-Option. |
-| P3 | **Jede Session hinterlässt Spuren** | Selbst 3 Minuten Spielen erzeugen permanenten Fortschritt (Seelen, Splitter, Schlüssel, Quests). |
-| P4 | **Juice skaliert mit Leistung** | Combo-Tiers, Krits, Beat-Treffer eskalieren Partikel, Sound, Shake, Haptik. Gut spielen *fühlt* sich besser an. |
-| P5 | **Offline-fähig & fair** | Kein Echtgeld, keine Accounts. Leaderboard bleibt optional & fail-silent. Alles ist erspielbar. |
-| P6 | **Testbare Reinheit** | Jede neue Mechanik existiert zuerst als pures, deterministisch getestetes Modul; DOM/Three/Audio bleiben dünner Glue. |
+| #   | Pfeiler                             | Bedeutung                                                                                                                                                                                                   |
+| --- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | **Click is King**                   | Der Klick ist die beste Schadens- und Show-Quelle. `clickDamage ∝ totalDPS` garantiert: jede Idle-Investition buff't den Klick mit.                                                                         |
+| P2  | **Immer eine nächste Wand**         | Bühnen-Ausdauer ×1,6/Bühne; wer steckt, farmt (`travelTo`) oder prestiget — nie ein Dead End.                                                                                                               |
+| P3  | **Jede Session hinterlässt Spuren** | Bestzone, Seelen, Vergoldungen, Splitter, Schlüssel, Quests — auch 3 Minuten zählen.                                                                                                                        |
+| P4  | **Juice skaliert mit Leistung**     | Combo-Tiers, Krits, Beat-Treffer eskalieren Partikel, Sound, Shake, Haptik. Gut spielen _fühlt_ sich besser an.                                                                                             |
+| P5  | **Offline-fähig & fair**            | Kein Echtgeld, keine Accounts. Leaderboard optional & fail-silent. Alles erspielbar.                                                                                                                        |
+| P6  | **Testbare Reinheit**               | Jede Mechanik existiert zuerst als pures, deterministisch getestetes Modul; DOM/Three/Audio bleiben dünner Glue. (Die MVP-Kernmodule leben das bereits — der WIP-Glue hat hier zwei Schulden, siehe N2/N3.) |
 
 ---
 
-## §2 Ist-Zustand (Audit M0–M6)
+## §2 Ist-Zustand
 
-Stand: Commit `12a26d2`, 141 Tests grün (132 Game + 9 API, verifiziert per `npm test`),
-Bundle ~578 KB JS / ~150 KB gzip (TESTPLAN §1).
+### 2.1 Der CH-MVP-Pivot (aktueller Kern)
 
-### 2.1 Was tatsächlich geliefert ist
+Produktentscheidung: **„komplette MVP für Clicker Heroes, auf Booty Clicker umgestellt."**
+Statt den flachen M0–M6-Clicker (Upgrades → einmaliger Boss → additives Rebirth) weiter zu
+flicken, wurde der Kernloop durch einen Clicker-Heroes-Loop ersetzt. Der gesamte MVP
+(Kernmodule **und** Loop/UI-Verdrahtung) ist committet, gepusht und headless-verifiziert
+(175 Game- + 9 API-Tests, Build ~566 KB, 15-Check-Smoke):
 
-| Bereich | Inhalt | Dateien |
-| ------- | ------ | ------- |
-| Ökonomie | 11 Upgrades (7 Basis + 4 Endgame), Kostenformel `floor(base·gr^lv)`, Combo +5 %/Stack (Fenster 1,2 s), Mult-Stacking multiplikativ | `apps/game/src/game/economy.ts` |
-| Progression | Boss-Unlock 50 000 BP, Rebirth 100 000 BP, `prestigeMult = 1 + rebirths` (additiv), ROI-greedy Bot `simulatePlaythrough` (Boss in 30–50 min bei 3 cps) | `apps/game/src/game/progression.ts`, `progression.test.ts` |
-| Boss | Einzelner 90-s-Fight, fixe 75 000 HP, Retry-Easing ×0,75/Versuch, Klick-Schaden `perClick·mult` | `apps/game/src/game/boss.ts`, `ui/boss.ts` |
-| Events | Genau 1 Random-Event: Goldener Pfirsich (alle 90–240 s, 8 s sichtbar, ×3 für 60 s), Timing persistiert | `apps/game/src/game/events.ts`, `main.ts:248–282` |
-| Achievements | 18 Stück, pure Prädikate über Snapshot-Kontext, Toasts + 🏆-Tab | `apps/game/src/game/achievements.ts`, `ui/achievements.ts`, `ui/toasts.ts` |
-| Kosmetik | 5 Skins, 4 Kulissen — **rein kosmetisch**, Content-Gates über `revealAt` × `maxBp` | `apps/game/src/character/skins.ts`, `world/backgrounds.ts`, `ui/shop.ts` |
-| Persistenz | Schema v4, Migrationskette v1→v4, never-throw-Validierung mit `Object.hasOwn`, Export/Import Base64, Offline-Ertrag `min(elapsed, 2 h) × perSec·mult × 0,5` | `apps/game/src/save/{schema,migrate,store}.ts` |
-| Settings | Separater Key `bootyclicker.settings` (Shake/Partikel/Qualität/FPS-Cap/Onboarded), Audio-Prefs unter `bootyclicker.audio` | `apps/game/src/game/settings.ts`, `audio/prefs.ts` |
-| Rendering | Three r0.180, Fixed-Timestep 120 Hz (`DT = 1/120`), Feder-Dämpfer-Cheeks, 5 Moves, Partikel-Pool (200), Qualitäts-Presets, FPS-Cap via purem `frameDue` | `engine/`, `character/`, `choreo/` |
-| Audio | Vollständig prozedural (kein Asset), generativer Loop pro Kulisse, Beat-Klatschen via `BeatTracker` über die Choreo-`phase` | `apps/game/src/audio/` |
-| Leaderboard | Worker (Hono + D1 + KV), nur **Boss-Kill-Zeit**, Rate-Limit 5/min/IP, Client fail-silent & default-aus | `apps/api/src/index.ts`, `apps/game/src/net/leaderboard-client.ts` |
-| UX | Onboarding (3 Coach-Marks), Loading-Screen, Mobile-Tap-Erkennung (`isTap`), itch-Export | `ui/onboarding.ts`, `game/input.ts`, `scripts/` |
+**Committete, unit-getestete pure Module:**
 
-### 2.2 Die aktuelle Progressions-Decke (warum das Spiel heute „endet")
+| Modul                             | Inhalt (verifiziert)                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/game/src/game/combat.ts`    | Endlose Bühnen-Leiter: `monsterHp(z) = 10 · 1.6^(z−1)`; **10 Rivalen pro Bühne** (`MONSTERS_PER_ZONE`); jede **5.** Bühne ein Boss (`BOSS_HP_FACTOR` ×10) am **30-s-Timer**; Gold `= ceil(HP/15)`, Boss ×12. Pure Reducer `hit()`/`tickBoss()`/`travelTo()`/`spawnFor()`. Boss-Timeout ⇒ Rivalen respawnen (`killsThisZone → 0`), **nie** Bühnenverlust. `travelTo` erlaubt Farmen in 1..maxZone. |
+| `apps/game/src/game/heroes.ts`    | **Crew** = 10 Mitglieder („Booty-Boss (Du)" 5 BP/1 DPS → „Twerk-Legende" 20 M BP/700 k DPS), Kostenwachstum **1,07**/Level, Meilenstein-Verdopplungen bei **[10, 25, 50, 100, 200, 400, 800]**, `clickDamageRaw = 1 + 0.2 · totalRawDps` (`CLICK_BASE`/`CLICK_DPS_SHARE`). Bulk-Kauf geschlossen: `bulkCost` (geometrische Summe), `maxAffordable` (log-Formel + Float-Guard).                    |
+| `apps/game/src/game/ascension.ts` | Prestige-Schicht 1 **Ruhm-Seelen**: `soulsForMaxZone(z) = ⌊z^1.6 / 40⌋` (0 unter Bühne 10, `ASCEND_MIN_ZONE`), `soulMult = 1 + 0.1 · souls`. Seelen sind an die **Lifetime**-Bestzone gepinnt (`pendingSouls` = Differenz zum Bank-Stand) ⇒ kein Farm-Exploit durch häufiges Aszendieren. `applyAscension` lässt die Bank **nie schrumpfen** (retune-sicher).                                     |
+| `apps/game/src/game/ch-state.ts`  | `ChState { gold, zone, killsThisZone, runMaxZone, crew, souls, lifetimeMaxZone, totalClicks }`; `dpsOf`/`clickDamageOf` falten `soulMult` ein; abgeleitete Werte werden **nie** persistiert. `ascendState` resettet den Run, behält Seelen/Lifetime-Bestzone/totalClicks.                                                                                                                         |
+| `apps/game/src/save/ch-store.ts`  | Eigener Save-Key **`bootyclicker.ch`**, Schema `v: 1`, never-throw-Validierung (`isChSave`), Invarianten-Reparatur beim Laden (`runMaxZone ≥ zone` etc.), UTF-8-sicherer Base64-Export/Import. **Offline-Gold:** Crew farmt die _aktuelle_ Bühne (nie Bosse), `offlineGold = kills/s · gold(z) · 0.5`, Cap **8 h** (`OFFLINE_CAP_S`, `OFFLINE_EFF`).                                              |
+| `apps/game/src/ui/format.ts`      | **B1 behoben:** Suffixe bis `Dc` (10³³), darüber wissenschaftliche Notation (`"1.00e36"`), `∞`-Guard, Negative; eigene Testdatei `format.test.ts`.                                                                                                                                                                                                                                                |
 
-Rechnung mit den Live-Daten aus `economy.ts` / `progression.ts`:
+**Verdrahtung & UI (committet & headless-verifiziert):**
 
-- **~40 min:** Boss-Unlock (50 k BP), Boss-Sieg → Tyrann-Skin. Der Boss-Button bleibt danach zwar
-  sichtbar (`main.ts:226–228` prüft `bossDefeated` nicht), aber ein Re-Fight gibt **nichts Neues**
-  — mit NG+-Stats ist er ein 1-Klick-Kill (siehe Bug B8).
-- **~45–50 min:** Rebirth-Gate (100 k BP). Danach: dieselben 11 Upgrades, nur mit +100 % Start-Mult.
-- **Endgame-Upgrades:** Nur 4 Stück (Reaktor/Mine/Singularität/Blackhole, base 250 k–5 M). Mit den
-  Mult-Upgrades `disco` (gr 1,9), `god` (gr 2,2), `quantum` (gr 2,5) explodieren die Kosten so
-  schnell, dass nach wenigen Käufen effektiv nichts mehr Kaufbares existiert.
-- **Achievements:** Höchste Schwelle ist 1 M BP (`millionaire`) — nach ~1–2 h ist alles geholt.
-- **Prestige:** Additiv (`1 + rebirths`) — der relative Gewinn pro Rebirth fällt von +50 % (NG+1)
-  auf +0,99 % (NG+100). Der Loop verliert exponentiell an Wert (Bug B2).
+- `main.ts` komplett auf den CH-Loop umgeschrieben: Klick trifft den Rivalen, Crew-DPS tickt,
+  Boss-Timer, Aszension, Offline-Gold + Welcome-Back beim Boot, Autosave 10 s +
+  `visibilitychange(hidden)` + `beforeunload`, `e.repeat`-Guard an der Leertaste (B4 ✔).
+- Neue UI: `ui/ch-hud.ts` (Bühnen-Anzeige, Rivalen-HP-Balken, Boss-Timer, `spawnPop`),
+  `ui/crew.ts` (Crew-Shop mit **×1/×10/Max**), `ui/prestige.ts` (Ruhm-Tab mit Seelen-Vorschau),
+  `ui/ch-settings.ts`; Tabs: 🕺 Crew · ✨ Ruhm · ⚙️.
+- **Provisorischer Klick-Juice im Glue** (Konstanten in `main.ts`, nicht in einem puren Modul):
+  `CRIT_CHANCE = 0.2`, `CRIT_MULT = 5`, Combo `+2 %`/Stack, Cap 50 (max ×2), Fenster 1,5 s mit
+  **Hard-Reset** auf 0; Krit-Popup + stärkerer Screen-Shake. Krit-Roll via `Math.random`.
+- Kulissen rotieren **automatisch** alle 10 Bühnen (`club → synth → beach → space` zyklisch);
+  Figur fix auf dem Klassiker-Skin.
+- Throttled 0,4-s-Tick: `document.title` + Re-Render des offenen Tabs (Crew-Affordability
+  bleibt beim Idlen frisch — B6 ✔ für den neuen Shop).
 
-**Fazit:** Nach ~2–3 h existiert kein Ziel mehr. Genau das behebt §4.
+**Im MVP bewusst entfallen (eingemottet, Module existieren weiter, Tests grün):** der
+Upgrade-Shop (`economy.ts`), der alte Boss-Fight (`boss.ts`), additives Rebirth
+(`progression.ts`), Achievements-UI, Goldener Pfirsich (`events.ts`), Skin-/Kulissen-Wahl,
+Leaderboard-Client-Verdrahtung, Legacy-Save (`bootyclicker.save`, Schema v4 — wird vom CH-Loop
+nicht gelesen). §2.3 listet, was davon wann zurückkommt.
+
+### 2.2 Warum der Pivot nötig war (Kurz-Audit des Legacy-Kerns)
+
+Der M0–M6-Kern (11 Upgrades, 50-k-Boss, `prestigeMult = 1 + rebirths`) hatte eine harte Decke:
+nach ~2–3 h existierte kein Ziel mehr — einmaliger Boss, 4 Endgame-Upgrades mit explodierenden
+Mult-Kosten (gr 1,9–2,5), Achievements bis 1 M BP, und ein Prestige, dessen relativer Gewinn
+von +50 % (NG+1) auf +0,99 % (NG+100) fiel. Details und Belege: §3 (B2/B3, historisch).
+Der CH-Loop ersetzt genau diese Decke durch eine formelbasierte, unendliche Leiter.
+
+### 2.3 MVP → v2 Gap-Checkliste
+
+Was der MVP noch **nicht** hat und wo es landet (Details in den Fach-§§, Reihenfolge in §10):
+
+| #   | Lücke                                                      | MVP-Stand                 | v2-Ziel                                | Milestone |
+| --- | ---------------------------------------------------------- | ------------------------- | -------------------------------------- | --------- |
+| G1  | Klick-Mathe (Krit/Combo) liegt im Glue, `Math.random`      | provisorisch in `main.ts` | pures `game/click.ts` + seedbarer RNG  | M7        |
+| G2  | Offline-Gutschrift bei Tab-Rückkehr                        | nur beim Boot             | `visibilitychange → visible` Grant     | M7        |
+| G3  | Legacy-Save-Übernahme                                      | wird ignoriert            | einmaliger „Erbe der alten Tour"-Bonus | M7        |
+| G4  | Combo flach (linear, Hard-Reset)                           | Cap ×2, Reset auf 0       | Tiers + Soft-Decay                     | M8        |
+| G5  | On-Beat-Bonus, Twerk-Ekstase, Ability-Bar                  | fehlen                    | §4.2.3/4.2.4                           | M8        |
+| G6  | Popup-Pooling, Haptik, Musik-Layer, Mobile-Sheet           | fehlen                    | §8                                     | M8        |
+| G7  | Seelen-Kurve plateaut (Messung N1)                         | `⌊z^1.6/40⌋`              | + „Legendäre Auftritte"-Term           | M9        |
+| G8  | Crew endet bei „Twerk-Legende"; Meilensteine enden bei 800 | 10 Tiers, 7 Schwellen     | +5 Tiers, endlose Schwellen            | M9        |
+| G9  | Vergoldungen (Gilds)                                       | fehlen                    | §4.3.4                                 | M9        |
+| G10 | Farm-/Travel-UI (`travelTo` ist pure da)                   | keine UI                  | Bühnen-Wahl ≤ Bestzone                 | M9        |
+| G11 | Seelen-Sink (Ahnen)                                        | Seelen nur passiv         | §4.6                                   | M10       |
+| G12 | Prestige-Schicht 2/3                                       | nur Schicht 1             | HPF + Himmelsbaum, TE-Gerüst           | M10/M14   |
+| G13 | Skins/Kulissen: Wahl + Buffs                               | Skin fix, Kulisse auto    | Skins-als-Gear                         | M11       |
+| G14 | Truhen/Loot/Schlüssel, Goldener Pfirsich                   | fehlen / entfallen        | §6                                     | M12       |
+| G15 | Achievements (CH-Modus), Quests, Daily, Stats              | entfallen / fehlen        | §7                                     | M13       |
+| G16 | Leaderboard (v2-Metrik `maxZone`)                          | Client unverdrahtet       | §7.4/§9.7                              | M13       |
+| G17 | `simulateEndless` als CI-Gate                              | nur Modul-Unit-Tests      | §9.5                                   | M9 + M14  |
 
 ---
 
 ## §3 Bugs, Probleme & Tech-Debt
 
-Alle Punkte wurden **im Code verifiziert** (Verhalten nachvollzogen bzw. per Node-Repro bestätigt).
-Severity: 🔴 blockiert das Endless-Ziel / korrumpiert Kernloop · 🟠 deutlich spürbar · 🟡 Politur/Debt.
+Alle Punkte im Code verifiziert; Statusspalte = Stand nach dem CH-Pivot (committete Module +
+verifizierter WIP-Glue). Severity: 🔴 blockiert Endless-Ziel/Kernloop · 🟠 deutlich spürbar ·
+🟡 Politur/Debt.
 
-### 3.1 Befundliste
+### 3.1 Befunde aus dem M0–M6-Audit (mit Pivot-Status)
 
-**B1 🔴 — Zahlenformatierung überläuft ab 10^21 („Qi"-Kappe).**
-- **Symptom:** `fmt(1e21)` → `"1000.00Qi"`, `fmt(1e30)` → `"1000000000000.00Qi"` (13-stellige
-  Ziffernkette), `fmt(1e60)` → `"9.999999999999999e+41Qi"` (E-Notation *plus* Suffix-Mischmasch).
-  Verifiziert per Node-Repro gegen den Originalcode.
-- **Ursache:** `apps/game/src/ui/format.ts:1–12` — `SUFFIXES = ['K','M','B','T','Qa','Qi']`, die
-  while-Schleife stoppt bei `i < SUFFIXES.length - 1`, der Rest der Zahl bleibt undividiert.
-- **Folge:** Ein endloses Spiel sprengt HUD, Shop-Preise, `document.title` und Popups.
-- **Fix:** Erweiterte Suffix-Tabelle + wissenschaftliche Notation als Fallback (§9.3). Pure
-  Funktion, unit-getestet inkl. Grenzwerte.
+**B1 🔴 → ✅ ERLEDIGT — Zahlenformatierung lief ab 10²¹ über.**
+`fmt(1e21)` → `"1000.00Qi"`, `fmt(1e30)` → 13-stellige Ziffernkette (per Node-Repro belegt).
+Behoben in `ui/format.ts`: Suffixe bis `Dc` (10³³), darüber `"1.00e36"`, `∞`- und
+Negativ-Guards; eigene Tests (`format.test.ts`). Referenz für §9.3.
 
-**B2 🔴 — Prestige ist additiv und stallt.**
-- **Symptom:** Jeder Rebirth gibt pauschal +100 % (`prestigeMult = 1 + rebirths`,
-  `apps/game/src/game/progression.ts:136–138`). Relativer Zugewinn: NG+1 = +50 %, NG+10 = +9 %,
-  NG+100 = +0,99 % — der teuerste Klick des Spiels (kompletter Reset!) wird asymptotisch wertlos.
-- **Vergleich Genre:** Clicker Heroes' Hero Souls geben +10 % DPS *pro Seele*, und die Seelen-
-  **Anzahl** wächst superlinear mit der erreichten Zone → jeder Ascend lohnt mehr, nicht weniger.
-- **Fix:** Rebirth 2.0 mit Seelen-Währung, Seelenertrag ∝ f(maxZone) superlinear (§4.5.1).
-  Migration rechnet Bestands-Rebirths fair um (§9.2).
+**B2 🔴 → 🟠 TEILWEISE — Prestige stallt.**
+Das additive `prestigeMult = 1 + rebirths` (`progression.ts:136–138`, Legacy) ist durch
+Ruhm-Seelen ersetzt — strukturell die richtige (CH-)Lösung. **Aber:** die Messung N1 (§4.8)
+zeigt, dass die implementierte Kurve `⌊z^1.6/40⌋` bei fester Run-Länge nach 3–4 Aszensionen
+bei **~13 Seelen (×2,3), Bühne ~50** plateaut. Rest-Fix: §4.5.1-Retune + §4.6 Ahnen (M9/M10).
 
-**B3 🔴 — Content ist endlich (Boss-Einbahnstraße, 4 Endgame-Upgrades).**
-- **Symptom/Ursache:** Ein einziger Boss mit fixen 75 k HP (`game/boss.ts:14`), keine Zonen, keine
-  skalierenden Gegner; nach dem Sieg gibt es kein neues Kampfziel. §2.2 beziffert die Decke.
-- **Fix:** Endlose Welttournee-Leiter mit Zonen-HP-Formel + Boss-Timern (§4.4); der Tyrann wird
-  Boss von Zone 10 (Kompatibilität: sein Skin-Unlock bleibt dort).
+**B3 🔴 → ✅ WEITGEHEND ERLEDIGT — Content war endlich.**
+Der einmalige 75-k-HP-Boss und die 4 Endgame-Upgrades sind durch die endlose Bühnen-Leiter +
+Crew ersetzt (`combat.ts`, `heroes.ts`). Verbleibend: Meta-Content (Ahnen, Gear, Truhen,
+Quests) — G11–G15.
 
-**B4 🔴 — Leertaste mit Key-Repeat = Gratis-Autoclicker.**
-- **Symptom:** Leertaste gedrückt halten feuert `doShake()` mit OS-Key-Repeat-Rate (~30/s) —
-  ohne einen einzigen bewussten Klick. Combo, Achievements („Klick-Maschine"), Boss-DPS und damit
-  auch die Boss-Zeit-Bestenliste werden trivialisiert.
-- **Ursache:** `apps/game/src/main.ts:335–341` — der `keydown`-Handler prüft `e.repeat` nicht.
-- **Fix:** `if (e.repeat) return;` (Einzeiler). Test: simulierter Repeat-Event erhöht BP nicht.
+**B4 🔴 → ✅ ERLEDIGT — Leertaste mit Key-Repeat war ein Gratis-Autoclicker.**
+Der neue `keydown`-Handler hat den Guard (`main.ts`, WIP: `if (e.repeat) return; // B4`).
+AC-Absicherung per Test bleibt Pflicht (M7).
 
-**B5 🟠 — Hintergrund-Tab verdient nichts; Offline-Ertrag nur beim Seiten-Load.**
-- **Symptom:** Tab 1 h im Hintergrund → praktisch 0 BP. Browser pausieren `requestAnimationFrame`;
-  beim Refokus liefert `clock.getDelta()` die volle Wegzeit, aber `main.ts:372` klemmt sie auf
-  `Math.min(dt, 0.05)` → 50 ms gutgeschrieben statt 1 h. Offline-Earnings werden ausschließlich
-  im Bootstrap berechnet (`main.ts:52–57`), der `visibilitychange`-Handler (`main.ts:120–122`)
-  speichert nur, schreibt aber nichts gut. Seite *schließen und neu laden* zahlt also besser aus
-  als der Tab-Wechsel — absurd.
-- **Fix:** Bei `visibilitychange → visible` Differenz seit dem letzten Tick als Offline-Ertrag
-  (gleiche pure `computeOfflineEarnings`) gutschreiben; ab Schwelle (> 60 s) den Welcome-Back-Dialog
-  zeigen. Test über injizierbare Clock.
+**B5 🟠 → 🟠 TEILWEISE — Hintergrund-Tab verdient nichts.**
+Offline-Gold wird beim **Boot** korrekt gutgeschrieben (`loadCh` + `offlineGold` +
+Welcome-Back, WIP-`main.ts:73–91`); `visibilitychange` persistiert aber weiterhin nur beim
+Verstecken — **Rückkehr in den Tab schreibt nichts gut** (rAF pausiert, `dt`-Clamp 0,05 s
+schluckt die Wegzeit). Fix M7: Grant bei `visible` über dieselbe pure `offlineGold`.
 
-**B6 🟠 — Shop-Affordability veraltet beim Idlen.**
-- **Symptom:** Wer nur zusieht (passives Einkommen), sieht Upgrades dauerhaft ausgegraut/„locked",
-  obwohl sie längst bezahlbar sind — bis zum nächsten Klick.
-- **Ursache:** `renderUpgrades()` läuft nur im Konstruktor, bei Shake (`main.ts:313`), Kauf,
-  Rebirth und Import. Der 0,25-s-Tick (`main.ts:399–408`) ruft nur `syncEndgameUi`/`checkAchievements`
-  — nie die Kostenanzeige.
-- **Fix:** Leichter `Shop.syncAffordability()` im Tick: nur CSS-Klassen togglen (kein
-  innerHTML-Rebuild), Signatur-Vergleich wie bei `syncReveals()`.
+**B6 🟠 → ✅ ERLEDIGT (neuer Shop) — Shop-Affordability veraltete beim Idlen.**
+Der WIP-0,4-s-Tick re-rendert den offenen Tab (Crew-Kosten bleiben frisch). Schönheitsfehler:
+es ist ein voller `innerHTML`-Rebuild alle 0,4 s bei offenem Tab → fällt unter B7.
 
-**B7 🟠 — DOM-Churn pro Klick & pro Frame.**
-- **Symptom/Ursache:** Jeder Shake rebuildet den kompletten Upgrade-Tab per `innerHTML`
-  (`main.ts:313` → `shop.ts:88–111`, 11 Items, Event-Handler neu verdrahtet). `hud.update(state)`
-  läuft ungedrosselt jeden Frame (`main.ts:396`) und schreibt 2–4 `textContent`s; `settings.refresh()`
-  überschreibt den Rebirth-Abschnitt alle 250 ms (`main.ts:403` → `settings.ts:197–212`).
-  Bei 10+ cps (Ziel von §4.2!) plus Krit-Popups wird das messbar.
-- **Fix:** HUD nur bei Wertänderung (formatierter String-Vergleich) bzw. auf den 0,25-s-Tick;
-  Upgrade-Kauf aktualisiert Zeilen in place; Popup-Batching (§8.5).
+**B7 🟠 → 🟠 OFFEN — DOM-Churn pro Klick & pro Frame.**
+Weiterhin: `hud.update(...)` ungedrosselt jeden Frame; `spawnPop` erzeugt pro Klick/Krit ein
+frisches DOM-Element (`ui/ch-hud.ts:88 ff.`); Crew-Tab-Full-Rebuild alle 0,4 s. Bei 10+ cps
+(Ziel!) plus Krit-Popups messbar. Fix M8: HUD nur bei Wertänderung, Popup-Pool (≤ 24 Nodes)
 
-**B8 🟠 — Bestenlisten-Metrik ist kaputt (und spambar).**
-- **Symptom:** (a) Ein NG+-Spieler one-shottet den 75-k-HP-Boss (`perClick·mult` wächst unbegrenzt,
-  Boss-HP nicht) → Kill-Zeit „1 s" für alle; die Rangliste misst Prestige-Grind, nicht Skill.
-  (b) Jeder Sieg erzeugt eine **neue Zeile** (`apps/api/src/index.ts:83–85`, unkonditionales
-  `INSERT`) — dieselbe Person kann die Top 50 fluten; `rankFor` zählt eigene Duplikate mit.
-- **Fix:** Leaderboard v2 mit Endless-Metrik `maxZone` (+ Tiebreaker Rebirth-Power) und
-  Upsert-per-Nickname (§7.4, §9.7). Alte Tabelle bleibt als Legacy lesbar.
+- Batching, Crew-Zeilen-Update in place.
 
-**B9 🟠 — Skins & Kulissen sind rein kosmetisch.**
-- **Symptom:** `SkinConfig` (`character/skins.ts`, `types.ts:7–20`) kennt nur Farben/Kosten/Reveal;
-  kein Gameplay-Feld. Nutzeranforderung: **Skins sollen Buffs geben.**
-- **Fix:** Skins-als-Gear-System (§5) mit Buff-Feldern, Levels, Raritäten, Set-Boni.
+**B8 🟠 → 🟡 TEILWEISE (Metrik-Problem obsolet) — Bestenliste.**
+Die Boss-Zeit-Metrik ist mit dem alten Boss verschwunden; der Client ist aktuell gar nicht
+verdrahtet. Die natürliche Endless-Metrik existiert jetzt im State (`lifetimeMaxZone`).
+Offen: Worker-v2 (Upsert pro Nickname statt unbegrenzter `INSERT`s, `apps/api/src/index.ts:83–85`)
 
-**B10 🟠 — Nur ein Random-Event, keine Loot-Schleife.**
-- **Symptom:** `events.ts` kennt genau den Goldenen Pfirsich; keine Truhen, keine Schlüssel,
-  keine variablen Belohnungen — die stärkste Retention-Mechanik des Genres fehlt komplett.
-- **Fix:** Truhen-/Loot-System (§6) mit seedbarem RNG (§9.4).
+- Client-Wiring → M13, Vertrag §9.7.
 
-**B11 🟠 — Offline-Ertrag: 2-h-Deckel, halbe Rate, klick-blinder.**
-- **Symptom:** `computeOfflineEarnings` (`save/store.ts:125–132`) deckelt bei 2 h × 50 % und
-  rechnet **nur** `perSec` — eine Klick-fokussierte Build (P1!) bekommt offline exakt 0.
-  Über Nacht (8 h) verfallen 75 % der Zeit ersatzlos; es gibt keinen Upgrade-Pfad für den Cap.
-- **Fix:** Basis-Cap 8 h; Rate/Cap über Himmels-Upgrades & Skin-Buffs steigerbar; Offline-Basis =
-  `perSec + 0,25 × perClick × 1 cps` („die Crew twerkt für dich mit halber Hingabe"), §4.3.4.
+**B9 🟠 → 🟠 OFFEN (verschärft) — Skins ohne Gameplay.**
+Im MVP ist sogar die Skin-/Kulissen-**Wahl** entfallen (Figur fix „classic", Kulisse
+auto-rotierend). v2: Skins-als-Gear (§5) bringt Wahl **und** Buffs zurück → M11.
 
-**B12 🟡 — Combo-System ist flach.**
-- **Symptom:** Linear +5 %/Stack (`economy.ts:37–40`), hartes Voll-Reset nach 1,2 s
-  (`main.ts:380–383`), keine Tiers, keine Interaktion mit irgendetwas. Kein Krit, kein Beat-Bonus,
-  keine Fähigkeit — der aktive Layer hat genau einen Knopf.
-- **Fix:** Combo 2.0 + Krits + On-Beat + Twerk-Ekstase (§4.2).
+**B10 🟠 → 🟠 OFFEN — Nur ein Random-Event, keine Loot-Schleife.**
+Der Goldene Pfirsich ist im MVP entfallen; Truhen/Schlüssel fehlen weiter → M12 (§6).
 
-**B13 🟡 — Mobile-Layout-Schulden.**
-- (a) Shop ist unter 640 px **vollflächig** (`style.css:733–737`) — die Figur (der Star!) ist beim
-  Shoppen unsichtbar; Käufe geben null visuelles Feedback.
-- (b) Kein Safe-Area-Handling: Viewport-Meta ohne `viewport-fit=cover` (`index.html:5–8`), kein
-  `env(safe-area-inset-*)` im CSS — Buttons kleben auf Notch-Geräten unter der Kamera-Insel.
-- (c) Pfirsich-Spawn (`main.ts:256–257`) rechnet mit `window.innerWidth/Height` zum Spawn-Zeitpunkt,
-  wird bei Resize/Rotation nicht neu geklemmt und rendert mit z-index 35 **über** dem geöffneten
-  Shop (z 20) — auf Mobile schwebt der Pfirsich über der Einkaufs-UI.
-- **Fix:** Shop als Bottom-Sheet (~55 % Höhe) unter 640 px, Safe-Area-Padding, Pfirsich-Clamp bei
-  Resize + Despawn bei geöffnetem Vollbild-Shop (§8.7).
+**B11 🟠 → ✅ WEITGEHEND ERLEDIGT — Offline-Regeln.**
+Neu: Cap 8 h (statt 2 h), Rate 50 %, DPS-basiert und bühnenbezogen (`offlineGold` farmt die
+aktuelle Bühne, nie Bosse) — sauber und pure. Verbleibend: reine Klick-Builds (Crew-los)
+verdienen offline 0; Fix über Twerk-Coaches (§4.3.5) + Cap-Upgrades im Himmelsbaum → M10.
 
-**B14 🟡 — Boost-Inkonsequenzen.**
-- ×3-Pfirsich-Boost wirkt nicht auf Boss-Schaden (`ui/boss.ts:69–74` nutzt nackt `perClick·mult`)
-  und wird in der HUD-Ratenzeile (`ui/hud.ts:20`) nicht angezeigt — die Anzeige lügt während des
-  Boosts. Ein zum Boss-Start sichtbarer Pfirsich bleibt zudem sichtbar (Gate nur beim Spawn,
-  `main.ts:264–272`).
-- **Fix:** `incomeMultiplier` in die eine zentrale „effektiver Klickwert"-Funktion falten (§4.2.6),
-  HUD zeigt effektive Werte, Pfirsich despawnt bei Kampfbeginn.
+**B12 🟡 → 🟠 TEILWEISE — Aktiver Layer flach.**
+Krit (20 %/×5) und Combo (+2 %/Stack, Cap ×2) existieren jetzt — aber: im Glue statt in einem
+puren Modul (N2), unseeded (N3), Combo mit Hard-Reset (`main.ts:383–386`), kein On-Beat, keine
+Fähigkeit. → M7 (Struktur) + M8 (Tiefe).
 
-**B15 🟡 — Float-Präzision als Zeitbombe.**
-- `state.bp` ist ein `number`; sobald `bp / gain > 2^53` ist, verpuffen Klick-Gewinne komplett
-  (`bp += gain` ändert nichts). Mit B1-Fix + Endless-Wachstum wird das real erreichbar.
-- **Fix:** Kein BigNumber nötig (Begründung §9.3): Die Prestige-Schichten sind so getuned, dass
-  Werte pro Schicht < 1e60 bleiben; zusätzlich Guard in der Sim (§9.5) der Stalls durch
-  Präzisionsverlust erkennt.
+**B13 🟡 → 🟡 OFFEN — Mobile-Layout-Schulden.**
+(a) Shop unter 640 px vollflächig — Figur beim Shoppen unsichtbar (`style.css:733–737`);
+(b) kein Safe-Area-Handling (`index.html`-Viewport ohne `viewport-fit=cover`, kein `env()`).
+(c — Pfirsich-Spawn) derzeit obsolet, kehrt mit M12 zurück (dann mit Clamp + Sheet-Regel).
+→ (b) M7, (a) M8.
 
-**B16 🟡 — Doku-Drift.**
-- `README.md:84` behauptet „Schema-Version 3", tatsächlich ist v4 live (`save/schema.ts:14`).
-  Klein, aber genau die Art Drift, die Agents später fehlleitet.
+**B14 🟡 → ✅ OBSOLET — Boost-Inkonsequenzen.**
+Pfirsich-Boost und alter Boss-Modus existieren nicht mehr; bei der Wiedereinführung (M12)
+fließt jeder Boost durch die eine `effectiveClick`-Pipeline (§4.1), womit die Klasse von
+Inkonsistenzen strukturell verschwindet.
 
-**B17 🟡 — Kein Bulk-Buy.**
-- Für ein Endless-Spiel mit hunderten Upgrade-Levels fehlen ×10/×25/×Max-Kauf (geschlossene
-  Formel der geometrischen Reihe, §4.3.3). Reines QoL, aber ab M9 Pflicht.
+**B15 🟡 → 🟡 OFFEN — Float-Präzision als Zeitbombe.**
+Unverändert relevant — mit dem §4.5.1-Retune wachsen Seelenzahlen exponentiell. Doubles
+bleiben die Entscheidung (§9.3); der Sim-Guard (§9.5) überwacht Stalls durch
+Präzisionsverlust. → M9/M14.
 
-### 3.2 Triage-Matrix (Severity × Aufwand)
+**B16 🟡 → 🟡 OFFEN (verschärft) — Doku-Drift.**
+`README.md` beschreibt jetzt ein Spiel, das es so nicht mehr gibt (Upgrade-Shop, 50-k-Boss,
+Schema-v3-Behauptung). → M7.
 
-| Bug | Severity | Aufwand | Milestone | Notiz |
-| --- | -------- | ------- | --------- | ----- |
-| B4 Space-Repeat | 🔴 | XS | M7 | Einzeiler + Test |
-| B1 fmt()-Überlauf | 🔴 | S | M7 | Pure Funktion + Tests |
-| B6 Idle-Affordability | 🟠 | S | M7 | Klassen-Toggle im Tick |
-| B5 Hintergrund-Tab | 🟠 | S | M7 | visibilitychange-Gutschrift |
-| B16 README-Drift | 🟡 | XS | M7 | Doku |
-| B13b Safe-Area | 🟡 | XS | M7 | CSS + Meta |
-| B7 DOM-Churn | 🟠 | M | M8 | HUD-Drossel + Popup-Batch |
-| B12 Combo flach | 🟡 | M | M8 | Combo 2.0 + Krits |
-| B14 Boost-Inkonsequenz | 🟡 | S | M8 | zentrale Klickwert-Funktion |
-| B3 endlicher Content | 🔴 | L | M9 | Welttournee |
-| B8 Leaderboard | 🟠 | M | M9 | v2-Metrik + Upsert |
-| B2 Prestige additiv | 🔴 | M | M10 | Seelen + Migration |
-| B11 Offline-Regeln | 🟠 | S | M10 | mit Prestige-Rework |
-| B17 Bulk-Buy | 🟡 | S | M11 | mit Generatoren |
-| B9 Skins kosmetisch | 🟠 | L | M12 | Gear-System |
-| B10 kein Loot | 🟠 | L | M13 | Truhen |
-| B13a/c Mobile-Shop/Pfirsich | 🟡 | M | M8/M13 | Sheet + Clamp |
-| B15 Float-Präzision | 🟡 | S | M10/M16 | Sim-Guard |
+**B17 🟡 → ✅ ERLEDIGT — Bulk-Buy.**
+`bulkCost`/`maxAffordable` (geschlossene Formeln, Float-Guard) + ×1/×10/Max-UI im Crew-Tab.
+
+### 3.2 Neue Befunde (aus MVP-Review + Messung)
+
+**N1 🔴 — Die Seelen-Ökonomie plateaut (gemessen).**
+
+- **Symptom:** Deterministische Sim (Annahmen §4.8) über 45-min-Runs: Bank 9 → 11 → 12 → 13,
+  dann dauerhaft **+0 Seelen**; Bestzone konvergiert gegen ~50. Auch ein isolierter
+  Kurven-Retune verschiebt die Wand nur (Bühne 55 bzw. mit Crew-Ausbau 80), beseitigt sie nicht.
+- **Ursache (strukturell, zwei Faktoren):** (1) `soulMult` ist **linear** in den Seelen, die
+  Ausdauer **exponentiell** in der Bühne — ein Mult ×X kauft nur `ln X / ln 1,6` Bühnen direkt;
+  (2) die Crew sättigt: Kosten wachsen ×1,07/Level unbegrenzt, DPS/Level ist zwischen
+  Meilensteinen linear und die Schwellen enden bei 800 (`heroes.ts:29`), der Tier-Katalog bei
+  der Twerk-Legende.
+- **Fix-Stack (jede Stufe einzeln gemessen, §4.8):** exponentieller Seelen-Term (§4.5.1) +
+  Crew-Erweiterung & endlose Meilensteine (§4.3.3) + Vergoldungen (§4.3.4) + Ahnen als
+  compoundende Prozent-Effekte (§4.6) + HPF-Seelen-Verstärker (§4.5.2). Erfolgskriterium
+  reformuliert als E1–E4 (§4.8).
+
+**N2 🟠 — Klick-Mathe lebt im Glue statt im puren Kern.**
+`CRIT_CHANCE/CRIT_MULT/COMBO_*` + `comboMult` sind Konstanten/Closures in `main.ts:37–48` —
+verletzt die Testbare-Kern-Regel (P6) und ist unbalancierbar ohne Logik-Datei anzufassen.
+Fix M7: Umzug in pures `game/click.ts` (Daten + Funktionen + Tests), Glue ruft nur noch auf.
+
+**N3 🟠 — Krit-Roll via `Math.random`.**
+Nicht deterministisch testbar, und sobald Loot existiert (M12) Save-Scumming-anfällig.
+Fix M7: seedbarer mulberry32-RNG (`util/rng.ts`), `{ seed, cursor }` im CH-Save (v2).
+
+**N4 🟡 — Doppelte Ökonomie im Repo.**
+Legacy-Module (economy/progression/boss/events/achievements + Legacy-Save-Layer) sind aus
+`main.ts` ausgehängt (Tree-Shaking entfernt sie aus dem Bundle), aber Repo + Tests tragen zwei
+Welten. Entscheidung M7: Legacy bleibt als eingefrorenes Archiv (Tests grün, keine Pflege) —
+plus einmaliger „Erbe"-Import (§9.2.3); Entfernung erst, wenn der Erbe-Import verschifft ist.
+
+**N5 🟡 — Feature-Regressionen gegenüber M6 dokumentieren.**
+Skin-/Kulissen-Wahl, Achievements, Pfirsich, Leaderboard sind bewusst raus — das muss in
+README/TESTPLAN sichtbar sein (sonst testet QA Geisterfeatures). → M7 Doku, Rückkehr M11–M13.
+
+**N6 🟡 — Combo-Hard-Reset im Glue.**
+`comboTimer ≤ 0 ⇒ combo = 0` (`main.ts:383–386`) — bestraft Shop-Griffe maximal.
+Fix M8: Soft-Decay (§4.2.2).
+
+### 3.3 Triage-Matrix (offene Punkte, Severity × Aufwand)
+
+| Punkt                                | Severity | Aufwand | Milestone |
+| ------------------------------------ | -------- | ------- | --------- |
+| N2 Klick-Mathe → pures Modul         | 🟠       | S       | M7        |
+| N3 seedbarer RNG                     | 🟠       | S       | M7        |
+| B5 Tab-Rückkehr-Grant                | 🟠       | S       | M7        |
+| B16/N5 Doku-Drift                    | 🟡       | S       | M7        |
+| B13b Safe-Area                       | 🟡       | XS      | M7        |
+| G3 Erbe-Import                       | 🟡       | S       | M7        |
+| B7 DOM-Churn/Popup-Pool              | 🟠       | M       | M8        |
+| N6/G4 Combo-Tiers + Decay            | 🟠       | M       | M8        |
+| G5 On-Beat + Ekstase                 | 🟠       | M       | M8        |
+| B13a Mobile-Sheet                    | 🟡       | M       | M8        |
+| **N1 Seelen-Plateau**                | 🔴       | M       | M9        |
+| G8/G9 Crew-Skalierung + Vergoldungen | 🔴       | M       | M9        |
+| G17 simulateEndless-CI               | 🟠       | M       | M9/M14    |
+| G11 Ahnen                            | 🟠       | M       | M10       |
+| G12 Aszension L2                     | 🟠       | M       | M10       |
+| B9/G13 Skins-als-Gear                | 🟠       | L       | M11       |
+| B10/G14 Truhen                       | 🟠       | L       | M12       |
+| G15/G16 Meta + Leaderboard v2        | 🟠       | M       | M13       |
+| B15 Float-Guard                      | 🟡       | S       | M9/M14    |
 
 ---
 
-## §4 Progression 2.0 — endlos, klick-zentriert („der Kern-Deliverable")
+## §4 Progression 2.0 — endlos, klick-zentriert (Kern-Deliverable)
 
-Explizit benannte Vorbilder und was wir von ihnen adaptieren:
+Explizit benannte Vorbilder und ihr Status nach dem Pivot:
 
-| Vorbild | Entliehene Mechanik | Unsere Adaption |
-| ------- | ------------------- | ---------------- |
-| **Clicker Heroes** | Zonen-Leiter mit exponentiellem Gegner-HP, Boss-Timer, Ascension → Hero Souls (+10 % DPS je Seele, Ertrag superlinear zur Zone), Ancients-Skilltree, Transcendence als 2. Schicht | Welttournee (§4.4), Booty-Seelen (§4.5.1), Twerk-Ahnen (§4.6), Transzendenz (§4.5.3) |
-| **AdVenture Capitalist** | Meilenstein-Multiplikatoren bei Besitz-Schwellen (×2 bei 25/50/100 …), Manager = Automation, Angel-Investor-Prestige | Generator-Meilensteine (§4.3.2), Twerk-Coaches (§4.3.4), Seelen-Formel-Anleihe |
-| **Cookie Clicker** | Klick-Synergie mit Gebäuden („Thousand Fingers"), Golden Cookies, Click Frenzy, Heavenly Chips + Ascension-Baum, Sugar Lumps als Slow-Currency | Muskel-Gedächtnis (§4.2.5), Goldener Pfirsich bleibt + Varianten (§6.2), Twerk-Ekstase (§4.2.4), Himmelspfirsiche + Himmelsbaum (§4.5.2), Zuckerpfirsiche fürs Skin-Leveln (§5.4) |
-| **Antimatter Dimensions / NGU Idle / Trimps / Realm Grinder** | Gestapelte Reset-Schichten, bei denen jede Schicht die Zeitkonstante der darunterliegenden drückt; „Herausforderungen" als Wiederspielwert | 3-Schichten-Prestige (§4.5), Challenge-Quests (§7.2), Pacing-Ziel „jede Schicht halbiert die Loop-Dauer der unteren" (§4.8) |
+| Vorbild                                                  | Entliehene Mechanik                                                                                                                           | Status                                                                                                                                                 |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Clicker Heroes**                                       | Zonen-Leiter (HP ~×1,6), Boss-Timer, Helden mit 1,07-Kosten + Meilenstein-×2, Ascension → Souls (+10 %/Stück), Gilds, Ancients, Transcendence | Leiter, Crew, Meilensteine, Souls: **implementiert** (`combat.ts`/`heroes.ts`/`ascension.ts`). Gilds → §4.3.4, Ancients → §4.6, Transcendence → §4.5.3 |
+| **AdVenture Capitalist**                                 | Besitz-Meilenstein-Multiplikatoren, Manager-Automation                                                                                        | Meilensteine: **implementiert** ([10…800]); „Manager" als Twerk-Coaches → §4.3.5                                                                       |
+| **Cookie Clicker**                                       | Klick-Gebäude-Synergie, Golden Cookies, Click Frenzy, Heavenly Chips, Sugar Lumps                                                             | Synergie: **implementiert** (`clickDamage ∝ 0,2·DPS`); Pfirsich-Events → M12; Ekstase → §4.2.4; Himmelspfirsiche → §4.5.2; Zuckerpfirsiche → §5.4      |
+| **Antimatter Dimensions / NGU / Trimps / Realm Grinder** | Gestapelte Reset-Schichten, die die Zeitkonstante der unteren drücken; Challenges                                                             | Schichten 2/3 → §4.5; Challenge-Quests → §7.2; Endlos-Kriterien E1–E4 → §4.8                                                                           |
+
+### 4.0 Implementierte Basis (verbindliche Formeln + Anschauungszahlen)
+
+```
+Ausdauer:   HP(z)      = 10 · 1.6^(z−1)          Boss: ×10, Timer 30 s, jede 5. Bühne
+Gold:       gold(z)    = ceil(HP(z) / 15)         Boss: ×12   (Verhältnis Gold/HP konstant!)
+Crew:       cost(lv)   = floor(base · 1.07^lv)    DPS(lv) = base · lv · 2^(#Meilensteine ≤ lv)
+Klick:      clickRaw   = 1 + 0.2 · ΣDPS_raw
+Seelen:     RS(z)      = ⌊z^1.6 / 40⌋  (z ≥ 10)   Mult = 1 + 0.1 · RS   (lifetime-gepinnt)
+Offline:    gold/s     = DPS/HP(z) · gold(z) · 0.5, Cap 8 h
+```
+
+| Bühne z | HP(z)   | gold(z) | Boss-HP (falls z%5=0) | RS(z) |
+| ------- | ------- | ------- | --------------------- | ----- |
+| 1       | 10      | 1       | —                     | 0     |
+| 5       | 65,5    | 5       | 655                   | 0     |
+| 10      | 687     | 46      | 6 872                 | 0     |
+| 11      | 1 100   | 74      | —                     | **1** |
+| 20      | 6,08 K  | 406     | 60,8 K                | 3     |
+| 25      | 63,8 K  | 4,25 K  | 638 K                 | 4     |
+| 30      | 669 K   | 44,6 K  | 6,69 M                | 5     |
+| 40      | 73,6 M  | 4,90 M  | 736 M                 | 9     |
+| 50      | 8,08 B  | 539 M   | 80,8 B                | 13    |
+| 60      | 888 B   | 59,2 B  | 8,88 T                | 17    |
+| 100     | 1,26e21 | 8,4e19  | 1,26e22               | 39    |
+
+Wichtige Eigenschaft (Abweichung von der ursprünglichen v2-Skizze, **übernommen wie
+implementiert**): Das Gold/HP-Verhältnis ist **konstant** (1/15) — die Wand entsteht nicht
+drop-seitig, sondern **kosten-seitig** (1,07^Level gegen lineare DPS/Level zwischen den
+Meilensteinen). Die ursprünglich skizzierte „Bounty-Schere" (1,033^z) ist damit hinfällig;
+§4.8 rechnet mit dem echten Modell.
 
 ### 4.1 Der aktive Klick-Layer als Star
 
-Eine einzige pure Funktion wird die **einzige** Quelle der Klick-Wahrheit (behebt B14):
+Die eine pure Quelle der Klick-Wahrheit (M7 zieht sie aus dem Glue in `game/click.ts`, N2):
 
 ```
 effectiveClick(ctx) =
-  perClick(ctx)                       // Basis + Upgrades + Synergie (§4.2.5)
-  × mult(ctx)                         // Upgrade-Mults × Prestige (§4.5)
-  × comboMult(ctx.comboTier)          // §4.2.2
-  × critRoll(ctx.rng, ctx.critChance, ctx.critMult)   // §4.2.1
-  × beatBonus(ctx.onBeat)             // §4.2.3
-  × frenzyMult(ctx.frenzyActive)      // §4.2.4
-  × eventMult(ctx.boostUntil, now)    // Pfirsich-Boost (bestehend)
+  clickDamageOf(state)                 // = (1 + 0.2·ΣDPS_raw) · soulMult   [implementiert]
+  × comboMult(ctx.combo)               // §4.2.2  [Basis implementiert im Glue]
+  × critRoll(rng, chance, mult)        // §4.2.1  [implementiert im Glue → Modul + Seed]
+  × beatBonus(ctx.onBeat)              // §4.2.3  [neu, M8]
+  × frenzyMult(now)                    // §4.2.4  [neu, M8]
+  × gearMult(ctx.gear)                 // §5      [neu, M11]
+  × eventMult(now)                     // §6/M12  [Pfirsich-Rückkehr]
 ```
 
-Modul `game/click.ts`, deterministisch über injizierten RNG (§9.4), vollständig unit-getestet.
-`doShake` in `main.ts` und der Tour-Schaden (§4.4) rufen **dieselbe** Funktion.
+Idle-DPS läuft immer parallel (`dpsOf`), aber ohne Krit/Combo/Beat/Ekstase — Klicken bleibt
+König (P1, belegt durch E4).
 
-#### 4.2 Teilsysteme des Klick-Layers
+### 4.2 Teilsysteme des Klick-Layers
 
-**4.2.1 Twerk-Krits.**
-- Basis: 2 % Chance, ×8 Schaden/BP. Skalierung über Ahnen (§4.6), Skins (§5) und Himmelsbaum.
-- Harte Caps: Chance ≤ 50 %, Mult unbegrenzt (Mult ist der Endless-Skalierer, Chance nicht).
-- Juice: eigener Sound-Layer (tieferer „Boom"), goldenes Popup in 1,6-facher Größe, Partikelring,
-  Haptik 35 ms (§8).
+**4.2.1 Twerk-Krits — implementierte Werte werden Baseline.**
 
-**4.2.2 Combo 2.0 (ersetzt das flache +5 %-System, B12).**
+- **Übernommen wie im WIP-Glue:** Chance **20 %**, Multiplikator **×5** (EV ×1,8). Begründung
+  gegen die ursprünglich skizzierten 2 %/×8 (EV ×1,28): (a) die gemessenen Pacing-Tabellen
+  (§4.8) basieren bereits darauf; (b) häufige Krits = häufige Juice-Momente (P4); (c) ein
+  seltener Riesen-Krit passt schlechter zu 3 cps Dauerfeuer.
+- Skalierung: Ahnen/Skins erhöhen primär den **Multiplikator** (unbegrenzt — der
+  Endless-Hebel); Chance hart gedeckelt bei **40 %** (Basis 20 + max. +20).
+- M7: Roll via seedbarem RNG, Konstanten als Daten in `game/click.ts`, Unit-Tests
+  (deterministische Sequenz, EV-Property-Test).
 
-| Tier | Stacks | Name | Klick-Bonus | Zusatz |
-| ---- | ------ | ---- | ----------- | ------ |
-| 0 | 0–9 | — | +2 %/Stack | — |
-| 1 | 10 | „Warm" | +25 % | Partikel-Stufe 1 |
-| 2 | 25 | „Heiß" | +60 % | Screen-Shake-Puls, Musik +Layer |
-| 3 | 50 | „Feuer" | +120 % | +2 % Krit-Chance |
-| 4 | 100 | „Inferno" | +250 % | +5 % Krit-Chance, Partikel-Stufe 3 |
-| 5 | 250 | „Transzendent" | +500 % | Beat-Fenster +40 ms, HUD-Aura |
+**4.2.2 Combo 2.0 (M8) — Basis bleibt, Tiers kommen obendrauf.**
 
-- **Sanfter Zerfall statt Hard-Reset:** Nach Ablauf des Fensters (Basis 1,2 s) verliert die Combo
-  20 % ihrer Stacks pro Sekunde (mindestens 1 Stack/s), statt auf 0 zu fallen. Ein kurzer
-  Griff zum Shop kostet also Momentum, nicht alles. Ahnen/Skins verlängern Fenster & senken Zerfall.
-- Pure Engine in `game/combo.ts`: `comboStep(state, dtS)`, `comboOnClick(state)`, `comboMult(stacks)`.
-  Bestehende Achievements (`combo10/50/100`) bleiben kompatibel (Stack-Zahl unverändert gezählt).
+- **Basis (implementiert):** +2 %/Stack, Cap 50 ⇒ max ×2, Fenster 1,5 s.
+- **Neu:** benannte Tiers mit Zusatz-Perks (nicht mehr roher Mult — der bleibt bei ×2-Cap,
+  damit die gemessene Balance steht):
 
-**4.2.3 On-Beat-Bonus (nutzt das vorhandene Beat-System).**
-- Der existierende `BeatTracker` (`audio/beat.ts`) liefert Beat-Onsets. Ein Klick innerhalb
-  ±100 ms um einen Onset gilt als „Im Takt!": ×1,5 auf diesen Klick, +1 Extra-Combo-Stack,
-  goldener Blitz am HUD-Move-Badge.
-- Da das Tempo mit `drive` steigt (schnelleres Klicken → schnellerer Beat → mehr Beat-Fenster),
-  entsteht ein natürlicher Flow-Loop. Pure Prüfung `isOnBeat(phase, clickT)` in `game/click.ts`.
+| Tier | Stacks | Name      | Zusatz-Perk                          | Juice                           |
+| ---- | ------ | --------- | ------------------------------------ | ------------------------------- |
+| 1    | 10     | „Warm"    | —                                    | Partikel-Stufe 1                |
+| 2    | 25     | „Heiß"    | +3 % Krit-Chance                     | Shake-Puls, Musik-Layer 1       |
+| 3    | 50     | „Feuer"   | +6 % Krit-Chance                     | Partikel-Stufe 2, Musik-Layer 2 |
+| 4    | 100*   | „Inferno" | +25 % Krit-Mult, Beat-Fenster +40 ms | Aura, Musik-Layer 3             |
 
-**4.2.4 Aktive Fähigkeit „Twerk-Ekstase" (à la Cookie Clickers Click Frenzy).**
-- Lade-Meter 0–100: +1 pro Klick, +2 pro On-Beat-Klick. Voll → Button/Taste `F` aktivierbar.
-- Effekt: **12 s lang ×10 Klick-BP und ×10 Klick-Schaden**, Musik schaltet einen Ekstase-Layer
-  dazu, Kamera-FOV-Punch, Dauer-Partikel. Danach Meter leer.
-- Später (Himmelsbaum, §4.5.2) freischaltbar: „Beat-Drop" (sofort 30 × effectiveClick als
-  Flächenschaden auf den aktuellen Gegner, Cooldown 120 s) und „Pfirsichregen" (5 Mini-Pfirsiche
-  regnen 6 s lang, je +60 s ×2-Boost-Verlängerung bei Fang).
-- Persistiert: Meter-Stand, aktive Fenster als Epoch-ms (Schema v5, §9.2). Pure Logik in
-  `game/ability.ts` (`chargeOnClick`, `activate`, `abilityMult(now)`).
+*Stacks > 50 erhöhen den Mult nicht mehr, zählen aber für Tiers/Quests weiter; Cap-Anhebung
+ist ein Ahnen-/Gear-Effekt.
 
-**4.2.5 Klick-Synergie mit Generatoren (Cookie-Clicker-„Thousand Fingers"-Analog).**
-- Neues Upgrade **„Muskel-Gedächtnis"** (`type: 'syn'`): pro Level fließen **+1 % von `perSec`
-  in `perClick`** ein: `perClickEff = perClick + 0.01 · synLv · perSec`.
-- Damit bleibt Klicken auch dann die Nr. 1, wenn die Idle-Ökonomie explodiert — Idle-Ausbau
-  füttert direkt den Klick (Pfeiler P1). `deriveStats` wird um den `syn`-Typ erweitert
-  (rein additiv im Fold, weiter pure).
+- **Soft-Decay statt Hard-Reset (N6):** nach Fensterablauf −20 % der Stacks pro Sekunde
+  (mind. 1/s) statt `combo = 0`. Ein Shop-Griff kostet Momentum, nicht alles.
+- Pure Engine `game/combo.ts`: `comboOnClick`, `comboStep(dt)`, `comboMult`, `comboTier` —
+  Glue ruft nur noch auf.
 
-**4.2.6 Klick-Invariante & Idle-Rolle.**
-- Idle (perSec) läuft immer weiter (auch während der Tour, §4.4) — aber ohne Krit, Combo, Beat,
-  Ekstase. Die Klick-Invariante aus §1.2 wird in der Balancing-Sim asserted (§9.5).
+**4.2.3 On-Beat-Bonus (M8) — nutzt das vorhandene Beat-System.**
+Der `BeatTracker` (`audio/beat.ts`) liefert Onsets; ein Klick innerhalb ±100 ms gilt als
+„Im Takt!": **×1,5** auf diesen Klick, +1 Extra-Stack, goldener Blitz. Da das Tempo mit
+`drive` steigt (schneller klicken → schnellerer Beat), entsteht ein Flow-Loop. Pure Prüfung
+`isOnBeat(phase, clickT)` in `game/click.ts`.
 
-### 4.3 Generatoren & Meilenstein-Multiplikatoren (AdVenture Capitalist)
+**4.2.4 Aktive Fähigkeit „Twerk-Ekstase" (M8, à la Click Frenzy).**
 
-**4.3.1 Umwidmung.** Die vorhandenen `sec`-Upgrades (Auto-Twerker, Twerk-Squad, Twerk-Arena,
-Pfirsich-Reaktor, Booty-Blackhole) heißen fortan **Generatoren** und bekommen zusätzlich je 3 neue
-für die Endless-Kurve (Daten, kein Code): „Twerk-Tempel" (base 25 M), „Booty-Bootcamp-Planet"
-(base 1 B), „Multiversum-Move-Fabrik" (base 100 B); Wachstum `gr` 1,17–1,25 wie gehabt.
+- Lade-Meter 0–100: +1 pro Klick, +2 pro On-Beat-Klick. Voll ⇒ Taste `F`/Button.
+- Effekt: **12 s lang ×10 Klick-Schaden**, Ekstase-Musik-Layer, FOV-Punch, Dauer-Partikel.
+- Später (Himmelsbaum, M10): „Beat-Drop" (Sofortschaden 30 × effectiveClick, Cooldown 120 s),
+  „Pfirsichregen" (5 Mini-Pfirsiche, je +60 s ×2-Boost bei Fang — M12-Synergie).
+- Persistenz: Meter, aktive Fenster als Epoch-ms (CH-Save v3, §9.2). Pure `game/ability.ts`.
 
-**4.3.2 Meilenstein-Multiplikatoren.** Pro Generator verdoppelt sich sein Output bei
-Level **25, 50, 100, 200, 400, 800, …** (jede Verdopplung der Schwelle → ×2):
+**4.2.5 Klick-Synergie — bereits implementiert.**
+`clickDamageRaw = 1 + 0.2 · ΣDPS_raw` ist die Cookie-Clicker-Synergie in Reinform: jede
+Crew-Investition buff't den Klick automatisch mit. Kein weiterer Mechanismus nötig; der
+`CLICK_DPS_SHARE`-Wert (0,2) ist der zentrale P1-Tuning-Knopf und wandert als benannte
+Konstante in die Balancing-Doku.
 
-```
-milestoneMult(lv) = 2 ^ (Anzahl Schwellen ≤ lv),  Schwellen = 25 · 2^k
-Beispiel: lv 130 → Schwellen 25, 50, 100 → ×8
-```
+### 4.3 Crew, Meilensteine & Vergoldungen
 
-Der Shop zeigt pro Generator einen Fortschrittsbalken zur nächsten Schwelle (das AdCap-Gefühl
-„nur noch 3 Level bis ×2!"). Pure Funktion + Test in `game/economy.ts`.
+**4.3.1 Implementierter Katalog (Daten, `heroes.ts`):**
 
-**4.3.3 Bulk-Buy (B17).** Kauf-Modi ×1 / ×10 / ×Max über die geschlossene Summenformel
+| Crew-Mitglied      | Kosten (Lv 0→1) | Basis-DPS/Lv |
+| ------------------ | --------------- | ------------ |
+| Booty-Boss (Du)    | 5               | 1            |
+| Hype-Girl          | 50              | 5            |
+| DJ Wumms           | 250             | 22           |
+| Türsteher          | 1 000           | 74           |
+| Insta-Influencerin | 4 000           | 245          |
+| Star-Choreograph   | 20 000          | 1 100        |
+| Musik-Produzent    | 100 000         | 5 000        |
+| A-Promi            | 500 000         | 22 000       |
+| Club-Tycoon        | 3 M             | 120 000      |
+| Twerk-Legende      | 20 M            | 700 000      |
 
-```
-cost(lv → lv+n) = base · gr^lv · (gr^n − 1) / (gr − 1)
-maxAffordable(bp) = floor( log_gr( bp·(gr−1)/(base·gr^lv) + 1 ) )
-```
+Kostenwachstum 1,07/Level; Meilenstein-×2 bei [10, 25, 50, 100, 200, 400, 800]; Bulk-Kauf
+×1/×10/×Max mit geschlossenen Formeln (alles implementiert + getestet).
 
-**4.3.4 Twerk-Coaches (Manager).** Über den Himmelsbaum (§4.5.2) freischaltbar: ein Coach
-klickt 1×/s mit 25 % des effektiven Klickwerts (ohne Krit/Beat), upgradebar auf bis zu 4 cps.
-Das ist die AdCap-„Manager"-Idee, umgemünzt: Automation imitiert *schwaches* aktives Spiel,
-statt es zu ersetzen — echtes Klicken bleibt ≥ 3× besser (Invariante §1.2). Coaches speisen auch
-den neuen Offline-Ertrag: `offlineBase = perSec + coachCps · 0.25 · perClickEff` (behebt B11,
-Klick-Builds verdienen offline endlich mit).
+**4.3.2 Crew-Fortschrittsbalken (M8-Politur):** pro Mitglied „noch n Level bis ×2" —
+das AdCap-Gefühl, reine UI über `MILESTONES`.
 
-### 4.4 Die Welttournee — endlose Zonen-Leiter (Clicker Heroes)
+**4.3.3 Crew-Erweiterung + endlose Meilensteine (M9, Anti-Plateau Stufe „Kosten-Seite").**
+Fünf neue Tiers (reine Daten, Muster ~×6–8 Kosten, ~×6–7 DPS pro Schritt fortgesetzt):
 
-Ersetzt das One-Shot-Boss-Finale (B3). Immer aktiv, kein separater Modus: Der aktuelle
-**Rivale** steht als zweites Rig gegenüber (Technik existiert: `spawnBossRig`, `main.ts:163–176`)
-— jeder Shake verdient BP **und** trifft ihn zugleich.
+| Neu                     | Kosten | Basis-DPS/Lv |
+| ----------------------- | ------ | ------------ |
+| Viral-Video-Team        | 150 M  | 4,5 M        |
+| Hologramm-Double        | 1,2 B  | 30 M         |
+| KI-Choreo-Cluster       | 10 B   | 220 M        |
+| Orbitale Tanz-Station   | 80 B   | 1,6 B        |
+| Kosmische Twerk-Entität | 650 B  | 12 B         |
 
-**4.4.1 Struktur.**
-- Zone `z` = Venue der Tour (Namen prozedural aus Listen: „Neon-Keller von Bottrop" →
-  „Orbital-Arena Kepler-7b"). Pro Zone 8 Rivalen, jede 5. Zone ein **Boss** mit 30-s-Timer.
-- Rivalen-HP und Kopfgeld:
+Zusätzlich werden die Meilensteine endlos: nach 800 jede weitere **Verdopplung** (1600, 3200,
+6400, …) ⇒ `DPS(lv)` wächst langfristig ~quadratisch statt linear — die Crew sättigt nie hart.
+(Beide Änderungen zusammen gemessen: verschieben die 45-min-Wand von Bühne 55 auf 80, §4.8.)
 
-```
-HP(z)      = 12 · 1.55^(z−1)          (Boss: × 8)
-bounty(z)  = HP(z) / 2 · 1/1.033^(z−1)   ⇔  bounty wächst mit ~1.5^z
-```
+**4.3.4 Vergoldungen (Gilds, M9).**
+Jeder **Erst-Clear einer 10er-Bühne** (10, 20, 30, …) gewährt 1 **Vergoldung**: permanent
+**×1,25 DPS** für ein zufälliges Crew-Mitglied (Umhängen später für 5 RS — CH-Gild-Move).
+Vergoldungen überleben die Aszension ⇒ auch ein Run **ohne** neue Seelen, der eine neue
+10er-Bühne erreicht, hinterlässt permanente Macht (P3; Anti-Plateau-Baustein). Persistenz:
+`gilds: Record<heroId, number>` (CH-Save v2).
 
-  Das Verhältnis HP/bounty wächst mit ~1,033^z — **das** ist die eigentliche Wand: sie wächst
-  langsam genug, dass ein Seelen-Multiplikator ×2,8 ≈ `ln(2.8)/ln(1.033)` ≈ **31 Zonen** weiter
-  trägt (Kernrechnung hinter dem Pacing in §4.8).
-- Schaden: Klick = `effectiveClick` (§4.1); Idle-DPS = `0.5 · perSec · mult` („die Crew tanzt mit",
-  halbe Kraft — Klicken bleibt König). Boss-Timer-Fail ⇒ Zone bleibt, Boss-HP resettet (kein
-  Easing mehr nötig — man farmt einfach tiefer und kommt stärker wieder).
-- Kills droppen: BP-Kopfgeld, Combo +2 Stacks, Chance auf Schlüssel/Truhen (§6.1).
-- **Zonen-Rücklauf:** Freiwillig zurückschalten (Farm-Modus) ist erlaubt (CH-Standard).
-- **Kompatibilität:** Der Goldene Twerk-Tyrann ist der Boss von **Zone 10** (HP(10)·8 ≈ 8,1 k —
-  bewusst früh und fett inszeniert); sein Erst-Kill schaltet wie bisher den Tyrann-Skin frei und
-  setzt `bossDefeated` (Achievement `slayer` bleibt gültig).
+**4.3.5 Twerk-Coaches (Manager, M10 via Himmelsbaum).**
+Ein Coach klickt 1×/s mit 25 % des effektiven Klickwerts (ohne Krit/Beat), upgradebar auf
+4 cps. Automation imitiert _schwaches_ aktives Spiel statt es zu ersetzen (E4 bleibt).
+Coaches zählen in `offlineGold` hinein (`dps + coachCps · 0.25 · clickDamage`) — damit
+verdienen auch klick-lastige Builds offline (Rest von B11).
 
-**4.4.2 Persistenz & Purity.** `game/tour.ts`: `createTour()`, `tourHit(dmg)`, `tourTick(dt)`,
-`hpFor(z, isBoss)`, `bountyFor(z)` — pure, kein DOM (Muster von `boss.ts` übernehmen und
-verallgemeinern). Save v5: `{ zone, kills, highestZone }`.
+### 4.4 Die Welttournee — Bühnen-Leiter (implementiert; v2-Aufsätze)
+
+**Implementierte Semantik (`combat.ts`, verbindlich):** 10 Rivalen pro Bühne; jede 5. Bühne
+Boss (×10 HP, 30 s); Boss-Timeout ⇒ Rivalen respawnen, Bühne bleibt (nie Soft-Lock); Kills
+droppen Gold sofort; `travelTo` klemmt auf 1..maxZone. Der Rivale steht als zweites Rig in
+der Szene (WIP-Glue), Kulisse rotiert alle 10 Bühnen.
+
+**v2-Aufsätze:**
+
+1. **Farm-/Travel-UI (M9, G10):** Bühnen-Stepper im HUD (`◀ Bühne 37 ▶`, Max-Knopf) über das
+   pure `travelTo` — tiefer farmen ist Strategie, keine Strafe.
+2. **Rivalen-Namen & Boss-Inszenierung (M8/M9):** prozedurale Namen aus Listen („Groupie",
+   „Rivalin Rita", …; Bosse: „Der Goldene Twerk-Tyrann" als **Boss von Bühne 10** —
+   Kontinuität zum M2-Charakter; sein Erst-Kill triggert das Erbe-Achievement und später
+   (M11) den Tyrann-Skin). Bühnen-Namen: „Neon-Keller Bottrop" → „Orbital-Arena Kepler-7b".
+3. **Kill-Hooks für spätere Systeme:** Combo +2 Stacks pro Kill (M8), Schlüssel-/Truhen-Drops
+   (M12), Quest-Zähler (M13) — alle hängen am puren `HitResult` (`killed/advancedZone/
+bossSpawned`), kein neuer Zustand im Glue.
 
 **Akzeptanzkriterien §4.4:**
-1. `hpFor`/`bountyFor` unit-getestet inkl. Wachstumsverhältnis (Property-Test: `HP(z)/bounty(z)`
-   wächst monoton).
-2. Zone-10-Boss-Erstkill schaltet Tyrann-Skin + `slayer` frei (Regressionstest).
-3. Sim (§9.5): Bei Klick-Invariante 3 cps erreicht Run 1 Zone ≥ 20 in ≤ 45 min.
-4. Ein Boss-Timer-Fail verliert nie Fortschritt (Zone/Kills unverändert, nur Boss-HP resettet).
+
+1. Formeln bleiben exakt `combat.ts` (Regressionstests bestehen unverändert).
+2. Travel-UI kann nie über `maxZone` hinaus (pure Clamp, Test).
+3. Boss-Bühne-10-Erstkill feuert das Tyrann-Ereignis (Hook-Test).
+4. Kill-Hooks sind pure Ableitungen aus `HitResult` (kein DOM-Zustand).
 
 ### 4.5 Drei gestapelte Prestige-Schichten
 
-| Schicht | Name | Währung | Gate (erstes Mal) | Resettet | Bleibt erhalten |
-| ------- | ---- | ------- | ----------------- | -------- | ---------------- |
-| L1 | **Rebirth** (Rework) | Booty-Seelen (BS) | Zone ≥ 15 | BP, Upgrades/Generatoren, Zone, Combo/Meter | Skins/Level, Kulissen, Achievements, BS, Ahnen, Schlüssel, Splitter, L2/L3 |
-| L2 | **Aszension** | Himmelspfirsiche (HPF) | 2 000 BS lifetime | alles aus L1 **plus** BS & Ahnen-Level | Skins/Splitter, Achievements, HPF, Himmelsbaum, L3 |
-| L3 | **Transzendenz** | Transzendente Essenz (TE) | 100 HPF lifetime | alles aus L2 **plus** HPF & Himmelsbaum | Mythos-Skins, TE, globaler TE-Exponent |
+| Schicht | Name                                  | Währung                   | Gate (erstes Mal)                         | Resettet                                    | Bleibt                                                                         |
+| ------- | ------------------------------------- | ------------------------- | ----------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------ |
+| L1      | **Aszension** (implementiert: „Ruhm") | Ruhm-Seelen (RS)          | Bühne ≥ 10 + ≥ 1 neue Seele (`canAscend`) | Gold, Crew, Bühne/Kills (`ascendState`)     | RS, `lifetimeMaxZone`, `totalClicks`, Vergoldungen*, Ahnen*, Gear*, Schlüssel* |
+| L2      | **Ruhmes-Himmelfahrt**                | Himmelspfirsiche (HPF)    | 1 000 RS lifetime                         | alles aus L1 **plus** RS-Bank & Ahnen-Level | HPF, Himmelsbaum, Gear, Schlüssel/Splitter, Achievements                       |
+| L3      | **Transzendenz** (Gerüst)             | Transzendente Essenz (TE) | 100 HPF lifetime                          | alles aus L2 **plus** HPF & Himmelsbaum     | TE, Mythos-Skins, TE-Globalfaktor                                              |
 
-**4.5.1 Rebirth 2.0 — Booty-Seelen (behebt B2).**
-- Ertrag beim Reset (superlinear zur Zone, Clicker-Heroes-Prinzip):
+\* sobald das jeweilige System existiert (M9–M12); der Reset-Scope je Schicht wird pro
+Milestone per Snapshot-Test festgeschrieben.
+
+**4.5.1 Schicht 1 — Ruhm-Seelen: implementiert + Retune (M9, gegen N1).**
+
+- **Implementiert:** `RS(z) = ⌊z^1.6/40⌋`, +10 %/Seele, lifetime-gepinnt (kein Farm-Exploit),
+  Bank schrumpft nie (`applyAscension`-Guard — genau dieser Guard macht den Retune
+  migrationssicher).
+- **Gemessenes Problem (N1):** Kurve zu flach ⇒ Bank-Plateau 13 RS / Bühne ~50.
+- **Retune (additiv, kein Nerf):** neuer Term **„Legendäre Auftritte"**:
 
 ```
-BS_gain(maxZone) = floor( (maxZone / 5) ^ 1.8 )
+RS_v2(z) = ⌊z^1.6 / 40⌋ + ⌊1.10^z − 1⌋        (z ≥ 10)
 ```
 
-  Beispiele: z 15 → 7 · z 25 → 18 · z 50 → 63 · z 100 → 219 · z 150 → 456 · z 300 → 1 588.
-- Wirkung: `soulMult = 1 + 0.10 · BS_gehalten` (jede Seele +10 % auf **alle** BP-Quellen,
-  CH-Formel). Seelen sind zugleich **Skillpunkte** für Ahnen (§4.6) — ausgegebene Seelen
-  buffen nicht mehr (klassischer CH-Tradeoff: Mult vs. Perk).
-- Migration Bestandsspieler: `BS_start = 7 · rebirths_alt` (entspricht je einem Zone-15-Run —
-  großzügig, niemand fühlt sich enteignet; dokumentieren in DECISIONS.md).
-- UI: Der Rebirth-Dialog zeigt **vorab** „Rebirth jetzt: +X Seelen (+Y % Einkommen)" — der
-  wichtigste einzelne UX-Fix am Prestige (heute steht dort nur Fließtext).
+| z      | 10  | 15  | 20  | 25  | 30  | 40  | 50  | 60  | 75    | 100    |
+| ------ | --- | --- | --- | --- | --- | --- | --- | --- | ----- | ------ |
+| RS alt | 0   | 1   | 3   | 4   | 5   | 9   | 13  | 17  | 25    | 39     |
+| RS_v2  | 1   | 4   | 8   | 13  | 21  | 53  | 129 | 320 | 1 295 | 13 818 |
 
-**4.5.2 Aszension — Himmelspfirsiche (Cookie-Clicker-Heavenly-Chips-Analog).**
-- Ertrag: `HPF_gain = floor( (BS_lifetime / 100) ^ 0.6 )`, z. B. 2 000 BS → 6 HPF,
-  20 000 → 24, 1 M → 251.
-- Passiv: +2 % globales Einkommen pro HPF (additiv zum Seelen-Mult, multiplikativ gestapelt:
-  `total = soulMult · (1 + 0.02·HPF) · …`).
-- **Himmelsbaum** (ausgegebene HPF, permanent über alle Rebirths):
+Der exponentielle Term sorgt dafür, dass jede neue Bestzone die Bank **vervielfacht** statt
+inkrementiert (gemessene Kette: 53 → 129 → 203 allein durch den Term; mit Crew-Ausbau
+53 → 810 → 2 070, §4.8). Bestands-Banken bleiben dank Guard unangetastet.
 
-| Knoten | Kosten (HPF) | Effekt |
-| ------ | ------------ | ------ |
-| Twerk-Coach I–IV | 5 / 15 / 40 / 100 | Auto-Klicker 1→4 cps (§4.3.4) |
-| Frühstarter | 8 | Start nach Rebirth mit Generator-Leveln = 10 % der vorherigen |
-| Nachtschicht | 10 / 25 | Offline-Cap 8 h → 16 h → 24 h |
-| Beat-Drop | 20 | Fähigkeit freischalten (§4.2.4) |
-| Pfirsichregen | 30 | Fähigkeit freischalten (§4.2.4) |
-| Ekstase-Ausdauer I–III | 12 / 30 / 75 | Ekstase-Dauer +3 s je Stufe |
-| Truhen-Magnet | 15 | +25 % Schlüssel-Dropchance |
-| Zonen-Sprinter | 25 | Nach Rebirth: Zonen < ⌊highestZone/3⌋ brauchen nur 3 Kills |
+- UI (implementiert im WIP-Prestige-Tab, beibehalten): Vorschau „Aszendieren jetzt: +X Seelen
+  (+Y %)" vor dem Reset.
 
-**4.5.3 Transzendenz (Skizze, bewusst später — M15+).**
-- `TE_gain = floor( log10(HPF_lifetime) )`; Wirkung: globaler Multiplikator `×3^TE` **und**
-  Zugang zu Mythos-Skins (§5.3) + 5. Kulisse „Astral-Klub". Details werden nach Live-Daten der
-  ersten Schichten getuned (Open Question §11).
+**4.5.2 Schicht 2 — Ruhmes-Himmelfahrt: Himmelspfirsiche (M10).**
+
+- Ertrag: `HPF = ⌊√(RS_lifetime / 1000)⌋` — erste Himmelfahrt ab 1 000 RS lifetime
+  (≈ Bühne 70–80 mit RS_v2, mehrere Stunden), 100 k RS → 10 HPF, 1 M RS → 31 HPF.
+- **Doppelwirkung** (der compoundende Anti-Plateau-Kern):
+  1. +2 % globaler Schaden pro gehaltenem HPF;
+  2. **Seelen-Verstärker:** `SOUL_BONUS_eff = 0.10 + 0.002 · HPF` — jede Seele wird selbst
+     stärker. Damit multiplizieren sich L1 und L2, statt sich zu addieren.
+- **Himmelsbaum** (ausgegebene HPF, permanent über alle Aszensionen):
+
+| Knoten                 | Kosten (HPF) | Effekt                                                 |
+| ---------------------- | ------------ | ------------------------------------------------------ |
+| Twerk-Coach I–IV       | 5/15/40/100  | Auto-Klicker 1→4 cps (§4.3.5)                          |
+| Frühstarter            | 8            | Start nach Aszension: Crew-Level = 10 % der vorherigen |
+| Nachtschicht I–II      | 10/25        | Offline-Cap 8 h → 16 h → 24 h                          |
+| Beat-Drop              | 20           | Fähigkeit (§4.2.4)                                     |
+| Pfirsichregen          | 30           | Fähigkeit (§4.2.4)                                     |
+| Ekstase-Ausdauer I–III | 12/30/75     | Ekstase +3 s je Stufe                                  |
+| Truhen-Magnet          | 15           | +25 % Schlüssel-Drops (M12)                            |
+| Bühnen-Sprinter        | 25           | Bühnen < ⌊Bestzone/3⌋ brauchen nur 3 Kills             |
+
+**4.5.3 Schicht 3 — Transzendenz (Gerüst, M14, Feature-Flag).**
+`TE = ⌊log10(HPF_lifetime)⌋`; Wirkung ×3^TE global + Mythos-Content (Skin „Diamant-Booty", 5. Kulisse „Astral-Klub"). Volle Ausgestaltung erst nach Live-Daten aus L1/L2 (§11).
 
 **Akzeptanzkriterien §4.5:**
-1. `soulsFor(maxZone)`, `hpfFor(bsLifetime)` pure + unit-getestet (inkl. Superlinearität:
-   `BS(2z) > 2·BS(z)` für z ≥ 10).
-2. Reset-Scopes exakt wie Tabelle (Tests: je Schicht ein „was bleibt/was fällt"-Snapshot-Test).
-3. Migration v4→v5 wandelt `rebirths` in Start-BS um; `prestigeMult` wird nie mehr gelesen
-   (Feld bleibt im Save für Abwärtskompatibilität des Imports, wird beim Serialisieren als
-   Legacy mitgeschrieben oder entfernt — Entscheidung in DECISIONS.md festhalten).
-4. Rebirth-Dialog zeigt BS-Vorschau; Aszensions-Dialog zeigt HPF-Vorschau.
 
-### 4.6 Twerk-Ahnen (Clicker-Heroes-Ancients, Skilltree für Seelen)
+1. `RS_v2` pure + getestet, inkl. Property „jede neue Bestzone +5 ⇒ Bank wächst ≥ ×1,3
+   (für z ≥ 40)"; Bestands-Banken schrumpfen nie (Guard-Test bleibt grün).
+2. Reset-Scopes je Schicht als Snapshot-Tests (Tabelle oben exakt).
+3. HPF-Verstärker: `soulMult`-Berechnung mit HPF > 0 getestet (kompoundierend, nicht additiv).
+4. Aszensions-/Himmelfahrts-Dialoge zeigen Vorschau (+RS bzw. +HPF) vor dem Reset.
 
-Kosten pro Level: `cost(lv) = lv + 1` Seelen (Summe: `n(n+1)/2` — früh billig, später echter Sink).
-Datengetriebenes Config-Array `game/ancients.ts`, Effekte fließen als reine Modifikatoren in
-`effectiveClick`/`deriveStats`:
+### 4.6 Twerk-Ahnen (Ancients — der Seelen-Sink, M10)
 
-| Ahn:in | Flavor | Effekt/Level | Cap |
-| ------ | ------ | ------------ | --- |
-| **Twerkules** | Held der 1000 Reps | +5 % Klick-BP | — |
-| **Poposeidon** | Herr der Wellen | +15 % Idle-BP | — |
-| **Cheeksana** | Auge des Sturms | +0,5 % Krit-Chance | 25 |
-| **Glutaeus Maximus** | Gladiator | +10 % Schaden gegen Bosse | — |
-| **Peachiel** | Erzengel des Goldes | +10 % Zonen-Kopfgeld | — |
-| **Wackelias** | Der Unerschütterliche | +0,05 s Combo-Fenster | 10 |
-| **Beatrix** | Taktgeberin | +10 ms On-Beat-Fenster | 8 |
-| **Truhilda** | Schatzmeisterin | +2 % Truhen-Luck (§6.4) | 15 |
-| **Ekstasius** | Der Entfesselte | −5 % Ekstase-Ladebedarf | 10 |
+Kosten: `cost(lv) = lv + 1` RS (Summe n(n+1)/2). **Ausgegebene Seelen buffen nicht mehr über
+`soulMult`** — der klassische CH-Tradeoff (Roh-Mult vs. Spezial-Perk). Daten-Array
+`game/ancients.ts`; Effekte fließen als pure Modifikatoren in `effectiveClick`/`dpsOf`:
 
-(Caps nur dort, wo Unbegrenztheit degenerieren würde — Chance/Fenster; Prozent-Output-Ahnen sind
-bewusst endlos als Seelen-Sink.)
+| Ahn:in               | Flavor                | Effekt/Level            | Cap               |
+| -------------------- | --------------------- | ----------------------- | ----------------- |
+| **Twerkules**        | Held der 1000 Reps    | +5 % Klick-Schaden      | —                 |
+| **Poposeidon**       | Herr der Wellen       | +15 % Crew-DPS          | —                 |
+| **Cheeksana**        | Auge des Sturms       | +0,5 % Krit-Chance      | 40 (= Chance-Cap) |
+| **Glutaeus Maximus** | Gladiator             | +10 % Boss-Schaden      | —                 |
+| **Chronilla**        | Hüterin der Zeit      | +1 s Boss-Timer         | 15                |
+| **Peachiel**         | Erzengel des Goldes   | +10 % Gold              | —                 |
+| **Wackelias**        | Der Unerschütterliche | +0,05 s Combo-Fenster   | 10                |
+| **Beatrix**          | Taktgeberin           | +10 ms On-Beat-Fenster  | 8                 |
+| **Truhilda**         | Schatzmeisterin       | +2 % Truhen-Luck        | 15                |
+| **Ekstasius**        | Der Entfesselte       | −5 % Ekstase-Ladebedarf | 10                |
 
-**Akzeptanzkriterien §4.6:** 1. Ahnen-Konfig ist Daten (Balancing ohne Logikänderung).
-2. `ancientBonus(id, lv)` pure + getestet; Caps enforced im purem Kauf-Guard.
-3. Ausgegebene Seelen reduzieren `soulMult` korrekt (Test: kaufen → Mult sinkt, Effekt steigt).
+Caps nur, wo Unbegrenztheit degeneriert (Chance/Fenster/Timer); Prozent-Output-Ahnen sind der
+endlose Seelen-Sink. Die %-Effekte compounden über Runs — zusammen mit Vergoldungen der Grund,
+warum auch ein „+0-Seelen-Run" nie wertlos ist (Anti-Plateau, N1).
+
+**Akzeptanzkriterien §4.6:** 1. Konfig ist Daten (Balancing ohne Logikänderung). 2. `ancientBonus(id, lv)` pure + getestet; Caps im puren Kauf-Guard. 3. Kauf senkt `soulMult` korrekt und erhöht den Perk (Bilanz-Test).
 
 ### 4.7 Währungs-Karte
 
-| Kürzel | Name | Verdienen | Ausgeben | Reset-Scope |
-| ------ | ---- | --------- | -------- | ----------- |
-| BP | Booty Points | Klicks, Idle, Kopfgeld, Truhen, Offline | Upgrades, Generatoren, Skin-Erstkauf | L1 |
-| BS | Booty-Seelen | Rebirth (`(z/5)^1.8`) | Ahnen; gehaltene = +10 %/Stk | L2 |
-| HPF | Himmelspfirsiche | Aszension (`(BS/100)^0.6`) | Himmelsbaum; gehaltene = +2 %/Stk | L3 |
-| TE | Transzendente Essenz | Transzendenz (`log10 HPF`) | ×3^TE global, Mythos-Content | nie |
-| 🔑 | Truhenschlüssel | Bosse, Quests, Daily, Combo-Meilensteine, Pfirsich-Chance | Truhen öffnen (§6) | nie |
-| 🧩 | Pfirsich-Splitter | Truhen, Duplikate, Quests | Skins leveln (§5.4) | nie |
-| 🍬 | Zuckerpfirsich | 1×/24 h Echtzeit (reift wie Sugar Lumps) | Skin-Sterne (§5.4), Ekstase-Slot | nie |
+| Kürzel | Name                  | Verdienen                                | Ausgeben                                       | Reset-Scope |
+| ------ | --------------------- | ---------------------------------------- | ---------------------------------------------- | ----------- |
+| BP     | Booty Points (= Gold) | Kills, Boss ×12, Offline, Truhen         | Crew-Level                                     | L1          |
+| RS     | Ruhm-Seelen           | Aszension (`RS_v2(maxZone)`)             | Ahnen; gehaltene = +10 %·(1+0,002·HPF) je      | L2          |
+| 🏅     | Vergoldungen          | Erst-Clear jeder 10er-Bühne              | ×1,25 auf ein Crew-Mitglied; Umhängen 5 RS     | nie         |
+| HPF    | Himmelspfirsiche      | Himmelfahrt (`⌊√(RS_life/1000)⌋`)        | Himmelsbaum; gehaltene = +2 %/Stk + Verstärker | L3          |
+| TE     | Transzendente Essenz  | Transzendenz (`⌊log10 HPF_life⌋`)        | ×3^TE, Mythos-Content                          | nie         |
+| 🔑     | Truhenschlüssel       | Bosse, Quests, Daily, Combo-Meilensteine | Truhen öffnen (§6)                             | nie         |
+| 🧩     | Pfirsich-Splitter     | Truhen, Duplikate, Quests                | Skins leveln (§5.4)                            | nie         |
+| 🍬     | Zuckerpfirsich        | 1×/24 h Echtzeit                         | Skin-Sterne (§5.4)                             | nie         |
 
-### 4.8 Pacing-Kurve & Zahlenbeispiele (Tuning-Ziele für die Sim)
+### 4.8 Gemessene Pacing-Daten, Plateau-Analyse & Endlos-Kriterien
 
-Herleitung der Loop-Beschleunigung: Der Seelen-Mult verschiebt die Wand um
-`Δz ≈ ln(soulMult)/ln(1.033)` Zonen (§4.4.1). Damit:
+Alle Zahlen stammen aus einer deterministischen Sim **über die implementierten Formeln**
+(Vorläufer von `simulateEndless`, §9.5). Annahmen: 3 Klicks/s, Combo dauerhaft ×2,
+Krit-EV ×1,8 (= 20 %/×5), ROI-greedy Crew-Käufe, 1-s-Schritte.
 
-| Loop | Zustand vorher | Ziel-Dauer | Ergebnis (BS kumuliert → Mult) |
-| ---- | -------------- | ---------- | ------------------------------ |
-| Run 1 (frisch) | — | 35–45 min bis Zone ~20–25 | +18 BS → ×2,8 |
-| Run 2 | ×2,8 | ~20 min bis Zone ~50 | +63 → 81 BS → ×9,1 |
-| Run 3 | ×9,1 | ~15 min bis Zone ~85 | +166 → 247 BS → ×25,7 |
-| Run 4–8 | wachsend | je 10–20 min, +25–35 Zonen | … |
-| Erste Aszension | ~2 000 BS lifetime | nach ~6–10 h Gesamtspielzeit | 6 HPF + Himmelsbaum-Start |
-| Aszensions-Loop | — | erste ~2–3 h, fallend auf ~1 h | HPF wachsen superlinear |
-| Erste Transzendenz | 100 HPF | Größenordnung 3–7 Tage | Design-Review vorher (§11) |
+**Messung 1 — Run 1 (0 Seelen), Zeit bis Bühne:**
 
-Ziel-Invarianten (asserted in `simulateEndless`, §9.5):
-1. **Nie fertig:** Nach jedem Reset existiert eine erreichbare nächste Wand (Sim findet für
-   jede getestete Seelen-Zahl eine Zone, an der DPS/HP < 1/30 s wird).
-2. **Nie gestallt:** Zeit bis zur Wand ist endlich und ≤ 60 min für die ersten 20 Rebirths.
-3. **Beschleunigung:** `Dauer(Run n+1 bis alte Bestzone) < Dauer(Run n)` für n ≤ 10.
-4. **Klick-Invariante** (§1.2) hält an Messpunkten Zone 1/10/25/50/100.
+| Bühne                      | 5       | 10  | 15  | 20  | 25  | 30                    | 35   | 40   | 45   |
+| -------------------------- | ------- | --- | --- | --- | --- | --------------------- | ---- | ---- | ---- |
+| aktiv (3 cps + Juice)      | 0,6 min | 1,4 | 2,8 | 5,0 | 8,3 | 13,4                  | 22,8 | 36,2 | 56,6 |
+| casual (1 cps, ohne Juice) | 2,8 min | 4,9 | —   | —   | —   | Bühne@45 min = **30** | —    | —    | —    |
+
+Aktiv erreicht Bühne **40** in 45 min — 10 Bühnen (≈ ×110 Ausdauer) vor casual. **Das ist die
+Klick-Invariante in Zahlen** (E4).
+
+**Messung 2 — Aszensions-Kette mit implementierter Kurve (45-min-Runs):**
+
+| Run | Start-Mult | Bestzone | +RS    | Bank             |
+| --- | ---------- | -------- | ------ | ---------------- |
+| 1   | ×1,0       | 40       | +9     | 9                |
+| 2   | ×1,9       | 45       | +2     | 11               |
+| 3   | ×2,1       | 49       | +1     | 12               |
+| 4   | ×2,2       | 50       | +1     | 13               |
+| 5–6 | ×2,3       | 50       | **+0** | 13 — **Plateau** |
+
+**Messung 3 — Fix-Stack (jede Stufe isoliert gemessen):**
+
+| Konfiguration                         | Kette (Bank)     | Plateau         |
+| ------------------------------------- | ---------------- | --------------- |
+| implementiert                         | 9 → 11 → 12 → 13 | Bühne ~50, ×2,3 |
+| + RS_v2-Term                          | 53 → 129 → 203   | Bühne ~55, ×21  |
+| + 5 Crew-Tiers + endlose Meilensteine | 53 → 810 → 2 070 | Bühne ~80, ×208 |
+
+**Analyse (die ehrliche Lektion):** Bei **fester** Run-Länge plateaut jede lineare
+Mult-Ökonomie gegen exponentielle Ausdauer — das gilt auch für Clicker Heroes selbst. Dort
+tragen ab da (a) Ancients mit compoundenden %-Effekten, (b) Gilds, (c) längere Runs, die
+durch die Meta immer _schneller bis zur alten Bestzone_ werden. Genau diese drei Bausteine
+liefern §4.6 (Ahnen), §4.3.4 (Vergoldungen) und der HPF-Verstärker (§4.5.2). „Endlos" wird
+darum **so** definiert und getestet:
+
+**Endlos-Kriterien (CI-Asserts in `simulateEndless`, §9.5):**
+
+- **E1 (kein Hard-Cap):** Für jede erreichte Bestzone z existiert ein Spielzustand, der z+5
+  erreicht (DPS wächst mit Gold unbegrenzt; endlose Meilensteine garantieren das strukturell).
+- **E2 (weiche Wand):** Zeit bis `lifetimeMaxZone + 5` steigt pro Verbesserung um ≤ ×2
+  (erste 30 Verbesserungen, volles v2-System).
+- **E3 (Loop bleibt lebendig):** Zeit bis „+50 % Gesamtmacht" ≤ 90 min über die ersten
+  20 Aszensionen (Gesamtmacht = effektive DPS+Klick bei Bestzonen-Farm).
+- **E4 (Klick-Invariante):** aktiv (3 cps + Juice) ≥ 8 Bühnen vor casual (1 cps, ohne Juice)
+  im 45-min-Fenster. Gemessen heute: 10.
+
+**Pacing-Zieltabelle v2 (Toleranz ±25 %, per Sim kalibriert):**
+
+| Meilenstein der Spielerin                | Ziel                           |
+| ---------------------------------------- | ------------------------------ |
+| Bühne 10 (Tyrann-Boss)                   | ~1,5 min                       |
+| Erste sinnvolle Aszension (Bühne ~30–40) | 15–40 min                      |
+| Zweite Aszension                         | +15–25 min                     |
+| Bühne 80 (kumuliert)                     | 3–5 h                          |
+| Erste Himmelfahrt (1 000 RS lifetime)    | 5–9 h kumuliert                |
+| Transzendenz-Gate (100 HPF)              | Größenordnung Tage (Flag, §11) |
 
 ---
 
-## §5 Skins als Gear (Buffs statt Kosmetik — behebt B9)
+## §5 Skins als Gear (Buffs statt Kosmetik — M11)
 
 ### 5.1 Prinzip
 
-Skins werden Ausrüstung: **1 aktiver Skin** (voller Buff) + Kulisse (Mini-Buff) + Set-Boni.
-Kein Skin ist rein kosmetisch; der Twerk bleibt im Zentrum, weil die stärksten Buffs Klick-Buffs
-sind. Erwerb wie bisher (BP + `revealAt`) **oder** via Truhen-Jackpot; Fortschritt über Level
-(Splitter) und Sterne (Zuckerpfirsiche).
+Im MVP ist die Figur fix und die Kulisse rotiert automatisch — M11 bringt **Wahl + Wirkung**
+zurück: 1 aktiver Skin (voller Buff) + Kulissen-Mini-Buff + Set-Boni. Kein Skin ist rein
+kosmetisch; die stärksten Buffs sind Klick-Buffs (P1). Erwerb über Bühnen-Meilensteine
+(`lifetimeMaxZone` als Gate, analog zum alten `revealAt`-Muster), Boss-Erst-Kills oder Truhen
+(M12); Fortschritt über Level (Splitter) und Sterne (Zuckerpfirsiche).
 
 ### 5.2 Datenmodell
 
-`SkinConfig` wird erweitert (Daten, kein Code — Spec-§4.3-Disziplin):
+`SkinConfig` (`character/skins.ts`, `types.ts`) wird erweitert — Daten, kein Code:
 
 ```ts
 interface SkinConfig {
   …bestehende Felder…
   rarity: 'common' | 'rare' | 'epic' | 'legendary' | 'mythic';
   buff: { stat: BuffStat; perLevel: number };   // linear pro Level
-  star: { stat: BuffStat; perStar: number };    // Sterne 0–5, Zuckerpfirsiche
+  star: { stat: BuffStat; perStar: number };    // Sterne 0–5
 }
-type BuffStat = 'clickPct' | 'idlePct' | 'critChance' | 'critMult' | 'comboWindow'
-  | 'comboDecay' | 'chestLuck' | 'keyDrop' | 'bossDmg' | 'beatWindow' | 'offlineRate'
-  | 'frenzyDur' | 'bounty';
+type BuffStat = 'clickPct' | 'dpsPct' | 'critChance' | 'critMult' | 'comboWindow'
+  | 'comboDecay' | 'goldPct' | 'bossDmg' | 'bossTimer' | 'beatWindow'
+  | 'chestLuck' | 'keyDrop' | 'offlineCap' | 'frenzyDur';
 ```
 
-`game/gear.ts` faltet aktive Skin-+Kulissen-+Set-Boni zu einem puren `GearBonus`-Objekt, das in
-`effectiveClick`/`deriveStats` einfließt.
+`game/gear.ts` faltet Skin + Kulisse + Sets zu einem puren `GearBonus`, konsumiert von
+`effectiveClick`/`dpsOf`.
 
-### 5.3 Starter-Katalog (bestehende 5 + 5 neue, alle prozedural baubar)
+### 5.3 Katalog (5 bestehende + 5 neue, alle prozedural baubar)
 
-| Skin | Rarität | Buff pro Level | Stern-Bonus | Beschaffung |
-| ---- | ------- | -------------- | ----------- | ----------- |
-| 🕺 Klassiker | Common | +4 % Klick-BP | +10 % Klick-BP/⭐ | Start |
-| 🪩 Disco-King | Rare | +0,4 % Krit-Chance (Cap-Anteil §4.2.1) | +5 % Krit-Mult/⭐ | Start |
-| 🤖 Robo-Twerk 3000 | Rare | +8 % Idle-BP | Coach +0,2 cps/⭐ | 250 BP / reveal 300 |
-| 🎤 Der Showmaster | Epic | +0,06 s Combo-Fenster | −4 % Combo-Zerfall/⭐ | 1 500 BP / reveal 4 000 |
-| 👑 Goldener Twerk-Tyrann | Legendary | +12 % Boss-Schaden | +2 % Truhen-Luck/⭐ | Zone-10-Boss |
-| 🥷 Neon-Ninja | Epic | +8 ms Beat-Fenster | On-Beat ×1,5 → ×1,6/⭐ | Truhen (Splitter-Craft 120) |
-| 🏴‍☠️ Pfirsich-Pirat | Rare | +6 % Schlüssel-Drop | +5 % Kopfgeld/⭐ | Truhen (Splitter-Craft 80) |
-| 🌋 Lava-Twerker | Epic | +6 % Krit-Mult | Ekstase +1 s/⭐ | Zone-50-Boss-Erstkill |
-| 🛸 Galaktischer Gyrator | Legendary | +10 % Ekstase-Dauer | −8 % Ekstase-Ladebedarf/⭐ | Aszension #1 |
-| 💎 Diamant-Booty | Mythic | +2 % ALLES (global) | +3 % ALLES/⭐ | Transzendenz |
+| Skin                     | Rarität   | Buff/Level            | Stern-Bonus          | Beschaffung               |
+| ------------------------ | --------- | --------------------- | -------------------- | ------------------------- |
+| 🕺 Klassiker             | Common    | +4 % Klick            | +10 % Klick/⭐       | Start                     |
+| 🪩 Disco-King            | Rare      | +0,4 % Krit-Chance    | +5 % Krit-Mult/⭐    | Start                     |
+| 🤖 Robo-Twerk 3000       | Rare      | +8 % Crew-DPS         | Coach +0,2 cps/⭐    | Bühne 15 erreicht         |
+| 🎤 Der Showmaster        | Epic      | +0,06 s Combo-Fenster | −4 % Combo-Decay/⭐  | Bühne 25 erreicht         |
+| 👑 Goldener Twerk-Tyrann | Legendary | +12 % Boss-Schaden    | +2 % Truhen-Luck/⭐  | Boss Bühne 10 (Erst-Kill) |
+| 🥷 Neon-Ninja            | Epic      | +8 ms Beat-Fenster    | On-Beat ×1,5→×1,6/⭐ | Truhen-Craft (120 🧩)     |
+| 🏴‍☠️ Pfirsich-Pirat        | Rare      | +6 % Schlüssel-Drop   | +5 % Gold/⭐         | Truhen-Craft (80 🧩)      |
+| 🌋 Lava-Twerker          | Epic      | +6 % Krit-Mult        | Ekstase +1 s/⭐      | Boss Bühne 50 (Erst-Kill) |
+| 🛸 Galaktischer Gyrator  | Legendary | +10 % Ekstase-Dauer   | −8 % Ladebedarf/⭐   | 1. Himmelfahrt            |
+| 💎 Diamant-Booty         | Mythic    | +2 % ALLES            | +3 % ALLES/⭐        | Transzendenz              |
 
 ### 5.4 Level & Sterne
 
-- **Level 1–50:** Kosten `splitter(lv) = 10 · ceil(1.25^lv)`; lineare Buff-Skalierung.
-- **Sterne 0–5:** je 1 Zuckerpfirsich × (Sterne+1); Zuckerpfirsich reift 1×/24 h Echtzeit
-  (Sugar-Lump-Mechanik: langsame, nicht grindbare Meta-Währung — schafft den „Morgen wieder
-  reinschauen"-Anker, §7.1).
-- Duplikat aus Truhe → 25 Splitter (Common) … 400 (Legendary).
+- **Level 1–50:** `splitter(lv) = 10 · ⌈1.25^lv⌉`; lineare Buff-Skalierung.
+- **Sterne 0–5:** je 1 Zuckerpfirsich × (Sterne + 1); Zuckerpfirsich reift 1×/24 h Echtzeit
+  (Sugar-Lump-Anker: langsame, nicht grindbare Meta-Währung → täglicher Login-Grund, §7.1).
+- Duplikat aus Truhe → 25 🧩 (Common) … 400 🧩 (Legendary).
 
 ### 5.5 Set-Boni (Skin × Kulisse)
 
-| Set | Kombination | Bonus |
-| --- | ----------- | ----- |
-| „Studio 54" | Disco-King + Neon-Club | +10 % Krit-Schaden |
-| „Retrowelle" | Neon-Ninja + Synthwave | Beat-Fenster +20 ms |
-| „Endless Summer" | Pfirsich-Pirat + Sunset Beach | Offline-Rate 50 % → 65 % |
-| „Void-Funk" | Galaktischer Gyrator + Deep Space | +15 % Idle-BP |
-| „Krönung" | Tyrann + beliebige Boss-Zone (z % 5 = 0) | +10 % Boss-Schaden |
+| Set              | Kombination                               | Bonus                    |
+| ---------------- | ----------------------------------------- | ------------------------ |
+| „Studio 54"      | Disco-King + Neon-Club                    | +10 % Krit-Schaden       |
+| „Retrowelle"     | Neon-Ninja + Synthwave                    | Beat-Fenster +20 ms      |
+| „Endless Summer" | Pfirsich-Pirat + Sunset Beach             | Offline-Rate 50 % → 65 % |
+| „Void-Funk"      | Galaktischer Gyrator + Deep Space         | +15 % Crew-DPS           |
+| „Krönung"        | Tyrann + beliebige Boss-Bühne (z % 5 = 0) | +10 % Boss-Schaden       |
 
-Kulissen allein geben Mini-Buffs (Club +0,1 s Combo-Fenster, Synth +10 ms Beat-Fenster,
-Beach +2 h Offline-Cap, Space +5 % Idle).
+Kulissen allein: Club +0,1 s Combo-Fenster · Synth +10 ms Beat-Fenster · Beach +2 h
+Offline-Cap · Space +5 % Crew-DPS. Manuelle Kulissen-Wahl kehrt zurück; die MVP-Auto-Rotation
+bleibt als Default („Tour-Modus") wählbar.
 
 **Akzeptanzkriterien §5:**
-1. `gearBonus(state)` pure; Test: Skin-Wechsel ändert `effectiveClick` deterministisch.
-2. Set-Erkennung als Daten-Tabelle; Test für mind. 2 Sets.
-3. Bestehende Saves: alle 5 Alt-Skins erscheinen als Level 1 / 0 Sterne, Unlocks bleiben (Migrationstest).
-4. Shop-Skin-Karten zeigen Rarität (Rahmenfarbe), Buff-Text, Level, Splitter-Kosten; kein
-   Skin ohne Buff-Anzeige.
-5. Klick-Invariante bleibt mit Best-in-Slot-Idle-Gear erfüllt (Sim-Messpunkt).
+
+1. `gearBonus(state)` pure; Skin-Wechsel ändert `effectiveClick` deterministisch (Test).
+2. Set-Erkennung als Daten-Tabelle; ≥ 2 Sets getestet.
+3. Legacy-Erbe (§9.2.3): `bossDefeated`-Altsave ⇒ Tyrann-Skin ab M11 freigeschaltet.
+4. Jede Skin-Karte zeigt Rarität, Buff, Level, Kosten — kein buff-loser Skin.
+5. E4 bleibt mit Best-in-Slot-Idle-Gear erfüllt (Sim-Messpunkt).
 
 ---
 
-## §6 Pfirsich-Truhen — Loot ohne Echtgeld (behebt B10)
+## §6 Pfirsich-Truhen — Loot ohne Echtgeld (M12)
 
 ### 6.1 Quellen von Truhen & Schlüsseln
 
-| Quelle | Drop |
-| ------ | ---- |
-| Zonen-Boss-Kill | 1 🔑 garantiert; Truhe 100 % (Tier zonenabhängig, §6.2) |
-| Rivalen-Kill | 3 % Chance Holztruhe (Truhen-Luck skaliert) |
-| Combo-Meilenstein (Tier 3+ erstmals pro Run) | 1 🔑 |
-| Goldener Pfirsich | 25 % Chance: droppt zusätzlich 1 🔑 |
-| Daily-Login (§7.1) | 1 Goldtruhe |
-| Quests (§7.2) | 🔑 / Truhen / Splitter laut Quest |
-| 20 min aktive Spielzeit (Klicks > 500) | 1 Holztruhe (Session-Drip, max 3/Tag) |
+| Quelle                                     | Drop                                               |
+| ------------------------------------------ | -------------------------------------------------- |
+| Boss-Kill (jede 5. Bühne)                  | 1 🔑 garantiert; Truhe 100 % (Tier bühnenabhängig) |
+| Rivalen-Kill                               | 3 % Chance Holztruhe (skaliert mit Truhen-Luck)    |
+| Combo-Tier 3 (erstmals pro Run)            | 1 🔑                                               |
+| Goldener Pfirsich (kehrt als Event zurück) | ×3-Boost 60 s wie gehabt + 25 % Chance 1 🔑        |
+| Daily-Login (§7.1)                         | 1 Goldtruhe                                        |
+| Quests (§7.2)                              | 🔑/Truhen/🧩 laut Quest                            |
+| 20 min aktive Session (> 500 Klicks)       | 1 Holztruhe (max 3/Tag)                            |
 
-Truhen landen in einem Inventar (Badge am neuen 🎁-Tab); Öffnen kostet 🔑 (Holz 0, Gold 1,
-Diamant 3, Mythos 10) — Schlüssel sind der Taktgeber, Truhen der Dopamin-Moment.
+Truhen landen in einem Inventar (🎁-Tab); Öffnen kostet 🔑 (Holz 0, Gold 1, Diamant 3,
+Mythos 10).
 
-### 6.2 Truhen-Tiers
+### 6.2 Tiers & Beispiel-Loot-Tabelle
 
-| Truhe | Quelle (typisch) | Schlüssel | Inhalt-Budget |
-| ----- | ---------------- | --------- | ------------- |
-| 🪵 Holztruhe | Kills, Session-Drip | 0 | klein, meist BP/Boost |
-| 🥇 Goldtruhe | Bosse z < 50, Daily | 1 | mittel, Splitter-Kern |
-| 💠 Diamanttruhe | Bosse z ≥ 50, Quests | 3 | groß, Epic-Chance |
-| 🌌 Mythostruhe | Bosse z ≥ 150, Events | 10 | Jackpot-Tier |
+| Truhe      | Typische Quelle           | 🔑  | Budget                |
+| ---------- | ------------------------- | --- | --------------------- |
+| 🪵 Holz    | Kills, Session-Drip       | 0   | klein (BP/Kurz-Boost) |
+| 🥇 Gold    | Bosse < Bühne 50, Daily   | 1   | mittel (🧩-Kern)      |
+| 💠 Diamant | Bosse ≥ Bühne 50, Quests  | 3   | groß (Epic-Chance)    |
+| 🌌 Mythos  | Bosse ≥ Bühne 150, Events | 10  | Jackpot               |
 
-### 6.3 Beispiel-Loot-Tabellen (Gewichte; BP-Beträge skalieren mit aktuellem Einkommen)
+**Goldtruhe (Gewichtssumme 100):** 30 → BP = 15 min aktuelles Gesamteinkommen · 25 →
+×2-Boost 10 min (stackt Dauer, nicht Faktor) · 22 → 3–8 🧩 · 10 → +1 🔑 · 8 →
+Permanent-Token „+1 % Krit-Schaden" · 3 → 🍬 · 2 → **Jackpot** (Truhen-Skin; Duplikat → 🧩).
+Diamant: Budget ×4, 🧩 10–25, Jackpot 5 %, Token-Pool erweitert (+0,1 % Krit-Chance /
++1 % Gold / +1 % Crew-DPS).
 
-**Goldtruhe (Gewichtssumme 100):**
+### 6.3 Fairness-Regeln (P5)
 
-| Gewicht | Belohnung |
-| ------- | --------- |
-| 30 | BP = 15 min aktuelles Gesamteinkommen |
-| 25 | Temp-Boost ×2 für 10 min (stackt Dauer, nicht Faktor) |
-| 22 | 3–8 Pfirsich-Splitter |
-| 10 | +1 🔑 |
-| 8 | Permanent-Token „+1 % Krit-Schaden" (unbegrenzt sammelbar, je +1 %) |
-| 3 | Zuckerpfirsich |
-| 2 | **Jackpot:** zufälliger Truhen-Skin (Neon-Ninja/Pirat-Pool); Duplikat → Splitter |
-
-**Diamanttruhe:** wie Gold, aber Budget ×4, Splitter 10–25, Jackpot 5 % (inkl. Epic-Pool),
-Permanent-Token-Pool erweitert (+0,1 % Krit-Chance / +1 % Kopfgeld / +1 % Idle).
-
-### 6.4 Fairness-Regeln (Anti-Frust, kein Echtgeld — Pfeiler P5)
-
-1. **Pity:** Spätestens jede 12. Gold-/4. Diamanttruhe enthält Splitter ≥ Maximum **oder** Jackpot;
+1. **Pity:** spätestens jede 12. Gold-/4. Diamanttruhe enthält 🧩-Maximum **oder** Jackpot;
    Zähler pro Tier persistiert.
-2. **Duplikat-Schutz:** Skins doppelt → fester Splitter-Kurs (§5.4); nie „nichts".
-3. **Kein Kauf:** Schlüssel/Truhen sind ausschließlich erspielbar. Keine Ausnahme, nie.
-4. **Truhen-Luck** (Truhilda, Tyrann-Sterne, „Truhen-Magnet") verschiebt Gewichte von Zeile 1
-   nach unten (pure Umgewichtung `applyLuck(table, luck)`, getestet).
-5. **Transparenz:** Der 🎁-Tab zeigt die Loot-Tabelle der jeweiligen Truhe (Gewichte in %),
-   Genre-Best-Practice gegen Gacha-Gefühl.
+2. **Duplikat-Schutz:** fester 🧩-Kurs, nie „nichts".
+3. **Kein Kauf:** 🔑/Truhen ausschließlich erspielbar. Keine Ausnahme, nie.
+4. **Truhen-Luck** (Truhilda, Tyrann-Sterne, Truhen-Magnet) verschiebt Gewichte von Zeile 1
+   nach unten — pure `applyLuck(table, luck)`, getestet.
+5. **Transparenz:** Loot-Tabellen (Gewichte in %) im 🎁-Tab einsehbar.
 
-### 6.5 Determinismus
+### 6.4 Determinismus
 
-Alle Rolls über den seedbaren RNG (§9.4); `openChest(tier, state, rng)` ist pure und liefert
-`{ rewards, newPity }`. Tests: Verteilungs-Test über 10 000 Seeds (χ²-Toleranz), Pity-Grenzfall,
-Luck-Umgewichtung.
+Alle Rolls über den seedbaren RNG (§9.4): `openChest(tier, state, rng)` pure ⇒
+`{ rewards, newPity }`. Da `{ seed, cursor }` im Save liegen, ist Save-Scumming vor Truhen
+wirkungslos.
 
 **Akzeptanzkriterien §6:**
-1. `openChest` pure + deterministisch (gleicher Seed ⇒ gleicher Loot).
-2. Pity greift exakt an der Grenze (Test: 11 Nieten ⇒ 12. ist Treffer).
-3. UI: Truhen-Öffnung als 1,2-s-Animation (§8.6), skippbar per Klick.
-4. Inventar/Keys/Pity überleben Reload (Schema v5, Migrationstest).
-5. Kein Netzwerk, kein Echtgeld-Pfad, keine dark patterns (Review-Checkliste in TESTPLAN).
+
+1. `openChest` deterministisch (gleicher Seed ⇒ gleicher Loot) + Verteilungstest
+   (10 000 Ziehungen, χ²-Toleranz).
+2. Pity-Grenzfall exakt (11 Nieten ⇒ 12. trifft).
+3. Truhen-Öffnung: 1,2-s-Animation, per Klick skippbar (§8.6).
+4. Inventar/🔑/Pity überleben Reload (CH-Save-Version des Milestones, Migrationstest).
+5. Kein Netzwerk-/Echtgeld-Pfad (Review-Checkliste in TESTPLAN).
 
 ---
 
-## §7 Meta & Retention (offline-freundlich, fail-silent)
+## §7 Meta & Retention (offline-freundlich, fail-silent — M13)
 
 ### 7.1 Daily-Anker
-- **Login-Belohnung:** 1 Goldtruhe/Tag; **Streak** (max 7): Tag 7 = Diamanttruhe + 2 🔑.
-  Streak-Bruch setzt auf Tag 1 zurück (mild, kein FOMO-Terror: Streak-Schutz 1×/Woche gratis).
-- **Zuckerpfirsich-Reifung** (§5.4): 24-h-Echtzeit-Timer, persistiert als Epoch-ms — der
-  tägliche „kurz ernten"-Grund. Alles rein lokal (Date.now), kein Server.
 
-### 7.2 Quests/Challenges (3 Slots, täglich rotierend, seedbar aus Datum)
-Beispiele (Daten-Array `game/quests.ts`): „Erreiche Combo-Tier 3" (2 🔑), „Besiege 4 Bosse"
-(Goldtruhe), „Fange 2 Goldene Pfirsiche" (20 Splitter), „500 On-Beat-Klicks" (Diamanttruhe),
-„Rebirthe einmal" (5 BS). Fortschritt pure über denselben Event-Bus wie Achievements
-(`buildAchievementCtx`-Erweiterung), Reroll 1×/Tag.
+1 Goldtruhe/Tag; Streak bis 7 (Tag 7: Diamanttruhe + 2 🔑), Streak-Schutz 1×/Woche gratis
+(kein FOMO-Terror). 🍬-Reifung (24-h-Echtzeit-Timer) als zweiter Anker. Alles lokal
+(`Date.now`), kein Server.
 
-### 7.3 Saison-Events (client-seitig, datumsbasiert)
-Oktober „Spooky Booty" (Kürbis-Partikel, Event-Skin via Splitter), Dezember „Frost-Twerk".
-Rein lokal (Datum → Config), kein Server nötig; Event-Skins bleiben nach dem Event craftbar
-(teurer) — kein FOMO-Hardlock.
+### 7.2 Quests/Challenges
 
-### 7.4 Leaderboard v2 (behebt B8)
-- **Metrik:** `maxZoneEver` (monoton, endless-tauglich, nicht durch Prestige gameable — Prestige
-  *hilft* der Metrik, statt sie zu brechen) + Anzeigefelder `rebirths`, `ascensions`.
-- **Upsert pro Nickname** (D1 `UNIQUE(nickname)` + `ON CONFLICT … UPDATE WHERE excluded.max_zone > max_zone`),
-  Rate-Limit unverändert. API-Vertrag §9.7. Alte `scores`-Tabelle bleibt; die Boss-Zeit-Ansicht
-  wird als „Klassik (Archiv)"-Tab angezeigt oder entfernt (Entscheidung → DECISIONS.md).
-- Client bleibt komplett fail-silent & default-aus (`VITE_API_BASE`).
+3 Slots, täglich rotierend, deterministisch aus dem Datum ge-seedet; Reroll 1×/Tag.
+Daten-Array `game/quests.ts`. Beispiele: „Erreiche Combo-Tier 3" (2 🔑) · „Besiege 4 Bosse"
+(Goldtruhe) · „500 On-Beat-Klicks" (Diamanttruhe) · „Erreiche eine neue Bestzone" (5 RS) ·
+„Aszendiere einmal" (20 🧩).
 
-### 7.5 Statistik-Tab
-Neuer 📊-Abschnitt im ⚙️-Tab: BP lifetime, Klicks, Krits, höchste Combo, On-Beat-Quote,
-Bosse, höchste Zone, Rebirths/BS, Truhen geöffnet, Spielzeit. Alles aus Save-v5-Stats-Feldern
-(Zähler-Increments an bestehenden Event-Punkten, pure Aggregation).
+### 7.3 Achievements (Rückkehr im CH-Modus)
+
+Das 18er-Set wird durch ein CH-natives Set ersetzt/erweitert (Daten): Bühnen-Meilensteine
+(10/25/50/100/200), Boss-Streaks ohne Timeout, Combo-Tiers, Krit-Zähler, Aszensionen,
+Vergoldungen, Truhen. Legacy-Achievements, die es im CH-Modus nicht mehr geben kann, entfallen
+ersatzlos (Doku in DECISIONS.md).
+
+### 7.4 Leaderboard v2 (G16, behebt B8 endgültig)
+
+- **Metrik: `maxZone`** (= `lifetimeMaxZone`) + Anzeige `souls`, `ascensions` — monoton,
+  endless-tauglich, durch Prestige nicht brech-, sondern förderbar.
+- **Upsert pro Nickname** (D1 `UNIQUE(nickname)`, Update nur bei größerer Zone) statt
+  unbegrenzter `INSERT`s. Vertrag §9.7. Alte `scores`-Tabelle: Archiv oder Drop → §11.
+- Client bleibt fail-silent & default-aus (`VITE_API_BASE`), Wiring wie M5-Muster.
+
+### 7.5 Saison-Events & Statistik
+
+Client-seitig datumsbasiert (Oktober „Spooky Booty", Dezember „Frost-Twerk"; Event-Skins
+bleiben danach craftbar — kein Hardlock). Statistik-Tab (📊 im ⚙️): Gold lifetime, Klicks,
+Krits, On-Beat-Quote, höchste Combo, Boss-Kills/-Timeouts, Bestzone, Aszensionen, RS lifetime,
+Truhen, Spielzeit.
 
 **Akzeptanzkriterien §7:**
-1. Daily/Streak/Quests funktionieren vollständig offline; Systemuhr-Manipulation crasht nichts
-   (never-throw: negative Deltas ⇒ Neutralverhalten, Test).
-2. Quest-Rotation ist deterministisch aus dem Datum (Test: gleiches Datum ⇒ gleiche Quests).
-3. Leaderboard v2: Upsert-Semantik getestet (in-memory Fakes wie M5); Spiel voll spielbar ohne API.
-4. Statistik zählt korrekt über Rebirths hinweg (lifetime vs. run-scoped getrennt, Test).
+
+1. Daily/Streak/Quests voll offline; Uhr-Manipulation ⇒ Neutralverhalten, nie Crash (Tests).
+2. Quest-Rotation deterministisch aus Datum (Test: gleiches Datum ⇒ gleiche Quests).
+3. Leaderboard v2: Upsert-Semantik per In-Memory-Fakes getestet (M5-Muster); Spiel voll
+   spielbar ohne API.
+4. Statistik trennt lifetime vs. run-scoped korrekt über Aszensionen (Test).
 
 ---
 
 ## §8 UX / Juice / Feel — Klicken muss sich großartig anfühlen
 
-Alle Effekte respektieren die bestehenden Toggles (`bootyclicker.settings`) und den
-Performance-Budget-Rahmen (§9.6). Neue Toggles: Haptik, Popup-Dichte.
+Bereits im WIP-Glue: Krit-Popups („CRIT"), stärkerer Shake bei Krit, Combo-Anzeige,
+Boss-Toasts, Kulissen-Wechsel als Bühnen-Belohnung. Der Rest (alles über die bestehenden
+Toggles in `bootyclicker.settings`; neu: Haptik, Popup-Dichte):
 
-1. **Hit-Feedback-Basis:** Jeder Klick: Cheek-Impuls (existiert) + 60-ms-Skalen-Punch am
-   Pelvis-Bone + Partikel-Mini-Burst. Krit: Ring-Burst + Gold-Blitz + tiefer Boom-Layer.
-2. **Floating Numbers 2.0:** Krit-Popups 1,6×, goldene Farbe, leichte Rotation; On-Beat-Popups
-   mit „♪"-Präfix.
-3. **Popup-Batching (B7):** Max. 1 Popup pro 80 ms; dazwischen aggregiert ein Akkumulator die
-   Summe („+12,4 K ×7"). Pool aus 24 wiederverwendeten DOM-Nodes statt create/remove
-   (`ui/pops.ts`, pure Batcher-Logik `popBatcher(nowMs, amount)` getestet).
-4. **Screen-Shake-Tiers:** an Combo-Tiers gekoppelt (Tier 2: 0,2 · Tier 4: 0,35 · Ekstase: 0,5,
-   Boss-Kill: 0,6); weiterhin nur im Render angewendet, nie in OrbitControls-State (M4-Muster).
-5. **Partikel skalieren mit Combo:** Burst-Count = `8 + comboTier · 6` (Pool bleibt 200, ggf.
-   auf 400 erhöht — messen, Budget < 1 ms bleibt AC).
-6. **Truhen-Animation:** Truhe als Sprite/Box im DOM-Overlay, 1,2 s: wackeln → aufspringen →
-   Reward-Karten fliegen ein; skippbar; Sound: Ratsche + Jingle (prozedural, `audio/engine.ts`).
-7. **Mobile:** Shop als **Bottom-Sheet** (55 % Höhe, Figur bleibt sichtbar — behebt B13a),
-   `viewport-fit=cover` + `env(safe-area-inset-*)`-Padding auf allen fixed-Elementen (B13b),
-   Pfirsich-Clamp bei Resize + Despawn bei offenem Sheet (B13c).
-8. **Haptik:** `navigator.vibrate?.(8)` pro Klick (gedrosselt auf 1×/100 ms), 35 ms bei Krit,
-   Muster `[20,30,60]` bei Boss-Kill/Truhen-Jackpot; Feature-Detection, Toggle, iOS-no-op.
-9. **Ability-/Cooldown-Bar:** Unten mittig: Ekstase-Meter (füllt sichtbar pro Klick), daneben
-   freigeschaltete Fähigkeits-Buttons mit radialem Cooldown; Tastatur `F`/`D`/`R`.
-10. **Sound-Layering mit Beat:** Combo-Tier schaltet Musik-Layer zu (Tier 2: Perkussion-Spur,
-    Tier 4: Lead-Arp +1 Oktave, Ekstase: alles + Filter-Sweep) — `MusicPlayer` bekommt
-    `setIntensity(0..3)`, rein additiv zum bestehenden 16-Step-Pattern.
-11. **HUD-Wahrheit:** Ratenzeile zeigt **effektive** Werte inkl. aktiver Boosts (behebt B14-Anzeige),
-    plus Zonen-Widget (Zone, Gegner-HP-Balken, Boss-Timer) oben rechts.
+1. **Hit-Feedback-Basis:** Klick = Cheek-Impuls (existiert) + 60-ms-Skalen-Punch am Pelvis +
+   Mini-Burst. Krit: Ring-Burst + Gold-Blitz + tiefer Boom-Layer.
+2. **Floating Numbers 2.0:** Krit ×1,6 Größe/golden/rotierend; On-Beat mit „♪"-Präfix;
+   Gold-Popups (implementiert) getrennt von Schadens-Popups stylen.
+3. **Popup-Pooling & Batching (B7):** max. 1 Popup/80 ms, Akkumulator aggregiert („+12,4 K ×7");
+   Pool aus 24 wiederverwendeten Nodes statt `createElement` pro Klick (`ui/pops.ts`, pure
+   Batcher-Logik getestet).
+4. **Screen-Shake-Tiers:** Combo-Tier 2: 0,2 · Tier 3: 0,35 · Ekstase: 0,5 · Boss-Kill: 0,6 —
+   weiterhin nur im Render-Call, nie in OrbitControls-State (M4-Muster).
+5. **Partikel skalieren mit Combo:** Burst = `8 + Tier · 6` (Pool 200, ggf. 400 — messen,
+   < 1 ms/Frame bleibt AC).
+6. **Truhen-Animation (M12):** wackeln → aufspringen → Reward-Karten, 1,2 s, skippbar;
+   Ratsche + Jingle prozedural.
+7. **Mobile:** Shop als **Bottom-Sheet** (~55 % Höhe — Figur & Rivale bleiben sichtbar, B13a);
+   `viewport-fit=cover` + `env(safe-area-inset-*)` auf allen fixed-Elementen (B13b, M7).
+8. **Haptik:** `navigator.vibrate?.(8)` pro Klick (gedrosselt 1×/100 ms), 35 ms bei Krit,
+   Muster `[20,30,60]` bei Boss-Kill/Jackpot; Feature-Detection, Toggle, iOS-no-op.
+9. **Ability-Bar:** unten mittig Ekstase-Meter (füllt sichtbar), daneben Fähigkeiten mit
+   radialem Cooldown; Tasten `F`/`D`/`R`.
+10. **Sound-Layering:** Combo-Tier schaltet Musik-Layer zu (Tier 2: Perkussion, Tier 3:
+    Lead-Arp +1 Oktave, Ekstase: alles + Filter-Sweep) — `MusicPlayer.setIntensity(0..3)`,
+    additiv zum 16-Step-Pattern.
+11. **HUD-Wahrheit:** DPS/Klick-Zeile zeigt **effektive** Werte inkl. aktiver Boosts; das
+    Bühnen-Widget (implementiert) erhält Boss-Timer-Puls < 10 s.
 
 **Akzeptanzkriterien §8:**
-1. 12 cps + Krits + Partikel: Frame-Budget hält 60 fps auf Referenz-Laptop (gemessen, TESTPLAN).
-2. Popup-DOM-Knoten ≤ 24 gleichzeitig (Pool-Test via Zähler).
-3. Haptik feuert nie öfter als 10×/s und nie ohne Nutzer-Toggle an.
-4. Alle neuen Effekte einzeln abschaltbar; „Effekte aus" ⇒ visuell M6-Niveau.
-5. Bottom-Sheet-Shop: Figur während des Kaufens sichtbar; Kauf zeigt Partikel-Feedback am Rig.
+
+1. 12 cps + Krits + Partikel: 60 fps auf Referenz-Laptop (gemessen, TESTPLAN-Eintrag).
+2. Popup-DOM ≤ 24 Nodes gleichzeitig (Pool-Zähler-Test).
+3. Haptik nie > 10×/s, nie ohne Toggle.
+4. Alle neuen Effekte einzeln abschaltbar; „Effekte aus" ⇒ MVP-Optik.
+5. Bottom-Sheet: Figur + Rivale beim Shoppen sichtbar (Screenshot-Nachweis).
 
 ---
 
 ## §9 Technisches Design & Architektur-Fit
 
-### 9.1 Neue Module (alle pure, DOM-frei, unit-getestet — M0-Disziplin)
+### 9.1 Modul-Layout (bestehend + neu; alle neuen Kernmodule pure & DOM-frei)
 
 ```
-apps/game/src/game/click.ts      # effectiveClick, isOnBeat, Krit-Roll
-apps/game/src/game/combo.ts      # Combo 2.0 (Tiers, Zerfall)
-apps/game/src/game/ability.ts    # Ekstase/Beat-Drop/Pfirsichregen (Meter, Fenster)
-apps/game/src/game/tour.ts       # Zonen, HP/Bounty, Boss-Timer (verallgemeinert boss.ts)
-apps/game/src/game/souls.ts      # BS/HPF/TE-Formeln, Reset-Scopes
-apps/game/src/game/ancients.ts   # Ahnen-Konfig + Boni
-apps/game/src/game/gear.ts       # Skin/Kulissen/Set-Boni-Fold
-apps/game/src/game/chests.ts     # Loot-Tabellen, openChest, Pity, Luck
-apps/game/src/game/quests.ts     # Daily-Quests, Streak
-apps/game/src/util/rng.ts        # mulberry32, seedbar (§9.4)
-apps/game/src/ui/pops.ts         # Popup-Pool + Batcher
-apps/game/src/ui/tour.ts, chest.ts, ability.ts, stats.ts   # dünner Glue
+BESTEHEND (committet):
+apps/game/src/game/combat.ts     # Bühnen/Boss-Loop            [M-MVP]
+apps/game/src/game/heroes.ts     # Crew, Meilensteine, Bulk    [M-MVP]
+apps/game/src/game/ascension.ts  # Ruhm-Seelen                 [M-MVP]
+apps/game/src/game/ch-state.ts   # CH-State + abgeleitete Werte[M-MVP]
+apps/game/src/save/ch-store.ts   # CH-Save v1 + Offline-Gold   [M-MVP]
+apps/game/src/ui/format.ts       # endless-sicheres fmt()      [M-MVP]
+
+NEU:
+apps/game/src/util/rng.ts        # mulberry32, seedbar                    [M7]
+apps/game/src/game/click.ts      # effectiveClick, Krit, On-Beat          [M7/M8]
+apps/game/src/game/combo.ts      # Tiers + Soft-Decay                     [M8]
+apps/game/src/game/ability.ts    # Ekstase/Beat-Drop/Pfirsichregen        [M8]
+apps/game/src/game/gild.ts       # Vergoldungen                           [M9]
+apps/game/src/game/ancients.ts   # Ahnen-Konfig + Boni                    [M10]
+apps/game/src/game/heaven.ts     # HPF + Himmelsbaum                      [M10]
+apps/game/src/game/gear.ts       # Skin/Kulissen/Set-Fold                 [M11]
+apps/game/src/game/chests.ts     # Loot, Pity, Luck                       [M12]
+apps/game/src/game/quests.ts     # Daily/Quests/Streak                    [M13]
+apps/game/src/game/sim.ts        # simulateEndless                        [M9+]
+apps/game/src/ui/pops.ts, ability.ts, chest.ts, stats.ts, gear.ts  # Glue
 ```
 
-`main.ts` bleibt der einzige Ort mit Wiring; wächst er über ~600 Zeilen, wird nach
-`bootstrap/`-Teilmodulen extrahiert (reine Verschiebung, kein Verhalten).
+Legacy-Module (economy/progression/boss/events/achievements + `save/store.ts`) bleiben als
+eingefrorenes Archiv im Repo (Tests grün, keine Weiterentwicklung), bis der Erbe-Import
+(§9.2.3) verschifft ist; danach Entfernung als eigener Aufräum-Commit (N4, DECISIONS.md).
+`main.ts` bleibt der einzige Wiring-Ort; > ~600 Zeilen ⇒ Extraktion nach `bootstrap/`.
 
-### 9.2 Save-Schema v5 (Migration v4→v5, never-throw, `Object.hasOwn`)
+### 9.2 Save-Evolution (Key `bootyclicker.ch`, never-throw, `Object.hasOwn`-Disziplin)
 
-Neue Felder (alle mit Defaults in `migrateV4toV5`; Validator-Muster von `isSaveDataV4` fortgeführt —
-pro Feld Typ-+Range-Check, unbekannte Keys ignorieren, nie werfen):
+**9.2.1 Versionsplan** (ein Bump pro bedarfstragendem Milestone; Migrationskette v1→… nach dem
+Registry-Muster von `save/migrate.ts` — nie werfen, Zukunfts-/Unsinns-Versionen ⇒ sauberer
+Fresh-Start):
 
-```ts
-interface SaveDataV5 {
-  schemaVersion: 5;
-  …alle v4-Felder…                    // prestigeMult bleibt als Legacy-Feld erhalten
-  tour: { zone: number; kills: number; highestZone: number };
-  souls: { bs: number; bsLifetime: number; ancients: Record<string, number> };
-  ascension: { hpf: number; hpfLifetime: number; count: number;
-               heavenly: Record<string, number> };
-  ability: { charge: number; frenzyUntil: number; cooldowns: Record<string, number> };
-  gear: { skinLevels: Record<string, number>; skinStars: Record<string, number>;
-          shards: number; sugarPeaches: number; nextSugarAt: number };
-  chests: { keys: number; inventory: Record<ChestTier, number>;
-            pity: Record<ChestTier, number> };
-  rng: { seed: number; cursor: number };
-  meta: { questDate: string; questProgress: Record<string, number>;
-          questsClaimed: string[]; streak: number; lastLoginDay: string;
-          permTokens: Record<string, number> };
-  stats: { bpLifetime: number; crits: number; onBeatClicks: number;
-           bossKills: number; chestsOpened: number; playTimeS: number };
-}
-```
+| Version            | Milestone | Neue Felder                                                                                                                              |
+| ------------------ | --------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| v1 (implementiert) | MVP       | `gold, zone, killsThisZone, runMaxZone, crew, souls, lifetimeMaxZone, totalClicks, lastSeen`                                             |
+| v2                 | M7        | `rng: { seed, cursor }` · `stats: { crits, onBeatClicks, bossKills, bossTimeouts, goldLifetime, playTimeS }` · `legacyImported: boolean` |
+| v3                 | M8        | `ability: { charge, frenzyUntil, cooldowns }` · `combo: { stacks }` (Reload-Kontinuität)                                                 |
+| v4                 | M9        | `gilds: Record<heroId, number>` · `rsLifetime`                                                                                           |
+| v5                 | M10       | `ancients: Record<string, number>` · `heaven: { hpf, hpfLifetime, ascensions2, tree: Record<string, number> }`                           |
+| v6                 | M11       | `gear: { skin, bg, bgAuto, skinLevels, skinStars, shards, sugarPeaches, nextSugarAt }`                                                   |
+| v7                 | M12       | `chests: { keys, inventory, pity }` · `permTokens`                                                                                       |
+| v8                 | M13       | `meta: { questDate, questProgress, questsClaimed, streak, lastLoginDay }` · `achievements: string[]`                                     |
 
-Migrations-Sonderfälle (Tests Pflicht):
-1. `rebirths ≥ 1` ⇒ `souls.bs = souls.bsLifetime = 7 · rebirths` (§4.5.1).
-2. `bossDefeated === true` ⇒ `tour.highestZone = max(10, …)` (Tyrann galt als Zone-10-Boss).
-3. `unlocked`-Skins ⇒ `skinLevels[k] = 1`.
-4. Korruptes Teilobjekt (z. B. `tour: 5`) ⇒ Validator lehnt ab ⇒ sauberer Fresh-Start
-   (bestehendes Verhalten, Test analog `migrate.test.ts`).
+Jede Migration: Default-Werte, Validator-Erweiterung (pro Feld Typ + Range, unbekannte Keys
+ignorieren), Migrationstest (vN-Save lädt verlustfrei in vN+1; korruptes Teilobjekt ⇒ null ⇒
+sauberer Neustart — bestehendes `isChSave`-Muster).
 
-Client-Settings (`bootyclicker.settings`) erhalten `haptics: boolean` und
-`popDensity: 'voll' | 'reduziert'` — per Feld-Fallback wie `asQuality` (kein Save-Schema betroffen,
-M6-Entscheidungsmuster).
+**9.2.2 Invarianten-Reparatur** bleibt wie implementiert (`stateFromSave`: `runMaxZone ≥ zone`,
+`lifetimeMaxZone ≥ runMaxZone`) und wird pro neuem Feld fortgeschrieben (z. B. Pity ≥ 0,
+`nextSugarAt` zu weit in der Zukunft ⇒ auf `now + 24 h` klemmen).
 
-### 9.3 Erweiterter Number-Formatter (behebt B1) — Empfehlung: **Doubles, kein BigNumber**
+**9.2.3 „Erbe der alten Tour" (M7, einmalig).** Beim ersten CH-Boot mit vorhandenem
+Legacy-Save (`bootyclicker.save`, v1–v4 über die bestehende `loadGame`-Kette lesbar):
 
-```ts
-const SUFFIXES = ['K','M','B','T','Qa','Qi','Sx','Sp','Oc','No','Dc'];
-// benannt mindestens bis Dc (1e33); optional erweiterbar bis QiDc (1e51)
-fmt(n):
-  n < 1000            → floor-String (wie bisher)
-  n < Suffix-Grenze   → Mantisse.toFixed(2) + Suffix (Schleife OHNE Kappungs-Bug)
-  sonst               → wissenschaftlich: "3.14e87" (Mantisse 2 Nachkommastellen)
-  !isFinite(n)        → "∞" (Guard; darf laut Sim nie erreicht werden)
-  n < 0               → '-' + fmt(-n)
-```
+- `rebirths ≥ 1` ⇒ Start-RS = `7 · rebirths` (großzügig, ≈ je eine Bühne-34-Bestzone);
+- `bossDefeated` ⇒ Tyrann-Skin-Anspruch vorgemerkt (einlösbar ab M11) + Achievement-Vormerkung;
+- `maxBp ≥ 50 000` ⇒ 1 Goldtruhe vorgemerkt (einlösbar ab M12).
+  Danach `legacyImported = true`; der Legacy-Key wird **nicht** gelöscht (Archiv). Test:
+  Import ist idempotent (zweiter Boot ⇒ kein Doppel-Bonus).
 
-Abwägung BigNumber (z. B. `break_infinity.js`, ~25 KB min):
+### 9.3 Zahlenformat & -grenzen — Entscheidung bestätigt: **Doubles, kein BigNumber**
 
-| | Doubles + e-Notation | BigNumber-Lib |
-| - | ------------------- | ------------- |
-| Bundle | ±0 KB | +25–30 KB (Budget-relevant, aber tragbar) |
-| Umbau | keiner | **jede** Ökonomie-Funktion + alle 141 Tests + Save-Format |
-| Grenze | 1,8e308 hart; Additions-Präzision ab Verhältnis 2^53 (B15) | praktisch unbegrenzt |
-| Risiko | Stall, falls Tuning entgleist | großflächige Regression |
+`fmt()` ist geliefert (B1 ✔): benannte Suffixe bis `Dc` (10³³), darüber wissenschaftlich
+(`"1.00e36"`), `∞`- und Negativ-Guards, Tests in `format.test.ts`. Abwägung unverändert:
 
-**Entscheidung:** Doubles. Die Prestige-Schichten sind explizit so getuned, dass BP pro Run
-< 1e60 bleibt (Reset-Design ist unser „BigNumber"); `simulateEndless` enthält einen
-Präzisions-Guard (Assert: kleinster relevanter Gewinn > `bp · 2^-50`). Erst wenn Transzendenz-
-Tuning (M15+) das sprengt, wird `break_infinity` als eigener Milestone evaluiert →
-Risiko-Eintrag §11.
+|        | Doubles + e-Notation (gewählt)                            | BigNumber-Lib (`break_infinity`, ~25 KB) |
+| ------ | --------------------------------------------------------- | ---------------------------------------- |
+| Bundle | ±0 KB                                                     | +25–30 KB                                |
+| Umbau  | keiner                                                    | jede Formel + alle Tests + Save-Format   |
+| Grenze | 1,8e308 hart; Additions-Präzision ab Verhältnis 2⁵³ (B15) | praktisch unbegrenzt                     |
 
-### 9.4 Deterministische Zufälligkeit
+Die Prestige-Schichten halten Werte pro Run < 1e60 (Bühne ~300 ⇒ HP ~1e58 — weit vor der
+Double-Grenze greift L1/L2-Reset-Druck). Der Sim-Guard (§9.5) asserted: kleinster relevanter
+Gewinn > `wert · 2⁻⁵⁰`. Erst wenn Transzendenz-Tuning das sprengt, wird BigNumber ein eigener
+Milestone (§11).
 
-`util/rng.ts`: mulberry32 (32-Bit-Seed, ~10 Zeilen, keine Dependency).
-`{ seed, cursor }` im Save; jede Ziehung inkrementiert `cursor`; Reload setzt den Strom exakt
-fort (Save-Scumming vor Truhen ist damit wirkungslos — Fairness + Testbarkeit in einem).
-Alle Systeme (Krit, Loot, Pfirsich-Timing, Quest-Rotation) ziehen aus injizierten RNG-Funktionen;
-`Math.random` bleibt nur für nicht-spielrelevante Optik (Partikelrichtungen) erlaubt.
-Tests: gleicher Seed ⇒ identische Sequenz über Serialisierung hinweg.
+### 9.4 Deterministische Zufälligkeit (M7)
 
-### 9.5 Balancing-Simulation `simulateEndless` (erweitert `simulatePlaythrough`)
+`util/rng.ts`: mulberry32 (32-Bit-Seed, ~10 Zeilen, keine Dependency). `{ seed, cursor }` im
+CH-Save v2; jede Ziehung inkrementiert `cursor`, Reload setzt den Strom exakt fort ⇒
+Save-Scumming (Krits heute, Loot ab M12) wirkungslos + volle Testbarkeit. Alle
+spielrelevanten Rolls (Krit, Loot, Quest-Rotation, Vergoldungs-Ziel) ziehen aus injizierten
+RNG-Funktionen; `Math.random` bleibt nur für nicht-spielrelevante Optik (Partikelrichtungen,
+Kamera-Shake) erlaubt. Tests: gleiche Seed+Cursor ⇒ identische Sequenz über Serialisierung.
 
-Deterministischer Bot über N Rebirths: klickt `clickRate` cps, nutzt Ekstase optimal, kauft
-ROI-greedy (Generatoren inkl. Meilensteine), pusht Zonen bis DPS/HP-Wand, rebirtht bei
-Grenznutzen < Schwelle, kauft Ahnen nach fixer Priorität. Asserted (CI-Pflicht):
+### 9.5 `simulateEndless` (M9, CI-Gate ab dann; Vollausbau M14)
 
-1. Pacing-Tabelle §4.8 (Toleranz ±25 %).
-2. „Nie gestallt": Zeit-bis-Wand ≤ 60 min für Rebirth 1–20.
-3. Beschleunigungs-Invariante (Run n+1 schneller zur alten Bestzone).
-4. Klick-Invariante ≥ 3× Idle an den Messpunkten.
-5. Float-Guard (§9.3).
-6. Laufzeit der Sim selbst < 10 s (grobe Zeitschritte 250 ms, wie bisher).
+Deterministischer Bot **über die echten Module** (combat/heroes/ascension/click/…): klickt
+`clickRate` cps, nutzt Ekstase optimal, kauft ROI-greedy (inkl. Meilenstein-Sprünge), farmt
+via `travelTo`, aszendiert bei Grenznutzen < Schwelle, kauft Ahnen nach fixer Priorität.
+Die Messwerte aus §4.8 sind die Kalibrier-Baseline (Sim-Annahmen dort dokumentiert). Asserts:
+
+1. Pacing-Zieltabelle §4.8 (±25 %).
+2. Endlos-Kriterien E1–E4.
+3. Float-Guard (§9.3).
+4. Sim-Eigenlaufzeit < 10 s (1-s-Schritte, gedeckelte Run-Anzahl).
 
 ### 9.6 Performance-Budget (unverändert hart)
 
-- Bundle < 5 MB (aktuell 578 KB; Schätzung neu: +80–120 KB reiner Code/Daten — kein Risiko;
-  einziges Risiko-Flag: eine etwaige BigNumber-Lib, s. o.).
-- 60 fps Mittelklasse-Laptop; Partikel < 1 ms/Frame (Messung bleibt AC); FPS-Cap/Qualitäts-Presets
-  decken die neuen Effekte mit ab (Effekt-Intensität folgt `quality`).
-- Draw Calls < 150: Rivalen-Rig ersetzt das Boss-Rig 1:1 (kein Zuwachs); Truhen-UI ist DOM.
-- DOM: Popup-Pool ≤ 24 Nodes; Shop-Updates ohne innerHTML-Rebuild im Hot-Path (B7).
+Bundle < 5 MB (Basis ~578 KB; alle neuen Systeme sind Code/Daten, Schätzung +80–120 KB —
+einziges Budget-Risiko wäre BigNumber, §11). 60 fps Referenz-Laptop; Partikel < 1 ms/Frame
+(Mess-AC); FPS-Cap/Qualitäts-Presets decken neue Effekte mit ab; Draw Calls < 150 (Rivalen-Rig
+statt Boss-Rig, Truhen-UI ist DOM); Popup-Pool ≤ 24 Nodes; kein `innerHTML`-Rebuild im
+Klick-Hot-Path.
 
-### 9.7 Leaderboard-API v2 (fix)
+### 9.7 Leaderboard-API v2 (fix, M13)
 
 ```
 POST /api/v2/scores
-  Body: { "nickname": string, "maxZone": number, "rebirths": number, "ascensions": number }
+  Body: { "nickname": string, "maxZone": number, "souls": number, "ascensions": number }
   201: { "rank": number }   400 | 429 wie gehabt
   Semantik: Upsert pro Nickname; Update nur wenn maxZone größer.
 GET /api/v2/scores/top?limit=50
-  200: [{ "nickname": string, "maxZone": number, "rebirths": number,
+  200: [{ "nickname": string, "maxZone": number, "souls": number,
           "ascensions": number, "updatedAt": string }]
 ```
 
-D1: neue Tabelle `scores_v2(nickname TEXT UNIQUE, max_zone INTEGER, rebirths INTEGER,
-ascensions INTEGER, updated_at TEXT)` + Index auf `max_zone DESC`. Nickname-Regeln,
-Rate-Limit, Fakes-basierte Tests: identisch zu M5.
+D1: `scores_v2(nickname TEXT UNIQUE, max_zone INTEGER, souls REAL, ascensions INTEGER,
+updated_at TEXT)` + Index `max_zone DESC`. Nickname-Regeln (`[a-zA-Z0-9_ ]{2,16}`),
+Rate-Limit 5/min/IP, In-Memory-Fake-Tests: identisch zum M5-Muster.
 
 ---
 
-## §10 Implementation-Roadmap (M7+, strikte Reihenfolge)
+## §10 Implementation-Roadmap (M7+, strikte Reihenfolge, baut auf dem CH-MVP auf)
 
 > Jeder Milestone ist eigenständig shippable, endet grün (`lint`/`test`/`build`) und mit
-> Update von `README.md` + `DECISIONS.md` (DoD aus Spec §7). Balancing-Werte sind Daten.
+> Update von `README.md` + `DECISIONS.md` (DoD). Balancing-Werte sind Daten. Voraussetzung
+> für M7 (**erfüllt**): die MVP-Verdrahtung (main.ts + ch-ui) ist committet, gepusht und der
+> Test-Satz grün.
 
-### M7 — Hotfix & Fundament (Quick Wins)
+### M7 — MVP-Härtung & Kern-Hygiene
 
-- fmt()-Erweiterung inkl. e-Notation-Fallback (§9.3) + Grenzwert-Tests (B1).
-- `e.repeat`-Guard für Leertaste (B4).
-- `Shop.syncAffordability()` im 0,25-s-Tick — Klassen-Toggle statt Re-Render (B6).
-- Offline-Gutschrift bei `visibilitychange → visible` inkl. Welcome-Back ab 60 s (B5).
-- Safe-Area: `viewport-fit=cover` + `env()`-Padding (B13b); Pfirsich-Clamp bei Resize (B13c-Teil).
-- `util/rng.ts` (mulberry32) als Fundament für M8+ (§9.4).
-- README-Drift fixen (B16).
+- **Klick-Mathe in den Kern (N2):** `game/click.ts` mit `CRIT_CHANCE/CRIT_MULT/COMBO_*` als
+  Daten + `effectiveClick`-Grundpipeline; `main.ts` ruft nur noch auf.
+- **Seedbarer RNG (N3):** `util/rng.ts`; Krit-Roll umgestellt; CH-Save **v2** (`rng`, `stats`,
+  `legacyImported`) + Migration v1→v2 + Validator-Tests.
+- **Tab-Rückkehr-Grant (B5):** `visibilitychange → visible` schreibt `offlineGold` seit dem
+  letzten Tick gut; Welcome-Back ab > 60 s.
+- **„Erbe der alten Tour" (§9.2.3):** einmaliger Legacy-Import (RS, Vormerkungen), idempotent.
+- **Safe-Area (B13b):** `viewport-fit=cover` + `env()`-Padding.
+- **Doku (B16/N5):** README/TESTPLAN beschreiben den CH-Loop; entfallene M6-Features als
+  „kehrt in Mx zurück" gelistet; DECISIONS-Einträge (Pivot, Krit-Baseline, Legacy-Archiv).
 - **Akzeptanzkriterien:**
-  1. `fmt(1e21) === '1.00Sx'`, `fmt(1e57)` in e-Notation, `fmt(Infinity) === '∞'` (Tests).
-  2. Gehaltene Leertaste erzeugt genau 1 Shake (Test mit `repeat: true`-Event).
-  3. Idle ohne Klicks: Upgrade wird binnen ≤ 0,5 s nach Erreichbarkeit als kaufbar markiert
-     (Headless-Smoke).
-  4. Tab 10 min hidden ⇒ beim Refokus Offline-Ertrag gutgeschrieben (injizierte Clock, Test).
-  5. Alle 141 Bestandstests bleiben grün; Bundle-Delta < +10 KB.
+  1. `effectiveClick` deterministisch getestet (Seed ⇒ exakte Krit-Sequenz; EV-Property
+     ×1,8 ± 1 % über 100 k Rolls).
+  2. Gehaltene Leertaste erzeugt genau 1 Shake (Test mit `repeat: true`).
+  3. Tab 10 min hidden ⇒ Grant bei Rückkehr = `offlineGold(dps, zone, 10 min)` (injizierte
+     Clock, Test).
+  4. v1-Save lädt verlustfrei in v2; korruptes `rng`-Feld ⇒ frischer Seed statt Crash.
+  5. Erbe-Import: NG+3-Legacy-Save ⇒ 21 RS; zweiter Boot ⇒ kein Doppel-Bonus (Tests).
+  6. Alle bestehenden Modul-Tests bleiben grün; Bundle-Delta < +10 KB.
 
-### M8 — Klick-Layer 2.0 (der Star zuerst)
+### M8 — Klick-Juice 2.0 (der Star zuerst)
 
-- `game/click.ts` (effectiveClick, Krits, On-Beat), `game/combo.ts` (Tiers + Zerfall),
-  `game/ability.ts` (Twerk-Ekstase); zentrale Nutzung in `doShake` (behebt B14-Rechenpfad).
-- Juice-Paket: Popup-Pool/-Batching, Krit-Optik, Screen-Shake-Tiers, Combo-Partikelskalierung,
-  Haptik-Toggle, Ability-Bar, Musik-Layer `setIntensity` (§8.1–8.4, 8.8–8.10).
-- Schema **v5-Teil 1** (ability-, rng-, stats-Felder) + Migration + Validator-Tests.
-- HUD zeigt effektive Werte inkl. Boost (B14-Anzeige); `hud.update` gedrosselt (B7).
+- `game/combo.ts` (Tiers + Soft-Decay statt Hard-Reset, N6/G4), On-Beat-Bonus
+  (`isOnBeat` + BeatTracker-Anbindung), `game/ability.ts` (Twerk-Ekstase), CH-Save **v3**.
+- Juice-Paket: Popup-Pool/Batching (B7), Krit-/On-Beat-Optik, Screen-Shake-Tiers,
+  Combo-Partikel, Haptik-Toggle, Ability-Bar, `MusicPlayer.setIntensity`,
+  Crew-Meilenstein-Fortschrittsbalken (§4.3.2), Mobile-Bottom-Sheet (B13a).
+- HUD-Drossel: Update nur bei Wertänderung bzw. 0,25-s-Tick (Rest von B7).
 - **Akzeptanzkriterien:**
-  1. `effectiveClick` deterministisch getestet (Krit via Seed, Combo-Tiers, Beat-Fenster,
-     Ekstase-Fenster — je eigener Test).
-  2. Combo zerfällt gestuft (Test: 1,2 s Pause ⇒ −20 %, kein Reset auf 0).
-  3. Ekstase: Meter lädt +1/Klick, +2 on-beat; ×10 für 12 s; Zustand überlebt Reload.
-  4. 12-cps-Stresstest hält 60 fps; Popup-Nodes ≤ 24 (gemessen, TESTPLAN-Eintrag).
-  5. v4-Save lädt verlustfrei in v5 (Migrationstest).
+  1. Combo zerfällt gestuft (1,5 s Pause ⇒ −20 %/s, kein Reset auf 0; Test).
+  2. Tier-Perks wirken (Tier 2 ⇒ +3 % Krit-Chance, deterministisch per Seed getestet).
+  3. Ekstase: +1/Klick, +2 on-beat, ×10 für 12 s; Zustand überlebt Reload (v3-Test).
+  4. On-Beat-Fenster ±100 ms gegen BeatTracker-Onsets getestet (pure Phase-Injektion).
+  5. 12-cps-Stresstest 60 fps; Popup-Nodes ≤ 24 (gemessen, TESTPLAN).
+  6. Bottom-Sheet: Figur + Rivale sichtbar beim Shoppen (Screenshot).
 
-### M9 — Welttournee (endloser Kampf-Layer)
+### M9 — Endless-Skalierung (Anti-Plateau, gegen N1)
 
-- `game/tour.ts` + Zonen-HUD + Rivalen-Rig (verallgemeinert aus Boss-Code); Kills → Kopfgeld,
-  Boss alle 5 Zonen mit 30-s-Timer; Tyrann = Zone-10-Boss inkl. Alt-Unlocks (B3).
-- Alter One-Shot-Bossmodus + Boss-Button entfernt; Schema v5-Teil 2 (`tour`).
-- Leaderboard v2 (Worker `scores_v2`, Upsert; Client-Metrik `highestZone`) — behebt B8;
-  Boss-Zeit-UI wird Archiv/entfernt (DECISIONS.md).
-- Bulk-Buy ×1/×10/×Max (B17) — nötig, sobald die Tour Upgrade-Druck erzeugt.
+- **Seelen-Retune:** `RS_v2 = ⌊z^1.6/40⌋ + ⌊1.10^z − 1⌋` (§4.5.1) — der Bank-Guard macht’s
+  migrationsfrei.
+- **Crew-Ausbau:** +5 Tiers (Daten, §4.3.3), endlose Meilensteine (1600, 3200, …).
+- **Vergoldungen** (`game/gild.ts`, CH-Save **v4**): 1 pro Erst-Clear jeder 10er-Bühne,
+  ×1,25 auf zufälliges Mitglied (RNG-seeded), Umhängen für 5 RS.
+- **Farm-/Travel-UI** (G10) über `travelTo`.
+- **`simulateEndless` v1** als CI-Gate: E1, E2, E4 + Pacing-Tabelle.
 - **Akzeptanzkriterien:**
-  1. HP-/Bounty-Formeln getestet (inkl. Monotonie des Verhältnisses).
-  2. Sim: Run 1 erreicht Zone ≥ 20 in ≤ 45 min bei 3 cps.
-  3. Tyrann-Erstkill (Zone 10) schaltet Skin + `slayer` frei; Bestands-Save mit
-     `bossDefeated` startet mit `highestZone ≥ 10`.
-  4. Worker-Tests: Upsert ersetzt nur bei größerer Zone; 9 M5-Tests bleiben grün oder werden
-     bewusst migriert.
-  5. Spiel voll spielbar ohne API (fail-silent, wie M5).
+  1. `RS_v2` Property-Test (§4.5-AC 1); Bestands-Bank schrumpft nie.
+  2. Meilenstein-Formel: `milestoneMult(1600) = 2⁸` etc. (Tests); `maxAffordable` bleibt
+     exakt für neue Tiers (Property gegen iterative Summe).
+  3. Vergoldung deterministisch (Seed ⇒ gleiches Ziel-Mitglied), überlebt Aszension (v4-Test).
+  4. Sim: 45-min-Run-Kette erreicht in ≤ 6 Runs Bühne ≥ 75 und Bank ≥ 500 RS (Baseline
+     §4.8 Messung 3, ±25 %); E1/E2/E4 grün.
+  5. Travel-Clamp 1..maxZone (Test); UI zeigt Farm-Bühne im HUD.
 
-### M10 — Prestige 2.0 (Seelen statt Additiv)
+### M10 — Ahnen & Ruhmes-Himmelfahrt (Schicht 2)
 
-- `game/souls.ts`: BS-Formel, Rebirth-Reset-Scope, `soulMult`; Migration `rebirths → 7·r BS` (B2).
-- Rebirth-UI mit Seelen-Vorschau; Offline-Rework (Cap 8 h, Coach-Anteil — B11-Basis).
-- `game/ancients.ts`: 9 Ahnen (Daten) + Kauf-UI im neuen 🌀-Tab.
+- `game/ancients.ts` (10 Ahnen, Daten; Kauf-Guard mit Caps) + 🌀-Ahnen-Tab.
+- `game/heaven.ts`: HPF-Formel, Himmelfahrts-Reset, Seelen-Verstärker
+  (`SOUL_BONUS_eff = 0.10 + 0.002·HPF`), Himmelsbaum-Grundknoten (Coaches, Nachtschicht,
+  Frühstarter, Ekstase-Ausdauer). CH-Save **v5**.
+- Offline final: Coach-Anteil in `offlineGold` (Rest von B11).
 - **Akzeptanzkriterien:**
-  1. `soulsFor` superlinear getestet; `soulMult` fließt in `effectiveClick` & Idle.
-  2. Reset-Scope-Snapshot-Test (Tabelle §4.5 exakt).
-  3. Migrationstest: NG+3-v4-Save ⇒ 21 BS, Einkommen ≥ Altstand (niemand wird schwächer).
-  4. Sim-Invarianten 1–3 aus §4.8 grün für Rebirth 1–10.
-  5. Ahnen-Caps enforced; ausgegebene Seelen senken `soulMult` (Test).
+  1. Ahnen-Kauf senkt `soulMult`, erhöht Perk (Bilanz-Test); Caps enforced.
+  2. Himmelfahrts-Reset-Scope exakt (RS/Ahnen fallen; Vergoldungen/Gear-Ansprüche bleiben —
+     Snapshot-Test).
+  3. HPF-Vorschau im Dialog; `HPF(1000) = 1`, `HPF(1e6) = 31` (Tests).
+  4. Sim: E3 grün (Zeit bis +50 % Macht ≤ 90 min über 20 Aszensionen); erste Himmelfahrt
+     im 5–9-h-Fenster (±25 %).
+  5. Coach klickt 1 cps × 25 % Klickwert idle + offline (Tests mit injizierter Clock).
 
-### M11 — Generatoren, Meilensteine & Coaches
+### M11 — Skins als Gear
 
-- 3 neue Generatoren (Daten); `milestoneMult` (§4.3.2) + Fortschrittsbalken im Shop.
-- Synergie-Upgrade „Muskel-Gedächtnis" (`type: 'syn'`, `deriveStats`-Erweiterung).
-- Twerk-Coaches (Himmelsbaum-Vorgriff: bis dahin via Ahnen-Platzhalter „Ekstasius"-Muster —
-  Entscheidung dokumentieren) + Offline-Formel final (B11 komplett).
+- `SkinConfig`-Erweiterung + 5 neue Skins (prozedural), `game/gear.ts`, Set-Boni,
+  Level/Sterne + 🧩/🍬-Ökonomie (§5); Kulissen-Wahl zurück (Auto-Rotation bleibt Default).
+  CH-Save **v6**; Erbe-Vormerkung Tyrann-Skin wird eingelöst.
 - **Akzeptanzkriterien:**
-  1. `milestoneMult(24/25/130/800)` = 1/2/8/32 (Tests).
-  2. Bulk-Buy-Formeln exakt (Vergleich gegen iterative Summe, Property-Test).
-  3. Klick-Invariante hält trotz Generator-Ausbaus (Sim-Messpunkte).
-  4. Shop zeigt Meilenstein-Fortschritt; Kauf aktualisiert in place (kein Full-Rebuild im Hot-Path).
+  1. `gearBonus` pure; Skin-Wechsel wirkt sofort auf `effectiveClick` (Test).
+  2. ≥ 2 Set-Boni per Test; 🍬 reift 1×/24 h, Uhr-Rückstellung ⇒ Klemmen statt Negativ-Timer.
+  3. Erbe: `bossDefeated`-Altsave ⇒ Tyrann verfügbar (Test).
+  4. Jede Skin-Karte zeigt Rarität/Buff/Level/Kosten.
+  5. E4 bleibt mit Best-in-Slot-Idle-Gear erfüllt (Sim-Messpunkt).
 
-### M12 — Skins als Gear
+### M12 — Pfirsich-Truhen & Loot
 
-- `SkinConfig`-Erweiterung + 5 neue Skins (prozedurale Styles), `game/gear.ts`, Set-Boni,
-  Level/Sterne + Splitter/Zuckerpfirsich-Ökonomie (§5, B9); Kulissen-Mini-Buffs.
-- Schema v5-Teil 3 (`gear`); Shop-Skin-Karten mit Rarität/Buff/Level.
+- `game/chests.ts` (Tiers, Tabellen, Pity, Luck), 🔑-Ökonomie, 🎁-Tab + Öffnungs-Animation,
+  Drop-Hooks an `HitResult`/Combo/Session; **Goldener Pfirsich kehrt zurück** (Event +
+  🔑-Chance; Spawn-Clamp bei Resize + Despawn bei offenem Sheet — B13c). CH-Save **v7**.
 - **Akzeptanzkriterien:**
-  1. `gearBonus` pure + getestet; Skin-Wechsel wirkt sofort auf `effectiveClick`.
-  2. Mind. 2 Set-Boni per Test; Alt-Saves erhalten Level 1/0 Sterne (Migrationstest).
-  3. Zuckerpfirsich reift 1×/24 h, Uhr-Rückstellung erzeugt keine Negativ-Timer (Test).
-  4. Jeder Skin zeigt seinen Buff im Shop (kein „nur Kosmetik"-Pfad mehr).
+  1. `openChest` deterministisch + Verteilungstest (10 k Ziehungen, χ²).
+  2. Pity-Grenzfall exakt; Luck-Umgewichtung getestet.
+  3. Loot-Tabellen im UI einsehbar; Animation skippbar.
+  4. Pfirsich despawnt bei Vollbild-Sheet; Position bei Resize geklemmt (Tests/Smoke).
+  5. Kein Echtgeld-/Netzwerk-Pfad (Review-Checkliste).
 
-### M13 — Pfirsich-Truhen & Loot
+### M13 — Meta, Retention & Leaderboard v2
 
-- `game/chests.ts` (Tiers, Tabellen, Pity, Luck), 🔑-Ökonomie, 🎁-Tab, Öffnungs-Animation,
-  Drop-Quellen (Bosse/Kills/Combo/Pfirsich/Session-Drip) (§6, B10).
-- Mobile-Feinschliff: Bottom-Sheet-Shop (B13a) + Pfirsich-Despawn bei offenem Sheet (B13c-Rest).
+- `game/quests.ts` (Daily/Streak/3 Quest-Slots, datums-seeded, Reroll), CH-natives
+  Achievement-Set, 📊-Statistik-Tab. CH-Save **v8**.
+- Leaderboard v2: Worker `scores_v2` (Upsert) + Client-Wiring (`lifetimeMaxZone`),
+  fail-silent wie M5; Alt-Tabelle laut §11-Entscheid.
 - **Akzeptanzkriterien:**
-  1. `openChest` deterministisch (Seed-Test) + Verteilungstest 10 000 Ziehungen.
-  2. Pity-Grenzfall exakt (11 Nieten ⇒ Treffer bei 12).
-  3. Loot-Tabellen im UI einsehbar (Transparenz-AC).
-  4. Bottom-Sheet: Figur bleibt beim Shoppen sichtbar (Screenshot-Nachweis TESTPLAN).
-  5. Kein Echtgeld-/Netzwerk-Pfad (Code-Review-Checkliste).
+  1. Quests deterministisch aus Datum; Reroll 1×/Tag; Uhr-Manipulation neutral (Tests).
+  2. Streak-Schutz-Logik getestet.
+  3. Worker: Upsert ersetzt nur bei größerer Zone; Rate-Limit greift (Fake-Tests).
+  4. Spiel voll spielbar ohne API; Submit-Prompt nur bei neuer Bestzone.
+  5. Statistik lifetime vs. run korrekt über Aszensionen/Himmelfahrten (Test).
 
-### M14 — Aszension & Himmelsbaum
+### M14 — Endless-QA, Transzendenz-Gerüst & Release 2.0
 
-- `HPF`-Formel, Aszensions-Reset, Himmelsbaum-Knoten (Daten) inkl. Beat-Drop/Pfirsichregen,
-  Coaches final an den Baum gehängt (§4.5.2).
+- `simulateEndless` voll ausgebaut (E1–E4 + Float-Guard, alle Systeme im Bot), CI-Pflicht.
+- Transzendenz-Gerüst hinter Feature-Flag (Formeln + Tests, UI aus — §11-Entscheid).
+- Performance-Pass (12-cps-Stress, Partikel-Messung, Lighthouse ≥ 85), TESTPLAN v2
+  (CH-Loop-Matrix: Bühnen, Bosse, Aszension, Himmelfahrt, Truhen, Mobile-Sheet),
+  itch-/Pages-Release. Legacy-Aufräum-Commit laut N4-Entscheid.
 - **Akzeptanzkriterien:**
-  1. Reset-Scope-Test L2 (BS/Ahnen fallen, Gear/Keys bleiben).
-  2. `hpfFor` getestet; Vorschau im Dialog.
-  3. Sim: erste Aszension im 6–10-h-Fenster (±25 %), Aszensions-Loop beschleunigt Rebirth-Loop
-     messbar (Invariante „jede Schicht drückt die Zeitkonstante der unteren").
-  4. Beide neuen Fähigkeiten deterministisch getestet.
-
-### M15 — Meta & Retention
-
-- Daily-Streak, 3 Quest-Slots (datums-seedbar), Saison-Gerüst, Statistik-Tab (§7.1–7.3, 7.5);
-  Transzendenz-Gerüst hinter Feature-Flag (Formeln drin, UI aus — Tuning nach §11-Entscheid).
-- **Akzeptanzkriterien:**
-  1. Quests deterministisch aus Datum; Reroll 1×/Tag (Tests).
-  2. Streak-Schutz-Logik getestet (inkl. Uhr-Manipulation ⇒ neutral).
-  3. Statistik über Rebirth/Aszension korrekt getrennt (lifetime vs. run).
-  4. Alles offline; keine neuen Netzwerkpfade außer Leaderboard v2.
-
-### M16 — Endless-QA & Release 2.0
-
-- `simulateEndless` als CI-Gate mit allen Invarianten (§9.5) inkl. Float-Guard (B15).
-- Performance-Pass (12-cps-Stress, Partikel-Messung, Lighthouse ≥ 85), TESTPLAN-v2
-  (neue Matrix: Tour, Truhen, Prestige-Schichten, Mobile-Sheet), itch-/Pages-Release.
-- **Akzeptanzkriterien:**
-  1. CI enthält `simulateEndless`-Suite; alle §4.8-Invarianten grün.
-  2. Bundle < 5 MB dokumentiert; 60 fps Referenzlauf dokumentiert.
-  3. Kompletter dokumentierter Playthrough: frischer Save → 3 Rebirths → 1 Aszension.
-  4. `README.md`/`DECISIONS.md`/`TESTPLAN.md` konsistent (kein B16-Rückfall).
+  1. CI enthält die komplette `simulateEndless`-Suite; E1–E4 grün.
+  2. Bundle < 5 MB dokumentiert; 60-fps-Referenzlauf dokumentiert.
+  3. Dokumentierter Playthrough: frischer Save → 3 Aszensionen → 1 Himmelfahrt.
+  4. Float-Guard grün bis Bühne 300 (HP ~1e58).
+  5. `README`/`DECISIONS`/`TESTPLAN` konsistent (kein B16-Rückfall).
 
 ---
 
 ## §11 Offene Fragen & Risiken (Entscheidungen für den Menschen)
 
-1. **Tuning-Konstanten sind Startwerte.** 1,55 (HP-Wachstum), 1,033 (Wand-Verhältnis), `^1.8`
-   (Seelen), `^0.6` (HPF), +10 %/Seele — alles über die Sim kalibrierbar, aber die *Zieltabelle*
-   §4.8 (erste Aszension nach 6–10 h?) ist Geschmackssache. → Bitte Pacing-Fenster bestätigen.
-2. **Rebirth-Migration:** 7 BS pro Alt-Rebirth ist großzügig geraten. Alternativ 3 (streng) oder
-   `soulsFor(10·rebirths)` (sehr großzügig). → Entscheid vor M10.
-3. **Boss-Zeit-Leaderboard:** archivieren (read-only Tab) oder komplett entfernen? D1-Daten
-   existieren ggf. schon. → Entscheid vor M9.
-4. **Transzendenz-Umfang** (L3): ×3^TE + Mythos-Content ist bewusst dünn spezifiziert; volle
-   Ausgestaltung erst mit Spieldaten aus L1/L2. Risiko: Wer M15 erreicht, könnte auf eine dünne
-   Schicht treffen. → Feature-Flag bis Tuning steht.
-5. **Float-Grenze:** Sollte das Transzendenz-Tuning BP > 1e60 pro Run erfordern, wird
-   `break_infinity.js` (+~25 KB, große Regression) ein eigener Milestone. Der Sim-Guard (§9.5)
-   ist unser Frühwarnsystem. → Bewusst akzeptiertes Restrisiko.
-6. **Scope-Risiko M12/M13** (Gear + Loot sind die dicksten Brocken): Beide sind bewusst *nach*
-   dem spielbaren Endless-Kern (M8–M10) einsortiert — bei Zeitdruck ist das Spiel ab M10 bereits
-   „endlos + klick-zentriert" shippable. → Bestätigen, dass M11–M15 einzeln verschiebbar sind.
-7. **Haptik/Autoclicker-Ethik:** Coaches (Auto-Klick) verwässern P1 minimal; Alternative wäre
-   „Coaches nur offline". → Geschmacksentscheidung, Default wie spezifiziert.
-8. **Saison-Events** sind rein datumsbasiert (kein Server): Zeitzonen-Kanten und „Datum
-   zurückstellen"-Cheese sind akzeptiert (Single-Player-Spaß > Wasserdichtheit). → Bestätigen.
+1. **Krit-Baseline 20 %/×5:** aus dem WIP-Glue übernommen und in die Messungen eingebacken.
+   Alternative (seltener/dicker: 10 %/×10, ähnlicher EV) wäre ein reiner Datentweak.
+   → Gefühlstest in M8, Entscheidung dokumentieren.
+2. **Erbe-Großzügigkeit:** 7 RS pro Legacy-Rebirth ist gesetzt, aber verhandelbar (3 = streng,
+   `RS_v2(10·rebirths)` = sehr großzügig). → vor M7 bestätigen.
+3. **RS_v2-Wachstum (1,10^z):** macht Seelenzahlen ab Bühne ~150 sehr groß (1,6 M bei z 150) —
+   gewollt (Zahlen-Rausch ist Genre-Charme, `fmt` kann es), aber die Ahnen-Kostenkurve
+   (`lv + 1` RS) braucht dann ggf. eine zweite, steilere Stufe. → Tuning-Review in M10.
+4. **Alte Boss-Zeit-Tabelle** (D1 `scores`): archivieren (read-only „Klassik"-Tab) oder
+   löschen? → vor M13.
+5. **Transzendenz-Umfang:** bewusst dünn (Flag). Wer M14 erreicht, könnte auf ein Gerüst
+   treffen — akzeptiert, solange das Flag aus bleibt, bis das Tuning steht. → M14-Review.
+6. **Float-Grenze:** Sollte Transzendenz-Tuning Werte > 1e60 pro Run erfordern, wird
+   `break_infinity` (+~25 KB, große Regression) ein eigener Milestone; der Sim-Guard ist das
+   Frühwarnsystem. → akzeptiertes Restrisiko.
+7. **Legacy-Code-Entfernung (N4):** Archiv-Zustand ist gewollt redundant; Entfernen erst nach
+   verschifftem Erbe-Import. Zeitpunkt (M8? M14?) → Geschmacksfrage, Default: M14.
+8. **Kulissen-Auto-Rotation vs. Wahl:** die MVP-Auto-Rotation ist charmant (Bühnenwechsel als
+   Belohnung); M11 macht sie zum Default mit Opt-out. → bestätigen.
+9. **Scope-Risiko M11/M12** (Gear + Loot sind die dicksten Brocken): beide liegen bewusst
+   _nach_ dem endlosen, klick-zentrierten Kern (M7–M10) — bei Zeitdruck ist das Spiel ab M10
+   bereits „endlos + geil klickbar" shippable. → bestätigen, dass M11–M13 einzeln
+   verschiebbar sind.
+10. **Saison-Events rein datumsbasiert** (kein Server): Zeitzonen-Kanten und
+    „Datum-zurückstellen"-Cheese akzeptiert (Single-Player-Spaß > Wasserdichtheit). → bestätigen.
 
 ---
 
-*Ende der Spec. Nächster Schritt für Agents: M7 starten (Quick Wins), jede nicht-offensichtliche
-Entscheidung in `DECISIONS.md` loggen, und `simulatePlaythrough` bei jedem Balancing-Touch
-mitziehen, bis `simulateEndless` (M16) übernimmt.*
+_Ende der Spec. Der MVP ist committet & verifiziert — **nächster Schritt für Agents: M7
+(Härtung)**, dann strikt der Reihe nach weiter (§0.3-Index). Jede nicht-offensichtliche
+Entscheidung in `DECISIONS.md` loggen; ab M9 ersetzt `simulateEndless` den alten
+`simulatePlaythrough` als Balancing-Gate._
