@@ -1,7 +1,9 @@
-# Booty Clicker · Anatomy Edition
+# Booty Clicker · Endless Twerk
 
-Joke-Clicker-Game in Three.js + TypeScript, gebaut mit Vite.
-(Der ursprüngliche Ein-Datei-Prototyp liegt read-only unter [`legacy/index.html`](./legacy/index.html).)
+Ein **endloser Idle-/Clicker im Clicker-Heroes-Stil**, thematisiert als Twerk-Show —
+gebaut mit Three.js + TypeScript + Vite. Twerke dich durch unendlich viele Bühnen,
+rekrutiere deine Crew und werde zur Twerk-Legende. (Der ursprüngliche Ein-Datei-Prototyp
+liegt read-only unter [`legacy/index.html`](./legacy/index.html).)
 
 ## Starten
 
@@ -11,101 +13,65 @@ npm run dev        # Dev-Server (Vite, HMR) → http://localhost:5173
 ```
 
 Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 MB),
-`npm test` (Vitest), `npm run lint`, `npm run format`.
-Three.js kommt als npm-Paket (kein CDN). Projekt-Struktur & Milestones: siehe
-[`AGENTS.md`](./AGENTS.md) und [`booty-clicker-spec.md`](./booty-clicker-spec.md).
+`npm run build:itch` (itch.io-ZIP), `npm test` (Vitest), `npm run lint`, `npm run format`.
+
+## So spielt es sich
+
+- **Twerken = Schaden.** Klick auf die Figur oder drück die Leertaste — jeder Shake
+  macht Schaden am aktuellen Rivalen. Aktives Klicken ist der Kern: **Crits** (×5) und
+  ein **Combo-Multiplikator** belohnen schnelles Twerken.
+- **Bühnen (Zonen).** Besiege 10 Rivalen, um eine Bühne zu räumen. Die Ausdauer (HP)
+  der Rivalen wächst exponentiell — es geht **endlos** weiter.
+- **Crew = Idle-DPS.** Heuere im 🕺-Tab Tänzer:innen an (Booty-Boss → Twerk-Legende)
+  und level sie (×1 / ×10 / Max). Ihre DPS ticken die Rivalen-HP auch ohne Klicken
+  herunter — und pushen zusätzlich deinen Klick-Schaden.
+- **Bosse.** Jede 5. Bühne ist ein Boss mit **30-Sekunden-Timer**. Schaffst du ihn
+  nicht, farmst du die Bühne weiter und forderst ihn erneut heraus (kein Soft-Lock).
+- **Ruhm-Seelen (Ascension).** Starte deine Tournee im ✨-Tab neu und sammle Seelen —
+  **+10 % Schaden pro Seele, dauerhaft**. Seelen hängen an deiner tiefsten je erreichten
+  Bühne (kein Farm-Exploit). Das ist der Motor, der das Spiel endlos macht:
+  tiefer → mehr Seelen → mehr Schaden → tiefer.
+- **Idle & Offline.** Deine Crew farmt weiter, während du weg bist (50 % Rate, max. 8 h)
+  — beim Wiedereinstieg gibt's eine „Willkommen zurück"-Zusammenfassung.
 
 ## Steuerung
 
-- Klick auf Figur / Leertaste = Shaken (BP verdienen)
+- Klick auf Figur / Leertaste = Twerken (Schaden)
 - Maus ziehen = Kamera drehen, Scrollen = Zoom
-- Shop (rechts): Upgrades, Skins, Kulissen, Einstellungen (⚙️)
-- 🛒-Button (links oben) blendet den Shop ein/aus
+- 🕺-Button (links oben) blendet das Panel ein/aus · 🔊 = Ton an/aus
+- Tabs: **🕺 Crew** · **✨ Ruhm** (Ascension + Statistik) · **⚙️** (Grafik, Effekte,
+  Save-Export/Import/Reset)
 
-## Progression & Boss-Finale (M2)
+## Architektur
 
-- **Balancing als Daten**: die Upgrade-Kosten in `economy.ts` folgen einer
-  dokumentierten Ziel-Kurve — optimales Spiel erreicht den Boss-Unlock bei
-  50 000 BP nach ~40 min (verifiziert durch einen reinen Bot-Playthrough-Test).
-- **Content-Gates**: Skins & Kulissen erscheinen erst ab BP-Meilensteinen im Shop.
-- **Boss-Fight** (👑 „Tyrann herausfordern", ab 50 000 BP): 90-Sekunden-Kampf gegen
-  den Goldenen Twerk-Tyrann, Klick-Schaden skaliert mit `perClick`. Sieg schaltet
-  den Tyrann-Skin frei; verloren gibt's einen Retry mit 25 % weniger Boss-HP.
-- **Rebirth (NG+)**: ab 100 000 BP im ⚙️-Tab — setzt BP & Upgrades zurück und
-  gewährt dauerhaft +100 % Multiplikator (kumulativ), NG+-Badge im HUD.
+npm-Workspaces-Monorepo:
 
-## UX, Mobile & Release (M6)
+- `apps/game` — der Spiel-Client (Vite + TS, strict). Reine, unit-getestete Kern-Logik
+  vs. dünne DOM/Three/Audio-Glue:
+  - `game/combat.ts` — Zonen-/Rivalen-Loop: `monsterHp(zone)=10·1.6^(zone-1)`, 10 Rivalen/Zone,
+    Boss alle 5 Zonen (HP ×10) mit 30 s-Timer, Gold `ceil(HP/15)` (Boss ×12), reine Reducer.
+  - `game/heroes.ts` — 10er-Crew, `1.07`-Kostenwachstum, ×2-Meilenstein-Verdopplungen,
+    Klick-Schaden = Basis + Anteil der Gesamt-DPS.
+  - `game/ascension.ts` — `soulsForMaxZone(z)=⌊z^1.6/40⌋`, +10 %/Seele, an Lifetime-Zone gepinnt.
+  - `game/ch-state.ts` + `save/ch-store.ts` — CH-State, eigener versionierter Save-Key
+    (`bootyclicker.ch`), Offline-Gold, Base64-Export/Import (never-throw, injizierbar).
+  - `ui/*` — HUD/Rival, Crew, Prestige, Settings; `main.ts` verdrahtet alles + Render-Loop.
+- `apps/api` — optionaler Cloudflare-Worker (Hono + D1 + KV) als Bestenlisten-Backend.
 
-- **Onboarding**: drei nicht-blockierende Coach-Marks beim ersten Start (danach
-  nie wieder), gespeichert im `bootyclicker.settings`-Key.
-- **Grafik-Einstellungen** im ⚙️-Tab: Qualität (Niedrig/Mittel/Hoch → Pixel-Ratio
-  & Schatten) und optionales FPS-Limit (0/30/60) — live angewendet & gespeichert.
-- **Mobile**: Tippen = Shaken, Ziehen = Kamera drehen (Pointer-Events + Tap-Test),
-  responsiver Vollbild-Shop und größere Touch-Targets unter 640 px.
-- **Loading-Screen** bis zum ersten Frame; Tab-Titel zeigt die aktuellen BP;
-  OpenGraph/Twitter-Meta.
-- **itch.io-Export**: `npm run build:itch` erzeugt `apps/game/release/booty-clicker-itch.zip`
-  (relative Pfade, läuft aus einem lokalen Ordner). Cloudflare-Pages-Deploy via CI
-  auf `main` (übersprungen ohne Secrets). QA-Checkliste: [`TESTPLAN.md`](./TESTPLAN.md).
+Audio ist komplett **prozedural** (Web Audio, keine Dateien). Three.js kommt als
+npm-Paket (kein CDN). Zahlen werden bis Decillion + wissenschaftliche Notation formatiert,
+damit die exponentielle Kurve endlos lesbar bleibt.
 
-## Bestenliste (M5)
+## Design-Dokumente
 
-- **Optionaler** globaler Highscore (Boss-Kill-Zeit) über einen Cloudflare Worker
-  (`apps/api`, Hono + D1 + KV). Endpunkte: `POST /api/scores`, `GET /api/scores/top`.
-- **Komplett fail-silent** (Spec §4.4): ohne erreichbare/konfigurierte API ist das
-  Spiel voll spielbar — der Client (`VITE_API_BASE`) ist standardmäßig aus.
-- Nach einem Boss-Sieg optionaler (überspringbarer) Eintrag; Top-50 im ⚙️-Tab.
-- Kein PII außer dem frei gewählten Nickname (`[a-zA-Z0-9_ ]`, 2–16).
-- Worker lokal: `cd apps/api && npx wrangler dev` (siehe `apps/api/wrangler.toml`).
-
-## Game Feel & Content (M4)
-
-- **18 Achievements** mit Toast-Benachrichtigung und eigenem 🏆-Shop-Tab.
-- **Klick-Partikel** (GPU-Points-Pool, max. 200) sprühen bei jedem Shake.
-- **Screen-Shake** bei Combo-Meilensteinen — im ⚙️-Tab abschaltbar (wie die Partikel).
-- **Random Event „Goldener Pfirsich"** 🍑: erscheint alle 90–240 s für 8 s; fangen
-  gibt 60 s lang ×3 Einkommen. Timing überlebt Reload.
-- **4 Endgame-Upgrades** (Pfirsich-Reaktor, Hüftgold-Mine, Twerk-Singularität,
-  Booty-Blackhole) für die Kurve nach dem Boss.
-
-## Audio (M3)
-
-- Komplett **prozedural** per Web Audio API erzeugt — keine Audiodateien, winzige
-  Bundle-Größe, lizenzfrei (Details in [`apps/game/public/CREDITS.md`](./apps/game/public/CREDITS.md)).
-- **Musik**: pro Kulisse ein generativer Loop (Bass + Arpeggio + Hi-Hat).
-- **SFX**: Shake/Klick, Kauf, Freischaltung, Combo, Beat-Klatschen (synchron zur
-  Choreografie), Boss-Treffer/Sieg/Niederlage.
-- **Kein Autoplay**: der AudioContext startet erst nach der ersten Nutzer-Geste.
-- **Mute** (🔊-Button oben links) wirkt sofort und wird gespeichert.
-
-## Persistenz (M1)
-
-- **Autosave**: alle 10 Sekunden, beim Wechsel in den Hintergrund-Tab und beim
-  Schließen/Verlassen der Seite (`localStorage`, Schema-Version 3, migriert v1/v2).
-- **Offline-Ertrag**: beim Wiedereinstieg gibt's 50 % des passiven Ertrags für die
-  Zeit, die man weg war (gedeckelt auf 2 Stunden) — angezeigt im
-  "Willkommen zurück"-Dialog.
-- **Export/Import/Reset**: im Shop-Tab ⚙️ lässt sich der Spielstand als
-  Base64-Code exportieren/importieren (z. B. zum Umziehen auf ein anderes
-  Gerät) oder komplett zurücksetzen.
-
-## Features
-
-- Anatomisches Skelett-Rig (~7-Kopf-Proportionen) mit Ellbogen/Knien
-- Choreografie-System: 5 Tanzmoves (Twerk, Hip Circles, Drop It Low, Shimmy, Bounce)
-- Feder-Dämpfer-Soft-Body-Physik (120 Hz Fixed Timestep) mit Gravitation
-- 5 Skins: Klassiker, Disco-King, Robo-Twerk 3000, Der Showmaster, Goldener Twerk-Tyrann
-- 4 Kulissen: Neon-Club, Synthwave, Sunset Beach, Deep Space
-- 7 Upgrades, Combo-System, ACES-Tonemapping, PBR-Materialien
-- Boss-Finale, Prestige/Rebirth, Content-Gates (M2)
-
-## Roadmap (siehe Gameplan)
-
-Alle Meilensteine **M0–M6** sind erledigt — Persistenz, Boss + Balancing, Audio,
-Game Feel & Content, Bestenliste sowie UX/Mobile/Release (siehe oben). Release-QA
-und Playthrough-Timing: [`TESTPLAN.md`](./TESTPLAN.md).
+- [`booty-clicker-spec.md`](./booty-clicker-spec.md) — ursprüngliche Spec (M0–M6).
+- [`booty-clicker-v2-spec.md`](./booty-clicker-v2-spec.md) — endlose, klick-zentrierte
+  Neugestaltung mit ausführlicher Roadmap (Skins-als-Gear, Truhen, mehrschichtiges
+  Prestige, Ancients, …). Dieser MVP ist die erste Stufe davon.
+- [`DECISIONS.md`](./DECISIONS.md) — Log der Engineering-Entscheidungen.
+- [`TESTPLAN.md`](./TESTPLAN.md) — QA-Checkliste.
 
 ## Lizenz-Hinweise
 
 - Three.js: MIT License (https://threejs.org)
-- Alle Modelle/Shader: selbst erstellt (prozedural)
+- Alle Modelle/Shader/Sounds: selbst erstellt (prozedural)

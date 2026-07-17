@@ -3,6 +3,42 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## CH-MVP — Umbau auf Clicker-Heroes-Loop (endlos)
+
+- **2026-07-17 — Produkt-Pivot auf einen Clicker-Heroes-Kern.** Auf Wunsch
+  („komplette MVP für Clicker Heroes, auf Booty Clicker umgestellt") wurde das
+  flache AdCap-artige Klickspiel zu einem endlosen Zonen-/DPS-Loop umgebaut:
+  Twerk-Klick = Schaden am Rivalen, Crew = Idle-DPS, 10 Rivalen/Zone, Boss alle 5
+  Zonen mit Timer, Ascension → Ruhm-Seelen. „Hauptinhalt = Klicken" wird durch
+  Crits (×5 @ 20 %) + Combo-Multiplikator und die Kopplung Klick-Schaden ∝ DPS
+  umgesetzt; „nie durchspielbar" durch exponentielle Zonen-HP + seelenbasierte,
+  an die Lifetime-Zone gepinnte Prestige-Skalierung.
+
+- **2026-07-17 — Eigener Save-Key statt Migration der v4-Kette.** Der CH-Modus
+  persistiert unter `bootyclicker.ch` (eigenes v1-Schema, never-throw, injizierbar),
+  statt das alte `SCHEMA_VERSION`/`migrate`-Layer (62 Tests) umzubauen. So bleibt
+  die Legacy-Save-Schicht grün und der neue Loop entkoppelt.
+
+- **2026-07-17 — Reiner, testbarer Kern für die neue Ökonomie.** `combat.ts`,
+  `heroes.ts`, `ascension.ts`, `ch-state.ts`, `ch-store.ts` sind DOM-frei und
+  deterministisch (40 neue Unit-Tests): HP/Gold-Formeln, Reducer `hit/tickBoss`,
+  Kostenreihen (`bulkCost`/`maxAffordable`), Seelen-Formel + Exploit-Schutz
+  (`Math.max`-Boden, Pinning an Lifetime-Zone), Offline-Gold (8 h/50 %).
+
+- **2026-07-17 — Idle-Schaden: ein Treffer pro Frame.** Der Loop wendet
+  `dps·dt` als einen `hit()` pro Frame an (kein Damage-Carry-over). Am Frontier-Wall
+  (DPS < Rivalen-HP) irrelevant; nur beim Über-Farmen weit unter Level würde Schaden
+  „verpuffen" — dort ist Clearing ohnehin trivial. Hält die Boss-Timer-Logik simpel.
+  (Offline nutzt die geschlossene Formel `dps/HP·Gold`, also frameraten-unabhängig.)
+
+- **2026-07-17 — Legacy-Module bleiben liegen, tree-shaken aber raus.** Die
+  M0–M6-UI/Ökonomie (shop/hud/boss/settings/leaderboard/economy/progression/…)
+  wird von `main.ts` nicht mehr importiert; ihre Tests bleiben grün, der Bundle
+  fällt auf ~566 KB. Aufräumen/Entfernen ist eine spätere Aufgabe.
+
+- **2026-07-17 — Bug B4 (v2-Spec) mitgefixt:** `keydown` mit `e.repeat` twerkt nicht
+  mehr — gehaltene Leertaste ist kein Gratis-Autoclicker mehr.
+
 ## M6 — UX, Polish & Release
 
 - **2026-07-17 — Settings extended in place, not a new schema.** `quality`
