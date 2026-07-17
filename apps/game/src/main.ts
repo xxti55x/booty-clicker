@@ -9,16 +9,22 @@ import { DT, renderCheeks, stepPhysics } from './character/physics';
 import { SKINS } from './character/skins';
 import { Choreographer } from './choreo/moves';
 import { createControls } from './engine/camera';
+import { ParticleSystem } from './engine/particles';
 import { createScene } from './engine/scene';
+import { buildAchievementCtx, newlyUnlocked } from './game/achievements';
 import { COMBO_WINDOW_S, clickGain, createUpgrades, passiveGain } from './game/economy';
+import { activateBoost, incomeMultiplier, PEACH_VISIBLE_S, rollNextPeachAt } from './game/events';
 import { applyRebirth, BOSS_UNLOCK_BP } from './game/progression';
+import { loadSettings } from './game/settings';
 import { createGameState, createRuntimeState } from './game/state';
 import { applySave, computeOfflineEarnings, loadGame, resetSave, saveGame } from './save/store';
+import { AchievementsUI } from './ui/achievements';
 import { BossFight } from './ui/boss';
 import { fmt } from './ui/format';
 import { Hud } from './ui/hud';
 import { Settings } from './ui/settings';
 import { Shop } from './ui/shop';
+import { Toasts } from './ui/toasts';
 import { World } from './world/backgrounds';
 
 /**
@@ -44,6 +50,8 @@ if (loaded) {
   offlineEarned = computeOfflineEarnings(offlineEarnedMs, state.perSec, state.mult);
   state.bp += offlineEarned;
 }
+if (state.nextPeachAt === 0) state.nextPeachAt = rollNextPeachAt(Date.now());
+const effects = loadSettings();
 
 const hud = new Hud();
 const choreo = new Choreographer();
@@ -61,6 +69,7 @@ const shop = new Shop({
   onPurchase: () => {
     hud.update(state);
     audio.buy();
+    checkAchievements();
   },
   rebuildCharacter: (key) => {
     char = buildCharacter(scene, SKINS[key], char);
@@ -75,6 +84,10 @@ world.setBackground(state.bg);
 audio.setBackground(state.bg);
 choreo.setMove(0);
 hud.update(state);
+
+const toasts = new Toasts();
+const achUI = new AchievementsUI(state);
+const particles = new ParticleSystem(scene);
 
 // ---------- persistence ----------
 let suppressSave = false;
@@ -115,7 +128,9 @@ const settings = new Settings({
     hud.update(state);
     persist();
     syncEndgameUi();
+    checkAchievements();
   },
+  effects,
 });
 if (offlineEarned >= 1) settings.showWelcomeBack(offlineEarnedMs, offlineEarned);
 
@@ -158,6 +173,7 @@ const bossFight = new BossFight({
     persist();
     syncEndgameUi();
     audio.bossWin();
+    checkAchievements();
   },
   onLose: () => audio.bossLose(),
   onExit: () => {
@@ -187,21 +203,83 @@ function syncEndgameUi(): void {
 }
 syncEndgameUi();
 
+// ---------- achievements, particles, peach event ----------
+const particleTmp = new THREE.Vector3();
+let shakeMag = 0;
+
+function checkAchievements(): void {
+  const ctx = buildAchievementCtx(state, upgrades);
+  const already = new Set(state.achievements);
+  const fresh = newlyUnlocked(ctx, already);
+  if (fresh.length === 0) return;
+  for (const a of fresh) {
+    state.achievements.push(a.id);
+    toasts.show(a.icon, a.name, a.desc);
+  }
+  achUI.render();
+  persist();
+}
+
+const peachBtn = document.getElementById('peach') as HTMLButtonElement;
+const boostBadge = document.getElementById('boostBadge') as HTMLElement;
+let peachVisible = false;
+let peachHideAt = 0;
+
+function showPeach(now: number): void {
+  peachVisible = true;
+  peachHideAt = now + PEACH_VISIBLE_S * 1000;
+  peachBtn.style.left = `${80 + Math.random() * Math.max(40, window.innerWidth - 200)}px`;
+  peachBtn.style.top = `${120 + Math.random() * Math.max(40, window.innerHeight - 320)}px`;
+  peachBtn.classList.remove('hidden');
+}
+function hidePeach(): void {
+  peachVisible = false;
+  peachBtn.classList.add('hidden');
+}
+function updatePeach(now: number): void {
+  if (!peachVisible && now >= state.nextPeachAt && !bossFight.engaged) {
+    showPeach(now);
+  } else if (peachVisible && now >= peachHideAt) {
+    hidePeach();
+    state.nextPeachAt = rollNextPeachAt(now);
+    persist();
+  }
+}
+peachBtn.addEventListener('click', () => {
+  const now = Date.now();
+  state.boostUntil = activateBoost(now);
+  state.peachesClicked += 1;
+  hidePeach();
+  state.nextPeachAt = rollNextPeachAt(now);
+  audio.unlockJingle();
+  persist();
+  checkAchievements();
+});
+
 // ---------- input ----------
 function doShake(cx?: number, cy?: number): void {
   if (bossFight.engaged) {
     bossFight.hit();
     return;
   }
-  const gain = clickGain(state.perClick, state.mult, runtime.combo);
+  const gain =
+    clickGain(state.perClick, state.mult, runtime.combo) *
+    incomeMultiplier(state.boostUntil, Date.now());
   state.bp += gain;
   runtime.combo++;
+  state.totalClicks += 1;
+  if (runtime.combo > state.maxCombo) state.maxCombo = runtime.combo;
   runtime.comboTimer = COMBO_WINDOW_S;
   runtime.drive = Math.min(runtime.drive + 1.2, 6);
   char.cheeks.forEach((c) => {
     c.vy += (Math.random() * 2 - 1) * 2.6;
     c.vx += (Math.random() * 2 - 1) * 2.6;
   });
+  if (effects.particles) {
+    char.rig.pelvis.getWorldPosition(particleTmp);
+    particles.burst(particleTmp.x, particleTmp.y, particleTmp.z);
+  }
+  if (effects.screenShake && runtime.combo > 0 && runtime.combo % 25 === 0) shakeMag = 0.35;
   if (++runtime.clicksSinceSwitch >= 18) {
     runtime.clicksSinceSwitch = 0;
     choreo.setMove(choreo.moveIdx + 1);
@@ -210,6 +288,7 @@ function doShake(cx?: number, cy?: number): void {
   shop.renderUpgrades();
   audio.click();
   if (runtime.combo > 2 && runtime.combo % 5 === 0) audio.combo(runtime.combo);
+  checkAchievements();
 }
 
 // A pointer that moved past a small threshold is an orbit drag, not a shake.
@@ -258,7 +337,8 @@ function loop(): void {
   const dt = Math.min(clock.getDelta(), 0.05);
   t0 += dt;
   if (!bossFight.engaged) {
-    state.bp += passiveGain(state.perSec, state.mult, dt);
+    state.bp +=
+      passiveGain(state.perSec, state.mult, dt) * incomeMultiplier(state.boostUntil, Date.now());
   }
   if (state.bp > state.maxBp) state.maxBp = state.bp;
   bossFight.update(dt);
@@ -273,20 +353,37 @@ function loop(): void {
     acc -= DT;
   }
   renderCheeks(char.rig, char.cheeks);
+  particles.update(dt);
   const beatV = Math.max(0, Math.sin(choreo.phase * 2.2));
   beat.intensity = beatV * runtime.drive * 4;
   if (beatTracker.update(choreo.phase)) audio.beat(0.5 + runtime.drive * 0.08);
   world.anims.forEach((a) => a(t0, beatV));
   hud.update(state);
 
-  // Throttled UI: content-gate reveals, rebirth eligibility, boss-fight button.
+  // Throttled UI: reveals, rebirth eligibility, boss button, achievements, peach.
   uiTimer -= dt;
   if (uiTimer <= 0) {
     uiTimer = 0.25;
+    const now = Date.now();
     syncEndgameUi();
+    checkAchievements();
+    updatePeach(now);
+    boostBadge.classList.toggle('hidden', incomeMultiplier(state.boostUntil, now) <= 1);
   }
 
   controls.update();
-  renderer.render(scene, camera);
+  if (shakeMag > 0.001) {
+    shakeMag *= Math.pow(0.0009, dt); // fast decay
+    const ox = (Math.random() * 2 - 1) * shakeMag;
+    const oy = (Math.random() * 2 - 1) * shakeMag;
+    camera.position.x += ox;
+    camera.position.y += oy;
+    renderer.render(scene, camera);
+    camera.position.x -= ox;
+    camera.position.y -= oy;
+  } else {
+    shakeMag = 0;
+    renderer.render(scene, camera);
+  }
 }
 loop();

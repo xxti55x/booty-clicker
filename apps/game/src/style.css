@@ -465,3 +465,129 @@ body {
   margin-bottom: 6px;
   line-height: 1.4;
 }
+
+/* ---- M4: toasts, achievements, golden peach, boost, effect toggles ---- */
+.toasts {
+  position: fixed;
+  left: 50%;
+  bottom: 60px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 45;
+  pointer-events: none;
+  align-items: center;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(20, 20, 28, 0.95);
+  border: 1px solid rgba(168, 232, 49, 0.4);
+  border-radius: 14px;
+  padding: 10px 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  animation: toastin 0.3s ease-out;
+  transition:
+    opacity 0.4s,
+    transform 0.4s;
+}
+.toast.out {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.toast .ti {
+  font-size: 22px;
+}
+.toast .tn {
+  font-size: 13px;
+  font-weight: 700;
+  color: #a8e831;
+}
+.toast .ts {
+  font-size: 11px;
+  color: #9a9aad;
+}
+@keyframes toastin {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.ach-head {
+  font-size: 13px;
+  font-weight: 700;
+  color: #a8e831;
+  margin-bottom: 10px;
+  text-align: center;
+}
+.ach {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 9px 11px;
+  margin-bottom: 8px;
+}
+.ach.locked {
+  opacity: 0.4;
+  filter: grayscale(0.7);
+}
+.ach .ai {
+  font-size: 22px;
+}
+.ach .an {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.ach .ad {
+  font-size: 11px;
+  color: #9a9aad;
+}
+.peach {
+  position: fixed;
+  z-index: 35;
+  width: 56px;
+  height: 56px;
+  border: none;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffd24d, #ff8a4d);
+  font-size: 30px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(255, 138, 77, 0.6);
+  animation: peachpulse 0.9s ease-in-out infinite;
+}
+.peach.hidden {
+  display: none;
+}
+@keyframes peachpulse {
+  0%,
+  100% {
+    transform: scale(1) rotate(-6deg);
+  }
+  50% {
+    transform: scale(1.12) rotate(6deg);
+  }
+}
+.boostbadge {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #ff8a4d;
+  animation: peachpulse 0.9s ease-in-out infinite;
+}
+.boostbadge.hidden {
+  display: none;
+}
+.btn.toggle {
+  background: rgba(255, 255, 255, 0.07);
+  color: #e8e8ef;
+}

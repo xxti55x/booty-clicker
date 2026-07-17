@@ -32,6 +32,7 @@ export class Shop {
     up: this.tabUp,
     sk: this.tabSk,
     bg: this.tabBg,
+    ach: byId('tabAch'),
     set: byId('tabSet'),
   };
 
