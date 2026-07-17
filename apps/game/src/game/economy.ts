@@ -120,6 +120,43 @@ export const UPGRADES: readonly UpgradeConfig[] = [
     type: 'mult',
     val: 1.5,
   },
+  // ---- M4 endgame upgrades (all base > REBIRTH_BP, so the M2 curve is untouched) ----
+  {
+    id: 'reactor',
+    name: 'Pfirsich-Reaktor',
+    ds: '+300 BP / Sekunde',
+    base: 250000,
+    gr: 1.2,
+    type: 'sec',
+    val: 300,
+  },
+  {
+    id: 'goldmine',
+    name: 'Hüftgold-Mine',
+    ds: '+120 BP pro Shake',
+    base: 600000,
+    gr: 1.22,
+    type: 'click',
+    val: 120,
+  },
+  {
+    id: 'quantum',
+    name: 'Twerk-Singularität',
+    ds: 'x2 Gesamt-Multiplikator',
+    base: 1500000,
+    gr: 2.5,
+    type: 'mult',
+    val: 2,
+  },
+  {
+    id: 'blackhole',
+    name: 'Booty-Blackhole',
+    ds: '+2000 BP / Sekunde',
+    base: 5000000,
+    gr: 1.25,
+    type: 'sec',
+    val: 2000,
+  },
 ];
 
 /** Instantiate the upgrade catalogue at level 0 for a fresh game. */

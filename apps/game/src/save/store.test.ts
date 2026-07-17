@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createUpgrades, deriveStats, type UpgradeState } from '../game/economy';
 import { createGameState } from '../game/state';
-import type { SaveDataV3 } from './schema';
+import type { SaveDataV4 } from './schema';
 import {
   applySave,
   computeOfflineEarnings,
@@ -52,6 +52,12 @@ describe('serialize / saveGame / loadGame / applySave — round-trip', () => {
     state.rebirths = 1;
     state.prestigeMult = 2;
     state.bossDefeated = true;
+    state.achievements = ['first', 'coins'];
+    state.totalClicks = 42;
+    state.maxCombo = 17;
+    state.peachesClicked = 3;
+    state.nextPeachAt = 5_000_000;
+    state.boostUntil = 6_000_000;
 
     saveGame(state, upgrades, store);
     const loaded = loadGame(store);
@@ -73,6 +79,12 @@ describe('serialize / saveGame / loadGame / applySave — round-trip', () => {
     expect(freshState.rebirths).toBe(1);
     expect(freshState.prestigeMult).toBe(2);
     expect(freshState.bossDefeated).toBe(true);
+    expect(freshState.achievements).toEqual(['first', 'coins']);
+    expect(freshState.totalClicks).toBe(42);
+    expect(freshState.maxCombo).toBe(17);
+    expect(freshState.peachesClicked).toBe(3);
+    expect(freshState.nextPeachAt).toBe(5_000_000);
+    expect(freshState.boostUntil).toBe(6_000_000);
 
     // Derived stats are rebuilt from levels with the prestige multiplier folded in.
     const expected = deriveStats(freshUpgrades, { perClick: 1, perSec: 0, mult: 2 });
@@ -92,7 +104,7 @@ describe('serialize / saveGame / loadGame / applySave — round-trip', () => {
 
 describe('loadGame — corrupt data never throws, always falls back to fresh start', () => {
   const validElse = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     upgrades: {},
     skin: 'classic',
     bg: 'club',
@@ -102,6 +114,12 @@ describe('loadGame — corrupt data never throws, always falls back to fresh sta
     prestigeMult: 1,
     rebirths: 0,
     bossDefeated: false,
+    achievements: [],
+    totalClicks: 0,
+    maxCombo: 0,
+    peachesClicked: 0,
+    nextPeachAt: 0,
+    boostUntil: 0,
   };
 
   const badRaws: string[] = [
@@ -124,6 +142,11 @@ describe('loadGame — corrupt data never throws, always falls back to fresh sta
     JSON.stringify({ ...validElse, bp: 1, rebirths: 1.5 }),
     JSON.stringify({ ...validElse, bp: 1, bossDefeated: 'yes' }),
     JSON.stringify({ ...validElse, bp: 1, maxBp: -1 }),
+    // v4 fields.
+    JSON.stringify({ ...validElse, bp: 1, achievements: 'nope' }),
+    JSON.stringify({ ...validElse, bp: 1, achievements: [1, 2] }),
+    JSON.stringify({ ...validElse, bp: 1, totalClicks: -1 }),
+    JSON.stringify({ ...validElse, bp: 1, boostUntil: -5 }),
   ];
 
   it.each(badRaws)('raw payload %#: results in null, never throws', (raw) => {
@@ -133,7 +156,7 @@ describe('loadGame — corrupt data never throws, always falls back to fresh sta
     expect(loadGame(store)).toBeNull();
   });
 
-  it('a fully valid v3 payload loads (sanity — the base is not itself corrupt)', () => {
+  it('a fully valid v4 payload loads (sanity — the base is not itself corrupt)', () => {
     const store = memStorage();
     store.setItem(SAVE_KEY, JSON.stringify({ ...validElse, bp: 7 }));
     expect(loadGame(store)).not.toBeNull();
@@ -220,19 +243,25 @@ describe('export / import', () => {
 });
 
 describe('applySave — hardening against tampered/partial saves', () => {
-  function baseSave(overrides: Partial<SaveDataV3> = {}): SaveDataV3 {
+  function baseSave(overrides: Partial<SaveDataV4> = {}): SaveDataV4 {
     return {
-      schemaVersion: 3,
+      schemaVersion: 4,
       bp: 10,
       upgrades: {},
       skin: 'classic',
       bg: 'club',
-      unlocked: {} as SaveDataV3['unlocked'],
+      unlocked: {} as SaveDataV4['unlocked'],
       lastSeen: Date.now(),
       maxBp: 0,
       prestigeMult: 1,
       rebirths: 0,
       bossDefeated: false,
+      achievements: [],
+      totalClicks: 0,
+      maxCombo: 0,
+      peachesClicked: 0,
+      nextPeachAt: 0,
+      boostUntil: 0,
       ...overrides,
     };
   }

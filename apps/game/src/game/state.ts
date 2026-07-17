@@ -17,6 +17,18 @@ export interface GameState {
   rebirths: number;
   /** Whether the boss has ever been defeated (permanent skin unlock). */
   bossDefeated: boolean;
+  /** Unlocked achievement ids (M4). */
+  achievements: string[];
+  /** Lifetime shake count (M4 achievements). */
+  totalClicks: number;
+  /** Highest combo ever reached (M4 achievements). */
+  maxCombo: number;
+  /** Golden peaches clicked (M4 achievements). */
+  peachesClicked: number;
+  /** Epoch ms when the next Golden Peach appears (M4 event, persisted). */
+  nextPeachAt: number;
+  /** Epoch ms until which the ×3 income boost is active (M4 event, persisted). */
+  boostUntil: number;
 }
 
 /** A fresh game. */
@@ -33,6 +45,12 @@ export function createGameState(): GameState {
     prestigeMult: 1,
     rebirths: 0,
     bossDefeated: false,
+    achievements: [],
+    totalClicks: 0,
+    maxCombo: 0,
+    peachesClicked: 0,
+    nextPeachAt: 0,
+    boostUntil: 0,
   };
 }
 
