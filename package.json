@@ -12,7 +12,7 @@
     "dev": "npm run dev -w apps/game",
     "build": "npm run build -w apps/game",
     "preview": "npm run preview -w apps/game",
-    "test": "npm run test -w apps/game",
+    "test": "npm run test --workspaces --if-present",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
