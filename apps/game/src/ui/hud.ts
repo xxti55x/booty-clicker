@@ -13,10 +13,17 @@ export class Hud {
   private readonly rateEl = byId('rate');
   private readonly comboEl = byId('combo');
   private readonly moveEl = byId('moveName');
+  private readonly ngEl = byId('ngPlus');
 
   update(g: GameState): void {
     this.bpEl.textContent = fmt(g.bp);
     this.rateEl.textContent = `${fmt(g.perSec * g.mult)} / Sek · +${fmt(g.perClick * g.mult)} pro Shake`;
+    if (g.rebirths > 0) {
+      this.ngEl.textContent = `NG+${g.rebirths} · ×${g.prestigeMult}`;
+      this.ngEl.classList.remove('hidden');
+    } else {
+      this.ngEl.classList.add('hidden');
+    }
   }
 
   setCombo(combo: number): void {

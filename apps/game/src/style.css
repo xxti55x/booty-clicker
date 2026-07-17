@@ -214,7 +214,7 @@ body {
 .toggleShop {
   position: fixed;
   top: 14px;
-  right: 16px;
+  left: 16px;
   z-index: 25;
   background: #a8e831;
   color: #12140a;
@@ -340,5 +340,128 @@ body {
   font-size: 12.5px;
   color: #9a9aad;
   margin: 10px 0 16px;
+  line-height: 1.4;
+}
+
+/* ---- M2: NG+ badge, boss button, boss fight, rebirth ---- */
+.ngplus {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #ffd24d;
+}
+.ngplus.hidden {
+  display: none;
+}
+.muteBtn {
+  position: fixed;
+  top: 14px;
+  left: 112px;
+  z-index: 25;
+  width: 40px;
+  height: 40px;
+  background: rgba(14, 14, 20, 0.9);
+  color: #e8e8ef;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  font-size: 16px;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+.bossStart {
+  position: fixed;
+  top: 60px;
+  left: 16px;
+  z-index: 25;
+  background: linear-gradient(135deg, #ffd24d, #ff8a4d);
+  color: #2a1500;
+  border: none;
+  border-radius: 12px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(255, 138, 77, 0.4);
+  animation: bosspulse 1.6s ease-in-out infinite;
+}
+.bossStart.hidden {
+  display: none;
+}
+@keyframes bosspulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+.boss-ui {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  padding: 14px 18px 16px;
+  background: linear-gradient(180deg, rgba(20, 6, 6, 0.92), rgba(20, 6, 6, 0));
+  pointer-events: none;
+  text-align: center;
+}
+.boss-ui.hidden {
+  display: none;
+}
+.boss-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: #ffd24d;
+  text-shadow: 0 2px 12px rgba(255, 60, 60, 0.5);
+  margin-bottom: 8px;
+}
+.boss-hpbar {
+  max-width: 520px;
+  margin: 0 auto;
+  height: 16px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.boss-hpfill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #ff4d4d, #ff2200);
+  transition: width 0.08s linear;
+}
+.boss-row {
+  max-width: 520px;
+  margin: 6px auto 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+.boss-hint {
+  color: rgba(255, 255, 255, 0.6);
+}
+.boss-timer {
+  font-weight: 800;
+  font-size: 18px;
+  color: #ff6b6b;
+}
+.btn.ghost {
+  background: transparent;
+  color: #9a9aad;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.rebirth-info {
+  font-size: 11.5px;
+  color: #ffd24d;
+  margin-bottom: 6px;
   line-height: 1.4;
 }

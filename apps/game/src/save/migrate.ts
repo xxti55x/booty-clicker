@@ -1,5 +1,5 @@
 import { UPGRADES } from '../game/economy';
-import { isSaveDataV2, SCHEMA_VERSION, type SaveDataV2 } from './schema';
+import { isSaveDataV3, SCHEMA_VERSION, type SaveDataV3 } from './schema';
 
 /**
  * v1 shape, defined retroactively — the naive serialization M0's prototype
@@ -16,6 +16,17 @@ export interface SaveDataV1 {
   skin: string;
   bg: string;
   unlocked: Record<string, boolean>;
+}
+
+/** v2 shape (M1): id-keyed levels, derived stats dropped, `lastSeen` added. */
+export interface SaveDataV2 {
+  schemaVersion: 2;
+  bp: number;
+  upgrades: Record<string, number>;
+  skin: string;
+  bg: string;
+  unlocked: Record<string, boolean>;
+  lastSeen: number;
 }
 
 type MigrationStep = (raw: Record<string, unknown>) => Record<string, unknown>;
@@ -43,15 +54,30 @@ function migrateV1toV2(raw: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
+function migrateV2toV3(raw: Record<string, unknown>): Record<string, unknown> {
+  // Progression fields (M2) default to a fresh, un-prestiged run. maxBp is
+  // seeded from the current bp (best guess for the highest seen so far).
+  const bp = typeof raw.bp === 'number' && Number.isFinite(raw.bp) ? raw.bp : 0;
+  return {
+    ...raw,
+    schemaVersion: 3,
+    maxBp: bp,
+    prestigeMult: 1,
+    rebirths: 0,
+    bossDefeated: false,
+  };
+}
+
 const MIGRATIONS: Record<number, MigrationStep> = {
   1: migrateV1toV2,
+  2: migrateV2toV3,
 };
 
 /**
  * Migrate an unknown parsed value up to the current schema. Returns null on
  * any structural failure — never throws.
  */
-export function migrate(raw: unknown): SaveDataV2 | null {
+export function migrate(raw: unknown): SaveDataV3 | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
 
   let version = (raw as Record<string, unknown>).schemaVersion;
@@ -67,5 +93,5 @@ export function migrate(raw: unknown): SaveDataV2 | null {
     version += 1;
   }
 
-  return isSaveDataV2(data) ? data : null;
+  return isSaveDataV3(data) ? data : null;
 }

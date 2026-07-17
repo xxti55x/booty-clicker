@@ -40,15 +40,28 @@ export const COMBO_BONUS_PER = 0.05;
 export const COMBO_WINDOW_S = 1.2;
 
 /**
- * Upgrade catalogue — identical values to the prototype so the port stays
- * behaviour-compatible. `lv` is added at runtime via {@link createUpgrades}.
+ * Upgrade catalogue.
+ *
+ * Effect values (`val`, `type`) are the prototype's originals — the shop reads
+ * the same "+1 BP pro Shake" etc. Costs (`base`, `gr`) are the M2 balancing knob
+ * (spec §5 M2). Base costs are 3× the prototype so optimal play follows the
+ * target curve below instead of racing to the boss in ~15 min:
+ *
+ *   TARGET CURVE (optimal play, ~3 clicks/s — verified by simulatePlaythrough):
+ *     · first ~5 min : a purchase is affordable roughly every ≤ 60 s
+ *     · min 5–30     : 2–4 min between purchases as costs outrun income
+ *     · ~40 min      : 50 000 BP → boss unlock (spec endgame goal, window 35–45)
+ *     · a few min later: 100 000 BP → Rebirth gate
+ *
+ * `gr` (growth) barely moves the curve in the ROI-greedy sim; base scale is the
+ * dominant lever, so we tune base and leave the prototype's growth rates intact.
  */
 export const UPGRADES: readonly UpgradeConfig[] = [
   {
     id: 'hips',
     name: 'Hüftschwung-Training',
     ds: '+1 BP pro Shake',
-    base: 15,
+    base: 45,
     gr: 1.15,
     type: 'click',
     val: 1,
@@ -57,7 +70,7 @@ export const UPGRADES: readonly UpgradeConfig[] = [
     id: 'auto',
     name: 'Auto-Twerker',
     ds: '+1 BP / Sekunde',
-    base: 50,
+    base: 150,
     gr: 1.16,
     type: 'sec',
     val: 1,
@@ -66,7 +79,7 @@ export const UPGRADES: readonly UpgradeConfig[] = [
     id: 'bass',
     name: 'Bass Boost',
     ds: '+3 BP pro Shake',
-    base: 200,
+    base: 600,
     gr: 1.18,
     type: 'click',
     val: 3,
@@ -75,7 +88,7 @@ export const UPGRADES: readonly UpgradeConfig[] = [
     id: 'squad',
     name: 'Twerk-Squad',
     ds: '+8 BP / Sekunde',
-    base: 650,
+    base: 1950,
     gr: 1.17,
     type: 'sec',
     val: 8,
@@ -84,7 +97,7 @@ export const UPGRADES: readonly UpgradeConfig[] = [
     id: 'disco',
     name: 'Discokugel-Faktor',
     ds: 'x1.25 Gesamt-Multiplikator',
-    base: 2500,
+    base: 7500,
     gr: 1.9,
     type: 'mult',
     val: 1.25,
@@ -93,7 +106,7 @@ export const UPGRADES: readonly UpgradeConfig[] = [
     id: 'arena',
     name: 'Twerk-Arena',
     ds: '+45 BP / Sekunde',
-    base: 8000,
+    base: 24000,
     gr: 1.18,
     type: 'sec',
     val: 45,
@@ -102,7 +115,7 @@ export const UPGRADES: readonly UpgradeConfig[] = [
     id: 'god',
     name: 'Booty-Gottheit',
     ds: 'x1.5 Gesamt-Multiplikator',
-    base: 60000,
+    base: 180000,
     gr: 2.2,
     type: 'mult',
     val: 1.5,

@@ -21,6 +21,8 @@ interface BgConfig {
   fr: number;
   /** floor metalness */
   fm: number;
+  /** BP milestone (highest-ever) before this appears in the shop (M2 content-gate). */
+  revealAt?: number;
   build: (ctx: BuildCtx) => void;
 }
 
@@ -35,6 +37,7 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     floor: 0x0c0c12,
     fr: 0.2,
     fm: 0.65,
+    revealAt: 0,
     build({ propGroup, glowSprite, anims }) {
       const ball = new THREE.Mesh(
         new THREE.IcosahedronGeometry(0.65, 2),
@@ -116,6 +119,7 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     floor: 0x160a26,
     fr: 0.15,
     fm: 0.7,
+    revealAt: 800,
     build({ propGroup, glowSprite, anims }) {
       const grid = new THREE.GridHelper(80, 80, 0xff3fb0, 0x8b5cf6);
       grid.position.y = -2.39;
@@ -161,6 +165,7 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     floor: 0x33241a,
     fr: 0.55,
     fm: 0.15,
+    revealAt: 6000,
     build({ propGroup, glowSprite, anims }) {
       const sun = new THREE.Mesh(
         new THREE.CircleGeometry(4.5, 48),
@@ -228,6 +233,7 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     floor: 0x08080f,
     fr: 0.12,
     fm: 0.8,
+    revealAt: 30000,
     build({ propGroup, glowSprite, anims }) {
       const n = 1600;
       const pos = new Float32Array(n * 3);

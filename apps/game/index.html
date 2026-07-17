@@ -22,8 +22,11 @@
       <div class="rate" id="rate">0 / Sek · +1 pro Shake</div>
       <div class="combo" id="combo"></div>
       <div class="move" id="moveName">TWERK</div>
+      <div class="ngplus hidden" id="ngPlus"></div>
     </div>
     <button class="toggleShop" id="toggleShop">🛒 Shop</button>
+    <button class="muteBtn" id="muteBtn" title="Ton an/aus">🔊</button>
+    <button class="bossStart hidden" id="bossStart">👑 Tyrann herausfordern</button>
     <div class="hintbar">👆 Klick / Leertaste = Shaken · Klicken pusht Tempo &amp; Moves</div>
     <div class="shop" id="shop">
       <div class="tabs">
@@ -42,6 +45,22 @@
         <div class="dt">🍑 Willkommen zurück!</div>
         <div class="dd" id="wbText"></div>
         <button class="btn" id="wbClose">Einsammeln</button>
+      </div>
+    </div>
+    <div class="boss-ui hidden" id="bossUi">
+      <div class="boss-name">👑 Goldener Twerk-Tyrann</div>
+      <div class="boss-hpbar"><div class="boss-hpfill" id="bossHpFill"></div></div>
+      <div class="boss-row">
+        <span class="boss-hint">👆 Klick / Leertaste = Angriff!</span>
+        <span class="boss-timer" id="bossTimer">90</span>
+      </div>
+    </div>
+    <div class="overlay hidden" id="bossResult">
+      <div class="dialog">
+        <div class="dt" id="bossResultTitle"></div>
+        <div class="dd" id="bossResultText"></div>
+        <button class="btn" id="bossResultPrimary"></button>
+        <button class="btn ghost" id="bossResultSecondary"></button>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

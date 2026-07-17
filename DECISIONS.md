@@ -3,6 +3,78 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M3 — Audio
+
+- **2026-07-17 — All audio is synthesised, not sourced files.** The spec asks for
+  "1 CC0 Loop-Track pro Kulisse". Instead of downloading audio (network-policy
+  dependent, and 4 tracks + SFX would eat into the < 5 MB budget), every sound is
+  generated at runtime via the Web Audio API — oscillators + filtered noise for
+  SFX, and a per-background generative bass/arp/hi-hat loop. It is original code,
+  so it is licence-free (effectively CC0); documented in `public/CREDITS.md`.
+
+- **2026-07-17 — Audio prefs live in a separate localStorage key.** Mute/volume
+  settings persist under `bootyclicker.audio`, not in the game save, so audio
+  settings never force a save-schema migration. Same never-throw + injectable-
+  storage discipline as the save layer, so `prefs.ts` is unit-tested in node.
+
+- **2026-07-17 — Lazy AudioContext on first gesture (no autoplay).** The context
+  is created and resumed only in `unlock()`, called from the first pointerdown /
+  keydown / mute click — so browsers never raise an autoplay warning (spec AC).
+  Music (re)starts only when the context is running and not muted.
+
+- **2026-07-17 — Testable core vs. audio glue.** Beat detection (`beat.ts`),
+  prefs (`prefs.ts`) and track configs (`tracks.ts`) are pure and unit-tested;
+  the AudioContext-touching `engine.ts` is thin glue verified by the headless
+  smoke test (no autoplay error, mute toggles + persists). `BeatTracker` turns
+  the choreography `phase` into discrete clap onsets that speed up with drive.
+
+## M2 — Progression & Boss-Finale
+
+- **2026-07-17 — Balancing = base-cost scale, not new mechanics.** Optimal play
+  raced to 50k BP in ~14 min with the ported economy. The upgrade **effect** values
+  (`val`/`type`) are the prototype's originals (shop text unchanged); only the
+  **costs** (`base` ×3) are the tuning knob. `economy.test.ts` asserts effect values
+  and the cost _formula_ (with literals), so retuning `base` breaks nothing. `gr`
+  barely moves the ROI-greedy curve — base scale dominates — so growth rates stay
+  as-is. Canonical cadence for the AC is ~3 clicks/s → boss at ~40 min.
+
+- **2026-07-17 — Pure optimal-buy simulator backs the balancing AC.**
+  `simulatePlaythrough` (game/progression.ts) is a deterministic, DOM-free
+  ROI-greedy playthrough; the test asserts the 50k-BP boss unlock lands in the
+  30–50 min window at clickRate 3 and 4. An optional `upgrades` override let me
+  calibrate tunings without editing `economy.ts` iteratively.
+
+- **2026-07-17 — Boss HP is fixed (75k), not scaled to the player.** Click damage
+  scales with `perClick·mult` (spec), so a fixed pool makes perClick investment
+  matter: at the expected unlock build (perClick·mult ≈ 260) it's a close fight at a
+  brisk cadence; a click-neglecting or slow player loses. Each loss eases the next
+  attempt's HP by 25% (`0.75^attempt`), so it is always eventually winnable.
+
+- **2026-07-17 — Rebirth = additive +100% folded into the multiplier.**
+  `prestigeMult = 1 + rebirths`; on load and after each rebirth, derived stats are
+  rebuilt via `deriveStats(upgrades, { mult: prestigeMult })`, so the running
+  incremental `state.mult *= val` on purchases keeps prestige baked in. Cosmetic
+  unlocks, `bossDefeated` and `maxBp` survive a rebirth; BP and levels reset.
+
+- **2026-07-17 — Schema v3.** Added `maxBp`, `prestigeMult`, `rebirths`,
+  `bossDefeated`; `migrate v2→v3` defaults them (maxBp seeded from bp). Kept the M1
+  never-throw + `Object.hasOwn` validation discipline; the migration loop still
+  can't infinite-loop and rejects future/invalid versions to a clean fresh start.
+
+- **2026-07-17 — Content-gates are sticky via persisted `maxBp`.** Skins/backgrounds
+  reveal once the _highest-ever_ BP passes `revealAt`, so spending BP never re-hides
+  an item. `Shop.syncReveals()` recomputes a reveal signature each throttled tick and
+  re-renders only when a milestone is crossed.
+
+- **2026-07-17 — Boss/rebirth UI placement.** Boss fight is a top HP-bar/timer banner
+  plus a win/lose result dialog (reusing the M1 `.overlay`/`.dialog` language);
+  clicks route to boss damage while engaged and passive income pauses. Rebirth lives
+  in the ⚙️ tab with the same armed double-confirm as Reset; NG+ badge in the HUD.
+
+- **2026-07-17 — Shop/boss buttons moved to top-left.** A headless end-to-end smoke
+  test surfaced that the 🛒 and 👑 buttons overlapped the shop tab row (real click
+  interception). Both moved to the left edge, clear of the right-hand shop panel.
+
 ## M1 — Persistenz
 
 - **2026-07-16 — `suppressSave` guard on reset.** `reset()` wipes the save and

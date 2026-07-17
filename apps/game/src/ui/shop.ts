@@ -52,6 +52,36 @@ export class Shop {
     this.renderUpgrades();
     this.renderSkins();
     this.renderBgs();
+    this.revealSig = this.computeRevealSig();
+  }
+
+  /** Signature of currently-revealed skins + backgrounds (content-gates). */
+  private revealSig = '';
+
+  private computeRevealSig(): string {
+    const { state } = this.deps;
+    const skins = (Object.keys(SKINS) as SkinKey[]).filter(
+      (k) => state.unlocked[k] || state.skin === k || state.maxBp >= (SKINS[k].revealAt ?? 0),
+    );
+    const bgs = (Object.keys(BGS) as BackgroundKey[]).filter(
+      (k) => state.bg === k || state.maxBp >= (BGS[k].revealAt ?? 0),
+    );
+    return `${skins.join(',')}|${bgs.join(',')}`;
+  }
+
+  /**
+   * Re-render skins/backgrounds if a new content-gate milestone was crossed.
+   * Returns true when something newly revealed (so the caller can chime).
+   */
+  syncReveals(): boolean {
+    const sig = this.computeRevealSig();
+    if (sig !== this.revealSig) {
+      this.revealSig = sig;
+      this.renderSkins();
+      this.renderBgs();
+      return true;
+    }
+    return false;
   }
 
   renderUpgrades(): void {
@@ -86,6 +116,8 @@ export class Shop {
       const s = SKINS[k];
       const owned = state.unlocked[k];
       const active = state.skin === k;
+      // Content-gate: hide until the BP milestone (unless already owned/active).
+      if (!owned && !active && state.maxBp < (s.revealAt ?? 0)) continue;
       const el = document.createElement('div');
       el.className = 'card' + (active ? ' active' : '') + (owned ? '' : ' locked');
       el.innerHTML = `<div class="ci">${s.icon}</div><div class="cn">${s.name}</div>
@@ -111,6 +143,7 @@ export class Shop {
     for (const k of Object.keys(BGS) as BackgroundKey[]) {
       const b = BGS[k];
       const active = state.bg === k;
+      if (!active && state.maxBp < (b.revealAt ?? 0)) continue;
       const el = document.createElement('div');
       el.className = 'card' + (active ? ' active' : '');
       el.innerHTML = `<div class="ci">${b.icon}</div><div class="cn">${b.name}</div>

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createUpgrades, deriveStats, type UpgradeState } from '../game/economy';
 import { createGameState } from '../game/state';
-import type { SaveDataV2 } from './schema';
+import type { SaveDataV3 } from './schema';
 import {
   applySave,
   computeOfflineEarnings,
@@ -36,7 +36,7 @@ function byId(upgrades: UpgradeState[], id: string): UpgradeState {
 }
 
 describe('serialize / saveGame / loadGame / applySave — round-trip', () => {
-  it('round-trips bp, upgrade levels, skin, bg, unlocked, and re-derives stats', () => {
+  it('round-trips state incl. progression + re-derives stats with prestige folded in', () => {
     const store = memStorage();
 
     const state = createGameState();
@@ -45,13 +45,13 @@ describe('serialize / saveGame / loadGame / applySave — round-trip', () => {
     byId(upgrades, 'hips').lv = 3;
     byId(upgrades, 'disco').lv = 1;
     byId(upgrades, 'god').lv = 2;
-    const derived = deriveStats(upgrades);
-    state.perClick = derived.perClick;
-    state.perSec = derived.perSec;
-    state.mult = derived.mult;
     state.skin = 'robo';
     state.bg = 'space';
     state.unlocked.robo = true;
+    state.maxBp = 5000;
+    state.rebirths = 1;
+    state.prestigeMult = 2;
+    state.bossDefeated = true;
 
     saveGame(state, upgrades, store);
     const loaded = loadGame(store);
@@ -69,11 +69,16 @@ describe('serialize / saveGame / loadGame / applySave — round-trip', () => {
     expect(freshState.skin).toBe('robo');
     expect(freshState.bg).toBe('space');
     expect(freshState.unlocked).toEqual(state.unlocked);
+    expect(freshState.maxBp).toBe(5000);
+    expect(freshState.rebirths).toBe(1);
+    expect(freshState.prestigeMult).toBe(2);
+    expect(freshState.bossDefeated).toBe(true);
 
-    const expectedDerived = deriveStats(freshUpgrades);
-    expect(freshState.perClick).toBe(expectedDerived.perClick);
-    expect(freshState.perSec).toBe(expectedDerived.perSec);
-    expect(freshState.mult).toBe(expectedDerived.mult);
+    // Derived stats are rebuilt from levels with the prestige multiplier folded in.
+    const expected = deriveStats(freshUpgrades, { perClick: 1, perSec: 0, mult: 2 });
+    expect(freshState.perClick).toBe(expected.perClick);
+    expect(freshState.perSec).toBe(expected.perSec);
+    expect(freshState.mult).toBe(expected.mult);
   });
 
   it('serialize() copies unlocked rather than aliasing it', () => {
@@ -87,12 +92,16 @@ describe('serialize / saveGame / loadGame / applySave — round-trip', () => {
 
 describe('loadGame — corrupt data never throws, always falls back to fresh start', () => {
   const validElse = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     upgrades: {},
     skin: 'classic',
     bg: 'club',
     unlocked: {},
     lastSeen: Date.now(),
+    maxBp: 0,
+    prestigeMult: 1,
+    rebirths: 0,
+    bossDefeated: false,
   };
 
   const badRaws: string[] = [
@@ -110,6 +119,11 @@ describe('loadGame — corrupt data never throws, always falls back to fresh sta
     // Prototype-chain key: `'toString' in BG_KEYS` is true, so a naive `in`
     // check would accept this and later crash BGS['toString'].build(...).
     JSON.stringify({ ...validElse, bp: 1, bg: 'toString' }),
+    // v3 progression fields must validate too.
+    JSON.stringify({ ...validElse, bp: 1, prestigeMult: 0 }),
+    JSON.stringify({ ...validElse, bp: 1, rebirths: 1.5 }),
+    JSON.stringify({ ...validElse, bp: 1, bossDefeated: 'yes' }),
+    JSON.stringify({ ...validElse, bp: 1, maxBp: -1 }),
   ];
 
   it.each(badRaws)('raw payload %#: results in null, never throws', (raw) => {
@@ -117,6 +131,12 @@ describe('loadGame — corrupt data never throws, always falls back to fresh sta
     store.setItem(SAVE_KEY, raw);
     expect(() => loadGame(store)).not.toThrow();
     expect(loadGame(store)).toBeNull();
+  });
+
+  it('a fully valid v3 payload loads (sanity — the base is not itself corrupt)', () => {
+    const store = memStorage();
+    store.setItem(SAVE_KEY, JSON.stringify({ ...validElse, bp: 7 }));
+    expect(loadGame(store)).not.toBeNull();
   });
 
   it('an empty store yields null', () => {
@@ -200,15 +220,19 @@ describe('export / import', () => {
 });
 
 describe('applySave — hardening against tampered/partial saves', () => {
-  function baseSave(overrides: Partial<SaveDataV2> = {}): SaveDataV2 {
+  function baseSave(overrides: Partial<SaveDataV3> = {}): SaveDataV3 {
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       bp: 10,
       upgrades: {},
       skin: 'classic',
       bg: 'club',
-      unlocked: {} as SaveDataV2['unlocked'],
+      unlocked: {} as SaveDataV3['unlocked'],
       lastSeen: Date.now(),
+      maxBp: 0,
+      prestigeMult: 1,
+      rebirths: 0,
+      bossDefeated: false,
       ...overrides,
     };
   }
@@ -239,6 +263,16 @@ describe('applySave — hardening against tampered/partial saves', () => {
     const upgrades = createUpgrades();
     applySave(save, state, upgrades);
     expect(state.unlocked.boss).toBe(true);
+  });
+
+  it('folds the stored prestige multiplier into the derived mult', () => {
+    const save = baseSave({ prestigeMult: 3 });
+    const state = createGameState();
+    const upgrades = createUpgrades();
+    applySave(save, state, upgrades);
+    // No mult upgrades bought → mult equals the prestige multiplier alone.
+    expect(state.mult).toBe(3);
+    expect(state.prestigeMult).toBe(3);
   });
 });
 

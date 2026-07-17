@@ -3,22 +3,36 @@ import type { BackgroundKey, SkinKey } from '../types';
 /**
  * Save schema — current version.
  *
- * Architecture rule (spec M1): derived stats (perClick/perSec/mult) are never
- * persisted. Only `bp` and upgrade *levels* (keyed by upgrade id) are stored;
- * derived stats are rebuilt from a fresh `createUpgrades()` via `deriveStats`
- * on load, so a corrupted/tampered stored multiplier can never leak in.
+ * Architecture rule (spec §4.2): derived stats (perClick/perSec/mult) are never
+ * persisted. Only `bp`, upgrade *levels* (keyed by id) and progression flags are
+ * stored; derived stats are rebuilt from a fresh `createUpgrades()` via
+ * `deriveStats` (with the prestige multiplier folded in) on load, so a
+ * corrupted/tampered stored multiplier can never leak in.
+ *
+ * v3 (M2) adds progression: maxBp, prestigeMult, rebirths, bossDefeated.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
-export interface SaveDataV2 {
-  schemaVersion: 2;
+export interface SaveDataV3 {
+  schemaVersion: 3;
   bp: number;
   upgrades: Record<string, number>;
   skin: SkinKey;
   bg: BackgroundKey;
   unlocked: Record<SkinKey, boolean>;
   lastSeen: number;
+  /** Highest BP ever reached (sticky content-gate reveals). */
+  maxBp: number;
+  /** Permanent Rebirth multiplier (1 + rebirths). */
+  prestigeMult: number;
+  /** Number of rebirths performed. */
+  rebirths: number;
+  /** Whether the boss has been defeated at least once. */
+  bossDefeated: boolean;
 }
+
+/** The current save shape. */
+export type SaveData = SaveDataV3;
 
 /** Compile-time exhaustive key sets. Do NOT import BGS — it pulls in three. */
 const SKIN_KEYS: Record<SkinKey, true> = {
@@ -39,11 +53,15 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
 /** Type guard: validates an unknown value as a current-schema save. Never throws. */
-export function isSaveDataV2(raw: unknown): raw is SaveDataV2 {
+export function isSaveDataV3(raw: unknown): raw is SaveDataV3 {
   if (!isRecord(raw)) return false;
   if (raw.schemaVersion !== SCHEMA_VERSION) return false;
-  if (typeof raw.bp !== 'number' || !Number.isFinite(raw.bp) || raw.bp < 0) return false;
+  if (!isFiniteNumber(raw.bp) || raw.bp < 0) return false;
 
   if (!isRecord(raw.upgrades)) return false;
   for (const v of Object.values(raw.upgrades)) {
@@ -60,9 +78,14 @@ export function isSaveDataV2(raw: unknown): raw is SaveDataV2 {
     if (v !== undefined && typeof v !== 'boolean') return false;
   }
 
-  if (typeof raw.lastSeen !== 'number' || !Number.isFinite(raw.lastSeen) || raw.lastSeen <= 0) {
+  if (!isFiniteNumber(raw.lastSeen) || raw.lastSeen <= 0) return false;
+
+  if (!isFiniteNumber(raw.maxBp) || raw.maxBp < 0) return false;
+  if (!isFiniteNumber(raw.prestigeMult) || raw.prestigeMult < 1) return false;
+  if (typeof raw.rebirths !== 'number' || !Number.isInteger(raw.rebirths) || raw.rebirths < 0) {
     return false;
   }
+  if (typeof raw.bossDefeated !== 'boolean') return false;
 
   return true;
 }

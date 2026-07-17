@@ -10,6 +10,7 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     skin: 0xc98e63,
     shorts: 0xa8e831,
     hair: 0x241608,
+    revealAt: 0,
   },
   disco: {
     icon: '🪩',
@@ -19,6 +20,7 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     skin: 0x8d5a3c,
     shorts: 0xffd24d,
     hair: 0x120c06,
+    revealAt: 0,
   },
   robo: {
     icon: '🤖',
@@ -28,6 +30,7 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     skin: 0x8f98a6,
     shorts: 0x38bdf8,
     hair: 0x333333,
+    revealAt: 300,
   },
   host: {
     icon: '🎤',
@@ -37,6 +40,7 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     skin: 0xe0ac7e,
     shorts: 0x14141f,
     hair: 0x1a1208,
+    revealAt: 4000,
   },
   boss: {
     icon: '👑',
@@ -46,5 +50,6 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     skin: 0xc9a227,
     shorts: 0x30180a,
     hair: 0x000000,
+    revealAt: 40000,
   },
 };
