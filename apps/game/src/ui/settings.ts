@@ -1,7 +1,8 @@
 import type { UpgradeState } from '../game/economy';
 import { REBIRTH_BP } from '../game/progression';
+import { saveSettings, type GameSettings } from '../game/settings';
 import type { GameState } from '../game/state';
-import type { SaveDataV3 } from '../save/schema';
+import type { SaveDataV4 } from '../save/schema';
 import { exportSave, importSave } from '../save/store';
 import { fmt } from './format';
 
@@ -15,11 +16,13 @@ export interface SettingsDeps {
   state: GameState;
   upgrades: UpgradeState[];
   /** Called with a freshly validated save after a successful import. */
-  applyImported: (save: SaveDataV3) => void;
+  applyImported: (save: SaveDataV4) => void;
   /** Wipe the save and restart. */
   reset: () => void;
   /** Perform a Rebirth/prestige reset (gated on REBIRTH_BP). */
   rebirth: () => void;
+  /** Live effect toggles (screen-shake, particles) — mutated in place. */
+  effects: GameSettings;
 }
 
 const RESET_ARM_MS = 4000;
@@ -44,6 +47,11 @@ export class Settings {
         <textarea id="impIn" placeholder="Save-Code hier einfügen…"></textarea>
         <button class="btn" id="impBtn" type="button">Importieren</button>
         <div class="msg" id="impMsg"></div>
+      </div>
+      <div class="settings-section">
+        <h3>Effekte</h3>
+        <button class="btn toggle" id="fxShake" type="button"></button>
+        <button class="btn toggle" id="fxParticles" type="button"></button>
       </div>
       <div class="settings-section hidden" id="rebirthSection">
         <h3>Rebirth (NG+)</h3>
@@ -115,6 +123,24 @@ export class Settings {
       this.deps.rebirth();
       this.refresh();
     });
+
+    const fxShake = byId('fxShake') as HTMLButtonElement;
+    const fxParticles = byId('fxParticles') as HTMLButtonElement;
+    const paintFx = (): void => {
+      fxShake.textContent = `Screen-Shake: ${this.deps.effects.screenShake ? 'An' : 'Aus'}`;
+      fxParticles.textContent = `Partikel: ${this.deps.effects.particles ? 'An' : 'Aus'}`;
+    };
+    fxShake.addEventListener('click', () => {
+      this.deps.effects.screenShake = !this.deps.effects.screenShake;
+      saveSettings(this.deps.effects);
+      paintFx();
+    });
+    fxParticles.addEventListener('click', () => {
+      this.deps.effects.particles = !this.deps.effects.particles;
+      saveSettings(this.deps.effects);
+      paintFx();
+    });
+    paintFx();
 
     byId('wbClose').addEventListener('click', () => {
       byId('welcomeBack').classList.add('hidden');

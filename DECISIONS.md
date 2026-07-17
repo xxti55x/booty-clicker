@@ -3,6 +3,40 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M4 — Game Feel & Content
+
+- **2026-07-17 — Achievements are data-driven pure predicates.** 18 achievements
+  each carry a `check(ctx)` over an `AchievementCtx` snapshot (maxBp, totalClicks,
+  maxCombo, levels, rebirths, …), so the whole set is unit-testable without a DOM.
+  `checkAchievements()` runs on every shake and on discrete events (buy, boss win,
+  rebirth, peach), plus a throttled loop pass — unlocking is immediate and
+  persistence-backed rather than relying on the render loop.
+
+- **2026-07-17 — Schema v4** adds `achievements`, `totalClicks`, `maxCombo`,
+  `peachesClicked`, `nextPeachAt`, `boostUntil`; `migrate v3→v4` defaults them.
+  Event timing persists as epoch ms so the peach schedule and the ×3 boost survive
+  a reload (spec AC). Same never-throw validation discipline.
+
+- **2026-07-17 — Golden-Peach timing is pure; the DOM peach is glue.** `events.ts`
+  exposes `rollNextPeachAt`/`activateBoost`/`incomeMultiplier` (unit-tested); the
+  clickable 🍑 button + 8 s visibility window live in `main.ts`. The ×3 boost is a
+  multiplier applied to both click and passive income, gated on `boostUntil`.
+
+- **2026-07-17 — Particles: one THREE.Points + fade shader, 200-slot pool.**
+  Round-robin reuse, CPU integration is a flat 200-iteration loop (≪ 1 ms/frame by
+  construction — a few thousand float ops); dead slots have life 0 and are
+  `discard`ed in the fragment shader. Toggleable via effect settings.
+
+- **2026-07-17 — Effect toggles in their own localStorage key.** Screen-shake and
+  particles persist under `bootyclicker.settings` (pure + injectable, like audio
+  prefs) — no save-schema coupling. Screen-shake offsets the camera only for the
+  render call and restores it, so OrbitControls' internal state never drifts.
+
+- **2026-07-17 — 4 endgame upgrades keep the M2 curve intact.** All four have base
+  cost > `REBIRTH_BP` (100k), so the optimal-buy simulator never affords them
+  before the boss/rebirth gates — the balancing acceptance test is unchanged.
+  Effect values (`val`) are new ids, so the `deriveStats` economy tests still pass.
+
 ## M3 — Audio
 
 - **2026-07-17 — All audio is synthesised, not sourced files.** The spec asks for

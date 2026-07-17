@@ -34,6 +34,16 @@ Three.js kommt als npm-Paket (kein CDN). Projekt-Struktur & Milestones: siehe
 - **Rebirth (NG+)**: ab 100 000 BP im ⚙️-Tab — setzt BP & Upgrades zurück und
   gewährt dauerhaft +100 % Multiplikator (kumulativ), NG+-Badge im HUD.
 
+## Game Feel & Content (M4)
+
+- **18 Achievements** mit Toast-Benachrichtigung und eigenem 🏆-Shop-Tab.
+- **Klick-Partikel** (GPU-Points-Pool, max. 200) sprühen bei jedem Shake.
+- **Screen-Shake** bei Combo-Meilensteinen — im ⚙️-Tab abschaltbar (wie die Partikel).
+- **Random Event „Goldener Pfirsich"** 🍑: erscheint alle 90–240 s für 8 s; fangen
+  gibt 60 s lang ×3 Einkommen. Timing überlebt Reload.
+- **4 Endgame-Upgrades** (Pfirsich-Reaktor, Hüftgold-Mine, Twerk-Singularität,
+  Booty-Blackhole) für die Kurve nach dem Boss.
+
 ## Audio (M3)
 
 - Komplett **prozedural** per Web Audio API erzeugt — keine Audiodateien, winzige
@@ -67,11 +77,10 @@ Three.js kommt als npm-Paket (kein CDN). Projekt-Struktur & Milestones: siehe
 
 ## Roadmap (siehe Gameplan)
 
-1. Achievements, Partikel, Random Events
-2. Mobile/UX, Settings
-3. Testing + itch.io Release
+1. Leaderboard (Cloudflare Worker + D1)
+2. Mobile/UX, Settings, Testing + itch.io Release
 
-Save/Load (M1), Boss-Fight + Balancing (M2) und Audio (M3) sind erledigt — siehe oben.
+M1–M4 (Persistenz, Boss + Balancing, Audio, Game Feel & Content) sind erledigt — siehe oben.
 
 ## Lizenz-Hinweise
 

@@ -1,5 +1,5 @@
 import { UPGRADES } from '../game/economy';
-import { isSaveDataV3, SCHEMA_VERSION, type SaveDataV3 } from './schema';
+import { isSaveDataV4, SCHEMA_VERSION, type SaveDataV4 } from './schema';
 
 /**
  * v1 shape, defined retroactively — the naive serialization M0's prototype
@@ -29,6 +29,21 @@ export interface SaveDataV2 {
   lastSeen: number;
 }
 
+/** v3 shape (M2): progression fields added. */
+export interface SaveDataV3 {
+  schemaVersion: 3;
+  bp: number;
+  upgrades: Record<string, number>;
+  skin: string;
+  bg: string;
+  unlocked: Record<string, boolean>;
+  lastSeen: number;
+  maxBp: number;
+  prestigeMult: number;
+  rebirths: number;
+  bossDefeated: boolean;
+}
+
 type MigrationStep = (raw: Record<string, unknown>) => Record<string, unknown>;
 
 function migrateV1toV2(raw: Record<string, unknown>): Record<string, unknown> {
@@ -55,8 +70,6 @@ function migrateV1toV2(raw: Record<string, unknown>): Record<string, unknown> {
 }
 
 function migrateV2toV3(raw: Record<string, unknown>): Record<string, unknown> {
-  // Progression fields (M2) default to a fresh, un-prestiged run. maxBp is
-  // seeded from the current bp (best guess for the highest seen so far).
   const bp = typeof raw.bp === 'number' && Number.isFinite(raw.bp) ? raw.bp : 0;
   return {
     ...raw,
@@ -68,16 +81,30 @@ function migrateV2toV3(raw: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
+function migrateV3toV4(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    schemaVersion: 4,
+    achievements: [],
+    totalClicks: 0,
+    maxCombo: 0,
+    peachesClicked: 0,
+    nextPeachAt: 0,
+    boostUntil: 0,
+  };
+}
+
 const MIGRATIONS: Record<number, MigrationStep> = {
   1: migrateV1toV2,
   2: migrateV2toV3,
+  3: migrateV3toV4,
 };
 
 /**
  * Migrate an unknown parsed value up to the current schema. Returns null on
  * any structural failure — never throws.
  */
-export function migrate(raw: unknown): SaveDataV3 | null {
+export function migrate(raw: unknown): SaveDataV4 | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
 
   let version = (raw as Record<string, unknown>).schemaVersion;
@@ -93,5 +120,5 @@ export function migrate(raw: unknown): SaveDataV3 | null {
     version += 1;
   }
 
-  return isSaveDataV3(data) ? data : null;
+  return isSaveDataV4(data) ? data : null;
 }

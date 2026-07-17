@@ -1,7 +1,7 @@
 import { deriveStats, type UpgradeState } from '../game/economy';
 import { createGameState, type GameState } from '../game/state';
 import { migrate } from './migrate';
-import type { SaveDataV3 } from './schema';
+import type { SaveDataV4 } from './schema';
 
 export const SAVE_KEY = 'bootyclicker.save';
 
@@ -25,11 +25,11 @@ export function serialize(
   state: GameState,
   upgrades: readonly UpgradeState[],
   now = Date.now(),
-): SaveDataV3 {
+): SaveDataV4 {
   const levels: Record<string, number> = {};
   for (const u of upgrades) levels[u.id] = u.lv;
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     bp: state.bp,
     upgrades: levels,
     skin: state.skin,
@@ -40,6 +40,12 @@ export function serialize(
     prestigeMult: state.prestigeMult,
     rebirths: state.rebirths,
     bossDefeated: state.bossDefeated,
+    achievements: [...state.achievements],
+    totalClicks: state.totalClicks,
+    maxCombo: state.maxCombo,
+    peachesClicked: state.peachesClicked,
+    nextPeachAt: state.nextPeachAt,
+    boostUntil: state.boostUntil,
   };
 }
 
@@ -58,7 +64,7 @@ export function saveGame(
 }
 
 /** Load + migrate the stored save, if any. Never throws — bad data yields null. */
-export function loadGame(storage: SaveStorage | null = defaultStorage()): SaveDataV3 | null {
+export function loadGame(storage: SaveStorage | null = defaultStorage()): SaveDataV4 | null {
   if (!storage) return null;
   let raw: string | null;
   try {
@@ -81,13 +87,19 @@ export function loadGame(storage: SaveStorage | null = defaultStorage()): SaveDa
  * derived stats (perClick/perSec/mult) are rebuilt via deriveStats, never
  * trusted from disk.
  */
-export function applySave(save: SaveDataV3, state: GameState, upgrades: UpgradeState[]): void {
+export function applySave(save: SaveDataV4, state: GameState, upgrades: UpgradeState[]): void {
   for (const u of upgrades) u.lv = save.upgrades[u.id] ?? 0;
 
   state.prestigeMult = save.prestigeMult;
   state.rebirths = save.rebirths;
   state.bossDefeated = save.bossDefeated;
   state.maxBp = save.maxBp;
+  state.achievements = [...save.achievements];
+  state.totalClicks = save.totalClicks;
+  state.maxCombo = save.maxCombo;
+  state.peachesClicked = save.peachesClicked;
+  state.nextPeachAt = save.nextPeachAt;
+  state.boostUntil = save.boostUntil;
 
   // Prestige multiplier is folded into the derived multiplier (never trust a
   // stored `mult`; rebuild it from levels + prestige).
@@ -140,7 +152,7 @@ export function exportSave(state: GameState, upgrades: readonly UpgradeState[]):
 }
 
 /** Parse a base64 save code back into a validated save. Never throws. */
-export function importSave(b64: string): SaveDataV3 | null {
+export function importSave(b64: string): SaveDataV4 | null {
   const trimmed = b64.trim();
   let json: string;
   try {
