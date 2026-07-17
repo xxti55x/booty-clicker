@@ -1,6 +1,6 @@
 import type { UpgradeState } from '../game/economy';
 import { REBIRTH_BP } from '../game/progression';
-import { saveSettings, type GameSettings } from '../game/settings';
+import { FPS_CAPS, type Quality, saveSettings, type GameSettings } from '../game/settings';
 import type { GameState } from '../game/state';
 import type { SaveDataV4 } from '../save/schema';
 import { exportSave, importSave } from '../save/store';
@@ -25,7 +25,16 @@ export interface SettingsDeps {
   effects: GameSettings;
   /** Open the top-50 leaderboard overlay. */
   showLeaderboard: () => void;
+  /** Re-apply the renderer graphics preset after a quality change. */
+  onGraphicsChange: () => void;
 }
+
+const QUALITY_LABEL: Record<Quality, string> = {
+  low: 'Niedrig',
+  medium: 'Mittel',
+  high: 'Hoch',
+};
+const QUALITY_CYCLE: readonly Quality[] = ['low', 'medium', 'high'];
 
 const RESET_ARM_MS = 4000;
 
@@ -49,6 +58,11 @@ export class Settings {
         <textarea id="impIn" placeholder="Save-Code hier einfügen…"></textarea>
         <button class="btn" id="impBtn" type="button">Importieren</button>
         <div class="msg" id="impMsg"></div>
+      </div>
+      <div class="settings-section">
+        <h3>Grafik</h3>
+        <button class="btn toggle" id="gfxQuality" type="button"></button>
+        <button class="btn toggle" id="gfxFps" type="button"></button>
       </div>
       <div class="settings-section">
         <h3>Effekte</h3>
@@ -129,6 +143,28 @@ export class Settings {
       this.deps.rebirth();
       this.refresh();
     });
+
+    const gfxQuality = byId('gfxQuality') as HTMLButtonElement;
+    const gfxFps = byId('gfxFps') as HTMLButtonElement;
+    const paintGfx = (): void => {
+      gfxQuality.textContent = `Qualität: ${QUALITY_LABEL[this.deps.effects.quality]}`;
+      const cap = this.deps.effects.fpsCap;
+      gfxFps.textContent = `FPS-Limit: ${cap === 0 ? 'Aus' : cap}`;
+    };
+    gfxQuality.addEventListener('click', () => {
+      const cur = QUALITY_CYCLE.indexOf(this.deps.effects.quality);
+      this.deps.effects.quality = QUALITY_CYCLE[(cur + 1) % QUALITY_CYCLE.length];
+      saveSettings(this.deps.effects);
+      this.deps.onGraphicsChange();
+      paintGfx();
+    });
+    gfxFps.addEventListener('click', () => {
+      const cur = FPS_CAPS.indexOf(this.deps.effects.fpsCap);
+      this.deps.effects.fpsCap = FPS_CAPS[(cur + 1) % FPS_CAPS.length];
+      saveSettings(this.deps.effects);
+      paintGfx();
+    });
+    paintGfx();
 
     const fxShake = byId('fxShake') as HTMLButtonElement;
     const fxParticles = byId('fxParticles') as HTMLButtonElement;

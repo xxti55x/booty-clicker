@@ -9,92 +9,116 @@ import { DT, renderCheeks, stepPhysics } from './character/physics';
 import { SKINS } from './character/skins';
 import { Choreographer } from './choreo/moves';
 import { createControls } from './engine/camera';
+import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
+import { effectivePixelRatio, qualityPreset } from './engine/quality';
 import { createScene } from './engine/scene';
-import { buildAchievementCtx, newlyUnlocked } from './game/achievements';
-import { COMBO_WINDOW_S, clickGain, createUpgrades, passiveGain } from './game/economy';
-import { activateBoost, incomeMultiplier, PEACH_VISIBLE_S, rollNextPeachAt } from './game/events';
-import { applyRebirth, BOSS_UNLOCK_BP } from './game/progression';
-import { loadSettings } from './game/settings';
-import { createGameState, createRuntimeState } from './game/state';
-import { applySave, computeOfflineEarnings, loadGame, resetSave, saveGame } from './save/store';
-import { AchievementsUI } from './ui/achievements';
-import { BossFight } from './ui/boss';
-import { Leaderboard } from './ui/leaderboard';
-import { fmt } from './ui/format';
-import { Hud } from './ui/hud';
-import { Settings } from './ui/settings';
-import { Shop } from './ui/shop';
+import { ascendState, clickDamageOf, createChState, dpsOf } from './game/ch-state';
+import { type CombatState, hit, spawnFor, tickBoss } from './game/combat';
+import { loadSettings, type Quality, saveSettings } from './game/settings';
+import { loadCh, offlineGold, resetCh, saveCh } from './save/ch-store';
+import { ChHud, spawnPop } from './ui/ch-hud';
+import { ChSettings } from './ui/ch-settings';
+import { Crew } from './ui/crew';
+import { fmt, titleFor } from './ui/format';
+import { Onboarding } from './ui/onboarding';
+import { Prestige } from './ui/prestige';
 import { Toasts } from './ui/toasts';
 import { World } from './world/backgrounds';
 
 /**
- * Booty Clicker bootstrap. Wires the ported modules together and runs the loop.
- * Reference implementation: ../../../legacy/index.html (behaviour preserved).
+ * Booty Clicker — endless (Clicker-Heroes-style) bootstrap.
+ * Twerk (click) to damage the current rival; your Crew adds idle DPS; every 5th
+ * zone is a timed boss; ascend for Ruhm-Seelen (permanent damage). Pure logic
+ * lives in game/*; this file is the DOM/Three/Audio glue + the render loop.
  */
 
-const canvas = document.getElementById('app') as HTMLCanvasElement;
+// ---------- click-juice tuning ----------
+const CRIT_CHANCE = 0.2;
+const CRIT_MULT = 5;
+const COMBO_STEP = 0.02;
+const COMBO_CAP = 50;
+const COMBO_WINDOW_S = 1.5;
+const MOVE_SWITCH_CLICKS = 18;
 
+const BG_BY_TIER = ['club', 'synth', 'beach', 'space'] as const;
+const bgForZone = (zone: number): (typeof BG_BY_TIER)[number] =>
+  BG_BY_TIER[Math.floor((zone - 1) / 10) % BG_BY_TIER.length];
+
+const comboMult = (combo: number): number => 1 + Math.min(combo, COMBO_CAP) * COMBO_STEP;
+
+// ---------- scene / engine ----------
+const canvas = document.getElementById('app') as HTMLCanvasElement;
 const { renderer, scene, camera, beat, skyMat, floorMat, glowSprite } = createScene(canvas);
 const controls = createControls(camera, renderer.domElement);
 
-const state = createGameState();
-const runtime = createRuntimeState();
-const upgrades = createUpgrades();
+const effects = loadSettings();
+function applyQuality(q: Quality): void {
+  const preset = qualityPreset(q);
+  renderer.setPixelRatio(effectivePixelRatio(q, window.devicePixelRatio));
+  if (renderer.shadowMap.enabled !== preset.shadows) {
+    renderer.shadowMap.enabled = preset.shadows;
+    renderer.shadowMap.needsUpdate = true;
+    scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material;
+      if (Array.isArray(m)) m.forEach((mm) => (mm.needsUpdate = true));
+      else if (m) (m as THREE.Material).needsUpdate = true;
+    });
+  }
+}
+applyQuality(effects.quality);
 
-const loaded = loadGame();
+// ---------- state ----------
+let state = createChState();
+const loaded = loadCh();
 let offlineEarnedMs = 0;
 let offlineEarned = 0;
 if (loaded) {
-  applySave(loaded, state, upgrades);
+  state = loaded.state;
   offlineEarnedMs = Math.max(0, Date.now() - loaded.lastSeen);
-  offlineEarned = computeOfflineEarnings(offlineEarnedMs, state.perSec, state.mult);
-  state.bp += offlineEarned;
 }
-if (state.nextPeachAt === 0) state.nextPeachAt = rollNextPeachAt(Date.now());
-const effects = loadSettings();
+let combat: CombatState = spawnFor(state.zone, state.killsThisZone, state.runMaxZone);
 
-const hud = new Hud();
-const choreo = new Choreographer();
-choreo.onMove = (name) => hud.setMoveName(name);
+let dps = 0;
+let clickDmg = 1;
+function recompute(): void {
+  dps = dpsOf(state);
+  clickDmg = clickDamageOf(state);
+}
+recompute();
 
+if (loaded) {
+  offlineEarned = offlineGold(dps, combat.zone, offlineEarnedMs);
+  state.gold += offlineEarned;
+}
+
+// ---------- visuals ----------
 const world = new World(scene, skyMat, floorMat, glowSprite);
 const audio = new AudioEngine();
 const beatTracker = new BeatTracker();
-
-let char: CharacterInstance = buildCharacter(scene, SKINS[state.skin]);
-
-const shop = new Shop({
-  state,
-  upgrades,
-  onPurchase: () => {
-    hud.update(state);
-    audio.buy();
-    checkAchievements();
-  },
-  rebuildCharacter: (key) => {
-    char = buildCharacter(scene, SKINS[key], char);
-  },
-  setBackground: (key) => {
-    world.setBackground(key);
-    audio.setBackground(key);
-  },
-});
-
-world.setBackground(state.bg);
-audio.setBackground(state.bg);
+const choreo = new Choreographer();
+const char: CharacterInstance = buildCharacter(scene, SKINS.classic);
+let currentBg = bgForZone(combat.zone);
+world.setBackground(currentBg);
+audio.setBackground(currentBg);
 choreo.setMove(0);
-hud.update(state);
 
+const hud = new ChHud();
 const toasts = new Toasts();
-const achUI = new AchievementsUI(state);
 const particles = new ParticleSystem(scene);
-const leaderboard = new Leaderboard();
 
 // ---------- persistence ----------
 let suppressSave = false;
+function syncMaxZones(): void {
+  state.zone = combat.zone;
+  state.killsThisZone = combat.killsThisZone;
+  state.runMaxZone = Math.max(state.runMaxZone, combat.maxZone);
+  state.lifetimeMaxZone = Math.max(state.lifetimeMaxZone, state.runMaxZone);
+}
 const persist = (): void => {
-  if (!suppressSave) saveGame(state, upgrades);
+  if (suppressSave) return;
+  syncMaxZones();
+  saveCh(state, Date.now());
 };
 window.setInterval(persist, 10_000);
 document.addEventListener('visibilitychange', () => {
@@ -102,94 +126,95 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('beforeunload', persist);
 
-const settings = new Settings({
+// ---------- shop panels ----------
+const crew = new Crew({
   state,
-  upgrades,
-  applyImported: (save) => {
-    applySave(save, state, upgrades);
-    char = buildCharacter(scene, SKINS[state.skin], char);
-    world.setBackground(state.bg);
-    audio.setBackground(state.bg);
-    shop.renderUpgrades();
-    shop.renderSkins();
-    shop.renderBgs();
-    hud.update(state);
+  onBuy: () => {
+    recompute();
+    audio.buy();
+    hud.update(state, combat, dps, clickDmg);
     persist();
-    syncEndgameUi();
+  },
+});
+
+const prestige = new Prestige({
+  state,
+  getRunMaxZone: () => Math.max(state.runMaxZone, combat.maxZone),
+  onAscend: () => {
+    syncMaxZones();
+    Object.assign(state, ascendState(state)); // mutate in place — panels hold this ref
+    combat = spawnFor(1, 0, 1);
+    recompute();
+    updateBackground(true);
+    crew.render();
+    hud.update(state, combat, dps, clickDmg);
+    toasts.show('✨', 'Ruhm eingeheimst!', `Jetzt ${fmt(state.souls)} Seelen`);
+    audio.unlockJingle();
+    persist();
+  },
+});
+
+new ChSettings({
+  getState: () => {
+    syncMaxZones();
+    return state;
+  },
+  applyImported: (imported) => {
+    Object.assign(state, imported); // mutate in place — panels hold this ref
+    combat = spawnFor(state.zone, state.killsThisZone, state.runMaxZone);
+    recompute();
+    updateBackground(true);
+    crew.render();
+    prestige.refresh();
+    hud.update(state, combat, dps, clickDmg);
+    persist();
   },
   reset: () => {
     suppressSave = true;
-    resetSave();
+    resetCh();
     window.location.reload();
   },
-  rebirth: () => {
-    applyRebirth(state, upgrades);
-    shop.renderUpgrades();
-    shop.renderSkins();
-    shop.renderBgs();
-    hud.update(state);
-    persist();
-    syncEndgameUi();
-    checkAchievements();
-  },
   effects,
-  showLeaderboard: () => void leaderboard.openTop(),
+  onGraphicsChange: () => applyQuality(effects.quality),
 });
-if (offlineEarned >= 1) settings.showWelcomeBack(offlineEarnedMs, offlineEarned);
 
-// ---------- boss fight ----------
-let bossInst: CharacterInstance | null = null;
-function spawnBossRig(): void {
-  if (bossInst) return;
-  bossInst = buildCharacter(scene, SKINS.boss);
-  const offX = 3.2;
-  const offZ = 1.2;
-  bossInst.rig.root.position.x += offX;
-  bossInst.rig.root.position.z += offZ;
-  bossInst.rig.root.rotation.y = -Math.PI * 0.72; // angle toward the player
-  for (const c of bossInst.cheeks) {
-    c.x += offX;
-    c.z += offZ;
-    c.g.position.set(c.x, c.y, c.z);
-  }
-}
-function removeBossRig(): void {
-  if (!bossInst) return;
-  scene.remove(bossInst.rig.root);
-  bossInst.cheeks.forEach((c) => scene.remove(c.g));
-  bossInst = null;
+// ---------- welcome back ----------
+const welcomeBack = document.getElementById('welcomeBack') as HTMLElement;
+document.getElementById('wbClose')?.addEventListener('click', () => {
+  welcomeBack.classList.add('hidden');
+});
+if (offlineEarned >= 1) {
+  const mins = Math.floor(offlineEarnedMs / 60_000);
+  const dur =
+    mins < 1
+      ? '< 1 min'
+      : mins < 60
+        ? `${mins} min`
+        : `${Math.floor(mins / 60)} h ${mins % 60} min`;
+  (document.getElementById('wbText') as HTMLElement).textContent =
+    `Du warst ${dur} weg. Deine Crew hat weitergetwerkt: +${fmt(offlineEarned)} BP (Idle-Rate 50 %, max. 8 h).`;
+  welcomeBack.classList.remove('hidden');
 }
 
-const bossFight = new BossFight({
-  getStats: () => ({ perClick: state.perClick, mult: state.mult }),
-  onSpawn: spawnBossRig,
-  onDespawn: removeBossRig,
-  onHit: (dmg) => {
-    hud.spawnPop(`-${fmt(dmg)}`);
-    audio.bossHit();
-  },
-  onWin: (bestTimeS) => {
-    state.bossDefeated = true;
-    state.unlocked.boss = true;
-    shop.renderSkins();
-    hud.update(state);
-    persist();
-    syncEndgameUi();
-    audio.bossWin();
-    checkAchievements();
-    leaderboard.promptSubmit(bestTimeS);
-  },
-  onLose: () => audio.bossLose(),
-  onExit: () => {
-    hud.update(state);
-    syncEndgameUi();
-  },
-});
+// ---------- tabs ----------
+const tabBodies: Record<string, string> = { crew: 'tabCrew', pr: 'tabPr', set: 'tabSet' };
+for (const tab of Array.from(document.querySelectorAll<HTMLElement>('.tab'))) {
+  tab.addEventListener('click', () => {
+    const key = tab.dataset.t!;
+    for (const t of Array.from(document.querySelectorAll('.tab'))) t.classList.remove('active');
+    tab.classList.add('active');
+    for (const [k, id] of Object.entries(tabBodies)) {
+      (document.getElementById(id) as HTMLElement).style.display = k === key ? '' : 'none';
+    }
+    if (key === 'crew') crew.render();
+    if (key === 'pr') prestige.refresh();
+  });
+}
 
-const bossStartBtn = document.getElementById('bossStart') as HTMLButtonElement;
-bossStartBtn.addEventListener('click', () => {
-  if (!bossFight.engaged) bossFight.start(0);
-});
+const shop = document.getElementById('shop') as HTMLElement;
+document
+  .getElementById('toggleShop')
+  ?.addEventListener('click', () => shop.classList.toggle('hidden'));
 
 const muteBtn = document.getElementById('muteBtn') as HTMLButtonElement;
 muteBtn.textContent = audio.muted ? '🔇' : '🔊';
@@ -198,83 +223,73 @@ muteBtn.addEventListener('click', () => {
   muteBtn.textContent = audio.toggleMute() ? '🔇' : '🔊';
 });
 
-/** Refresh milestone-driven UI: content-gate reveals, rebirth eligibility, boss button. */
-function syncEndgameUi(): void {
-  if (shop.syncReveals()) audio.unlockJingle();
-  settings.refresh();
-  const canBoss = state.maxBp >= BOSS_UNLOCK_BP && !bossFight.engaged;
-  bossStartBtn.classList.toggle('hidden', !canBoss);
+// ---------- background follows zone tier ----------
+function updateBackground(force = false): void {
+  const bg = bgForZone(combat.zone);
+  if (force || bg !== currentBg) {
+    currentBg = bg;
+    world.setBackground(bg);
+    audio.setBackground(bg);
+  }
 }
-syncEndgameUi();
 
-// ---------- achievements, particles, peach event ----------
+// ---------- combat glue ----------
 const particleTmp = new THREE.Vector3();
 let shakeMag = 0;
 
-function checkAchievements(): void {
-  const ctx = buildAchievementCtx(state, upgrades);
-  const already = new Set(state.achievements);
-  const fresh = newlyUnlocked(ctx, already);
-  if (fresh.length === 0) return;
-  for (const a of fresh) {
-    state.achievements.push(a.id);
-    toasts.show(a.icon, a.name, a.desc);
+function onKillProgress(
+  r: ReturnType<typeof hit>,
+  fromClick: boolean,
+  x?: number,
+  y?: number,
+): void {
+  state.gold += r.gold;
+  if (r.bossSpawned) {
+    toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
+    audio.unlockJingle();
   }
-  achUI.render();
-  persist();
+  if (r.advancedZone) {
+    if (combat.zone > state.runMaxZone) state.runMaxZone = combat.zone;
+    if (fromClick && x !== undefined) spawnPop(`+${fmt(r.gold)}`, x, y ?? 0, 'gold');
+    // was the kill a boss? (advanced from a boss target)
+    updateBackground();
+    if (combat.zone % 5 === 1 && combat.zone > 1) {
+      toasts.show('🏆', `Boss besiegt!`, `Bühne ${combat.zone} erreicht`);
+      audio.bossWin();
+    }
+  }
+  syncMaxZones();
 }
 
-const peachBtn = document.getElementById('peach') as HTMLButtonElement;
-const boostBadge = document.getElementById('boostBadge') as HTMLElement;
-let peachVisible = false;
-let peachHideAt = 0;
-
-function showPeach(now: number): void {
-  peachVisible = true;
-  peachHideAt = now + PEACH_VISIBLE_S * 1000;
-  peachBtn.style.left = `${80 + Math.random() * Math.max(40, window.innerWidth - 200)}px`;
-  peachBtn.style.top = `${120 + Math.random() * Math.max(40, window.innerHeight - 320)}px`;
-  peachBtn.classList.remove('hidden');
-}
-function hidePeach(): void {
-  peachVisible = false;
-  peachBtn.classList.add('hidden');
-}
-function updatePeach(now: number): void {
-  if (!peachVisible && now >= state.nextPeachAt && !bossFight.engaged) {
-    showPeach(now);
-  } else if (peachVisible && now >= peachHideAt) {
-    hidePeach();
-    state.nextPeachAt = rollNextPeachAt(now);
-    persist();
+function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void {
+  const wasBoss = combat.boss;
+  const r = hit(combat, dmg);
+  combat = r.state;
+  if (r.killed) {
+    onKillProgress(r, fromClick, x, y);
+  } else if (wasBoss && fromClick) {
+    audio.bossHit();
   }
 }
-peachBtn.addEventListener('click', () => {
-  const now = Date.now();
-  state.boostUntil = activateBoost(now);
-  state.peachesClicked += 1;
-  hidePeach();
-  state.nextPeachAt = rollNextPeachAt(now);
-  audio.unlockJingle();
-  persist();
-  checkAchievements();
-});
 
 // ---------- input ----------
-function doShake(cx?: number, cy?: number): void {
-  if (bossFight.engaged) {
-    bossFight.hit();
-    return;
-  }
-  const gain =
-    clickGain(state.perClick, state.mult, runtime.combo) *
-    incomeMultiplier(state.boostUntil, Date.now());
-  state.bp += gain;
-  runtime.combo++;
+let downX = 0;
+let downY = 0;
+let downT = 0;
+
+function doShake(x?: number, y?: number): void {
   state.totalClicks += 1;
-  if (runtime.combo > state.maxCombo) state.maxCombo = runtime.combo;
-  runtime.comboTimer = COMBO_WINDOW_S;
-  runtime.drive = Math.min(runtime.drive + 1.2, 6);
+  combo += 1;
+  comboTimer = COMBO_WINDOW_S;
+  drive = Math.min(drive + 1.2, 6);
+
+  const crit = Math.random() < CRIT_CHANCE;
+  const dmg = clickDmg * comboMult(combo) * (crit ? CRIT_MULT : 1);
+  const px = x ?? window.innerWidth / 2;
+  const py = y ?? window.innerHeight / 2;
+
+  applyHit(dmg, true, px, py);
+
   char.cheeks.forEach((c) => {
     c.vy += (Math.random() * 2 - 1) * 2.6;
     c.vx += (Math.random() * 2 - 1) * 2.6;
@@ -283,42 +298,41 @@ function doShake(cx?: number, cy?: number): void {
     char.rig.pelvis.getWorldPosition(particleTmp);
     particles.burst(particleTmp.x, particleTmp.y, particleTmp.z);
   }
-  if (effects.screenShake && runtime.combo > 0 && runtime.combo % 25 === 0) shakeMag = 0.35;
-  if (++runtime.clicksSinceSwitch >= 18) {
-    runtime.clicksSinceSwitch = 0;
+  if (effects.screenShake && (crit || (combo > 0 && combo % 25 === 0))) shakeMag = crit ? 0.5 : 0.3;
+  if (++clicksSinceSwitch >= MOVE_SWITCH_CLICKS) {
+    clicksSinceSwitch = 0;
     choreo.setMove(choreo.moveIdx + 1);
   }
-  hud.spawnPop('+' + fmt(gain), cx, cy);
-  shop.renderUpgrades();
+  spawnPop(`${crit ? 'CRIT ' : ''}-${fmt(dmg)}`, px, py, crit ? 'crit' : '');
   audio.click();
-  if (runtime.combo > 2 && runtime.combo % 5 === 0) audio.combo(runtime.combo);
-  checkAchievements();
+  if (combo > 2 && combo % 5 === 0) audio.combo(combo);
+  hud.update(state, combat, dps, clickDmg);
 }
 
-// A pointer that moved past a small threshold is an orbit drag, not a shake.
-let downX = 0;
-let downY = 0;
-let moved = false;
 canvas.addEventListener('pointerdown', (e) => {
   audio.unlock();
   downX = e.clientX;
   downY = e.clientY;
-  moved = false;
+  downT = performance.now();
 });
-window.addEventListener('pointermove', (e) => {
-  if (Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > 4) moved = true;
-});
-canvas.addEventListener('click', (e) => {
-  if (moved) return;
-  doShake(e.clientX, e.clientY);
+canvas.addEventListener('pointerup', (e) => {
+  const dist = Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY);
+  if (dist <= 10 && performance.now() - downT <= 500) doShake(e.clientX, e.clientY);
 });
 window.addEventListener('keydown', (e) => {
   audio.unlock();
   if (e.code === 'Space') {
     e.preventDefault();
+    if (e.repeat) return; // B4: no key-repeat autoclicker
     doShake();
   }
 });
+
+// ---------- runtime signals ----------
+let combo = 0;
+let comboTimer = 0;
+let drive = 0;
+let clicksSinceSwitch = 0;
 
 // ---------- resize ----------
 function resize(): void {
@@ -331,53 +345,76 @@ function resize(): void {
 window.addEventListener('resize', resize);
 resize();
 
+// ---------- onboarding + loading ----------
+const loadingEl = document.getElementById('loading');
+const onboarding = new Onboarding(() => {
+  effects.onboarded = true;
+  saveSettings(effects);
+});
+
+hud.update(state, combat, dps, clickDmg);
+
 // ---------- loop ----------
 const clock = new THREE.Clock();
 let acc = 0;
 let t0 = 0;
 let uiTimer = 0;
-function loop(): void {
+let lastRenderMs = 0;
+let firstFrame = true;
+
+function loop(nowMs: number): void {
   requestAnimationFrame(loop);
+  if (!frameDue(nowMs, lastRenderMs, effects.fpsCap)) return;
+  lastRenderMs = nowMs;
   const dt = Math.min(clock.getDelta(), 0.05);
   t0 += dt;
-  if (!bossFight.engaged) {
-    state.bp +=
-      passiveGain(state.perSec, state.mult, dt) * incomeMultiplier(state.boostUntil, Date.now());
+
+  // Idle DPS chips away at the current target; boss timer ticks down.
+  if (dps > 0) applyHit(dps * dt, false);
+  if (combat.boss) {
+    const bt = tickBoss(combat, dt);
+    combat = bt.state;
+    if (bt.failed) {
+      toasts.show('⏱', 'Zeit um!', 'Farm die Bühne & fordere den Boss erneut.');
+      audio.bossLose();
+    }
   }
-  if (state.bp > state.maxBp) state.maxBp = state.bp;
-  bossFight.update(dt);
-  if (runtime.comboTimer > 0) {
-    runtime.comboTimer -= dt;
-    if (runtime.comboTimer <= 0) runtime.combo = 0;
+
+  if (comboTimer > 0) {
+    comboTimer -= dt;
+    if (comboTimer <= 0) combo = 0;
   }
-  hud.setCombo(runtime.combo);
+  hud.setCombo(combo);
+
+  // physics
   acc += dt;
   while (acc >= DT) {
-    runtime.drive = stepPhysics(DT, char.rig, char.cheeks, choreo, runtime.drive);
+    drive = stepPhysics(DT, char.rig, char.cheeks, choreo, drive);
     acc -= DT;
   }
   renderCheeks(char.rig, char.cheeks);
   particles.update(dt);
-  const beatV = Math.max(0, Math.sin(choreo.phase * 2.2));
-  beat.intensity = beatV * runtime.drive * 4;
-  if (beatTracker.update(choreo.phase)) audio.beat(0.5 + runtime.drive * 0.08);
-  world.anims.forEach((a) => a(t0, beatV));
-  hud.update(state);
 
-  // Throttled UI: reveals, rebirth eligibility, boss button, achievements, peach.
+  const beatV = Math.max(0, Math.sin(choreo.phase * 2.2));
+  beat.intensity = beatV * drive * 4;
+  if (beatTracker.update(choreo.phase)) audio.beat(0.5 + drive * 0.08);
+  world.anims.forEach((a) => a(t0, beatV));
+
+  hud.update(state, combat, dps, clickDmg);
+
   uiTimer -= dt;
   if (uiTimer <= 0) {
-    uiTimer = 0.25;
-    const now = Date.now();
-    syncEndgameUi();
-    checkAchievements();
-    updatePeach(now);
-    boostBadge.classList.toggle('hidden', incomeMultiplier(state.boostUntil, now) <= 1);
+    uiTimer = 0.4;
+    document.title = titleFor(state.gold);
+    // keep crew affordability + prestige fresh while idling
+    const active = document.querySelector('.tab.active') as HTMLElement | null;
+    if (active?.dataset.t === 'crew') crew.render();
+    else if (active?.dataset.t === 'pr') prestige.refresh();
   }
 
   controls.update();
   if (shakeMag > 0.001) {
-    shakeMag *= Math.pow(0.0009, dt); // fast decay
+    shakeMag *= Math.pow(0.0009, dt);
     const ox = (Math.random() * 2 - 1) * shakeMag;
     const oy = (Math.random() * 2 - 1) * shakeMag;
     camera.position.x += ox;
@@ -389,5 +426,11 @@ function loop(): void {
     shakeMag = 0;
     renderer.render(scene, camera);
   }
+
+  if (firstFrame) {
+    firstFrame = false;
+    loadingEl?.classList.add('hidden');
+    if (!effects.onboarded) onboarding.start();
+  }
 }
-loop();
+requestAnimationFrame(loop);

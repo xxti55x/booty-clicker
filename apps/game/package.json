@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:itch": "npm run build && node scripts/pack-itch.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"
