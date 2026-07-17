@@ -1,4 +1,5 @@
 import {
+  BOSS_TIME_S,
   bossHit,
   bossHpFraction,
   bossTick,
@@ -22,8 +23,8 @@ export interface BossFightDeps {
   onDespawn: () => void;
   /** Feedback for a landed hit (damage dealt). */
   onHit: (dmg: number) => void;
-  /** The boss was defeated — unlock the skin, persist, roll credits. */
-  onWin: () => void;
+  /** The boss was defeated — unlock the skin, persist, roll credits. `bestTimeS` = kill time. */
+  onWin: (bestTimeS: number) => void;
   /** A fight attempt ran out the clock. */
   onLose?: () => void;
   /** The fight is fully over (won or abandoned) — resume normal play. */
@@ -99,7 +100,8 @@ export class BossFight {
     this.ui.classList.add('hidden');
     this.deps.onDespawn();
     if (b.status === 'won') {
-      this.deps.onWin();
+      const bestTimeS = Math.max(1, Math.ceil(BOSS_TIME_S - b.timeLeft));
+      this.deps.onWin(bestTimeS);
       this.showResult(
         '🏆 Sieg!',
         'Du hast den Goldenen Twerk-Tyrann besiegt! Der Tyrann-Skin ist jetzt freigeschaltet.',

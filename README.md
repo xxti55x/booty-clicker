@@ -34,6 +34,16 @@ Three.js kommt als npm-Paket (kein CDN). Projekt-Struktur & Milestones: siehe
 - **Rebirth (NG+)**: ab 100 000 BP im ⚙️-Tab — setzt BP & Upgrades zurück und
   gewährt dauerhaft +100 % Multiplikator (kumulativ), NG+-Badge im HUD.
 
+## Bestenliste (M5)
+
+- **Optionaler** globaler Highscore (Boss-Kill-Zeit) über einen Cloudflare Worker
+  (`apps/api`, Hono + D1 + KV). Endpunkte: `POST /api/scores`, `GET /api/scores/top`.
+- **Komplett fail-silent** (Spec §4.4): ohne erreichbare/konfigurierte API ist das
+  Spiel voll spielbar — der Client (`VITE_API_BASE`) ist standardmäßig aus.
+- Nach einem Boss-Sieg optionaler (überspringbarer) Eintrag; Top-50 im ⚙️-Tab.
+- Kein PII außer dem frei gewählten Nickname (`[a-zA-Z0-9_ ]`, 2–16).
+- Worker lokal: `cd apps/api && npx wrangler dev` (siehe `apps/api/wrangler.toml`).
+
 ## Game Feel & Content (M4)
 
 - **18 Achievements** mit Toast-Benachrichtigung und eigenem 🏆-Shop-Tab.
@@ -77,10 +87,10 @@ Three.js kommt als npm-Paket (kein CDN). Projekt-Struktur & Milestones: siehe
 
 ## Roadmap (siehe Gameplan)
 
-1. Leaderboard (Cloudflare Worker + D1)
-2. Mobile/UX, Settings, Testing + itch.io Release
+1. M6 — UX, Polish & Release (Onboarding, Mobile, Loading-Screen, itch.io-Export)
 
-M1–M4 (Persistenz, Boss + Balancing, Audio, Game Feel & Content) sind erledigt — siehe oben.
+M1–M5 (Persistenz, Boss + Balancing, Audio, Game Feel & Content, Bestenliste)
+sind erledigt — siehe oben.
 
 ## Lizenz-Hinweise
 

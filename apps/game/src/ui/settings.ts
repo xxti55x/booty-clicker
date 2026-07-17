@@ -23,6 +23,8 @@ export interface SettingsDeps {
   rebirth: () => void;
   /** Live effect toggles (screen-shake, particles) — mutated in place. */
   effects: GameSettings;
+  /** Open the top-50 leaderboard overlay. */
+  showLeaderboard: () => void;
 }
 
 const RESET_ARM_MS = 4000;
@@ -52,6 +54,10 @@ export class Settings {
         <h3>Effekte</h3>
         <button class="btn toggle" id="fxShake" type="button"></button>
         <button class="btn toggle" id="fxParticles" type="button"></button>
+      </div>
+      <div class="settings-section">
+        <h3>Bestenliste</h3>
+        <button class="btn" id="lbOpenBtn" type="button">Top 50 ansehen</button>
       </div>
       <div class="settings-section hidden" id="rebirthSection">
         <h3>Rebirth (NG+)</h3>
@@ -141,6 +147,8 @@ export class Settings {
       paintFx();
     });
     paintFx();
+
+    byId('lbOpenBtn').addEventListener('click', () => this.deps.showLeaderboard());
 
     byId('wbClose').addEventListener('click', () => {
       byId('welcomeBack').classList.add('hidden');
