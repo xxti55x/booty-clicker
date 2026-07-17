@@ -79,6 +79,44 @@ function stateFromSave(save: ChSaveV1): ChState {
   };
 }
 
+/** Parse + validate a save JSON string into a clean state (null if invalid). */
+export function deserializeCh(json: string): ChState | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  return isChSave(parsed) ? stateFromSave(parsed) : null;
+}
+
+// UTF-8-safe base64 (mirrors the legacy store) so export codes survive emoji.
+function toB64(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+function fromB64(code: string): string {
+  const bin = atob(code);
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+/** Portable save code (base64) for manual export. */
+export function exportCh(state: ChState, now: number): string {
+  return toB64(serializeCh(state, now));
+}
+
+/** Decode + validate a base64 save code back into a state (null if invalid). */
+export function importCh(code: string): ChState | null {
+  try {
+    return deserializeCh(fromB64(code.trim()));
+  } catch {
+    return null;
+  }
+}
+
 export function saveCh(
   state: ChState,
   now: number,

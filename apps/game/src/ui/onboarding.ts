@@ -13,15 +13,15 @@ interface Step {
 
 const STEPS: readonly Step[] = [
   {
-    text: '👆 Klick auf die Figur oder drück die Leertaste — so shakest du und verdienst Booty Points (BP).',
+    text: '👆 Klick auf die Figur oder drück die Leertaste — jeder Twerk macht Schaden am Rivalen und bringt BP. Besiege 10 Rivalen pro Bühne!',
   },
   {
-    text: '🛒 Im Shop (rechts) kaufst du Upgrades für mehr BP pro Klick und pro Sekunde.',
+    text: '🕺 In der Crew (rechts) heuerst du Tänzer:innen an — sie machen Idle-DPS und pushen deinen Klick-Schaden. Alle 5 Bühnen wartet ein Boss mit Timer.',
     target: 'toggleShop',
   },
   {
-    text: '🔊 Ton lässt sich hier jederzeit an-/ausschalten. Viel Spaß beim Twerken!',
-    target: 'muteBtn',
+    text: '✨ Im Ruhm-Tab startest du deine Tournee neu und sammelst Seelen für dauerhaft mehr Schaden. Es geht endlos weiter — viel Spaß!',
+    target: 'toggleShop',
   },
 ];
 

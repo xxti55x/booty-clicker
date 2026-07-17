@@ -5,6 +5,8 @@ import { monsterHp } from '../game/combat';
 import {
   CH_SAVE_KEY,
   type ChStorage,
+  exportCh,
+  importCh,
   isChSave,
   loadCh,
   offlineGold,
@@ -63,6 +65,17 @@ describe('ch-store — round-trip', () => {
     expect(isChSave({ ...good, crew: { boss: -2 } })).toBe(false);
     expect(isChSave({ ...good, crew: { boss: 1.5 } })).toBe(false);
     expect(isChSave({ ...good, lastSeen: 0 })).toBe(false);
+  });
+
+  it('export → import round-trips through a base64 code', () => {
+    const s = { ...createChState(), zone: 7, runMaxZone: 7, crew: { boss: 3, dj: 1 }, souls: 2 };
+    const code = exportCh(s, 12345);
+    const back = importCh(code);
+    expect(back).not.toBeNull();
+    expect(back!.zone).toBe(7);
+    expect(back!.crew).toEqual({ boss: 3, dj: 1 });
+    expect(importCh('not-valid-base64!!')).toBeNull();
+    expect(importCh(exportCh(createChState(), 1))).not.toBeNull();
   });
 
   it('reset removes the save', () => {

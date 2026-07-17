@@ -4,20 +4,20 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
-    <title>Booty Clicker · Anatomy Edition</title>
-    <meta name="description" content="Booty Clicker — Joke-Clicker-Game in Three.js." />
+    <title>Booty Clicker · Endless Twerk</title>
+    <meta name="description" content="Booty Clicker — endloser Twerk-Idle-Clicker in Three.js." />
     <meta name="theme-color" content="#07070b" />
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🍑%3C/text%3E%3C/svg%3E"
     />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Booty Clicker · Anatomy Edition" />
+    <meta property="og:title" content="Booty Clicker · Endless Twerk" />
     <meta
       property="og:description"
-      content="Ein Joke-Clicker-Game in Three.js: Shaken, Upgrades kaufen, den Twerk-Tyrann besiegen."
+      content="Twerke dich durch endlose Bühnen, rekrutiere deine Crew und werde zur Twerk-Legende."
     />
     <meta name="twitter:card" content="summary" />
   </head>
@@ -30,20 +30,32 @@
     <canvas id="app"></canvas>
     <div class="fx vignette"></div>
     <div class="fx grain"></div>
+
     <div class="hud">
-      <div class="bp"><span id="bp">0</span> BP</div>
-      <div class="rate" id="rate">0 / Sek · +1 pro Shake</div>
+      <div class="zone">
+        Bühne <span id="zone">1</span> <span class="zone-kind" id="zoneKind"></span>
+      </div>
+      <div class="bp"><span id="gold">0</span> BP</div>
+      <div class="stats" id="stats">DPS 0 · Klick 1</div>
       <div class="combo" id="combo"></div>
-      <div class="move" id="moveName">TWERK</div>
-      <div class="ngplus hidden" id="ngPlus"></div>
-      <div class="boostbadge hidden" id="boostBadge">🍑 ×3 Boost!</div>
+      <div class="ngplus hidden" id="souls"></div>
     </div>
-    <button class="toggleShop" id="toggleShop">🛒 Shop</button>
+
+    <div class="rival" id="rival">
+      <div class="rival-name" id="rivalName">Groupie</div>
+      <div class="rival-hpbar"><div class="rival-hpfill" id="rivalHpFill"></div></div>
+      <div class="rival-row">
+        <span class="rival-hp" id="rivalHpText">10 / 10</span>
+        <span class="rival-prog" id="zoneProgress">0 / 10</span>
+        <span class="rival-timer hidden" id="rivalTimer">30</span>
+      </div>
+    </div>
+
+    <button class="toggleShop" id="toggleShop">🕺 Crew</button>
     <button class="muteBtn" id="muteBtn" title="Ton an/aus">🔊</button>
-    <button class="bossStart hidden" id="bossStart">👑 Tyrann herausfordern</button>
-    <div class="hintbar">👆 Klick / Leertaste = Shaken · Klicken pusht Tempo &amp; Moves</div>
-    <button class="peach hidden" id="peach" title="Fang mich!">🍑</button>
+    <div class="hintbar">👆 Klick / Leertaste = Twerken &amp; Schaden · Crew macht Idle-DPS</div>
     <div class="toasts" id="toasts"></div>
+
     <div class="coach hidden" id="coach">
       <div class="coach-text" id="coachText"></div>
       <div class="coach-row">
@@ -51,20 +63,18 @@
         <button class="coach-btn" id="coachNext" type="button">Weiter</button>
       </div>
     </div>
+
     <div class="shop" id="shop">
       <div class="tabs">
-        <div class="tab active" data-t="up">⚡ Upgrades</div>
-        <div class="tab" data-t="sk">🕺 Skins</div>
-        <div class="tab" data-t="bg">🌆 Kulisse</div>
-        <div class="tab" data-t="ach">🏆</div>
+        <div class="tab active" data-t="crew">🕺 Crew</div>
+        <div class="tab" data-t="pr">✨ Ruhm</div>
         <div class="tab" data-t="set">⚙️</div>
       </div>
-      <div class="tabbody" id="tabUp"></div>
-      <div class="tabbody" id="tabSk" style="display: none"></div>
-      <div class="tabbody" id="tabBg" style="display: none"></div>
-      <div class="tabbody" id="tabAch" style="display: none"></div>
+      <div class="tabbody" id="tabCrew"></div>
+      <div class="tabbody" id="tabPr" style="display: none"></div>
       <div class="tabbody" id="tabSet" style="display: none"></div>
     </div>
+
     <div class="overlay hidden" id="welcomeBack">
       <div class="dialog">
         <div class="dt">🍑 Willkommen zurück!</div>
@@ -72,39 +82,7 @@
         <button class="btn" id="wbClose">Einsammeln</button>
       </div>
     </div>
-    <div class="boss-ui hidden" id="bossUi">
-      <div class="boss-name">👑 Goldener Twerk-Tyrann</div>
-      <div class="boss-hpbar"><div class="boss-hpfill" id="bossHpFill"></div></div>
-      <div class="boss-row">
-        <span class="boss-hint">👆 Klick / Leertaste = Angriff!</span>
-        <span class="boss-timer" id="bossTimer">90</span>
-      </div>
-    </div>
-    <div class="overlay hidden" id="bossResult">
-      <div class="dialog">
-        <div class="dt" id="bossResultTitle"></div>
-        <div class="dd" id="bossResultText"></div>
-        <button class="btn" id="bossResultPrimary"></button>
-        <button class="btn ghost" id="bossResultSecondary"></button>
-      </div>
-    </div>
-    <div class="overlay hidden" id="lbSubmit">
-      <div class="dialog">
-        <div class="dt">🏅 Bestenliste</div>
-        <div class="dd" id="lbSubmitText"></div>
-        <input class="lb-input" id="lbNick" maxlength="16" placeholder="Nickname (2–16 Zeichen)" />
-        <div class="msg" id="lbMsg"></div>
-        <button class="btn" id="lbSubmitBtn" type="button">Absenden</button>
-        <button class="btn ghost" id="lbSkipBtn" type="button">Überspringen</button>
-      </div>
-    </div>
-    <div class="overlay hidden" id="lbTop">
-      <div class="dialog wide">
-        <div class="dt">🏅 Top 50</div>
-        <div class="lb-list" id="lbList"></div>
-        <button class="btn" id="lbClose" type="button">Schließen</button>
-      </div>
-    </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
