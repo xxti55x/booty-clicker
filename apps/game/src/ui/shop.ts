@@ -69,14 +69,19 @@ export class Shop {
     return `${skins.join(',')}|${bgs.join(',')}`;
   }
 
-  /** Re-render skins/backgrounds if a new content-gate milestone was crossed. */
-  syncReveals(): void {
+  /**
+   * Re-render skins/backgrounds if a new content-gate milestone was crossed.
+   * Returns true when something newly revealed (so the caller can chime).
+   */
+  syncReveals(): boolean {
     const sig = this.computeRevealSig();
     if (sig !== this.revealSig) {
       this.revealSig = sig;
       this.renderSkins();
       this.renderBgs();
+      return true;
     }
+    return false;
   }
 
   renderUpgrades(): void {

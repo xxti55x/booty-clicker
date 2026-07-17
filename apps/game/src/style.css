@@ -355,6 +355,21 @@ body {
 .ngplus.hidden {
   display: none;
 }
+.muteBtn {
+  position: fixed;
+  top: 14px;
+  left: 112px;
+  z-index: 25;
+  width: 40px;
+  height: 40px;
+  background: rgba(14, 14, 20, 0.9);
+  color: #e8e8ef;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  font-size: 16px;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
 .bossStart {
   position: fixed;
   top: 60px;

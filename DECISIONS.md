@@ -3,6 +3,31 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M3 — Audio
+
+- **2026-07-17 — All audio is synthesised, not sourced files.** The spec asks for
+  "1 CC0 Loop-Track pro Kulisse". Instead of downloading audio (network-policy
+  dependent, and 4 tracks + SFX would eat into the < 5 MB budget), every sound is
+  generated at runtime via the Web Audio API — oscillators + filtered noise for
+  SFX, and a per-background generative bass/arp/hi-hat loop. It is original code,
+  so it is licence-free (effectively CC0); documented in `public/CREDITS.md`.
+
+- **2026-07-17 — Audio prefs live in a separate localStorage key.** Mute/volume
+  settings persist under `bootyclicker.audio`, not in the game save, so audio
+  settings never force a save-schema migration. Same never-throw + injectable-
+  storage discipline as the save layer, so `prefs.ts` is unit-tested in node.
+
+- **2026-07-17 — Lazy AudioContext on first gesture (no autoplay).** The context
+  is created and resumed only in `unlock()`, called from the first pointerdown /
+  keydown / mute click — so browsers never raise an autoplay warning (spec AC).
+  Music (re)starts only when the context is running and not muted.
+
+- **2026-07-17 — Testable core vs. audio glue.** Beat detection (`beat.ts`),
+  prefs (`prefs.ts`) and track configs (`tracks.ts`) are pure and unit-tested;
+  the AudioContext-touching `engine.ts` is thin glue verified by the headless
+  smoke test (no autoplay error, mute toggles + persists). `BeatTracker` turns
+  the choreography `phase` into discrete clap onsets that speed up with drive.
+
 ## M2 — Progression & Boss-Finale
 
 - **2026-07-17 — Balancing = base-cost scale, not new mechanics.** Optimal play

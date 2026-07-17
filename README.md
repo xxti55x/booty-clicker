@@ -34,6 +34,16 @@ Three.js kommt als npm-Paket (kein CDN). Projekt-Struktur & Milestones: siehe
 - **Rebirth (NG+)**: ab 100 000 BP im ⚙️-Tab — setzt BP & Upgrades zurück und
   gewährt dauerhaft +100 % Multiplikator (kumulativ), NG+-Badge im HUD.
 
+## Audio (M3)
+
+- Komplett **prozedural** per Web Audio API erzeugt — keine Audiodateien, winzige
+  Bundle-Größe, lizenzfrei (Details in [`apps/game/public/CREDITS.md`](./apps/game/public/CREDITS.md)).
+- **Musik**: pro Kulisse ein generativer Loop (Bass + Arpeggio + Hi-Hat).
+- **SFX**: Shake/Klick, Kauf, Freischaltung, Combo, Beat-Klatschen (synchron zur
+  Choreografie), Boss-Treffer/Sieg/Niederlage.
+- **Kein Autoplay**: der AudioContext startet erst nach der ersten Nutzer-Geste.
+- **Mute** (🔊-Button oben links) wirkt sofort und wird gespeichert.
+
 ## Persistenz (M1)
 
 - **Autosave**: alle 10 Sekunden, beim Wechsel in den Hintergrund-Tab und beim
@@ -57,12 +67,11 @@ Three.js kommt als npm-Paket (kein CDN). Projekt-Struktur & Milestones: siehe
 
 ## Roadmap (siehe Gameplan)
 
-1. Audio (Beat-Klatschen, SFX, Musik)
-2. Achievements, Partikel, Random Events
-3. Mobile/UX, Settings
-4. Testing + itch.io Release
+1. Achievements, Partikel, Random Events
+2. Mobile/UX, Settings
+3. Testing + itch.io Release
 
-Save/Load (M1) und Boss-Fight + Balancing (M2) sind erledigt — siehe oben.
+Save/Load (M1), Boss-Fight + Balancing (M2) und Audio (M3) sind erledigt — siehe oben.
 
 ## Lizenz-Hinweise
 

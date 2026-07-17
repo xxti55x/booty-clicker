@@ -2,6 +2,8 @@ import * as THREE from 'three';
 
 import './style.css';
 
+import { BeatTracker } from './audio/beat';
+import { AudioEngine } from './audio/engine';
 import { buildCharacter, type CharacterInstance } from './character/rig';
 import { DT, renderCheeks, stepPhysics } from './character/physics';
 import { SKINS } from './character/skins';
@@ -48,20 +50,29 @@ const choreo = new Choreographer();
 choreo.onMove = (name) => hud.setMoveName(name);
 
 const world = new World(scene, skyMat, floorMat, glowSprite);
+const audio = new AudioEngine();
+const beatTracker = new BeatTracker();
 
 let char: CharacterInstance = buildCharacter(scene, SKINS[state.skin]);
 
 const shop = new Shop({
   state,
   upgrades,
-  onPurchase: () => hud.update(state),
+  onPurchase: () => {
+    hud.update(state);
+    audio.buy();
+  },
   rebuildCharacter: (key) => {
     char = buildCharacter(scene, SKINS[key], char);
   },
-  setBackground: (key) => world.setBackground(key),
+  setBackground: (key) => {
+    world.setBackground(key);
+    audio.setBackground(key);
+  },
 });
 
 world.setBackground(state.bg);
+audio.setBackground(state.bg);
 choreo.setMove(0);
 hud.update(state);
 
@@ -83,6 +94,7 @@ const settings = new Settings({
     applySave(save, state, upgrades);
     char = buildCharacter(scene, SKINS[state.skin], char);
     world.setBackground(state.bg);
+    audio.setBackground(state.bg);
     shop.renderUpgrades();
     shop.renderSkins();
     shop.renderBgs();
@@ -134,7 +146,10 @@ const bossFight = new BossFight({
   getStats: () => ({ perClick: state.perClick, mult: state.mult }),
   onSpawn: spawnBossRig,
   onDespawn: removeBossRig,
-  onHit: (dmg) => hud.spawnPop(`-${fmt(dmg)}`),
+  onHit: (dmg) => {
+    hud.spawnPop(`-${fmt(dmg)}`);
+    audio.bossHit();
+  },
   onWin: () => {
     state.bossDefeated = true;
     state.unlocked.boss = true;
@@ -142,7 +157,9 @@ const bossFight = new BossFight({
     hud.update(state);
     persist();
     syncEndgameUi();
+    audio.bossWin();
   },
+  onLose: () => audio.bossLose(),
   onExit: () => {
     hud.update(state);
     syncEndgameUi();
@@ -154,9 +171,16 @@ bossStartBtn.addEventListener('click', () => {
   if (!bossFight.engaged) bossFight.start(0);
 });
 
+const muteBtn = document.getElementById('muteBtn') as HTMLButtonElement;
+muteBtn.textContent = audio.muted ? '🔇' : '🔊';
+muteBtn.addEventListener('click', () => {
+  audio.unlock();
+  muteBtn.textContent = audio.toggleMute() ? '🔇' : '🔊';
+});
+
 /** Refresh milestone-driven UI: content-gate reveals, rebirth eligibility, boss button. */
 function syncEndgameUi(): void {
-  shop.syncReveals();
+  if (shop.syncReveals()) audio.unlockJingle();
   settings.refresh();
   const canBoss = state.maxBp >= BOSS_UNLOCK_BP && !bossFight.engaged;
   bossStartBtn.classList.toggle('hidden', !canBoss);
@@ -184,6 +208,8 @@ function doShake(cx?: number, cy?: number): void {
   }
   hud.spawnPop('+' + fmt(gain), cx, cy);
   shop.renderUpgrades();
+  audio.click();
+  if (runtime.combo > 2 && runtime.combo % 5 === 0) audio.combo(runtime.combo);
 }
 
 // A pointer that moved past a small threshold is an orbit drag, not a shake.
@@ -191,6 +217,7 @@ let downX = 0;
 let downY = 0;
 let moved = false;
 canvas.addEventListener('pointerdown', (e) => {
+  audio.unlock();
   downX = e.clientX;
   downY = e.clientY;
   moved = false;
@@ -203,6 +230,7 @@ canvas.addEventListener('click', (e) => {
   doShake(e.clientX, e.clientY);
 });
 window.addEventListener('keydown', (e) => {
+  audio.unlock();
   if (e.code === 'Space') {
     e.preventDefault();
     doShake();
@@ -247,6 +275,7 @@ function loop(): void {
   renderCheeks(char.rig, char.cheeks);
   const beatV = Math.max(0, Math.sin(choreo.phase * 2.2));
   beat.intensity = beatV * runtime.drive * 4;
+  if (beatTracker.update(choreo.phase)) audio.beat(0.5 + runtime.drive * 0.08);
   world.anims.forEach((a) => a(t0, beatV));
   hud.update(state);
 

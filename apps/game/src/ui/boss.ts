@@ -24,6 +24,8 @@ export interface BossFightDeps {
   onHit: (dmg: number) => void;
   /** The boss was defeated — unlock the skin, persist, roll credits. */
   onWin: () => void;
+  /** A fight attempt ran out the clock. */
+  onLose?: () => void;
   /** The fight is fully over (won or abandoned) — resume normal play. */
   onExit: () => void;
 }
@@ -105,6 +107,7 @@ export class BossFight {
         () => this.close(),
       );
     } else {
+      this.deps.onLose?.();
       const next = b.attempt + 1;
       this.showResult(
         '💀 Zu langsam!',
