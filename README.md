@@ -19,12 +19,25 @@ Three.js kommt als npm-Paket (kein CDN). Projekt-Struktur & Milestones: siehe
 
 - Klick auf Figur / Leertaste = Shaken (BP verdienen)
 - Maus ziehen = Kamera drehen, Scrollen = Zoom
-- Shop (rechts oben): Upgrades, Skins, Kulissen
+- Shop (rechts): Upgrades, Skins, Kulissen, Einstellungen (⚙️)
+- 🛒-Button (links oben) blendet den Shop ein/aus
+
+## Progression & Boss-Finale (M2)
+
+- **Balancing als Daten**: die Upgrade-Kosten in `economy.ts` folgen einer
+  dokumentierten Ziel-Kurve — optimales Spiel erreicht den Boss-Unlock bei
+  50 000 BP nach ~40 min (verifiziert durch einen reinen Bot-Playthrough-Test).
+- **Content-Gates**: Skins & Kulissen erscheinen erst ab BP-Meilensteinen im Shop.
+- **Boss-Fight** (👑 „Tyrann herausfordern", ab 50 000 BP): 90-Sekunden-Kampf gegen
+  den Goldenen Twerk-Tyrann, Klick-Schaden skaliert mit `perClick`. Sieg schaltet
+  den Tyrann-Skin frei; verloren gibt's einen Retry mit 25 % weniger Boss-HP.
+- **Rebirth (NG+)**: ab 100 000 BP im ⚙️-Tab — setzt BP & Upgrades zurück und
+  gewährt dauerhaft +100 % Multiplikator (kumulativ), NG+-Badge im HUD.
 
 ## Persistenz (M1)
 
 - **Autosave**: alle 10 Sekunden, beim Wechsel in den Hintergrund-Tab und beim
-  Schließen/Verlassen der Seite (`localStorage`, Schema-Version 2).
+  Schließen/Verlassen der Seite (`localStorage`, Schema-Version 3, migriert v1/v2).
 - **Offline-Ertrag**: beim Wiedereinstieg gibt's 50 % des passiven Ertrags für die
   Zeit, die man weg war (gedeckelt auf 2 Stunden) — angezeigt im
   "Willkommen zurück"-Dialog.
@@ -40,16 +53,16 @@ Three.js kommt als npm-Paket (kein CDN). Projekt-Struktur & Milestones: siehe
 - 5 Skins: Klassiker, Disco-King, Robo-Twerk 3000, Der Showmaster, Goldener Twerk-Tyrann
 - 4 Kulissen: Neon-Club, Synthwave, Sunset Beach, Deep Space
 - 7 Upgrades, Combo-System, ACES-Tonemapping, PBR-Materialien
+- Boss-Finale, Prestige/Rebirth, Content-Gates (M2)
 
 ## Roadmap (siehe Gameplan)
 
-1. Boss-Fight + Balancing (Pflicht)
-2. Audio (Beat-Klatschen, SFX, Musik)
-3. Achievements, Partikel, Random Events
-4. Mobile/UX, Settings
-5. Testing + itch.io Release
+1. Audio (Beat-Klatschen, SFX, Musik)
+2. Achievements, Partikel, Random Events
+3. Mobile/UX, Settings
+4. Testing + itch.io Release
 
-Save/Load via localStorage ist erledigt — siehe "Persistenz (M1)" oben.
+Save/Load (M1) und Boss-Fight + Balancing (M2) sind erledigt — siehe oben.
 
 ## Lizenz-Hinweise
 

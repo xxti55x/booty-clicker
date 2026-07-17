@@ -15,6 +15,8 @@ export interface SkinConfig {
   readonly shorts: number;
   /** Hair colour. */
   readonly hair: number;
+  /** BP milestone (highest-ever) before this appears in the shop (M2 content-gate). */
+  readonly revealAt?: number;
 }
 
 export type SkinKey = 'classic' | 'disco' | 'robo' | 'host' | 'boss';

@@ -3,6 +3,53 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M2 — Progression & Boss-Finale
+
+- **2026-07-17 — Balancing = base-cost scale, not new mechanics.** Optimal play
+  raced to 50k BP in ~14 min with the ported economy. The upgrade **effect** values
+  (`val`/`type`) are the prototype's originals (shop text unchanged); only the
+  **costs** (`base` ×3) are the tuning knob. `economy.test.ts` asserts effect values
+  and the cost _formula_ (with literals), so retuning `base` breaks nothing. `gr`
+  barely moves the ROI-greedy curve — base scale dominates — so growth rates stay
+  as-is. Canonical cadence for the AC is ~3 clicks/s → boss at ~40 min.
+
+- **2026-07-17 — Pure optimal-buy simulator backs the balancing AC.**
+  `simulatePlaythrough` (game/progression.ts) is a deterministic, DOM-free
+  ROI-greedy playthrough; the test asserts the 50k-BP boss unlock lands in the
+  30–50 min window at clickRate 3 and 4. An optional `upgrades` override let me
+  calibrate tunings without editing `economy.ts` iteratively.
+
+- **2026-07-17 — Boss HP is fixed (75k), not scaled to the player.** Click damage
+  scales with `perClick·mult` (spec), so a fixed pool makes perClick investment
+  matter: at the expected unlock build (perClick·mult ≈ 260) it's a close fight at a
+  brisk cadence; a click-neglecting or slow player loses. Each loss eases the next
+  attempt's HP by 25% (`0.75^attempt`), so it is always eventually winnable.
+
+- **2026-07-17 — Rebirth = additive +100% folded into the multiplier.**
+  `prestigeMult = 1 + rebirths`; on load and after each rebirth, derived stats are
+  rebuilt via `deriveStats(upgrades, { mult: prestigeMult })`, so the running
+  incremental `state.mult *= val` on purchases keeps prestige baked in. Cosmetic
+  unlocks, `bossDefeated` and `maxBp` survive a rebirth; BP and levels reset.
+
+- **2026-07-17 — Schema v3.** Added `maxBp`, `prestigeMult`, `rebirths`,
+  `bossDefeated`; `migrate v2→v3` defaults them (maxBp seeded from bp). Kept the M1
+  never-throw + `Object.hasOwn` validation discipline; the migration loop still
+  can't infinite-loop and rejects future/invalid versions to a clean fresh start.
+
+- **2026-07-17 — Content-gates are sticky via persisted `maxBp`.** Skins/backgrounds
+  reveal once the _highest-ever_ BP passes `revealAt`, so spending BP never re-hides
+  an item. `Shop.syncReveals()` recomputes a reveal signature each throttled tick and
+  re-renders only when a milestone is crossed.
+
+- **2026-07-17 — Boss/rebirth UI placement.** Boss fight is a top HP-bar/timer banner
+  plus a win/lose result dialog (reusing the M1 `.overlay`/`.dialog` language);
+  clicks route to boss damage while engaged and passive income pauses. Rebirth lives
+  in the ⚙️ tab with the same armed double-confirm as Reset; NG+ badge in the HUD.
+
+- **2026-07-17 — Shop/boss buttons moved to top-left.** A headless end-to-end smoke
+  test surfaced that the 🛒 and 👑 buttons overlapped the shop tab row (real click
+  interception). Both moved to the left edge, clear of the right-hand shop panel.
+
 ## M1 — Persistenz
 
 - **2026-07-16 — `suppressSave` guard on reset.** `reset()` wipes the save and
