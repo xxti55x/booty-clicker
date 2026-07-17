@@ -1,6 +1,6 @@
 import type { UpgradeState } from '../game/economy';
 import type { GameState } from '../game/state';
-import type { SaveDataV2 } from '../save/schema';
+import type { SaveDataV3 } from '../save/schema';
 import { exportSave, importSave } from '../save/store';
 import { fmt } from './format';
 
@@ -14,7 +14,7 @@ export interface SettingsDeps {
   state: GameState;
   upgrades: UpgradeState[];
   /** Called with a freshly validated save after a successful import. */
-  applyImported: (save: SaveDataV2) => void;
+  applyImported: (save: SaveDataV3) => void;
   /** Wipe the save and restart. */
   reset: () => void;
 }

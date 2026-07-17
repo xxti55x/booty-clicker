@@ -1,6 +1,6 @@
 import type { BackgroundKey, SkinKey } from '../types';
 
-/** The serializable game state (spec §4.2 — becomes versioned in M1). */
+/** The serializable game state (spec §4.2 — versioned in the save schema). */
 export interface GameState {
   bp: number;
   perClick: number;
@@ -9,9 +9,17 @@ export interface GameState {
   skin: SkinKey;
   bg: BackgroundKey;
   unlocked: Record<SkinKey, boolean>;
+  /** Highest BP ever reached — drives sticky content-gate reveals (M2). */
+  maxBp: number;
+  /** Permanent Rebirth multiplier: 1 + number of rebirths (M2 prestige). */
+  prestigeMult: number;
+  /** How many times the player has rebirthed (NG+ badge). */
+  rebirths: number;
+  /** Whether the boss has ever been defeated (permanent skin unlock). */
+  bossDefeated: boolean;
 }
 
-/** A fresh game, values identical to the prototype's `G`. */
+/** A fresh game. */
 export function createGameState(): GameState {
   return {
     bp: 0,
@@ -21,6 +29,10 @@ export function createGameState(): GameState {
     skin: 'classic',
     bg: 'club',
     unlocked: { classic: true, disco: true, robo: false, host: false, boss: false },
+    maxBp: 0,
+    prestigeMult: 1,
+    rebirths: 0,
+    bossDefeated: false,
   };
 }
 

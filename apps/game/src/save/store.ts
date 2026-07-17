@@ -1,7 +1,7 @@
 import { deriveStats, type UpgradeState } from '../game/economy';
 import { createGameState, type GameState } from '../game/state';
 import { migrate } from './migrate';
-import type { SaveDataV2 } from './schema';
+import type { SaveDataV3 } from './schema';
 
 export const SAVE_KEY = 'bootyclicker.save';
 
@@ -25,17 +25,21 @@ export function serialize(
   state: GameState,
   upgrades: readonly UpgradeState[],
   now = Date.now(),
-): SaveDataV2 {
+): SaveDataV3 {
   const levels: Record<string, number> = {};
   for (const u of upgrades) levels[u.id] = u.lv;
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     bp: state.bp,
     upgrades: levels,
     skin: state.skin,
     bg: state.bg,
     unlocked: { ...state.unlocked },
     lastSeen: now,
+    maxBp: state.maxBp,
+    prestigeMult: state.prestigeMult,
+    rebirths: state.rebirths,
+    bossDefeated: state.bossDefeated,
   };
 }
 
@@ -54,7 +58,7 @@ export function saveGame(
 }
 
 /** Load + migrate the stored save, if any. Never throws — bad data yields null. */
-export function loadGame(storage: SaveStorage | null = defaultStorage()): SaveDataV2 | null {
+export function loadGame(storage: SaveStorage | null = defaultStorage()): SaveDataV3 | null {
   if (!storage) return null;
   let raw: string | null;
   try {
@@ -77,10 +81,17 @@ export function loadGame(storage: SaveStorage | null = defaultStorage()): SaveDa
  * derived stats (perClick/perSec/mult) are rebuilt via deriveStats, never
  * trusted from disk.
  */
-export function applySave(save: SaveDataV2, state: GameState, upgrades: UpgradeState[]): void {
+export function applySave(save: SaveDataV3, state: GameState, upgrades: UpgradeState[]): void {
   for (const u of upgrades) u.lv = save.upgrades[u.id] ?? 0;
 
-  const derived = deriveStats(upgrades);
+  state.prestigeMult = save.prestigeMult;
+  state.rebirths = save.rebirths;
+  state.bossDefeated = save.bossDefeated;
+  state.maxBp = save.maxBp;
+
+  // Prestige multiplier is folded into the derived multiplier (never trust a
+  // stored `mult`; rebuild it from levels + prestige).
+  const derived = deriveStats(upgrades, { perClick: 1, perSec: 0, mult: state.prestigeMult });
   state.perClick = derived.perClick;
   state.perSec = derived.perSec;
   state.mult = derived.mult;
@@ -129,7 +140,7 @@ export function exportSave(state: GameState, upgrades: readonly UpgradeState[]):
 }
 
 /** Parse a base64 save code back into a validated save. Never throws. */
-export function importSave(b64: string): SaveDataV2 | null {
+export function importSave(b64: string): SaveDataV3 | null {
   const trimmed = b64.trim();
   let json: string;
   try {
