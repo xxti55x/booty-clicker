@@ -315,8 +315,9 @@ function repairPermTokens(v: unknown): PermTokens {
 /**
  * Repair the Golden-Peach slice (v7, §6.1): `nextPeachAt`/`boostUntil` must be
  * finite and ≥ 0 (negative/NaN ⇒ 0). The absurd-future clamp (clock set forward,
- * then back) is deferred to the boot glue, which re-rolls `nextPeachAt` and clears a
- * stale `boostUntil` against `now` — exactly like the sugar timer (§9.2.2). Never throws.
+ * then back) is deferred to the boot glue, which re-rolls `nextPeachAt` and clamps
+ * `boostUntil` via `clampBoostUntil` (≤ 24 h ahead — chest boosts legitimately stack
+ * the window far past 60 s, §6.2) — same spirit as the sugar timer (§9.2.2). Never throws.
  */
 function repairPeach(v: unknown): PeachState {
   if (!isRecord(v)) return createPeach();

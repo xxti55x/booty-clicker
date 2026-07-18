@@ -145,7 +145,12 @@ export function permTokenDpsMult(tokens: PermTokens): number {
 /** The reward kinds a chest can yield. */
 export type RewardKind = 'bp' | 'shards' | 'keys' | 'sugar' | 'boost' | 'token' | 'jackpot';
 
-/** A time-limited income boost reward (`mult`× for `durMs`, stacks DURATION §6.2). */
+/**
+ * A time-limited income boost reward (`mult`× for `durMs`, stacks DURATION §6.2).
+ * The glue credits `durMs` onto the game's SINGLE income window (the Golden-Peach ×3,
+ * §6.1) — so `mult` is always `PEACH_BOOST` (3) in the shipped tables, keeping the
+ * advertised factor identical to the delivered one (P5 transparency).
+ */
 export interface BoostReward {
   readonly mult: number;
   readonly durMs: number;
@@ -239,7 +244,7 @@ export interface LootRow {
   readonly weight: number;
   /** `bp`: minutes of current income the BP reward equals (§6.2: Gold = 15 min). */
   readonly bpMinutes?: number;
-  /** `boost`: income multiplier (×2 stacks duration, §6.2). */
+  /** `boost`: income multiplier (extends the single ×3 window — stacks duration, §6.2). */
   readonly boostMult?: number;
   /** `boost`: duration in ms. */
   readonly boostDurMs?: number;
@@ -278,7 +283,7 @@ export const LOOT_TABLES: Record<ChestTier, LootTable> = {
     tokenPool: [],
     rows: [
       { kind: 'bp', weight: 45, bpMinutes: 5 },
-      { kind: 'boost', weight: 30, boostMult: 2, boostDurMs: 3 * MIN },
+      { kind: 'boost', weight: 30, boostMult: 3, boostDurMs: 3 * MIN },
       { kind: 'shards', weight: 18, min: 1, max: 3 },
       { kind: 'keys', weight: 5, min: 1, max: 1 },
       { kind: 'sugar', weight: 1, sugar: 1 },
@@ -291,7 +296,7 @@ export const LOOT_TABLES: Record<ChestTier, LootTable> = {
     tokenPool: GOLD_TOKEN_POOL,
     rows: [
       { kind: 'bp', weight: 30, bpMinutes: 15 },
-      { kind: 'boost', weight: 25, boostMult: 2, boostDurMs: 10 * MIN },
+      { kind: 'boost', weight: 25, boostMult: 3, boostDurMs: 10 * MIN },
       { kind: 'shards', weight: 22, min: 3, max: 8 },
       { kind: 'keys', weight: 10, min: 1, max: 1 },
       { kind: 'token', weight: 8 },
@@ -305,7 +310,7 @@ export const LOOT_TABLES: Record<ChestTier, LootTable> = {
     tokenPool: DIAMOND_TOKEN_POOL,
     rows: [
       { kind: 'bp', weight: 20, bpMinutes: 60 },
-      { kind: 'boost', weight: 20, boostMult: 2, boostDurMs: 40 * MIN },
+      { kind: 'boost', weight: 20, boostMult: 3, boostDurMs: 40 * MIN },
       { kind: 'shards', weight: 25, min: 10, max: 25 },
       { kind: 'keys', weight: 12, min: 1, max: 2 },
       { kind: 'token', weight: 15 },
@@ -319,7 +324,7 @@ export const LOOT_TABLES: Record<ChestTier, LootTable> = {
     tokenPool: DIAMOND_TOKEN_POOL,
     rows: [
       { kind: 'bp', weight: 15, bpMinutes: 240 },
-      { kind: 'boost', weight: 15, boostMult: 2, boostDurMs: 160 * MIN },
+      { kind: 'boost', weight: 15, boostMult: 3, boostDurMs: 160 * MIN },
       { kind: 'shards', weight: 25, min: 40, max: 100 },
       { kind: 'keys', weight: 15, min: 2, max: 3 },
       { kind: 'token', weight: 12 },
@@ -341,8 +346,10 @@ export function shardMax(tier: ChestTier): number {
 
 /**
  * The cap on how much of row 0's weight Luck may redistribute (never fully drains
- * the consolation row, so every table stays valid). Truhilda + gear + Truhen-Magnet
- * feed a single `luck` fraction; part 2 sums them and clamps here.
+ * the consolation row, so every table stays valid). Truhilda (Ahnen) + gear chest-luck
+ * (incl. Tyrann-Sterne) feed a single `luck` fraction; part 2 sums them and clamps
+ * here. (Truhen-Magnet is the KEY-DROP node per the §4.5.2 tree table — it feeds
+ * `keyDropMult`, not this luck fraction.)
  */
 export const LUCK_MAX_SHIFT = 0.9;
 
@@ -433,7 +440,7 @@ export function isPityHit(reward: Reward, tier: ChestTier): boolean {
 export interface ChestCtx {
   /** Current total income per second (drives BP rewards; kept out of the engine). */
   readonly incomePerSec: number;
-  /** Summed Truhen-Luck fraction (Truhilda + gear + Truhen-Magnet), §6.3.4. */
+  /** Summed Truhen-Luck fraction (Truhilda + gear incl. Tyrann-Sterne), §6.3.4. */
   readonly luck: number;
   /** Incoming per-tier pity counters. */
   readonly pity: PityState;

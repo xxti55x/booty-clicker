@@ -56,10 +56,10 @@ import {
   resolveDuplicate,
 } from './game/chests';
 import {
-  PEACH_BOOST_S,
   PEACH_MAX_S,
   PEACH_VISIBLE_S,
   activateBoost,
+  clampBoostUntil,
   peachKeyRoll,
   rollNextPeachAt,
 } from './game/peach';
@@ -210,15 +210,17 @@ let rng = new Rng(state.rng);
 
 // Seed / repair the Golden-Peach schedule (§6.1). A fresh or migrated slice arrives
 // unseeded (`nextPeachAt: 0`); an absurd-future timestamp (clock set forward, then
-// back) is re-rolled — the same clamp spirit as the sugar timer (§9.2.2). A stale
-// far-future boost is cleared. A recent-past `nextPeachAt` is left as-is: the loop's
-// despawn check reschedules it on the first frame.
+// back) is re-rolled — the same clamp spirit as the sugar timer (§9.2.2). The boost
+// window is CLAMPED (never wiped): chest `boost` rewards legitimately extend it far
+// past the 60-s peach base (§6.2 duration-stacking), so only a beyond-24-h absurdity
+// is clipped. A recent-past `nextPeachAt` is left as-is: the loop's despawn check
+// reschedules it on the first frame.
 {
   const bootNow = Date.now();
   if (state.peach.nextPeachAt <= 0 || state.peach.nextPeachAt > bootNow + PEACH_MAX_S * 1000) {
     state.peach.nextPeachAt = rollNextPeachAt(bootNow, rng);
   }
-  if (state.peach.boostUntil > bootNow + PEACH_BOOST_S * 1000) state.peach.boostUntil = 0;
+  state.peach.boostUntil = clampBoostUntil(state.peach.boostUntil, bootNow);
 }
 
 let combat: CombatState = spawnFor(state.zone, state.killsThisZone, state.runMaxZone);
@@ -960,9 +962,12 @@ function creditReward(reward: Reward): void {
       break;
     case 'boost': {
       // Stack DURATION onto the active income-boost window (§6.2 „stackt Dauer, nicht
-      // Faktor"): the single ×3 peach window is extended by the reward's duration.
-      const base = Math.max(state.peach.boostUntil, Date.now());
-      state.peach.boostUntil = base + reward.boost.durMs;
+      // Faktor"): the single ×3 peach window is extended by the reward's duration,
+      // capped 24 h ahead (`clampBoostUntil`) so the persisted window always stays
+      // inside the boot-repair ceiling — a reload can never clip a legit stack.
+      const now = Date.now();
+      const base = Math.max(state.peach.boostUntil, now);
+      state.peach.boostUntil = clampBoostUntil(base + reward.boost.durMs, now);
       break;
     }
     case 'token':

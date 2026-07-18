@@ -24,6 +24,26 @@ export const PEACH_BOOST = 3;
 export const PEACH_BOOST_S = 60;
 /** Chance a caught peach also drops a 🔑 (spec §6.1: 25 %). */
 export const PEACH_KEY_CHANCE = 0.25;
+/**
+ * Hard ceiling on how far `boostUntil` may reach past `now` (24 h). Chest `boost`
+ * rewards stack DURATION onto the single income window (§6.2), so a legit
+ * `boostUntil` can lie far beyond the 60-s peach base — the forward-clock guard
+ * must therefore CLAMP against this generous ceiling, never wipe anything past
+ * `now + 60 s` (that would destroy an already-credited chest reward on reload).
+ * The same ceiling caps duration-stacking at credit time, so a saved window is
+ * always ≤ 24 h ahead and a set-clock-forward exploit is bounded by the same 24 h.
+ */
+export const BOOST_MAX_AHEAD_MS = 24 * 3600 * 1000;
+
+/**
+ * Clamp a persisted/credited boost end so it never reaches further than
+ * `now + BOOST_MAX_AHEAD_MS` (and never below 0). Identity for every legit value —
+ * only an absurd-future timestamp (clock set forward, then back) or an over-stacked
+ * window is clipped. Pure; used by the boot repair AND the reward-credit glue.
+ */
+export function clampBoostUntil(boostUntil: number, now: number): number {
+  return Math.max(0, Math.min(boostUntil, now + BOOST_MAX_AHEAD_MS));
+}
 
 /**
  * Epoch-ms for the next peach: `now` + a random `PEACH_MIN_S..PEACH_MAX_S` seconds,

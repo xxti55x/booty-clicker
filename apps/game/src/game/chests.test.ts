@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { Rng } from '../util/rng';
+import { PEACH_BOOST } from './peach';
 import {
   type ChestCtx,
   type ChestTier,
@@ -69,6 +70,18 @@ describe('chests — tiers, tables & sources (§6.2)', () => {
     expect(LOOT_TABLES.diamond.tokenPool).toEqual(['critDmg', 'critChance', 'goldPct', 'dpsPct']);
     expect(LOOT_TABLES.gold.tokenPool).toEqual(['critDmg']);
     expect(LOOT_TABLES.wood.tokenPool).toEqual([]);
+  });
+
+  it('boost rows advertise exactly the delivered factor (the single ×3 window)', () => {
+    // The glue credits boost DURATION onto the one Golden-Peach income window,
+    // whose factor is always PEACH_BOOST (×3). The table data must advertise that
+    // same factor — a row claiming ×2 while the window pays ×3 would break the
+    // §6.3.5 transparency promise (loot tables show the truth).
+    for (const tier of ['wood', 'gold', 'diamond', 'mythic'] as ChestTier[]) {
+      const boost = LOOT_TABLES[tier].rows.find((r) => r.kind === 'boost');
+      expect(boost?.boostMult).toBe(PEACH_BOOST);
+      expect(boost?.boostDurMs ?? 0).toBeGreaterThan(0);
+    }
   });
 
   it('chestTierForBoss maps boss zones to tiers (§6.2)', () => {

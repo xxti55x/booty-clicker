@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { Rng } from '../util/rng';
 import {
+  BOOST_MAX_AHEAD_MS,
   PEACH_BOOST,
   PEACH_BOOST_S,
   PEACH_KEY_CHANCE,
@@ -9,6 +10,7 @@ import {
   PEACH_MIN_S,
   activateBoost,
   boostActive,
+  clampBoostUntil,
   incomeMultiplier,
   peachKeyRoll,
   rollNextPeachAt,
@@ -45,6 +47,32 @@ describe('peach — boost (§6.1)', () => {
     expect(boostActive(until, now + 59_999)).toBe(true);
     expect(incomeMultiplier(until, now + 60_001)).toBe(1); // expired
     expect(boostActive(until, now + 60_001)).toBe(false);
+  });
+});
+
+describe('peach — boost-window clamp (§6.2 stacking + clock guard)', () => {
+  const now = 1_000_000_000;
+
+  it('is the identity for every legit window — incl. chest-stacked hours past 60 s', () => {
+    expect(clampBoostUntil(0, now)).toBe(0); // no boost stays no boost
+    expect(clampBoostUntil(now + PEACH_BOOST_S * 1000, now)).toBe(now + PEACH_BOOST_S * 1000);
+    // A mythic ×3 boost (160 min) reaches FAR past the 60-s peach base and must
+    // survive a reload — the regression this clamp guards against (never wipe to 0).
+    const mythic = now + 160 * 60 * 1000;
+    expect(clampBoostUntil(mythic, now)).toBe(mythic);
+    // Several stacked boosts inside the 24-h ceiling pass through untouched.
+    const stacked = now + 20 * 3600 * 1000;
+    expect(clampBoostUntil(stacked, now)).toBe(stacked);
+  });
+
+  it('clips an absurd-future window (clock set forward, then back) to now + 24 h', () => {
+    const yearAhead = now + 365 * 24 * 3600 * 1000;
+    expect(clampBoostUntil(yearAhead, now)).toBe(now + BOOST_MAX_AHEAD_MS);
+    expect(clampBoostUntil(now + BOOST_MAX_AHEAD_MS + 1, now)).toBe(now + BOOST_MAX_AHEAD_MS);
+  });
+
+  it('never returns a negative window', () => {
+    expect(clampBoostUntil(-5, now)).toBe(0);
   });
 });
 

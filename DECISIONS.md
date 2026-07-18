@@ -3,6 +3,29 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M12 — Review-Fixes (Pfirsich-Truhen & Loot)
+
+- **2026-07-18 (Review) — Boost-Fenster wird beim Boot GEKLEMMT, nie gelöscht
+  (`clampBoostUntil`, 24-h-Decke).** Der alte Boot-Guard löschte jedes
+  `peach.boostUntil > now + 60 s` — aber Truhen-`boost`-Rewards verlängern das Fenster
+  legitim um 10–160 min (§6.2 „stackt Dauer"), d. h. ein Reload nach einer Boost-Truhe
+  vernichtete den bereits gutgeschriebenen Reward. Jetzt: pure `clampBoostUntil(until, now)`
+  (`peach.ts`, `BOOST_MAX_AHEAD_MS = 24 h`) klemmt beim Boot UND beim Gutschreiben
+  (`creditReward`), sodass (a) jedes legitime Stack-Fenster den Reload überlebt und (b) der
+  Vor-Uhr-Stellen-Exploit weiter auf ≤ 24 h ×3 begrenzt bleibt. Duration-Stacking hat damit
+  eine dokumentierte 24-h-Fenster-Decke. Tests in `peach.test.ts`.
+
+- **2026-07-18 (Review) — Boost-Zeilen werben mit dem GELIEFERTEN Faktor: `boostMult: 3`.**
+  Die Tabellen deklarierten ×2, aber die Glue schreibt nur DAUER auf das eine
+  ×3-Einkommensfenster (Peach) gut — geliefert wurde also immer ×3. Statt einer zweiten
+  Multiplikator-Verwaltung (Architektur) wurden die Daten auf die Wahrheit gezogen
+  (`boostMult: 3`, alle vier Tiers; Null-Verhaltensänderung — `creditReward` liest `mult`
+  nicht). Loot-Viewer, Reward-Caption und „×3 Boost"-Badge sagen jetzt dasselbe wie die
+  Auszahlung (§6.3.5 Transparenz); Test erzwingt `boostMult === PEACH_BOOST`. Zudem
+  Kommentar-Fix: Truhen-Magnet ist laut §4.5.2-Knotentabelle der **Key-Drop**-Knoten
+  (+25 %, `keyDropMult`), nicht Teil der Luck-Fraktion — die §6.3.4-Aufzählung im Spec ist
+  dort inkonsistent; implementiert ist die konkrete Knotendefinition.
+
 ## M12 — Pfirsich-Truhen & Loot (Teil 3: 🎁 Truhen-Tab + 🍑-Button + Doku)
 
 - **2026-07-18 — 🎁 als 7. Emoji-Tab; Tab-Reihe auf `font-size: 15.5px` verengt.** Die
