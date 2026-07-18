@@ -36,6 +36,8 @@ interface Sim {
   gilds: Gilds;
   souls: number;
   lifetimeMaxZone: number;
+  /** Lifetime-earned RS highwater (held-balance model, §ascension). */
+  rsLifetime: number;
   rng: Rng;
 }
 
@@ -46,6 +48,7 @@ function newSim(seed: number): Sim {
     gilds: {},
     souls: 0,
     lifetimeMaxZone: 1,
+    rsLifetime: 0,
     rng: new Rng({ seed, cursor: 0 }),
   };
 }
@@ -207,9 +210,10 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
     globalT += runSeconds;
     maxBestZone = Math.max(maxBestZone, res.bestZone);
     const before = sim.souls;
-    const asc = applyAscension(res.bestZone, sim.lifetimeMaxZone, sim.souls);
+    const asc = applyAscension(res.bestZone, sim.lifetimeMaxZone, sim.souls, sim.rsLifetime);
     sim.souls = asc.souls;
     sim.lifetimeMaxZone = asc.lifetimeMaxZone;
+    sim.rsLifetime = asc.rsLifetime;
     summaries.push({
       run: r + 1,
       bestZone: res.bestZone,
@@ -282,10 +286,11 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
     buyCrewGreedy(sim);
 
     if (globalT - lastAdvanceT >= opts.stallSeconds) {
-      const asc = applyAscension(combat.maxZone, sim.lifetimeMaxZone, sim.souls);
+      const asc = applyAscension(combat.maxZone, sim.lifetimeMaxZone, sim.souls, sim.rsLifetime);
       const gained = asc.souls - sim.souls;
       sim.souls = asc.souls;
       sim.lifetimeMaxZone = asc.lifetimeMaxZone;
+      sim.rsLifetime = asc.rsLifetime;
       sim.gold = 0;
       sim.crew = {};
       combat = spawnFor(1, 0, 1);

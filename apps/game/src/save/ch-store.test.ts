@@ -171,11 +171,95 @@ describe('ch-store — v2 migration & repair', () => {
 
   it('rejects unknown / future versions to a clean fresh start', () => {
     const store = memStorage();
-    store.setItem(CH_SAVE_KEY, JSON.stringify({ v: 5, gold: 0 }));
+    store.setItem(CH_SAVE_KEY, JSON.stringify({ v: 6, gold: 0 }));
     expect(loadCh(store)).toBeNull();
     store.setItem(CH_SAVE_KEY, JSON.stringify({ v: 0, gold: 0 }));
     expect(loadCh(store)).toBeNull();
     expect(() => loadCh(store)).not.toThrow();
+  });
+});
+
+describe('ch-store — v5 migration & repair (M10)', () => {
+  it('migrates a v4 blob losslessly into v5 (ancients empty, heaven default, RS lifted)', () => {
+    const store = memStorage();
+    const v4 = {
+      v: 4,
+      lastSeen: 11000,
+      gold: 2000,
+      zone: 50,
+      killsThisZone: 1,
+      runMaxZone: 50,
+      crew: { boss: 20, legend: 2 },
+      souls: 129,
+      lifetimeMaxZone: 50,
+      totalClicks: 800,
+      rng: { seed: 333, cursor: 99 },
+      stats: { ...createStats(), crits: 20 },
+      legacyImported: true,
+      ability: createAbility(),
+      combo: { stacks: 30 },
+      gilds: { boss: 4 },
+      rsLifetime: 129,
+    };
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v4));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    // v4 fields carried through losslessly.
+    expect(s.gold).toBe(2000);
+    expect(s.crew).toEqual({ boss: 20, legend: 2 });
+    expect(s.souls).toBe(129);
+    expect(s.gilds).toEqual({ boss: 4 });
+    expect(s.rng).toEqual({ seed: 333, cursor: 99 });
+    // v5 defaults added.
+    expect(s.ancients).toEqual({});
+    expect(s.heaven).toEqual({ hpf: 0, hpfLifetime: 0, ascensions2: 0, tree: {} });
+    // Pre-M10 souls were lifetime-pinned ⇒ earned highwater = soulsForMaxZone(50).
+    expect(s.rsLifetime).toBe(soulsForMaxZone(50));
+  });
+
+  it('round-trips Ancients + heaven through a v5 save', () => {
+    const store = memStorage();
+    const s = {
+      ...createChState(),
+      zone: 30,
+      runMaxZone: 30,
+      lifetimeMaxZone: 30,
+      souls: 5,
+      rsLifetime: 21,
+      ancients: { twerkules: 7, cheeksana: 12 },
+      heaven: { hpf: 3, hpfLifetime: 8, ascensions2: 2, tree: { coach: 2, nachtschicht: 1 } },
+    };
+    saveCh(s, 4000, store);
+    const loaded = loadCh(store);
+    expect(loaded!.state.ancients).toEqual({ twerkules: 7, cheeksana: 12 });
+    expect(loaded!.state.heaven).toEqual({
+      hpf: 3,
+      hpfLifetime: 8,
+      ascensions2: 2,
+      tree: { coach: 2, nachtschicht: 1 },
+    });
+  });
+
+  it('repairs corrupt ancients/heaven to defaults without throwing', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.ancients = { twerkules: -2, cheeksana: 1.5, glutaeus: 4, junk: 'x' }; // keep glutaeus:4
+    raw.heaven = 'garbage';
+    let s: ChState | null = null;
+    expect(() => {
+      s = deserializeCh(JSON.stringify(raw));
+    }).not.toThrow();
+    expect(s).not.toBeNull();
+    expect(s!.ancients).toEqual({ glutaeus: 4 });
+    expect(s!.heaven).toEqual({ hpf: 0, hpfLifetime: 0, ascensions2: 0, tree: {} });
+  });
+
+  it('clamps held HPF above the lifetime total on load', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.heaven = { hpf: 99, hpfLifetime: 10, ascensions2: 1, tree: { coach: 5, junk: 'x' } };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.heaven.hpf).toBe(10); // clamped to hpfLifetime
+    expect(s!.heaven.tree).toEqual({ coach: 5 });
   });
 });
 
@@ -347,5 +431,26 @@ describe('ch-store — offline gold', () => {
     expect(capped).toBe(atCap);
     // Efficiency halves throughput vs. a naive full-rate estimate.
     expect(oneHour).toBeLessThan(2 * 3600 * OFFLINE_EFF * 10); // sanity upper bound-ish
+  });
+
+  // M10-AC5 (offline half): a Twerk-Coach contributes to offline gold even with
+  // ZERO crew DPS, so a crew-less click build still earns while away (rest of B11).
+  it('a coach earns offline for a crew-less build (25 % of clickDmg × cps)', () => {
+    const clickDmg = monsterHp(5) * 8; // chunky click
+    const noCoach = offlineGold(0, 5, 3600_000);
+    expect(noCoach).toBe(0); // no DPS, no coach ⇒ nothing
+    const withCoach = offlineGold(0, 5, 3600_000, { clickDmg, coachCps: 2 });
+    expect(withCoach).toBeGreaterThan(0);
+    // Equivalent to a plain-DPS run at the coach's effective throughput.
+    const coachDps = 2 * 0.25 * clickDmg;
+    expect(withCoach).toBe(offlineGold(coachDps, 5, 3600_000));
+  });
+
+  it('a raised offline cap (Nachtschicht) lets more time accrue', () => {
+    const dps = monsterHp(5) * 2;
+    const at8h = offlineGold(dps, 5, 100 * 3600_000);
+    const at24h = offlineGold(dps, 5, 100 * 3600_000, { capS: 24 * 3600 });
+    expect(at24h).toBeGreaterThan(at8h);
+    expect(at24h).toBeCloseTo(at8h * 3, -1); // 24 h ≈ 3 × 8 h
   });
 });

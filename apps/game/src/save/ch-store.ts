@@ -5,6 +5,7 @@
  */
 import { type AbilityState, ABILITY_CHARGE_MAX, createAbility } from '../game/ability';
 import { soulsForMaxZone } from '../game/ascension';
+import { type AncientLevels, createAncients } from '../game/ancients';
 import { goldFor, monsterHp } from '../game/combat';
 import {
   type ChStats,
@@ -14,11 +15,12 @@ import {
   createStats,
 } from '../game/ch-state';
 import { type Gilds, createGilds } from '../game/gild';
+import { COACH_CLICK_SHARE, type HeavenState, createHeaven } from '../game/heaven';
 import type { CrewLevels } from '../game/heroes';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 4;
+export const CH_SCHEMA = 5;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -48,9 +50,9 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The v4 persisted shape (M9): the current ChState + envelope. */
-interface ChSaveV4 extends ChState {
-  v: 4;
+/** The current persisted shape (M10, v5): the live ChState + envelope. */
+interface ChSaveLatest extends ChState {
+  v: typeof CH_SCHEMA;
   lastSeen: number;
 }
 
@@ -73,16 +75,16 @@ function isFiniteNumber(v: unknown): v is number {
 }
 
 /**
- * Never-throw validation of a stored CH save (the v4 guard). The gameplay-
+ * Never-throw validation of a stored CH save (the v5 guard). The gameplay-
  * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
- * The meta/juice fields (rng/stats/legacyImported/ability/combo/gilds/rsLifetime)
- * are deliberately NOT gated here: they are runtime bookkeeping and get repaired
- * (fresh seed / zeroed stats / false flag / default ability+combo / pruned gilds /
- * clamped highwater) in `stateFromSave` — the same "repair, don't nuke progress"
- * spirit as the runMaxZone invariant. Per-field type+range checks for them live in
- * the `repair*` helpers below.
+ * The meta/juice fields (rng/stats/legacyImported/ability/combo/gilds/rsLifetime/
+ * ancients/heaven) are deliberately NOT gated here: they are runtime bookkeeping
+ * and get repaired (fresh seed / zeroed stats / false flag / default ability+combo
+ * / pruned gilds / clamped highwater / sanitised ancients+heaven) in `stateFromSave`
+ * — the same "repair, don't nuke progress" spirit as the runMaxZone invariant.
+ * Per-field type+range checks for them live in the `repair*` helpers below.
  */
-export function isChSave(raw: unknown): raw is ChSaveV4 {
+export function isChSave(raw: unknown): raw is ChSaveLatest {
   if (!isRecord(raw)) return false;
   if (raw.v !== CH_SCHEMA) return false;
   if (!isFiniteNumber(raw.gold) || raw.gold < 0) return false;
@@ -100,7 +102,7 @@ export function isChSave(raw: unknown): raw is ChSaveV4 {
 
 /** Serialize state + timestamp to a JSON string. */
 export function serializeCh(state: ChState, now: number): string {
-  const save: ChSaveV4 = { v: CH_SCHEMA, lastSeen: now, ...state };
+  const save: ChSaveLatest = { v: CH_SCHEMA, lastSeen: now, ...state };
   return JSON.stringify(save);
 }
 
@@ -162,8 +164,30 @@ function repairRsLifetime(v: unknown): number {
   return isFiniteNumber(v) && v >= 0 ? v : 0;
 }
 
+/** Repair the persisted Ancient levels: keep only positive-int levels, else empty (v5). */
+function repairAncients(v: unknown): AncientLevels {
+  if (!isRecord(v)) return createAncients();
+  const out: AncientLevels = {};
+  for (const [id, n] of Object.entries(v)) if (isNonNegInt(n) && n > 0) out[id] = n;
+  return out;
+}
+
+/** Repair the persisted L2 (heaven) slice: sanitise each field, else defaults (v5). */
+function repairHeaven(v: unknown): HeavenState {
+  if (!isRecord(v)) return createHeaven();
+  const nn = (x: unknown): number => (isFiniteNumber(x) && x >= 0 ? x : 0);
+  const tree: Record<string, number> = {};
+  if (isRecord(v.tree)) {
+    for (const [id, n] of Object.entries(v.tree)) if (isNonNegInt(n) && n > 0) tree[id] = n;
+  }
+  const hpfLifetime = nn(v.hpfLifetime);
+  // Held HPF can never exceed what was ever earned.
+  const hpf = Math.min(nn(v.hpf), hpfLifetime);
+  return { hpf, hpfLifetime, ascensions2: nn(v.ascensions2), tree };
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
-function stateFromSave(save: ChSaveV4): ChState {
+function stateFromSave(save: ChSaveLatest): ChState {
   const souls = save.souls;
   const lifetimeMaxZone = Math.max(save.lifetimeMaxZone, save.runMaxZone, save.zone);
   return {
@@ -181,12 +205,12 @@ function stateFromSave(save: ChSaveV4): ChState {
     ability: repairAbility(save.ability),
     combo: repairCombo(save.combo),
     gilds: repairGilds(save.gilds),
-    // Keep the highwater ≥ souls and ≥ the souls-equivalent of the deepest zone.
-    rsLifetime: Math.max(
-      repairRsLifetime(save.rsLifetime),
-      souls,
-      soulsForMaxZone(lifetimeMaxZone),
-    ),
+    // Held souls ≤ earned total; the highwater only grows via ascension/Himmelfahrt
+    // (NOT lifted to soulsForMaxZone(lifetime) here — that would erase souls pending
+    // from an un-ascended new best zone). The v4→v5 migration seeds it for old saves.
+    rsLifetime: Math.max(repairRsLifetime(save.rsLifetime), souls),
+    ancients: repairAncients(save.ancients),
+    heaven: repairHeaven(save.heaven),
   };
 }
 
@@ -227,10 +251,37 @@ function migrateChV3toV4(raw: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+/**
+ * v4 → v5: fill the M10 defaults — no Ancients, a fresh (empty) heaven state. A
+ * pre-M10 player's souls were lifetime-pinned (held == earned), so lift the
+ * lifetime-RS highwater to the deepest-zone souls-equivalent: that bakes in their
+ * true earned total for the HPF gate before any spending exists.
+ */
+function migrateChV4toV5(raw: Record<string, unknown>): Record<string, unknown> {
+  const deepest = Math.max(
+    isNonNegInt(raw.lifetimeMaxZone) ? raw.lifetimeMaxZone : 1,
+    isNonNegInt(raw.runMaxZone) ? raw.runMaxZone : 1,
+    isNonNegInt(raw.zone) ? raw.zone : 1,
+  );
+  const rsLifetime = Math.max(
+    isFiniteNumber(raw.rsLifetime) && raw.rsLifetime >= 0 ? raw.rsLifetime : 0,
+    isNonNegInt(raw.souls) ? raw.souls : 0,
+    soulsForMaxZone(deepest),
+  );
+  return {
+    ...raw,
+    v: 5,
+    rsLifetime,
+    ancients: {},
+    heaven: { hpf: 0, hpfLifetime: 0, ascensions2: 0, tree: {} },
+  };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
   3: migrateChV3toV4,
+  4: migrateChV4toV5,
 };
 
 /**
@@ -238,7 +289,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
  * Never throws; unknown/future/corrupt data ⇒ null ⇒ clean fresh start.
  * (Registry pattern mirrors `save/migrate.ts`.)
  */
-function migrateCh(raw: unknown): ChSaveV4 | null {
+function migrateCh(raw: unknown): ChSaveLatest | null {
   if (!isRecord(raw)) return null;
   let version = raw.v;
   if (typeof version !== 'number' || !Number.isInteger(version)) return null;
@@ -343,15 +394,36 @@ export function resetCh(storage: ChStorage | null = defaultStorage()): void {
   }
 }
 
+/** Offline accrual options: Twerk-Coach contribution + a Nachtschicht-raised cap. */
+export interface OfflineOpts {
+  /** Effective click damage (for the coach's 25 %-of-click contribution). */
+  clickDmg?: number;
+  /** Twerk-Coach clicks per second (§4.3.5). */
+  coachCps?: number;
+  /** Offline cap in seconds (Nachtschicht raises it; defaults to `OFFLINE_CAP_S`). */
+  capS?: number;
+}
+
 /**
  * Idle gold earned while away: the crew farms the CURRENT zone's rivals (never
- * bosses — idle can't beat a timed boss) at `OFFLINE_EFF`, capped at
- * `OFFLINE_CAP_S`. Returns 0 without any DPS.
+ * bosses — idle can't beat a timed boss) at `OFFLINE_EFF`, capped at `capS`
+ * (default 8 h). Twerk-Coaches add `coachCps · 25 % · clickDmg` of throughput, so
+ * even a crew-less click build earns offline (rest of B11, §4.3.5). Returns 0
+ * without any effective throughput.
  */
-export function offlineGold(dps: number, zone: number, elapsedMs: number): number {
-  if (dps <= 0 || elapsedMs <= 0) return 0;
-  const seconds = Math.min(elapsedMs / 1000, OFFLINE_CAP_S);
-  const killsPerSec = dps / monsterHp(zone);
+export function offlineGold(
+  dps: number,
+  zone: number,
+  elapsedMs: number,
+  opts: OfflineOpts = {},
+): number {
+  const coachDps =
+    Math.max(0, opts.coachCps ?? 0) * COACH_CLICK_SHARE * Math.max(0, opts.clickDmg ?? 0);
+  const effectiveDps = Math.max(0, dps) + coachDps;
+  const capS = opts.capS ?? OFFLINE_CAP_S;
+  if (effectiveDps <= 0 || elapsedMs <= 0) return 0;
+  const seconds = Math.min(elapsedMs / 1000, capS);
+  const killsPerSec = effectiveDps / monsterHp(zone);
   const goldPerSec = killsPerSec * goldFor(zone, false);
   return Math.floor(goldPerSec * seconds * OFFLINE_EFF);
 }
@@ -361,6 +433,11 @@ export function offlineGold(dps: number, zone: number, elapsedMs: number): numbe
  * boot-time offline gold over the interval the tab was hidden. A thin named seam
  * so `main.ts` reads clearly and the grant is unit-testable with injected times.
  */
-export function visibilityGrant(dps: number, zone: number, hiddenMs: number): number {
-  return offlineGold(dps, zone, hiddenMs);
+export function visibilityGrant(
+  dps: number,
+  zone: number,
+  hiddenMs: number,
+  opts: OfflineOpts = {},
+): number {
+  return offlineGold(dps, zone, hiddenMs, opts);
 }

@@ -7,9 +7,16 @@
  * damage) are NEVER persisted — they're recomputed from crew levels + souls.
  */
 import { type AbilityState, createAbility } from './ability';
-import { applyAscension, soulsForMaxZone } from './ascension';
-import { soulMult } from './ascension';
+import { applyAscension, soulMult } from './ascension';
+import { type AncientLevels, ancientClickMult, ancientDpsMult, createAncients } from './ancients';
 import { type Gilds, createGilds } from './gild';
+import {
+  type HeavenState,
+  bankHimmelfahrt,
+  createHeaven,
+  heavenGlobalMult,
+  soulBonusEff,
+} from './heaven';
 import { type CrewLevels, clickDamageRaw, createCrew, totalRawDps } from './heroes';
 import { createRngState, type RngState } from '../util/rng';
 
@@ -82,10 +89,15 @@ export interface ChState {
   /** Permanent per-member gilds, ×1.25 DPS each; survive ascension (CH-save v4, §4.3.4). */
   gilds: Gilds;
   /**
-   * Running max of banked souls (lifetime RS), for the later Himmelfahrt gate
-   * (§4.5.2). Only ever grows; souls aren't spent yet, so it tracks `souls`.
+   * Lifetime-earned Ruhm-Seelen (monotonic highwater = `soulsForMaxZone(deepest
+   * ascended zone)`). Held `souls` = `rsLifetime − Σ(spent on Ancients)`; it drives
+   * the Himmelfahrt gate (§4.5.2). Only grows, and only via ascension/Himmelfahrt.
    */
   rsLifetime: number;
+  /** Bought Twerk-Ahnen levels; the Ruhm-Seelen sink (CH-save v5, §4.6). */
+  ancients: AncientLevels;
+  /** Prestige layer 2 — Himmelspfirsiche + Himmelsbaum (CH-save v5, §4.5.2). */
+  heaven: HeavenState;
 }
 
 /** A brand-new run/profile. */
@@ -106,43 +118,87 @@ export function createChState(): ChState {
     combo: createComboSave(),
     gilds: createGilds(),
     rsLifetime: 0,
+    ancients: createAncients(),
+    heaven: createHeaven(),
   };
 }
 
-/** Total crew DPS including gilds and the soul multiplier. */
-export function dpsOf(state: Pick<ChState, 'crew' | 'souls' | 'gilds'>): number {
-  return totalRawDps(state.crew, state.gilds) * soulMult(state.souls);
-}
+/** The fields the derived combat numbers depend on. */
+type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'heaven'>;
 
-/** Click (shake) damage including gilds + the soul multiplier (before crit/frenzy). */
-export function clickDamageOf(state: Pick<ChState, 'crew' | 'souls' | 'gilds'>): number {
-  return clickDamageRaw(state.crew, state.gilds) * soulMult(state.souls);
+/**
+ * Total crew DPS: raw crew (with gilds) × the held-soul multiplier (amplified by
+ * held HPF) × Poposeidon's Ancient DPS mult × the +2 %/HPF global mult. Idle DPS
+ * never draws crit/combo/beat/frenzy — active clicking stays king (P1).
+ */
+export function dpsOf(state: DerivedInput): number {
+  const hpf = state.heaven.hpf;
+  return (
+    totalRawDps(state.crew, state.gilds) *
+    soulMult(state.souls, soulBonusEff(hpf)) *
+    ancientDpsMult(state.ancients) *
+    heavenGlobalMult(hpf)
+  );
 }
 
 /**
- * Ascend: bank souls from the lifetime-deepest zone and reset the run (zone,
- * kills, crew, gold). Souls + lifetime record persist and only ever grow.
+ * Click (shake) damage before crit/combo/beat/frenzy: raw click × held-soul mult
+ * (HPF-amplified) × Twerkules' Ancient click mult × the +2 %/HPF global mult.
+ */
+export function clickDamageOf(state: DerivedInput): number {
+  const hpf = state.heaven.hpf;
+  return (
+    clickDamageRaw(state.crew, state.gilds) *
+    soulMult(state.souls, soulBonusEff(hpf)) *
+    ancientClickMult(state.ancients) *
+    heavenGlobalMult(hpf)
+  );
+}
+
+/**
+ * Ascend (L1): earn the *new* souls for the lifetime-deepest zone and reset the
+ * run (zone, kills, crew, gold). **Held souls carry over** (only a Himmelfahrt
+ * resets them) plus the newly-earned gain, and what was spent on Ancients stays
+ * spent. Ancients, gilds, the L2 heaven state and all lifetime meta persist; only
+ * the L1 run itself resets. `rsLifetime` is the never-shrinking earned highwater.
  */
 export function ascendState(state: ChState): ChState {
-  const { souls, lifetimeMaxZone } = applyAscension(
+  const { souls, lifetimeMaxZone, rsLifetime } = applyAscension(
     state.runMaxZone,
     state.lifetimeMaxZone,
     state.souls,
+    state.rsLifetime,
   );
-  // Souls, lifetime record and all meta (RNG stream, lifetime stats, the
-  // legacy-import flag) persist; only the run itself (gold/crew/zone) resets.
-  // Gilds are permanent (§4.3.4) — carried over so a soul-less run that still
-  // reached a new 10-zone keeps its power (anti-plateau, P3). `rsLifetime` is the
-  // never-shrinking lifetime-RS highwater for the later Himmelfahrt gate.
   return {
     ...createChState(),
     souls,
     lifetimeMaxZone,
+    rsLifetime,
     totalClicks: state.totalClicks,
     rng: state.rng,
     stats: state.stats,
     legacyImported: state.legacyImported,
     gilds: state.gilds,
-    rsLifetime: Math.max(state.rsLifetime, souls, soulsForMaxZone(lifetimeMaxZone)),
+    ancients: state.ancients, // Ancients survive L1 (§4.5 reset table)
+    heaven: state.heaven, // L2 state survives L1
+  };
+}
+
+/**
+ * Ruhmes-Himmelfahrt (L2): bank HPF from the lifetime-RS total, then reset all of
+ * L1 per the §4.5.2 reset scope (AC2). RS (`souls` + `rsLifetime`), Ancients and
+ * the whole tour (gold/crew/zone/kills/lifetime record) fall to fresh; **gilds,
+ * the heaven state (HPF + Himmelsbaum) and lifetime stats survive.**
+ */
+export function himmelfahrtState(state: ChState): ChState {
+  const heaven = bankHimmelfahrt(state.heaven, state.rsLifetime);
+  return {
+    ...createChState(),
+    heaven,
+    gilds: state.gilds, // Vergoldungen survive Himmelfahrt (M10-AC2)
+    totalClicks: state.totalClicks,
+    rng: state.rng,
+    stats: state.stats,
+    legacyImported: state.legacyImported,
   };
 }

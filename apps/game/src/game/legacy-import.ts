@@ -31,9 +31,14 @@ export function applyLegacyInheritance(ch: ChState, legacy: SaveDataV4 | null): 
     legacy && Number.isFinite(legacy.rebirths) && legacy.rebirths > 0
       ? Math.floor(legacy.rebirths)
       : 0;
+  const grant = LEGACY_RS_PER_REBIRTH * rebirths;
+  const souls = ch.souls + grant;
   return {
     ...ch,
-    souls: ch.souls + LEGACY_RS_PER_REBIRTH * rebirths,
+    souls,
+    // Granted souls are "earned" — lift the lifetime-RS highwater so held ≤ earned
+    // stays true (the M10 souls-accounting invariant) and the HPF gate counts them.
+    rsLifetime: Math.max(ch.rsLifetime, souls),
     legacyImported: true,
   };
 }
