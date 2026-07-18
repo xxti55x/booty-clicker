@@ -2209,3 +2209,15 @@ body {
 .item.mythos-soon .lv {
   color: #d0a8ff;
 }
+
+/* ---- v10: kaufbare Crew-Fähigkeiten (goal: slower progression) ---- */
+.btn.ab-buy {
+  margin-top: 8px;
+  font-size: 12px;
+  padding: 7px 0 6px;
+}
+.btn.ab-buy.locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: 0 3px 0 var(--gold-deep);
+}

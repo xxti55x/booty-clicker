@@ -95,7 +95,15 @@ import {
   soulBonusEff,
   truhenMagnetBonus,
 } from './heaven';
-import { CREW, clickDamageRaw, heroDps, nextLevelCost, totalRawDps } from './heroes';
+import {
+  CREW,
+  abilityTiersUnlocked,
+  clickDamageRaw,
+  heroDps,
+  nextAbility,
+  nextLevelCost,
+  totalRawDps,
+} from './heroes';
 import {
   activateBoost,
   clampBoostUntil,
@@ -183,6 +191,8 @@ function econOn(config: SimConfig): boolean {
 interface Sim {
   gold: number;
   crew: Record<string, number>;
+  /** Bought crew abilities (v10 — paid milestone tiers, reset with `crew`). */
+  crewUp: Record<string, number>;
   gilds: Gilds;
   souls: number;
   lifetimeMaxZone: number;
@@ -253,6 +263,7 @@ function newSim(seed: number): Sim {
   return {
     gold: 0,
     crew: {},
+    crewUp: {},
     gilds: {},
     souls: 0,
     lifetimeMaxZone: 1,
@@ -338,6 +349,7 @@ function shardIdleMultFor(sim: Sim, config: SimConfig): number {
  */
 function powerFor(
   crew: Record<string, number>,
+  crewUp: Record<string, number>,
   gilds: Gilds,
   souls: number,
   ancients: AncientLevels,
@@ -353,7 +365,7 @@ function powerFor(
   const global = heavenGlobalMult(hpf);
   // Click gear (§5) multiplies the click term only (P1: the strongest gear is click).
   const baseClick =
-    clickDamageRaw(crew, gilds) *
+    clickDamageRaw(crew, gilds, crewUp) *
     sm *
     ancientClickMult(ancients) *
     global *
@@ -361,7 +373,7 @@ function powerFor(
   // Idle gear (§5) + the permanent DPS-token pool (§6.2) multiply crew DPS only —
   // never the click term (P1, M11-AC5).
   const idle =
-    totalRawDps(crew, gilds) *
+    totalRawDps(crew, gilds, crewUp) *
     sm *
     ancientDpsMult(ancients) *
     global *
@@ -375,6 +387,7 @@ function powerFor(
 function damagePerSecond(sim: Sim, config: SimConfig, combo: number, crit: number): number {
   return powerFor(
     sim.crew,
+    sim.crewUp,
     sim.gilds,
     sim.souls,
     sim.ancients,
@@ -550,30 +563,52 @@ function stepSecond(
   return combat.boss ? tickBoss(combat, 1).state : combat;
 }
 
-/** Spend gold ROI-greedy: repeatedly buy the best marginal-DPS-per-BP next level. */
+/**
+ * Spend gold ROI-greedy: repeatedly buy the best marginal-output-per-BP option,
+ * comparing next LEVELS and unlocked-but-unbought ABILITIES (v10) across the
+ * whole crew. The Boss click line uses `heroClickValue` (its output is click
+ * damage — weighted like DPS here, which matches how the drivers click ~always).
+ */
 function buyCrewGreedy(sim: Sim): void {
+  const outputAt = (cfg: (typeof CREW)[number], lvl: number, ups: number): number => {
+    const g = sim.gilds[cfg.id] ?? 0;
+    // Click hero's line counts as output too — the sim drivers click constantly,
+    // so 1 click-damage ≈ CLICKS_PER_SEC dps; ROI-comparing them 1:1 is close
+    // enough for a greedy bot and keeps this loop hero-agnostic.
+    if (cfg.click) return lvl <= 0 ? 0 : cfg.baseDps * lvl * (1 + ups) * Math.pow(1.25, g);
+    return heroDps(cfg, lvl, g, ups);
+  };
   let guard = 5000;
   for (;;) {
     if (guard-- <= 0) break;
-    let bestId: string | null = null;
+    let bestBuy: { kind: 'level' | 'ability'; id: string; cost: number } | null = null;
     let bestRoi = 0;
-    let bestCost = 0;
     for (const cfg of CREW) {
       const lvl = sim.crew[cfg.id] ?? 0;
+      const ups = sim.crewUp[cfg.id] ?? 0;
       const cost = nextLevelCost(cfg, lvl);
-      if (cost > sim.gold) continue;
-      const g = sim.gilds[cfg.id] ?? 0;
-      const gain = heroDps(cfg, lvl + 1, g) - heroDps(cfg, lvl, g);
-      const roi = gain / cost;
-      if (roi > bestRoi) {
-        bestRoi = roi;
-        bestId = cfg.id;
-        bestCost = cost;
+      if (cost <= sim.gold) {
+        const gain = outputAt(cfg, lvl + 1, ups) - outputAt(cfg, lvl, ups);
+        const roi = gain / cost;
+        if (roi > bestRoi) {
+          bestRoi = roi;
+          bestBuy = { kind: 'level', id: cfg.id, cost };
+        }
+      }
+      const ab = nextAbility(cfg, lvl, ups);
+      if (ab.unlocked && ab.cost <= sim.gold && ups < abilityTiersUnlocked(lvl)) {
+        const gain = outputAt(cfg, lvl, ups + 1) - outputAt(cfg, lvl, ups);
+        const roi = gain / ab.cost;
+        if (roi > bestRoi) {
+          bestRoi = roi;
+          bestBuy = { kind: 'ability', id: cfg.id, cost: ab.cost };
+        }
       }
     }
-    if (bestId === null) break;
-    sim.gold -= bestCost;
-    sim.crew[bestId] = (sim.crew[bestId] ?? 0) + 1;
+    if (bestBuy === null) break;
+    sim.gold -= bestBuy.cost;
+    if (bestBuy.kind === 'level') sim.crew[bestBuy.id] = (sim.crew[bestBuy.id] ?? 0) + 1;
+    else sim.crewUp[bestBuy.id] = (sim.crewUp[bestBuy.id] ?? 0) + 1;
   }
 }
 
@@ -688,6 +723,7 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
   for (let r = 0; r < runs; r++) {
     sim.gold = 0;
     sim.crew = {};
+    sim.crewUp = {};
     const res = runOnce(
       sim,
       runSeconds,
@@ -799,6 +835,7 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
       sim.rsLifetime = asc.rsLifetime;
       sim.gold = 0;
       sim.crew = {};
+      sim.crewUp = {};
       combat = spawnFor(1, 0, 1);
       lastAdvanceT = globalT;
       ascensions++;
@@ -867,6 +904,7 @@ function buyAncientsGreedy(sim: Sim, config: SimConfig, combo: number, crit: num
     if (guard-- <= 0) break;
     const p0 = powerFor(
       sim.crew,
+      sim.crewUp,
       sim.gilds,
       sim.souls,
       sim.ancients,
@@ -884,6 +922,7 @@ function buyAncientsGreedy(sim: Sim, config: SimConfig, combo: number, crit: num
       const r = buyAncient(sim.ancients, sim.souls, cfg.id);
       const p = powerFor(
         sim.crew,
+        sim.crewUp,
         sim.gilds,
         r.souls,
         r.ancients,
@@ -982,6 +1021,7 @@ export function simulateAscensionEra(config: SimConfig, opts: EraOptions): EraRe
       sim.rsLifetime = asc.rsLifetime;
       sim.gold = 0;
       sim.crew = {};
+      sim.crewUp = {};
       buyAncientsGreedy(sim, config, combo, crit); // spend the freshly-earned souls
       combat = spawnFor(1, 0, 1);
       lastAdvanceT = globalT;
@@ -1091,6 +1131,7 @@ export function simulateFloatGuard(config: SimConfig, opts: FloatGuardOptions): 
     const crit = critFactor(config, sim.permTokens);
     const power = powerFor(
       sim.crew,
+      sim.crewUp,
       sim.gilds,
       rsLifetime,
       sim.ancients,

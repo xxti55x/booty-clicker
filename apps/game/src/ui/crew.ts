@@ -1,16 +1,18 @@
 import type { ChState } from '../game/ch-state';
 import {
+  abilityTiersUnlocked,
   bulkCost,
   CREW,
   type HeroConfig,
+  heroClick,
   heroDps,
   maxAffordable,
+  nextAbility,
   nextLevelCost,
-  nextMilestone,
 } from '../game/heroes';
 import { soulMult } from '../game/ascension';
-import { ancientDpsMult } from '../game/ancients';
-import { dpsGearMult } from '../game/gear';
+import { ancientClickMult, ancientDpsMult } from '../game/ancients';
+import { clickGearMult, dpsGearMult } from '../game/gear';
 import { heavenGlobalMult, soulBonusEff } from '../game/heaven';
 import { fmt } from './format';
 
@@ -28,7 +30,12 @@ export interface CrewDeps {
   onBuy: () => void;
 }
 
-/** The Crew shop tab: recruit & level dancers for idle DPS + click power. */
+/**
+ * The Crew shop tab. Slot 1 (Booty-Boss) levels CLICK damage, every later
+ * member is pure idle DPS (§goal v10). Each member additionally has kaufbare
+ * Fähigkeiten (Lv 25, 75, 125, …): +100 % base output, paid in BP — the row
+ * shows a gold buy button once the level requirement is met.
+ */
 export class Crew {
   private readonly body = byId('tabCrew');
   private amount: BuyAmount = 1;
@@ -79,44 +86,70 @@ export class Crew {
     this.render();
   }
 
+  /** Buy the next unlocked ability tier for a member (in order, BP-priced). */
+  private buyAbility(cfg: HeroConfig): void {
+    const s = this.deps.state;
+    const level = s.crew[cfg.id] ?? 0;
+    const ups = s.crewUp[cfg.id] ?? 0;
+    const ab = nextAbility(cfg, level, ups);
+    if (!ab.unlocked || ups >= abilityTiersUnlocked(level) || ab.cost > s.gold) return;
+    s.gold -= ab.cost;
+    s.crewUp[cfg.id] = ups + 1;
+    this.deps.onBuy();
+    this.render();
+  }
+
   render(): void {
     const list = byId('crewList');
     const s = this.deps.state;
-    const mult =
-      soulMult(s.souls, soulBonusEff(s.heaven.hpf)) *
-      ancientDpsMult(s.ancients) *
-      heavenGlobalMult(s.heaven.hpf) *
-      dpsGearMult(s.gear); // keep the per-hero display in lockstep with dpsOf (§5)
+    const sm = soulMult(s.souls, soulBonusEff(s.heaven.hpf));
+    const global = heavenGlobalMult(s.heaven.hpf);
+    // keep the per-hero display in lockstep with dpsOf/clickDamageOf (§5)
+    const dpsMult = sm * ancientDpsMult(s.ancients) * global * dpsGearMult(s.gear);
+    const clickMult = sm * ancientClickMult(s.ancients) * global * clickGearMult(s.gear);
     const rows: string[] = [];
     CREW.forEach((cfg, i) => {
       if (!this.revealed(i)) return;
-      const level = this.deps.state.crew[cfg.id] ?? 0;
+      const level = s.crew[cfg.id] ?? 0;
+      const ups = s.crewUp[cfg.id] ?? 0;
       const count = this.countFor(cfg, level);
       const cost = count > 0 ? bulkCost(cfg, level, count) : nextLevelCost(cfg, level);
-      const affordable = count > 0 && cost <= this.deps.state.gold;
-      const gild = this.deps.state.gilds[cfg.id] ?? 0;
-      const dps = heroDps(cfg, level, gild) * mult;
+      const affordable = count > 0 && cost <= s.gold;
+      const gild = s.gilds[cfg.id] ?? 0;
+      const out = cfg.click
+        ? heroClick(cfg, level, gild, ups) * clickMult
+        : heroDps(cfg, level, gild, ups) * dpsMult;
+      const outLabel = cfg.click ? 'Klick' : 'DPS';
       const gildBadge =
         gild > 0 ? `<span class="gild" title="×1.25 pro Vergoldung">🏅${gild}</span>` : '';
       const label = level === 0 ? 'Anheuern' : `+${count === 0 ? 1 : count}`;
-      // Milestone progress bar (§4.3.2): "noch n Level bis ×2" once recruited.
-      // Milestones are endless (§4.3.3), so there is always a next bracket.
-      const ms = level > 0 ? nextMilestone(level) : null;
-      const msRow = ms
-        ? `<div class="ms-bar" title="noch ${ms.remaining} bis ×2 DPS">
-            <div class="ms-fill" style="width:${Math.round(((level - ms.prev) / (ms.next - ms.prev)) * 100)}%"></div>
-          </div>
-          <div class="ms-txt">noch ${ms.remaining} bis ×2 (Lv ${ms.next})</div>`
-        : '';
+      // Kaufbare Fähigkeit (§goal v10): buy button once unlocked, else progress bar.
+      const ab = level > 0 ? nextAbility(cfg, level, ups) : null;
+      let abRow = '';
+      if (ab) {
+        if (ab.unlocked) {
+          const can = ab.cost <= s.gold;
+          abRow = `<button class="btn ab-buy ${can ? '' : 'locked'}" data-ab="${cfg.id}" type="button">
+              Fähigkeit: +100% ${outLabel} · ${fmt(ab.cost)} BP
+            </button>`;
+        } else {
+          const prev = ab.tier === 1 ? 0 : ab.level - 50;
+          const pct = Math.round(((level - prev) / (ab.level - prev)) * 100);
+          abRow = `<div class="ms-bar" title="Fähigkeit ${ab.tier} ab Lv ${ab.level}">
+              <div class="ms-fill" style="width:${pct}%"></div>
+            </div>
+            <div class="ms-txt">Fähigkeit ${ab.tier} (+100% ${outLabel}) ab Lv ${ab.level}</div>`;
+        }
+      }
       rows.push(
         `<div class="item ${affordable ? '' : 'locked'}" data-id="${cfg.id}">
-          <div class="nm">${cfg.name}${gildBadge}<span class="lv">Lv ${level}</span></div>
+          <div class="nm">${cfg.name}${gildBadge}<span class="lv">Lv ${level}${ups > 0 ? ` · ×${ups + 1}` : ''}</span></div>
           <div class="ds">${cfg.ds}</div>
           <div class="crew-foot">
             <span class="cost ${affordable ? '' : 'bad'}">${label} · ${fmt(cost)} BP</span>
-            <span class="dps">${level > 0 ? `${fmt(dps)} DPS` : '—'}</span>
+            <span class="dps">${level > 0 ? `${fmt(out)} ${outLabel}` : '—'}</span>
           </div>
-          ${msRow}
+          ${abRow}
         </div>`,
       );
     });
@@ -125,6 +158,15 @@ export class Crew {
       const id = el.dataset.id;
       const cfg = CREW.find((c) => c.id === id);
       if (cfg) el.addEventListener('click', () => this.buy(cfg));
+    }
+    for (const el of Array.from(list.querySelectorAll<HTMLButtonElement>('.ab-buy'))) {
+      const id = el.dataset.ab;
+      const cfg = CREW.find((c) => c.id === id);
+      if (cfg)
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation(); // the row's level-buy handler must not also fire
+          this.buyAbility(cfg);
+        });
     }
   }
 }

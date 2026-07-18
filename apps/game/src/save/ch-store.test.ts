@@ -1165,3 +1165,50 @@ describe('ch-store — offline gold', () => {
     expect(at24h).toBeCloseTo(at8h * 3, -1); // 24 h ≈ 3 × 8 h
   });
 });
+
+describe('ch-store — v10 migration & repair (kaufbare Crew-Fähigkeiten)', () => {
+  it('migrates a v9 blob losslessly into v10 (empty bought-ability ledger)', () => {
+    // A realistic v9 save: mid-run with levels past ability gates but no crewUp field.
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 9;
+    delete raw.crewUp;
+    raw.gold = 777;
+    raw.crew = { boss: 30, hype: 80 };
+    const store = memStorage();
+    store.setItem(CH_SAVE_KEY, JSON.stringify(raw));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    expect(s.gold).toBe(777);
+    expect(s.crew).toEqual({ boss: 30, hype: 80 });
+    // v10 default: nothing bought — the levels only UNLOCK tiers for purchase.
+    expect(s.crewUp).toEqual({});
+  });
+
+  it('round-trips bought abilities and clamps a crafted ledger to unlocked tiers', () => {
+    const s: ChState = {
+      ...createChState(),
+      crew: { boss: 80, hype: 25 },
+      crewUp: { boss: 2, hype: 1 }, // boss: tiers 25+75 unlocked+bought; hype: tier 25
+    };
+    const round = deserializeCh(serializeCh(s, 1000));
+    expect(round!.crewUp).toEqual({ boss: 2, hype: 1 });
+
+    // Crafted save: bought counts the levels never unlocked are clamped away.
+    const raw = JSON.parse(serializeCh(s, 1000)) as Record<string, unknown>;
+    raw.crewUp = { boss: 99, hype: -3, dj: 5, junk: 2 };
+    const repaired = deserializeCh(JSON.stringify(raw));
+    // boss Lv 80 unlocks tiers 25+75 = 2; hype negative ⇒ dropped; dj Lv 0 ⇒ 0 tiers.
+    expect(repaired!.crewUp).toEqual({ boss: 2 });
+  });
+
+  it('repairs a wholly corrupt crewUp slice without touching other progress', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.crewUp = 'garbage';
+    raw.souls = 44;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.crewUp).toEqual({});
+    expect(s!.souls).toBe(44);
+  });
+});

@@ -398,7 +398,7 @@ describe('ch-state — Transzendenz threading (§4.5.3)', () => {
     // folds, so the ratio is finite, non-trivial and genuinely at risk if TE were biased.
     const base = {
       ...createChState(),
-      crew: { boss: 30 },
+      crew: { boss: 30, hype: 10 }, // hype: DPS line (boss is click-only, v10)
       souls: 8,
       ancients: { twerkules: 3, poposeidon: 2 },
       heaven: { ...createHeaven(), hpf: 4 },
@@ -530,7 +530,7 @@ describe('ch-state — Transzendenz threading (§4.5.3)', () => {
     // DPS carries the surviving te=2 factor (×9). Compared against the same state with
     // a wiped slice, the ratio is exactly 3^2 — isolating the TE factor from the
     // (banked-HPF) heaven mult, which a wiped `transcend` would collapse to ×1.
-    const hfCrew = { ...hf, crew: { boss: 20 } };
+    const hfCrew = { ...hf, crew: { boss: 20, hype: 8 } }; // hype: DPS line (v10)
     const hfNoTE = { ...hfCrew, transcend: createTranscend() };
     expect(dpsOf(hfNoTE)).toBeGreaterThan(0);
     expect(dpsOf(hfCrew)).toBeCloseTo(dpsOf(hfNoTE) * TRANSCEND_GLOBAL_BASE ** 2, 6);

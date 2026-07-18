@@ -3,6 +3,48 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## v10 — Kaufbare Crew-Fähigkeiten & langsamere Progression (Goal-Rebalance)
+
+- **2026-07-18 — Slot 1 = Klick-Linie, Rest = DPS; Meilensteine werden KAUFBAR.**
+  Explizites Spieler-Goal: „progression slower; upgrade 1 is click damage, every
+  upgrade after that is dps; every 25–50 levels a buyable ability (e.g. +100 % dps);
+  careful not to make it too fast." Umsetzung (`heroes.ts`, CH-Save **v10**):
+  - **Booty-Boss (`click: true`)** gibt pro Level **Klick-Schaden** (baseDps 1/Lv),
+    nie DPS; alle 14 weiteren Mitglieder sind reine DPS-Linien. Klick =
+    `CLICK_BASE + Boss-Linie + 0,2 × Gesamt-DPS` — P1 bleibt strukturell erhalten
+    (E4 unverändert grün, alle 5 Seeds).
+  - **Fähigkeiten statt Gratis-Meilensteine:** Das alte automatische ×2 bei
+    10/25/50/… ist ERSATZLOS gestrichen. Stattdessen: kaufbare Fähigkeit-Tiers ab
+    **Lv 25, dann alle 50 Level** (25/75/125/…, endlos — im geforderten
+    25–50-Fenster), je **+100 % Basis-Output additiv** (Mult = 1+n), Preis =
+    Level-Kosten am Unlock-Level × `ABILITY_COST_MULT = 6`. Additiv statt
+    exponentiell ⇒ Langzeit-DPS(Level) bleibt in der M9-Anti-Plateau-Klasse
+    (~Level²), aber mit ~8× flacherer Konstante — UND jede Stufe kostet Gold.
+  - **`DPS_TUNE = 2` (Idle-Rückgabe).** Die reine Umstellung über-nerfte die
+    Idle-Seite (~×8 Multiplikator-Verlust): der realistische 1-cps-Bot war nach
+    12 h bei Bühne 20 gebrickt, E2-Bot loopte flache Aszensionen. ×2 auf die
+    DPS-Basen (nur DPS-Linien, nicht die Boss-Klick-Linie) stellt die Idle-Route
+    wieder her; Aktive spüren davon nur den 20-%-Share.
+  - **Gemessene neue Envelope** (Sim, kalibrierte Bedingungen): t10 ≈ 0,93 min
+    (Klick-Linie macht den Start knackig), **erste Wand Bühne 30** t30 ≈ 12–15 min,
+    Single-Run-Best 35–39 (Bühne 35 in einer 45-min-Sitzung bewusst nicht mehr
+    sicher erreichbar), realistischer kumulativer Marsch **t75 ≈ 4,6 h** (alt: t80
+    3–5 h ⇒ klar langsamer; Bühne 80+ braucht jetzt echt den Prestige-Stack),
+    erste Himmelfahrt 8,2–8,8 h (altes Fenster hält), E2 16 Marks/z80 mit
+    ≥ 1 Himmelfahrt. **Test-Re-Kalibrierung dokumentiert im sim.test:** Tabelle
+    neu verankert (t10/t30, t75-kumuliert), E2-`stallSeconds` 90→240
+    (Spieler-Geduld-Modell folgt dem langsameren Takt) + ×2-Bound erst nach
+    4-Gap-Warm-up (der eine ~×3-Spike ist exakt die designte erste Wand vor der
+    ersten Aszension), Loot-Witness-Seed 1→7 (Chest-RNG-Strom verschoben).
+  - **Save v10:** `crewUp`-Ledger (gekaufte Tiers je Mitglied), Migration v9→v10
+    (leeres Ledger — alte Gratis-Mults werden NICHT nachgeschenkt, das ist die
+    Verlangsamung), Repair klemmt gekaufte Tiers auf `abilityTiersUnlocked(level)`.
+    `crewUp` lebt und stirbt mit `crew` (jeder Prestige-Reset leert beides).
+  - **UI (`crew.ts`):** Boss-Zeile zeigt „Klick" statt DPS; pro Mitglied
+    Gold-Button „Fähigkeit: +100 % … · Preis" sobald freigeschaltet
+    (stopPropagation gegen den Row-Kauf-Handler), sonst Fortschrittsbalken
+    „Fähigkeit n ab Lv X"; Level-Badge zeigt gekauften Mult (`Lv 80 · ×3`).
+
 ## M15 — Transzendenz LIVE (Schicht 3, §4.5.3)
 
 - **2026-07-18 (Part 2) — UI, Glue, Sim & Docs für die volle Transzendenz-Schicht.**
