@@ -58,8 +58,8 @@ export class AbilityBar {
     const label = active
       ? `×10  ${Math.max(0, Math.ceil((ability.frenzyUntil - now) / 1000))}s`
       : ready
-        ? '🍑 Ekstase! · F'
-        : '🍑 Ekstase';
+        ? 'Ekstase! · F'
+        : 'Ekstase';
     if (label !== this.cLabel) {
       this.cLabel = label;
       this.label.textContent = label;

@@ -5,6 +5,7 @@ import './style.css';
 import { BeatTracker } from './audio/beat';
 import { AudioEngine } from './audio/engine';
 import { buildCharacter, type CharacterInstance } from './character/rig';
+import { buildEntity, entityVariant, type EntityInstance } from './character/entity';
 import { DT, renderCheeks, stepPhysics } from './character/physics';
 import { SKINS } from './character/skins';
 import { Choreographer } from './choreo/moves';
@@ -114,12 +115,14 @@ import {
 import { awardGildOnZone, isGildZone } from './game/gild';
 import {
   buyTreeNode,
+  canHimmelfahrt,
   coachCps,
   coachDps,
   ekstaseBonusMs,
   fruhstarterFraction,
   offlineCapS,
 } from './game/heaven';
+import { canAscend } from './game/ascension';
 import { CREW, type CrewLevels } from './game/heroes';
 import { buildAchievementCtx, newlyUnlocked } from './game/ch-achievements';
 import {
@@ -177,6 +180,10 @@ const MOVE_SWITCH_CLICKS = 18;
 const BG_BY_TIER = ['club', 'synth', 'beach', 'space'] as const;
 const bgForZone = (zone: number): (typeof BG_BY_TIER)[number] =>
   BG_BY_TIER[Math.floor((zone - 1) / 10) % BG_BY_TIER.length];
+// Wave 3: scenery recolour lap — hue-shifts each stage's palette every full
+// 40-zone tour, in step with the rival's entityVariant, so endless laps 2, 3, …
+// never look identical to lap 1. Purely visual (kulisse buffs/tiers untouched).
+const bgVariant = (zone: number): number => Math.floor(Math.max(0, zone - 1) / 40);
 
 // ---------- scene / engine ----------
 const canvas = document.getElementById('app') as HTMLCanvasElement;
@@ -325,12 +332,28 @@ const beatTracker = new BeatTracker();
 const choreo = new Choreographer();
 // The equipped skin drives the 3D rig now (§5) — no longer always classic.
 let char: CharacterInstance = buildCharacter(scene, SKINS[state.gear.skin]);
+// Wave 2: the rival's visual body — a cartoon creature across the dance floor,
+// themed by the zone's tier (BG_BY_TIER), boss-sized on boss targets and
+// recoloured every 40-zone lap. Purely visual; combat logic is untouched.
+let entity: EntityInstance = buildEntity(scene, bgForZone(combat.zone), {
+  boss: combat.boss,
+  variant: entityVariant(combat.zone),
+});
+/** Rebuild the rival entity only when its look actually changes (cheap check). */
+function syncEntity(): void {
+  const theme = bgForZone(combat.zone);
+  const variant = entityVariant(combat.zone);
+  if (entity.theme !== theme || entity.boss !== combat.boss || entity.variant !== variant) {
+    entity = buildEntity(scene, theme, { boss: combat.boss, variant }, entity);
+  }
+}
 // Kulisse (§5.5): in Tour-Modus (`bgAuto`) the background rotates with the zone tier;
 // otherwise the manually chosen `gear.bg` is fixed. Keep `gear.bg` in lockstep with
 // what's on screen so the kulisse mini-buff + set detection match the view.
 let currentBg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
+let currentBgVariant = bgVariant(combat.zone);
 if (state.gear.bgAuto) state.gear.bg = currentBg;
-world.setBackground(currentBg);
+world.setBackground(currentBg, currentBgVariant);
 audio.setBackground(currentBg);
 recompute(); // fold the (possibly view-synced) kulisse buff into the derived numbers
 choreo.setMove(0);
@@ -463,6 +486,7 @@ const prestige = new Prestige({
     lastShakeTier = 0;
     recompute();
     updateBackground(true);
+    syncEntity(); // fresh Bühne 1 ⇒ fresh club rival
     crew.render();
     ancients.render();
     heaven.refresh();
@@ -499,6 +523,7 @@ const heaven = new Heaven({
     lastShakeTier = 0;
     recompute();
     updateBackground(true);
+    syncEntity(); // fresh Bühne 1 ⇒ fresh club rival
     crew.render();
     ancients.render();
     prestige.refresh();
@@ -549,6 +574,7 @@ if (transcendEnabled) {
       lastShakeTier = 0;
       recompute();
       updateBackground(true); // background follows the fresh Bühne 1
+      syncEntity(); // fresh Bühne 1 ⇒ fresh club rival
       crew.render();
       ancients.render(); // Ahnen were wiped
       prestige.refresh(); // Ruhm-Seelen were wiped
@@ -600,6 +626,7 @@ const chSettings = new ChSettings({
     char = buildCharacter(scene, SKINS[state.gear.skin], char); // rig follows the imported skin
     recompute();
     updateBackground(true);
+    syncEntity(); // rival body follows the imported zone/boss state
     crew.render();
     ancients.render();
     prestige.refresh();
@@ -675,16 +702,78 @@ for (const tab of Array.from(document.querySelectorAll<HTMLElement>('.tab'))) {
   });
 }
 
-const shop = document.getElementById('shop') as HTMLElement;
-document
-  .getElementById('toggleShop')
-  ?.addEventListener('click', () => shop.classList.toggle('hidden'));
+// ---------- progressive tab disclosure ----------
+// A fresh player at Bühne 1 should not face nine cryptic icons for layers they
+// can't touch for hours. Each deeper tab reveals itself the moment its layer is
+// first *reachable* — driven by monotonic lifetime highwaters (rsLifetime,
+// stats.ascensions, hpfLifetime, teLifetime, keysEarned) or a live "can-do-now"
+// gate — so a tab never re-hides once shown. This is pure presentation: it toggles
+// visibility only and changes no gate, formula or balance.
+function tabUnlocked(key: string): boolean {
+  switch (key) {
+    case 'crew': // core loop — always
+    case 'gear': // skins/kulisse — always (cosmetic identity from the start)
+    case 'set': // options must always be reachable (mute, quality, import/export)
+      return true;
+    case 'meta': // 📋 Ziele: after a few stages, once goals become meaningful
+      return state.lifetimeMaxZone >= 5 || state.stats.ascensions > 0;
+    case 'pr': // ✨ Ruhm: the first time an ascension is worth doing, or ever done
+      return (
+        state.rsLifetime > 0 || canAscend(state.runMaxZone, state.lifetimeMaxZone, state.rsLifetime)
+      );
+    case 'anc': // 🌀 Ahnen: the soul sink — only after a first ascension banks souls
+      return state.stats.ascensions > 0 || Object.keys(state.ancients).length > 0;
+    case 'heaven': // 🌈 Himmel (L2): once a Himmelfahrt is reachable or done
+      return state.heaven.hpfLifetime > 0 || canHimmelfahrt(state.heaven, state.rsLifetime);
+    case 'transcend': // 🔮 Transzendenz (L3): only if enabled AND reachable/done
+      return (
+        !!transcendPanel &&
+        (state.transcend.teLifetime > 0 || canTranscend(state.transcend, state.heaven.hpfLifetime))
+      );
+    case 'chest': // 🎁 Truhen: once the first key/chest has ever dropped
+      return state.stats.keysEarned > 0 || state.stats.chestsOpened > 0 || state.chests.keys > 0;
+    default:
+      return true;
+  }
+}
 
+let tabVisSig = '';
+function syncTabVisibility(): void {
+  let sig = '';
+  const vis: Record<string, boolean> = {};
+  for (const key of Object.keys(tabBodies)) {
+    const u = tabUnlocked(key);
+    vis[key] = u;
+    sig += u ? '1' : '0';
+  }
+  if (sig === tabVisSig) return; // change-detected: no DOM churn on the common path
+  tabVisSig = sig;
+  for (const [key, unlocked] of Object.entries(vis)) {
+    document
+      .querySelector<HTMLElement>(`.tab[data-t="${key}"]`)
+      ?.style.setProperty('display', unlocked ? 'flex' : 'none');
+  }
+  // Safety net: monotonic gates never hide a revealed tab, but if the active tab
+  // were ever hidden, fall back to Crew so the body is never left blank.
+  const active = document.querySelector<HTMLElement>('.tab.active');
+  if (active && active.style.display === 'none') {
+    document.querySelector<HTMLElement>('.tab[data-t="crew"]')?.click();
+  }
+}
+syncTabVisibility();
+
+const shop = document.getElementById('shop') as HTMLElement;
+document.getElementById('toggleShop')?.addEventListener('click', () => {
+  shop.classList.toggle('hidden');
+  if (!shop.classList.contains('hidden')) syncTabVisibility(); // reflect fresh unlocks on open
+});
+
+// The speaker icon is inline SVG; `.muted` swaps its wave arcs for a strike-cross.
 const muteBtn = document.getElementById('muteBtn') as HTMLButtonElement;
-muteBtn.textContent = audio.muted ? '🔇' : '🔊';
+muteBtn.classList.toggle('muted', audio.muted);
 muteBtn.addEventListener('click', () => {
   audio.unlock();
-  muteBtn.textContent = audio.toggleMute() ? '🔇' : '🔊';
+  muteBtn.classList.toggle('muted', audio.toggleMute());
 });
 
 // ---------- background: zone-tier auto-rotation, gated on the kulisse chooser ----------
@@ -693,14 +782,16 @@ muteBtn.addEventListener('click', () => {
 // chosen `gear.bg` is fixed and the loop never rotates away from it (§5.5).
 function updateBackground(force = false): void {
   const bg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
-  if (!force && bg === currentBg) return;
+  const variant = bgVariant(combat.zone); // recolour lap follows depth even on a manual kulisse
+  if (!force && bg === currentBg && variant === currentBgVariant) return;
   currentBg = bg;
+  currentBgVariant = variant;
   if (state.gear.bgAuto && state.gear.bg !== bg) {
     state.gear.bg = bg;
     recompute(); // Space +5 % dpsPct etc. follow the auto-rotation
   }
-  world.setBackground(bg);
-  audio.setBackground(bg);
+  world.setBackground(bg, variant);
+  audio.setBackground(bg); // idempotent for a same-key (variant-only) rebuild
 }
 
 // ---------- farm / travel (G10, §4.4) ----------
@@ -709,6 +800,7 @@ function updateBackground(force = false): void {
 function travel(toZone: number): void {
   combat = travelTo(combat, toZone);
   updateBackground();
+  syncEntity(); // the rival body follows the farmed zone's tier
   syncMaxZones();
   hud.update(state, combat, dps, clickDmg);
   persist();
@@ -823,10 +915,15 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
   // A newly-spawned boss gets Chronilla's extra timer seconds.
   combat = r.bossSpawned ? withBossTimerBonus(r.state) : r.state;
   if (r.killed) {
+    // Visual KO pop — the same body doubles as the next rival's spawn-in bounce,
+    // so rapid idle-DPS kills never rebuild geometry.
+    entity.defeat();
     onKillProgress(r, fromClick, wasBoss, x, y);
+    syncEntity(); // boss spawn/kill, tier change or recolour lap swaps the model
   } else if (wasBoss && fromClick) {
     audio.bossHit();
   }
+  if (!r.killed && fromClick) entity.flinch();
 }
 
 // ---------- input ----------
@@ -1442,6 +1539,12 @@ persist();
 const clock = new THREE.Clock();
 let acc = 0;
 let t0 = 0;
+// Headless-smoke hook (same spirit as `window.chLoot`): render time + the
+// live rival's look/facing, so the screenshot rig can time taunt/boss frames
+// under software-GL time dilation. Read-only; no gameplay surface.
+(
+  window as unknown as { chVs: () => { t0: number; theme: string; boss: boolean; rotY: number } }
+).chVs = () => ({ t0, theme: entity.theme, boss: entity.boss, rotY: entity.root.rotation.y });
 let uiTimer = 0;
 let lastRenderMs = 0;
 let firstFrame = true;
@@ -1468,6 +1571,7 @@ function loop(nowMs: number): void {
       state.stats.bossStreak = 0; // a timeout breaks the no-timeout boss streak (§7.3)
       toasts.show('⏱', 'Zeit um!', 'Farm die Bühne & fordere den Boss erneut.');
       audio.bossLose();
+      syncEntity(); // the boss bounced us — back to the normal rival body
     }
   }
 
@@ -1499,6 +1603,8 @@ function loop(nowMs: number): void {
   beat.intensity = beatV * drive * 4;
   if (beatTracker.update(choreo.phase)) audio.beat(0.5 + drive * 0.08);
   world.anims.forEach((a) => a(t0, beatV));
+  // The rival twerks back — same beat envelope, its own loop (independent of the rig).
+  entity.update(t0, beatV, drive);
 
   // HUD-throttle (B7): the moving HP bar / boss timer refresh cheaply per frame;
   // the full text HUD only rebuilds on the 0.25 s tick (or discrete events).
@@ -1528,6 +1634,7 @@ function loop(nowMs: number): void {
     checkAchievements();
     maybeLeaderboardPrompt();
     hud.update(state, combat, dps, clickDmg);
+    syncTabVisibility(); // reveal a tab the instant its layer becomes reachable
     // keep the open shop tab's affordability/previews fresh while idling
     const active = document.querySelector('.tab.active') as HTMLElement | null;
     if (active?.dataset.t) renderActiveTab(active.dataset.t);

@@ -98,9 +98,13 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   });
   scene.add(new THREE.Mesh(new THREE.SphereGeometry(70, 32, 32), skyMat));
 
-  scene.add(new THREE.HemisphereLight(0xbfc4ff, 0x201820, 0.4));
-  const key = new THREE.DirectionalLight(0xffffff, 2.4);
-  key.position.set(5, 9, 6);
+  // Cartoon lighting (Wave 1): one strong frontal-ish key so the cel bands cut
+  // cleanly across the toon materials, a lifted hemisphere + soft cool fill so
+  // the shadow band stays colourful (never muddy), and the club rim lights for
+  // pop. The beat PointLight still pulses the whole cast on the beat.
+  scene.add(new THREE.HemisphereLight(0xcdd2ff, 0x33222a, 0.55));
+  const key = new THREE.DirectionalLight(0xfff4e0, 2.3);
+  key.position.set(4.5, 8.5, 7);
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
   key.shadow.camera.near = 1;
@@ -112,6 +116,9 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   key.shadow.bias = -0.0004;
   key.shadow.radius = 5;
   scene.add(key);
+  const fill = new THREE.DirectionalLight(0xa9c4ff, 0.5);
+  fill.position.set(-6, 3, 6);
+  scene.add(fill);
   const rimV = new THREE.PointLight(0x8b5cf6, 48, 55, 2);
   rimV.position.set(-6, 4, -5);
   scene.add(rimV);

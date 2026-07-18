@@ -3,6 +3,13 @@ import type * as THREE from 'three';
 /** Skin visual style — drives which meshes the rig builds. */
 export type SkinStyle = 'human' | 'disco' | 'robot' | 'host' | 'boss';
 
+/**
+ * Optional cartoon flair (Wave 1 art direction): small themed props/face
+ * variants the rig layers ON TOP of the base `SkinStyle` silhouette, so a skin
+ * can feel unique without inventing a new rig branch. Purely visual.
+ */
+export type SkinFlair = 'ninja' | 'pirate' | 'lava' | 'saucer' | 'ice';
+
 /** Gear rarity tiers (spec §5.3). */
 export type SkinRarity = 'common' | 'rare' | 'epic' | 'legendary' | 'mythic';
 
@@ -64,6 +71,17 @@ export interface SkinConfig {
   readonly shorts: number;
   /** Hair colour. */
   readonly hair: number;
+  // ---- optional cartoon visual fields (Wave 1 art direction; rig-only) ----
+  /** Accent colour for glowing/prop details (visor, tie, trims). */
+  readonly accent?: number;
+  /** Ink-outline colour override (default: warm near-black `INK`). */
+  readonly outline?: number;
+  /** Toon cel-band count override (2 = graphic, 4 = default). */
+  readonly bands?: number;
+  /** Cape colour (boss-style silhouettes only). */
+  readonly cape?: number;
+  /** Themed cartoon flair props layered on the base style. */
+  readonly flair?: SkinFlair;
   /** BP milestone (highest-ever) before this appears in the shop (M2 content-gate). */
   readonly revealAt?: number;
   // ---- gear metadata (M11, spec §5.2/§5.3): data, not code ----
