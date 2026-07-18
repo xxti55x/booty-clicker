@@ -13,9 +13,25 @@
  * reproducible. Kept fast (bounded runs, integer-second steps) to stay a CI gate.
  */
 import { applyAscension, soulMult } from './ascension';
+import {
+  ANCIENTS,
+  type AncientLevels,
+  ancientClickMult,
+  ancientDpsMult,
+  ancientGoldMult,
+  buyAncient,
+  canBuyAncient,
+} from './ancients';
 import { CRIT_CHANCE, CRIT_MULT, COMBO_CAP, comboMult } from './click';
 import { type CombatState, hit, spawnFor, tickBoss, travelTo } from './combat';
 import { awardGildOnZone, type Gilds, isGildZone } from './gild';
+import {
+  type HeavenState,
+  canHimmelfahrt,
+  createHeaven,
+  heavenGlobalMult,
+  soulBonusEff,
+} from './heaven';
 import { CREW, clickDamageRaw, heroDps, nextLevelCost, totalRawDps } from './heroes';
 import { Rng } from '../util/rng';
 
@@ -38,6 +54,10 @@ interface Sim {
   lifetimeMaxZone: number;
   /** Lifetime-earned RS highwater (held-balance model, §ascension). */
   rsLifetime: number;
+  /** Bought Twerk-Ahnen (the M10 soul sink). */
+  ancients: AncientLevels;
+  /** Prestige layer 2 (HPF + Himmelsbaum). */
+  heaven: HeavenState;
   rng: Rng;
 }
 
@@ -49,6 +69,8 @@ function newSim(seed: number): Sim {
     souls: 0,
     lifetimeMaxZone: 1,
     rsLifetime: 0,
+    ancients: {},
+    heaven: createHeaven(),
     rng: new Rng({ seed, cursor: 0 }),
   };
 }
@@ -62,12 +84,33 @@ function juiceFactors(config: SimConfig): { combo: number; crit: number } {
   };
 }
 
+/**
+ * Effective damage per second (= total power, click + idle at farm) for a given
+ * crew/gilds/souls/ancients/heaven. Folds the held-soul mult (HPF-amplified), the
+ * Ancient click/DPS mults and the +2 %/HPF global mult — the same derivation as
+ * `ch-state.dpsOf`/`clickDamageOf`. Idle never draws juice (P1).
+ */
+function powerFor(
+  crew: Record<string, number>,
+  gilds: Gilds,
+  souls: number,
+  ancients: AncientLevels,
+  heaven: HeavenState,
+  config: SimConfig,
+  combo: number,
+  crit: number,
+): number {
+  const hpf = heaven.hpf;
+  const sm = soulMult(souls, soulBonusEff(hpf));
+  const global = heavenGlobalMult(hpf);
+  const baseClick = clickDamageRaw(crew, gilds) * sm * ancientClickMult(ancients) * global;
+  const idle = totalRawDps(crew, gilds) * sm * ancientDpsMult(ancients) * global;
+  return config.clickRate * baseClick * combo * crit + idle;
+}
+
 /** Effective damage the bot deals in one second at the current state. */
 function damagePerSecond(sim: Sim, config: SimConfig, combo: number, crit: number): number {
-  const mult = soulMult(sim.souls);
-  const baseClick = clickDamageRaw(sim.crew, sim.gilds) * mult;
-  const idle = totalRawDps(sim.crew, sim.gilds) * mult;
-  return config.clickRate * baseClick * combo * crit + idle;
+  return powerFor(sim.crew, sim.gilds, sim.souls, sim.ancients, sim.heaven, config, combo, crit);
 }
 
 /**
@@ -84,7 +127,7 @@ function stepSecond(sim: Sim, combat: CombatState, dmg: number): CombatState {
     if (remaining >= combat.hp) {
       remaining -= combat.hp;
       const r = hit(combat, combat.hp);
-      sim.gold += r.gold;
+      sim.gold += Math.floor(r.gold * ancientGoldMult(sim.ancients)); // Peachiel (§4.6)
       combat = r.state;
       if (r.advancedZone && combat.zone > sim.lifetimeMaxZone) {
         const cleared = combat.zone - 1;
@@ -318,4 +361,138 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
  */
 export function farmZone(combat: CombatState, zone: number): CombatState {
   return travelTo(combat, zone);
+}
+
+/**
+ * Spend the freshly-earned souls on Ancients, greedily picking the purchase that
+ * most increases total power (§4.6 soul sink; the fixed priority falls out of the
+ * power ranking — Poposeidon/Twerkules/Cheeksana dominate the farm metric). Only
+ * ever buys when it *raises* power, so holding souls for `soulMult` wins once the
+ * marginal ancient is worse — this keeps power monotone and never regresses E3.
+ */
+function buyAncientsGreedy(sim: Sim, config: SimConfig, combo: number, crit: number): void {
+  let guard = 300;
+  for (;;) {
+    if (guard-- <= 0) break;
+    const p0 = powerFor(
+      sim.crew,
+      sim.gilds,
+      sim.souls,
+      sim.ancients,
+      sim.heaven,
+      config,
+      combo,
+      crit,
+    );
+    let bestId: string | null = null;
+    let bestPower = p0;
+    for (const cfg of ANCIENTS) {
+      if (!canBuyAncient(sim.ancients, sim.souls, cfg.id)) continue;
+      const r = buyAncient(sim.ancients, sim.souls, cfg.id);
+      const p = powerFor(sim.crew, sim.gilds, r.souls, r.ancients, sim.heaven, config, combo, crit);
+      if (p > bestPower) {
+        bestPower = p;
+        bestId = cfg.id;
+      }
+    }
+    if (bestId === null) break;
+    const r = buyAncient(sim.ancients, sim.souls, bestId);
+    sim.ancients = r.ancients;
+    sim.souls = r.souls;
+  }
+}
+
+/** Options for the ascension-era sim (the E3 + first-Himmelfahrt measurement). */
+export interface EraOptions {
+  /** Seconds without a frontier advance before the bot ascends (hits the wall). */
+  stallSeconds: number;
+  /** Global-second budget (bounds runtime). */
+  maxSeconds: number;
+  /** Stop after this many ascensions (the E3 window: "first 20 ascensions"). */
+  maxAscensions: number;
+  /** End the run the moment the first Himmelfahrt becomes possible (keeps it fast). */
+  stopAtFirstHimmelfahrt?: boolean;
+}
+
+/** The result of an ascension-era progression (E3 / first Himmelfahrt). */
+export interface EraResult {
+  ascensions: number;
+  /** Global second at which each new +50 % total-power milestone was first hit. */
+  powerMilestones: number[];
+  /** Global second at which the first Himmelfahrt became possible (RS_life ≥ 1000), −1 if none. */
+  firstHimmelfahrtT: number;
+  maxPower: number;
+  maxBestZone: number;
+}
+
+/**
+ * Play a continuous ascension era: adaptive ascension on stall, ROI-greedy crew,
+ * and Ancient buying with the freshly-earned souls after each ascension. Tracks
+ * every +50 % total-power milestone (E3) and the global time the first Himmelfahrt
+ * becomes possible (RS lifetime ≥ 1000). Souls, gilds and Ancients compound across
+ * ascensions (held-balance), so power keeps climbing — the anti-plateau of §4.6.
+ */
+export function simulateAscensionEra(config: SimConfig, opts: EraOptions): EraResult {
+  const sim = newSim(config.seed ?? 1);
+  const { combo, crit } = juiceFactors(config);
+  let combat = spawnFor(1, 0, 1);
+  let globalT = 0;
+  let lastAdvanceT = 0;
+  let ascensions = 0;
+  let firstHimmelfahrtT = -1;
+  let maxPower = 0;
+  let maxBestZone = 1;
+  const powerMilestones: number[] = [];
+  let milestonePower = 0;
+
+  while (globalT < opts.maxSeconds && ascensions < opts.maxAscensions) {
+    globalT++;
+    const dmg = damagePerSecond(sim, config, combo, crit);
+    const prevFrontier = combat.maxZone;
+    combat = stepSecond(sim, combat, dmg);
+    // Reset the stall timer whenever THIS run's frontier advances (incl. re-climbing
+    // a cleared zone), not only on a new lifetime record — otherwise the bot ascends
+    // mid-climb and never gets deep.
+    if (combat.maxZone > prevFrontier) lastAdvanceT = globalT;
+    if (combat.maxZone > maxBestZone) maxBestZone = combat.maxZone;
+    buyCrewGreedy(sim);
+
+    const power = powerFor(
+      sim.crew,
+      sim.gilds,
+      sim.souls,
+      sim.ancients,
+      sim.heaven,
+      config,
+      combo,
+      crit,
+    );
+    maxPower = Math.max(maxPower, power);
+    if (milestonePower <= 0) {
+      if (power > 0) milestonePower = power;
+    } else if (power >= milestonePower * 1.5) {
+      powerMilestones.push(globalT);
+      milestonePower = power;
+    }
+
+    if (firstHimmelfahrtT < 0 && canHimmelfahrt(sim.heaven, sim.rsLifetime)) {
+      firstHimmelfahrtT = globalT;
+      if (opts.stopAtFirstHimmelfahrt) break;
+    }
+
+    if (globalT - lastAdvanceT >= opts.stallSeconds) {
+      const asc = applyAscension(combat.maxZone, sim.lifetimeMaxZone, sim.souls, sim.rsLifetime);
+      sim.souls = asc.souls;
+      sim.lifetimeMaxZone = asc.lifetimeMaxZone;
+      sim.rsLifetime = asc.rsLifetime;
+      sim.gold = 0;
+      sim.crew = {};
+      buyAncientsGreedy(sim, config, combo, crit); // spend the freshly-earned souls
+      combat = spawnFor(1, 0, 1);
+      lastAdvanceT = globalT;
+      ascensions++;
+    }
+  }
+
+  return { ascensions, powerMilestones, firstHimmelfahrtT, maxPower, maxBestZone };
 }

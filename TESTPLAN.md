@@ -19,8 +19,8 @@ CI (real browsers, touch input, performance).
 - [ ] `npm run lint` — ESLint clean
 - [ ] `npm run format:check` — Prettier clean
 - [ ] `npm test` — all unit tests green (game + API workspaces)
-- [ ] `npm run build` — type-checks and builds; bundle **< 5 MB** (currently ~583 KB JS / ~153 KB gzip; +~2 KB for M9 scaling)
-- [ ] `npm run test:sim` — the `simulateEndless` gate (E1/E2/E4 + §4.8 pacing) is green (also runs inside `npm test` + CI)
+- [ ] `npm run build` — type-checks and builds; bundle **< 5 MB** (currently ~594 KB JS / ~156 KB gzip; +~11 KB for M10 Ahnen/Himmel)
+- [ ] `npm run test:sim` — the `simulateEndless` gate (E1/E2/**E3**/E4 + §4.8 pacing + first-Himmelfahrt window) is green (also runs inside `npm test` + CI)
 - [ ] `npm run build:itch` — produces `apps/game/release/booty-clicker-itch.zip` with `index.html` at the archive root
 
 ## 2. Browser matrix (manual smoke)
@@ -42,6 +42,10 @@ Run `npm run preview` (or serve the itch ZIP) and verify on each target:
 | Backdrop rotates every 10 zones (club → synth → beach → space)                                          | ☐                | ☐                 | ☐                |
 | Ascend (✨ Ruhm): resets the run, banks Ruhm-Seelen, +10 %/soul                                         | ☐                | ☐                 | ☐                |
 | Ascension preview shows "+X Seelen" before the reset                                                    | ☐                | ☐                 | ☐                |
+| Ahnen (🌀): buy a Twerk-Ahne → held souls drop, perk applies; capped ancients lock at cap               | ☐                | ☐                 | ☐                |
+| Himmel (🌈): Himmelfahrt preview shows "+X HPF"; arm→confirm banks HPF, resets RS/Ahnen/tour            | ☐                | ☐                 | ☐                |
+| Himmelsbaum: buy Twerk-Coach → an auto-clicker ticks rivals idle (1→4 cps)                              | ☐                | ☐                 | ☐                |
+| Held HPF: HUD shows "🍑 X HPF"; soul-% and global damage rise with HPF (compounding)                    | ☐                | ☐                 | ☐                |
 | Audio starts after first gesture; mute button persists                                                  | ☐                | ☐                 | ☐                |
 | Autosave + reload restores progress                                                                     | ☐                | ☐                 | ☐                |
 | Offline earnings dialog on boot after being away                                                        | ☐                | ☐                 | ☐                |
@@ -178,3 +182,30 @@ Manual passes (real device / browser):
       shows „🌾 Farmen · Front: Bühne N" while below the frontier.
 - [ ] **RS_v2 feel.** Ascension previews a much larger „+X Seelen" at depth than the
       old curve (e.g. Bühne 50 → +129), and a new best zone visibly multiplies the bank.
+
+### M10 — Ahnen & Ruhmes-Himmelfahrt (Schicht 2)
+
+Automated (unit + `test:sim` + headless smoke `smoke-ch.mjs`, now v5):
+
+- Souls held-balance/additive-earn refactor (`ascension.test.ts`): buying an Ancient
+  spends held souls without ascension refunding them; `pendingSouls` gates on
+  `rsLifetime`.
+- Ancients (`ancients.test.ts`): **AC1** — a purchase lowers `soulMult` (spends souls)
+  and raises the perk; caps enforced (buying past a cap is rejected/clamped).
+- Heaven (`heaven.test.ts`): **AC3** — `HPF(1000)=1`, `HPF(1e6)=31`; the soul amplifier
+  multiplies (not adds); tree costs/levels; coach damage. **AC5** (offline half) in
+  `ch-store.test.ts`: a coach earns offline with zero crew DPS (injected clock).
+- Himmelfahrt reset scope (`ch-state.test.ts`): **AC2** exact snapshot — RS + Ancients
+  fall; gilds, HPF and the Himmelsbaum survive.
+- Save v5 (`ch-store.test.ts`): v4→v5 lossless; corrupt ancients/heaven ⇒ defaults.
+- Sim (`sim.test.ts`): **E3** ≤ 90 min per +50 % power over 20 ascensions; **AC4** first
+  Himmelfahrt in the 5–9 h ±25 % window; E1/E2/E4 + pacing stay green.
+
+Manual passes (real device / browser):
+
+- [ ] **Ahnen 🌀.** Buying a Twerk-Ahne drops held Ruhm-Seelen and applies its perk
+      (e.g. Twerkules → click damage rises); capped ancients show „Max erreicht".
+- [ ] **Himmelfahrt 🌈.** At ≥ 1 000 RS lifetime the 🌈-tab previews „+X HPF"; arm→confirm
+      banks the HPF and resets RS/Ahnen/tour, while gilds + HPF + Himmelsbaum persist.
+- [ ] **Himmelsbaum.** Buying Twerk-Coach spawns an auto-clicker (1→4 cps at 25 % click);
+      Nachtschicht raises the offline cap; the HUD shows held „🍑 X HPF".

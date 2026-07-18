@@ -3,6 +3,85 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M10 — Ahnen & Ruhmes-Himmelfahrt (Schicht 2)
+
+- **2026-07-18 — Seelen: held-balance + additive-earn statt lifetime-gepinnt.** Vor
+  M10 war `souls` eine an die tiefste Bühne gepinnte Bank (`max(current,
+soulsForMaxZone)`). Da Ahnen jetzt Seelen **ausgeben**, darf die Aszension das
+  Ausgegebene nicht zurückerstatten. Neues Modell: `rsLifetime` = jemals **verdiente**
+  Seelen (monoton), `souls` = **gehaltener** Saldo = `rsLifetime − Σ(Ahnen-Ausgaben)`.
+  `applyAscension(runMax, lifetime, souls, rsLifetime)` bankt nur den **neuen** Gewinn
+  (`max(0, soulsForMaxZone(deepest) − rsLifetime)`) auf den gehaltenen Saldo; gehaltene
+  Seelen überleben die Aszension (nur eine Himmelfahrt setzt sie zurück). Eine erste
+  Aszension „from scratch" ergibt exakt die alten Zahlen (Bühne 50 ⇒ 129), sodass die
+  §4.8-Pacing-Tabellen stehen bleiben. `pendingSouls`/`canAscend` gaten gegen
+  `rsLifetime` (Ausgegebenes ist nie re-farmbar). `soulMult(souls, bonusPerSoul)` nimmt
+  den Per-Seele-Bonus als Argument, damit der HPF-Verstärker am Call-Site einfließt und
+  `ascension.ts` frei von jedem L2-Import bleibt.
+
+- **2026-07-18 — v4→v5-Migration setzt verdiente RS = gebankte Seelen (NICHT
+  zonen-basiert).** Naheliegend wäre, `rsLifetime` auf `soulsForMaxZone(lifetimeMaxZone)`
+  zu heben. Das ist falsch: `lifetimeMaxZone` wächst live beim Erreichen neuer Tiefen,
+  aber verdient (gebankt) wird erst bei der Aszension. Ein Pre-M10-Spieler, der Bühne 60
+  erreicht, aber bei Bühne 50 aszendiert hat, hat 129 Seelen (nicht 320). Ein Lift auf
+  `soulsForMaxZone(60)` würde die noch **ausstehenden** Seelen (191) beim Laden löschen.
+  Pre-M10 wurde nichts ausgegeben ⇒ verdient == gehalten == `souls`, also
+  `rsLifetime = souls`. `stateFromSave` hebt danach nur noch `rsLifetime ≥ souls` (kein
+  Zonen-Lift), damit auch v5-Saves mit Ausgaben ihren Saldo/Preview behalten.
+
+- **2026-07-18 — Ahnen als Daten; Effekte als pure Aggregat-Modifikatoren.** `ancients.ts`
+  hält die 10 Ahnen als Config (id/Name/Flavor/`effect`/`perLevel`/`cap`/`label`); Kosten
+  `level+1` RS (Summe n(n+1)/2). `buyAncient` ist rein und durch Seelen **und** Cap
+  gegated; Caps nur wo Unbegrenztheit degeneriert (Krit-Chance/Fenster/Timer), die
+  Prozent-Ahnen bleiben uncapped (endloser Sink). Die Wirkung fließt über kleine
+  Aggregatoren (`ancientClickMult`, `ancientDpsMult`, `ancientCritChanceBonus`, …) in die
+  abgeleiteten Pipelines — `dpsOf`/`clickDamageOf` falten Click-/DPS-Mult direkt ein, der
+  Rest (Krit/Gold/Boss-Schaden/Boss-Timer/Combo-/Beat-Fenster/Ekstase-Ladebedarf) wird im
+  Glue (`main.ts`) an genau einer Stelle je Faktor durchgereicht. So bleibt Balancing
+  reine Datenänderung.
+
+- **2026-07-18 — HPF: gleiches held-balance-Modell; Doppelwirkung MULTIPLIZIERT.**
+  `hpfForRsLifetime = ⌊√(RS_life/1000)⌋` (erste Himmelfahrt bei 1 000 RS; `HPF(1e6)=31`).
+  `heaven = { hpf (gehalten), hpfLifetime (verdient), ascensions2, tree }`. Gehaltene HPF
+  wirken doppelt: `heavenGlobalMult = 1 + 0,02·HPF` **und** der Seelen-Verstärker
+  `soulBonusEff = 0,10 + 0,002·HPF`. Beide fließen multiplikativ in `dpsOf`/`clickDamageOf`
+  — L1 (mehr Seelen) und L2 (fettere Seelen) compounden, statt sich zu addieren.
+
+- **2026-07-18 — Himmelfahrts-Reset-Scope nach AC2 (Vergoldungen bleiben).** Die §4.5-
+  Tabelle listet Vergoldungen nicht explizit in L2-„Bleibt", aber das M10-AC2 (Spec §10 +
+  Auftrag) sagt ausdrücklich: **RS (souls + rsLifetime) und Ahnen fallen; Vergoldungen,
+  HPF, Himmelsbaum und Lifetime-Stats bleiben.** `himmelfahrtState` implementiert das als
+  puren Reducer (`{...createChState(), heaven: bankHimmelfahrt(...), gilds, totalClicks,
+rng, stats, legacyImported}`) mit exaktem Snapshot-Test. `lifetimeMaxZone` fällt bewusst
+  auf 1 (sonst wäre der RS-Reset via pending sofort wieder verdient).
+
+- **2026-07-18 — Himmelsbaum: nur die aktiven Grundknoten, Kampf-/Loot-Knoten nach M12.**
+  `TREE_NODES` enthält Coach I–IV, Frühstarter, Nachtschicht I–II, Ekstase-Ausdauer I–III
+  (Kosten-Listen pro Level, HPF ausgegeben = permanent). Beat-Drop/Pfirsichregen/
+  Truhen-Magnet/Bühnen-Sprinter sind **weggelassen** (statt gekauft-aber-wirkungslos),
+  bis M11/M12 ihre Effekte liefern — kein HPF-Verschwendungs-Fallstrick.
+
+- **2026-07-18 — Coach als geglätteter Idle-Schaden + Offline-Anteil.** Der Twerk-Coach
+  „klickt 1×/s mit 25 % Klickwert" ist im Loop als `coachDps(clickDmg, cps)·dt`
+  (wie Idle-DPS, ohne Krit/Beat, P1) modelliert — deterministisch und identisch zur
+  Offline-Formel. `offlineGold` bekommt optionale `{clickDmg, coachCps, capS}`: der
+  effektive Durchsatz ist `dps + coachCps·0,25·clickDmg`, gedeckelt per Nachtschicht.
+  Reine Klick-/Crew-lose Builds verdienen so offline (Rest von B11). Alte 3-Arg-Aufrufe
+  bleiben grün (Opts default leer).
+
+- **2026-07-18 — Sim E3: robustes Kriterium + realistischer Himmelfahrts-Pace.**
+  `simulateAscensionEra` (adaptive Aszension, ROI-greedy Crew, power-greedy Ahnen-Kauf
+  nach jeder Aszension, held-balance) misst zwei Dinge: **E3** = „+50 % Gesamtmacht
+  (effektive DPS+Klick) höchstens alle 90 min über die ersten 20 Aszensionen" (aktiver
+  Bot, beobachtet ~6 min ≪ 90 min), und die **erste Himmelfahrt** (RS_life ≥ 1000) im
+  Fenster **5–9 h ±25 %** = [3,75 h; 11,25 h]. Wichtig: der optimale 3-cps-Juice-Bot
+  erreicht 1 000 RS in ~0,6–1 h — dieselbe Optimal-vs-Real-Lücke, die schon die
+  M9-Pacing-Tabelle dokumentiert. Der Himmelfahrts-Pace wird darum mit einem
+  **realistischen Spielermodell** (0,7 cps, ohne Juice, ~45-min-Runs) gemessen und landet
+  reproduzierbar bei ~5,4–5,7 h. Ein Bug im Era-Bot (Stall-Timer nur bei neuem Lifetime-
+  Rekord statt bei jedem Frontier-Vorstoß) hätte ihn bei Bühne 35 plateauen lassen —
+  behoben, indem der Timer beim Re-Climb jeder geräumten Bühne zurückgesetzt wird.
+
 ## M9 — Endless-Skalierung (Anti-Plateau)
 
 - **2026-07-18 — RS_v2 ist rein additiv, deshalb migrationsfrei.** `soulsForMaxZone`

@@ -41,12 +41,28 @@ Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 M
 - **Bosse.** Jede 5. Bühne ist ein Boss mit **30-Sekunden-Timer**. Schaffst du ihn
   nicht, farmst du die Bühne weiter und forderst ihn erneut heraus (kein Soft-Lock).
 - **Ruhm-Seelen (Ascension).** Starte deine Tournee im ✨-Tab neu und sammle Seelen —
-  **+10 % Schaden pro Seele, dauerhaft**. Der Seelen-Ertrag `⌊z^1.6/40⌋ + ⌊1.10^z−1⌋`
+  **+10 % Schaden pro gehaltener Seele, dauerhaft**. Der Seelen-Ertrag `⌊z^1.6/40⌋ + ⌊1.10^z−1⌋`
   wächst mit der Tiefe **exponentiell**, sodass jede neue Bestzone die Bank vervielfacht.
   Seelen hängen an deiner tiefsten je erreichten Bühne (kein Farm-Exploit): tiefer → mehr
   Seelen → mehr Schaden → tiefer.
-- **Idle & Offline.** Deine Crew farmt weiter, während du weg bist (50 % Rate, max. 8 h)
-  — beim Wiedereinstieg gibt's eine „Willkommen zurück"-Zusammenfassung.
+- **Twerk-Ahnen (🌀).** Gib **gehaltene** Ruhm-Seelen für 10 **Ahnen** aus (Twerkules
+  +5 % Klick, Poposeidon +15 % Crew-DPS, Cheeksana +Krit, Glutaeus +Boss-Schaden,
+  Peachiel +Gold, …). Ausgegebene Seelen buffen nicht mehr über `soulMult` — dafür
+  geben die Ahnen dauerhafte, über Runs **compoundende** Perks (der klassische
+  Souls-vs-Perk-Tradeoff). Die Prozent-Ahnen sind uncapped: der endlose Seelen-Sink.
+- **Ruhmes-Himmelfahrt (🌈).** Ab **1 000 RS Lebenszeit** kannst du ein zweites Mal
+  prestige-n und **Himmelspfirsiche (HPF)** ernten. Jeder gehaltene HPF gibt **+2 %
+  globalen Schaden** _und_ **verstärkt jede Seele** (`+0,2 %`/HPF) — L1 und L2
+  multiplizieren sich. Die Himmelfahrt setzt Ruhm-Seelen, Ahnen und die ganze Tour
+  zurück; **Vergoldungen, HPF und der Himmelsbaum bleiben.** Gib HPF im **Himmelsbaum**
+  aus (permanent über alle Prestiges): **Twerk-Coach I–IV**, **Frühstarter**,
+  **Nachtschicht** (Offline-Cap 8 → 16 → 24 h), **Ekstase-Ausdauer**.
+- **Twerk-Coaches.** Ein per Himmelsbaum freigeschalteter Coach **klickt automatisch
+  1×/s** mit 25 % deines Klickwerts (bis 4 cps) — idle **und** offline, sodass auch
+  reine Klick-Builds ohne Crew über Nacht verdienen.
+- **Idle & Offline.** Deine Crew (und deine Coaches) farmen weiter, während du weg bist
+  (50 % Rate, Cap 8 h, per Nachtschicht bis 24 h) — beim Wiedereinstieg gibt's eine
+  „Willkommen zurück"-Zusammenfassung.
 
 ## Steuerung
 
@@ -55,7 +71,8 @@ Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 M
 - Maus ziehen = Kamera drehen, Scrollen = Zoom
 - 🕺-Button (links oben) blendet das Panel ein/aus · 🔊 = Ton an/aus
 - Auf dem Handy ist der Shop ein **Bottom-Sheet** — Figur & Rivale bleiben sichtbar
-- Tabs: **🕺 Crew** · **✨ Ruhm** (Ascension + Statistik) · **⚙️** (Grafik, Effekte,
+- Tabs: **🕺 Crew** · **🌀 Ahnen** (Seelen-Sink) · **✨ Ruhm** (Ascension + Statistik) ·
+  **🌈 Himmel** (Himmelfahrt + Himmelsbaum) · **⚙️** (Grafik, Effekte,
   Save-Export/Import/Reset)
 
 ## Architektur
@@ -68,15 +85,20 @@ npm-Workspaces-Monorepo:
     Boss alle 5 Zonen (HP ×10) mit 30 s-Timer, Gold `ceil(HP/15)` (Boss ×12), reine Reducer.
   - `game/heroes.ts` — 15er-Crew, `1.07`-Kostenwachstum, **endlose** ×2-Meilensteine
     (fix bis 800, danach jede Verdopplung), Klick-Schaden = Basis + Anteil der Gesamt-DPS.
-  - `game/ascension.ts` — `soulsForMaxZone(z)=⌊z^1.6/40⌋+⌊1.10^z−1⌋` (RS_v2), +10 %/Seele,
-    an Lifetime-Zone gepinnt; Bank schrumpft nie (retune-sicher).
+  - `game/ascension.ts` — `soulsForMaxZone(z)=⌊z^1.6/40⌋+⌊1.10^z−1⌋` (RS_v2), +10 %/Seele;
+    **held-balance**: `rsLifetime`=verdiente, `souls`=gehaltener Saldo (Ahnen geben aus).
   - `game/gild.ts` — Vergoldungen: seeded Ziel-Wahl, Award pro 10er-Erst-Clear, Umhängen (5 RS).
+  - `game/ancients.ts` — 10 Twerk-Ahnen (Daten), `ancientCost`=level+1, cap-gegateter
+    `buyAncient`, Aggregat-Modifikatoren (der Seelen-Sink, §4.6).
+  - `game/heaven.ts` — Ruhmes-Himmelfahrt: `hpfForRsLifetime=⌊√(RS/1000)⌋`, Doppelwirkung
+    (+2 %/HPF global + Seelen-Verstärker), `bankHimmelfahrt`, Himmelsbaum-Grundknoten.
   - `game/sim.ts` — `simulateEndless`: deterministischer Balancing-Bot über die echten
-    Module; Endlos-Kriterien E1/E2/E4 + Pacing als CI-Gate (`npm run test:sim`).
-  - `game/ch-state.ts` + `save/ch-store.ts` — CH-State (Save **v4**: `gilds`, `rsLifetime`),
-    eigener versionierter Save-Key (`bootyclicker.ch`), Offline-Gold, Base64-Export/Import
-    (never-throw, injizierbar).
-  - `ui/*` — HUD/Rival + Travel-Stepper, Crew, Prestige, Settings; `main.ts` verdrahtet alles.
+    Module; Endlos-Kriterien E1/E2/**E3**/E4 + Pacing + erste-Himmelfahrt als CI-Gate (`npm run test:sim`).
+  - `game/ch-state.ts` + `save/ch-store.ts` — CH-State (Save **v5**: `ancients`, `heaven`),
+    eigener versionierter Save-Key (`bootyclicker.ch`), Offline-Gold (inkl. Coach),
+    Base64-Export/Import (never-throw, injizierbar).
+  - `ui/*` — HUD/Rival + Travel-Stepper, Crew, **Ahnen**, Prestige, **Himmel**, Settings;
+    `main.ts` verdrahtet alles.
 - `apps/api` — optionaler Cloudflare-Worker (Hono + D1 + KV) als Bestenlisten-Backend.
 
 Audio ist komplett **prozedural** (Web Audio, keine Dateien). Three.js kommt als

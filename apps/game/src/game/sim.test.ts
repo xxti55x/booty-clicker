@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { spawnFor } from './combat';
-import { farmZone, simulateContinuous, simulateRunChain, simulateSingleRun } from './sim';
+import {
+  farmZone,
+  simulateAscensionEra,
+  simulateContinuous,
+  simulateRunChain,
+  simulateSingleRun,
+} from './sim';
 
 // The §4.8 "active player" bot: 3 clicks/s with juice (sustained combo ×2 + crit
 // EV ×1.8). Fixed run length 45 min = 2700 one-second steps.
@@ -93,6 +99,59 @@ describe('simulateEndless — E4 (click is king, P1)', () => {
       const active = simulateSingleRun({ clickRate: 3, juice: true, seed }, RUN_S);
       const casual = simulateSingleRun({ clickRate: 1, juice: false, seed }, RUN_S);
       expect(active.bestZone - casual.bestZone).toBeGreaterThanOrEqual(8);
+    });
+  }
+});
+
+// E3 (loop stays lively, §4.8): total power (effective DPS+click at best-zone farm)
+// grows by +50 % at least every 90 min over the first 20 ascensions, with the bot
+// buying Ancients after each ascension. The active bot compounds souls/gilds/
+// ancients, so power keeps climbing fast. Observed worst gap ≈ 6 min across seeds.
+describe('simulateEndless — E3 (loop stays lively, M10)', () => {
+  for (const seed of SEEDS) {
+    it(`seed ${seed}: no +50 % power gap exceeds 90 min over the first 20 ascensions`, () => {
+      const era = simulateAscensionEra(
+        { clickRate: 3, juice: true, seed },
+        { stallSeconds: 90, maxSeconds: 150_000, maxAscensions: 20 },
+      );
+      expect(era.ascensions).toBe(20);
+      // Plenty of +50 %-power milestones (the loop is far from flat).
+      expect(era.powerMilestones.length).toBeGreaterThanOrEqual(10);
+      let worst = 0;
+      for (let i = 1; i < era.powerMilestones.length; i++) {
+        worst = Math.max(worst, era.powerMilestones[i] - era.powerMilestones[i - 1]);
+      }
+      expect(worst).toBeLessThanOrEqual(90 * 60); // ≤ 90 min
+    });
+  }
+});
+
+// M10-AC4: the first Ruhmes-Himmelfahrt (RS lifetime ≥ 1000) lands in the 5–9 h
+// cumulative window (±25 % ⇒ [3.75 h, 11.25 h]). Measured with a realistic-pace
+// player (sub-3 cps, ~45-min runs), since the optimal juiced bot reaches it far
+// sooner (the same optimal-vs-real gap the M9 pacing table documents). Observed
+// ≈ 5.4–5.7 h across seeds. Its power gaps also stay < 90 min (bonus E3 coverage).
+describe('simulateEndless — first Himmelfahrt pacing (M10-AC4)', () => {
+  for (const seed of SEEDS) {
+    it(`seed ${seed}: first Himmelfahrt lands in the 5–9 h ±25 % window`, () => {
+      const era = simulateAscensionEra(
+        { clickRate: 0.7, juice: false, seed },
+        {
+          stallSeconds: 2700,
+          maxSeconds: 80_000,
+          maxAscensions: 100_000,
+          stopAtFirstHimmelfahrt: true,
+        },
+      );
+      expect(era.firstHimmelfahrtT).toBeGreaterThan(0);
+      const hours = era.firstHimmelfahrtT / 3600;
+      expect(hours).toBeGreaterThanOrEqual(3.75); // 5 h − 25 %
+      expect(hours).toBeLessThanOrEqual(11.25); // 9 h + 25 %
+      let worst = 0;
+      for (let i = 1; i < era.powerMilestones.length; i++) {
+        worst = Math.max(worst, era.powerMilestones[i] - era.powerMilestones[i - 1]);
+      }
+      expect(worst).toBeLessThanOrEqual(90 * 60);
     });
   }
 });
