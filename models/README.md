@@ -17,13 +17,22 @@ python3 tools/blender/verify_models.py   # 3. Blender-Import-Roundtrip (bpy)
 
 **Blender-Refine (Schritt 2)** macht die Dateien fertig — keine Nacharbeit
 nötig: Nähte verschweißt (Merge-by-Distance), Normals konsistent,
-Shade-Smooth-by-Angle 60°, mattes Cartoon-Material-Finish, und **jede Bühne
-wird ein Diorama**: Club-Parkett (glossy-dunkel), Synth-Violett-Boden (das
-In-Game-Grid ist Linien-Geometrie), Sand-Insel im glänzenden Ozean mit
-leuchtender Horizont-Sonne, Weltraum-Asphalt (das 111-Einheiten-Sternfeld —
-Himmel, kein Diorama-Inhalt — entfernt). `renders/` enthält den
-Cycles-Render-Nachweis jedes Modells (Studio-Rig, 3-Punkt-Licht, OIDN-Denoise,
-Auto-Framing über die Prop-Kern-BBox).
+Shade-Smooth-by-Angle 60°, **Detail-Pass** (Bevel + selektiver Subsurf — alle
+Modelle sichtbar feiner bei Cartoon-Silhouette), mattes Material-Finish, und
+**jede Bühne wird ein detailliertes Diorama** (`tools/blender/enrich.py`,
+radius-relativ skalierte Cartoon-Prop-Kits):
+· **Beach**: große Sand-Insel im glänzenden Ozean — 5 gebogene Palmen mit
+Kokosnüssen und Hänge-Wedeln, Sonnenschirm + Handtuch, Sandburg, Wasserball,
+Seesterne, Muscheln, Felsen, Schaumkante, Pufferwolken, Horizont-Sonne.
+· **Club**: DJ-Pult mit Decks + Neon-Front, zusätzliche Speaker-Stacks,
+Laser-Fächer, Neon-Ring, Parkett-Disc.
+· **Synth**: echtes emissives Grid (das In-Game-Grid ist Linien-Geometrie),
+Synthwave-Sonnen-Slats, Sternenfeld, Violett-Boden.
+· **Space**: Asteroidengürtel, Cartoon-Rakete mit Flamme, Satellit,
+Sternenstaub (das 111-Einheiten-Sternfeld-Mesh entfernt — Himmel, kein
+Diorama-Inhalt).
+`renders/` enthält den Cycles-Render-Nachweis jedes Modells (Studio-Rig,
+3-Punkt-Licht, OIDN-Denoise, Auto-Framing über die Prop-Kern-BBox).
 
 ## Inhalt (22 Modelle)
 
