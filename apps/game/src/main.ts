@@ -178,6 +178,10 @@ const MOVE_SWITCH_CLICKS = 18;
 const BG_BY_TIER = ['club', 'synth', 'beach', 'space'] as const;
 const bgForZone = (zone: number): (typeof BG_BY_TIER)[number] =>
   BG_BY_TIER[Math.floor((zone - 1) / 10) % BG_BY_TIER.length];
+// Wave 3: scenery recolour lap — hue-shifts each stage's palette every full
+// 40-zone tour, in step with the rival's entityVariant, so endless laps 2, 3, …
+// never look identical to lap 1. Purely visual (kulisse buffs/tiers untouched).
+const bgVariant = (zone: number): number => Math.floor(Math.max(0, zone - 1) / 40);
 
 // ---------- scene / engine ----------
 const canvas = document.getElementById('app') as HTMLCanvasElement;
@@ -345,8 +349,9 @@ function syncEntity(): void {
 // otherwise the manually chosen `gear.bg` is fixed. Keep `gear.bg` in lockstep with
 // what's on screen so the kulisse mini-buff + set detection match the view.
 let currentBg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
+let currentBgVariant = bgVariant(combat.zone);
 if (state.gear.bgAuto) state.gear.bg = currentBg;
-world.setBackground(currentBg);
+world.setBackground(currentBg, currentBgVariant);
 audio.setBackground(currentBg);
 recompute(); // fold the (possibly view-synced) kulisse buff into the derived numbers
 choreo.setMove(0);
@@ -713,14 +718,16 @@ muteBtn.addEventListener('click', () => {
 // chosen `gear.bg` is fixed and the loop never rotates away from it (§5.5).
 function updateBackground(force = false): void {
   const bg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
-  if (!force && bg === currentBg) return;
+  const variant = bgVariant(combat.zone); // recolour lap follows depth even on a manual kulisse
+  if (!force && bg === currentBg && variant === currentBgVariant) return;
   currentBg = bg;
+  currentBgVariant = variant;
   if (state.gear.bgAuto && state.gear.bg !== bg) {
     state.gear.bg = bg;
     recompute(); // Space +5 % dpsPct etc. follow the auto-rotation
   }
-  world.setBackground(bg);
-  audio.setBackground(bg);
+  world.setBackground(bg, variant);
+  audio.setBackground(bg); // idempotent for a same-key (variant-only) rebuild
 }
 
 // ---------- farm / travel (G10, §4.4) ----------
