@@ -42,6 +42,7 @@ import {
   keyDropMult,
   peachIncomeMult,
   rivalChestChance,
+  transcendState,
 } from './game/ch-state';
 import {
   CHEST_TIERS,
@@ -133,6 +134,8 @@ import {
   rollDay,
 } from './game/quests';
 import { type Season, seasonFor } from './game/season';
+import { canTranscend, transcendGlobalMult } from './game/transcend';
+import { isTranscendEnabled } from './game/flags';
 import { shouldShakeOnKey } from './game/input';
 import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
 import { applyLegacyInheritance } from './game/legacy-import';
@@ -156,6 +159,7 @@ import { fmt, titleFor } from './ui/format';
 import { Onboarding } from './ui/onboarding';
 import { Prestige } from './ui/prestige';
 import { Toasts } from './ui/toasts';
+import { Transcend } from './ui/transcend-panel';
 import { World } from './world/backgrounds';
 
 /**
@@ -519,6 +523,59 @@ const heaven = new Heaven({
   },
 });
 
+// 🔮 Transzendenz (prestige L3, §4.5.3) — LIVE as of M15 (flag `isTranscendEnabled()`).
+// A Transzendenz is a strictly DEEPER reset than a Himmelfahrt: `transcendState` banks
+// TE from lifetime HPF and seeds a fresh heaven (`createHeaven()`) ON TOP of the fresh
+// L1 tour — so it wipes ALL of L1 (tour/RS/Ahnen) AND all of L2 (HPF + Himmelsbaum),
+// preserving only the „nie"-reset meta (gilds/gear/loot/retention) and the banked TE
+// slice. The handler therefore replicates EXACTLY the post-Himmelfahrt re-seed steps so
+// no timer/state dangles at the old (now-wiped) heaven, plus refreshes the 🌈 panel
+// (its L2 state was reset) which the Himmelfahrt handler need not do.
+const transcendEnabled = isTranscendEnabled();
+let transcendPanel: Transcend | null = null;
+if (transcendEnabled) {
+  transcendPanel = new Transcend({
+    state,
+    onTranscend: () => {
+      // Gate the deep reset on a real TE gain (the panel button is disabled otherwise,
+      // but guard here too so a stray call can never wipe L1+L2 for nothing).
+      if (!canTranscend(state.transcend, state.heaven.hpfLifetime)) return;
+      syncMaxZones(); // fold live combat maxzones + RNG cursor + combo into state first
+      Object.assign(state, transcendState(state)); // mutate in place (banks TE, wipes L1+L2)
+      // ---- re-seed, mirroring the Himmelfahrt handler exactly (L2-wipe hazard) ----
+      combat = withBossTimerBonus(spawnFor(1, 0, 1)); // zone/front travel reset to Bühne 1
+      comboState = createCombo(state.combo.stacks); // run-scoped combo juice reset
+      comboT3KeyAwardedThisRun = false; // the combo-Tier-3 key is once per run (§6.1)
+      lastShakeTier = 0;
+      recompute();
+      updateBackground(true); // background follows the fresh Bühne 1
+      crew.render();
+      ancients.render(); // Ahnen were wiped
+      prestige.refresh(); // Ruhm-Seelen were wiped
+      heaven.refresh(); // L2 (HPF + Himmelsbaum) was wiped — the 🌈 panel must re-read fresh
+      gearPanel.render();
+      metaPanel.render();
+      hud.update(state, combat, dps, clickDmg); // now paints the 🔮 ×mult badge
+      abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
+      toasts.show(
+        '🔮',
+        'Transzendenz!',
+        `${fmt(state.transcend.te)} TE · ×${fmt(transcendGlobalMult(state.transcend.te))} Boost`,
+      );
+      checkAchievements(); // Transzendenz / TE milestones (§7.3)
+      audio.unlockJingle();
+      persist();
+    },
+  });
+} else {
+  // Dev `VITE_TRANSCEND=0`: hide the 🔮 tab + its body so the layer vanishes cleanly.
+  document
+    .querySelector<HTMLElement>('.tab[data-t="transcend"]')
+    ?.style.setProperty('display', 'none');
+  const tb = document.getElementById('tabTranscend');
+  if (tb) tb.style.display = 'none';
+}
+
 // 🎁 Truhen (§6): open chests via the pure loot glue (`openChestFromInventory`
 // already consumes keys + chest, credits rewards, recomputes, refreshes the HUD and
 // persists). The panel only reads the shared `state` ref and plays the skippable
@@ -589,6 +646,7 @@ const tabBodies: Record<string, string> = {
   anc: 'tabAnc',
   pr: 'tabPr',
   heaven: 'tabHeaven',
+  transcend: 'tabTranscend',
   chest: 'tabChest',
   meta: 'tabMeta',
   set: 'tabSet',
@@ -599,6 +657,7 @@ function renderActiveTab(key: string): void {
   else if (key === 'anc') ancients.render();
   else if (key === 'pr') prestige.refresh();
   else if (key === 'heaven') heaven.refresh();
+  else if (key === 'transcend') transcendPanel?.refresh();
   else if (key === 'chest') chestPanel.render();
   else if (key === 'meta') metaPanel.render();
   else if (key === 'set') chSettings.render();

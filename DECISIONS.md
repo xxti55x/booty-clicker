@@ -3,6 +3,81 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M15 — Transzendenz LIVE (Schicht 3, §4.5.3)
+
+- **2026-07-18 (Part 2) — UI, Glue, Sim & Docs für die volle Transzendenz-Schicht.**
+  Part 1 (`8ea3c81`) hat die Live-Verrohrung geliefert (CH-State-`transcend`-Slice,
+  CH-Save **v9** inkl. Migration v8→v9 + `repairTranscend`, `×3^TE` gefaltet in `dpsOf`
+  **und** `clickDamageOf`, `transcendState`-Reset-Glue, `TRANSCEND_ENABLED = true`,
+  Diamant-Booty ab `transcendences ≥ 1`). Part 2 macht die Schicht spielbar:
+  - **🔮-Tab (`ui/transcend-panel.ts`).** Spiegelt das 🌈-Himmel-Panel: Arm→Bestätigen-
+    „Transzendieren"-Button (zwei Klicks, 4-s-Fenster) — **disabled außer**
+    `canTranscend(state.transcend, state.heaven.hpfLifetime)`. Zeigt gehaltene/Lebenszeit-TE,
+    die Transzendenzen-Zahl, den `×3^TE`-Boost, die +TE-Vorschau und — vor der ersten
+    Transzendenz — den Gate-Fortschritt `hpfLifetime / 100` mit klarem „🔒 gesperrt"-Hinweis,
+    dass eine Transzendenz L1 **und** L2 wipet. **Gate-Metrik = `state.heaven.hpfLifetime`**
+    (Lebenszeit-HPF), NICHT gehaltene HPF.
+  - **Tab-Reihenfolge:** 🔮 sitzt **direkt hinter 🌈 Himmel** (vor 🎁 Truhen) — das hält die
+    Prestige-Leiter ✨ Ruhm → 🌈 Himmel → 🔮 Transzendenz zusammenhängend und in Reihenfolge,
+    was am besten liest. Neun Tabs; die Tab-Leiste scrollt seit M13 horizontal (nichts clippt).
+  - **Mythos = bewusst minimaler Platzhalter.** Der Spent-TE-Content-Baum ist im M15-Scaffold
+    leer (§11 offene Frage #5 „bewusst dünn"). Das Panel rendert einen sauberen
+    „Mythos-Skins — bald"-Platzhalter; **keine** Balance erfunden, kein realer TE-Sink
+    gebaut. Absichtlich, damit die Held-TE der einzige (P1-neutrale) Effekt bleibt.
+  - **L2-Wipe-Gefahr im Handler (`main.ts`).** `transcendState` setzt `heaven =
+createHeaven()` — ein **strikt tieferer** Reset als eine Himmelfahrt. Der `onTranscend`-
+    Handler repliziert daher **exakt** die Post-Himmelfahrt-Re-Seeds, damit kein Timer/State
+    an der alten (weggewischten) Heaven hängt: `syncMaxZones()` **zuerst** (faltet
+    Combat-Maxzonen + **RNG-Cursor** + Combo in den State, bevor der Reset greift) → `combat =
+withBossTimerBonus(spawnFor(1,0,1))` (Zonen/Front-Travel auf Bühne 1) → `comboState =
+createCombo(state.combo.stacks)` → `comboT3KeyAwardedThisRun = false` → `lastShakeTier = 0`
+    → `recompute()` → `updateBackground(true)` → Panel-Refreshes `crew/ancients/prestige/
+heaven/gear/meta` (**inkl. `heaven.refresh()`** — anders als der Himmelfahrt-Handler, weil
+    L2 hier resettet wird) → `hud.update(...)` (malt das 🔮-Badge) → `abilityBar.update(...)`
+    → Toast → `checkAchievements()` → `audio.unlockJingle()` → `persist()`. **Peach
+    `nextPeachAt` und Sugar `nextSugarAt` brauchen KEINEN Re-Seed** — `transcendState`
+    bewahrt `peach`/`gear` (wie die Himmelfahrt), die Zeitstempel bleiben gültige Zukunft;
+    der Boot-Glue re-seedet sie nur bei `≤ 0`/absurder Zukunft. Der Live-`rng` wird NICHT neu
+    erzeugt (nur der Import-Handler tut das) — Cursor-Kontinuität via `syncMaxZones`.
+  - **HUD-Badge.** `ch-hud.ts` hängt `· 🔮 ×N` (`transcendGlobalMult(te)`) an die
+    change-detektierte Seelen-Zeile (`#souls`), sobald `transcendences > 0` — analog zum
+    `🍑 HPF`-Badge und wie dieses **außerhalb** des Klick-Hot-Path-`innerHTML`. Zeigt auch bei
+    0 Seelen/HPF (der Mult überlebt den L1+L2-Wipe): z. B. `✨ 0 Seelen · +0% Schaden · 🔮 ×9`.
+  - **Achievement `transcend-1` („Transzendent", 🔮).** Erste Transzendenz; `AchievementCtx`
+    um `transcendences` erweitert (`state.transcend?.transcendences ?? 0`), mit Test.
+  - **Flag-Respekt.** `isTranscendEnabled()` gated die Panel-Instanz + den Tab; bei
+    `VITE_TRANSCEND=0` blendet der Handler die 🔮-Tab **und** ihren Body sauber aus.
+  - **F7 aufgelöst (E2 durch den vollen v2-Prestige-Stack).** `simulateContinuous` bekam ein
+    `fullPrestige`-Flag: der Bot kauft nach jeder Aszension **Twerk-Ahnen** greedy **und**
+    führt beim Seelen-Plateau eine **echte Himmelfahrt** (`bankHimmelfahrt` + L1-Reset) aus.
+    E2 fährt jetzt darüber und asserted (a) die ×2-Soft-Wall-Schranke, (b) ≥ 16 produktive
+    +5-Verbesserungen (hoch von ≥ 12), (c) `himmelfahrten ≥ 1` über ≥ 8 Ahnen-kaufende
+    Aszensionen — der volle Stack ist nachweislich exerziert (`himmelfahrten = 1`,
+    `ascensions ≈ 10–12`, worst ratio ≈ 1,89, ~0,2 s/Seed).
+    **RESIDUAL (dokumentiert, nicht erzwungen):** die erreichbare Decke bleibt im
+    < 1-s-Budget bei ~Bühne 80 / 16 Verbesserungen, **nicht** den „ersten ~30" der Spec. Die
+    erste Himmelfahrt an der Bühne-80-Seelen-Wand bankt nur `⌊√(2074/1000)⌋ = 1` HPF (+2 %
+    global) — viel zu wenig, um Bühne 80 zu brechen; eine 2. HPF bräuchte `rsLife ≥ 4000`
+    (≈ Bühne 88), was 1 HPF nicht erreicht: eine echte Henne-Ei-Soft-Wall, die nur der
+    beabsichtigte Multi-HPF-Grind über Tage (§4.5.2/§4.8-Pacing) löst. 30 Verbesserungen
+    bräuchten eine minutenlange Sim — also asserten wir die ehrliche Decke + die Tatsache,
+    dass die Ahnen-+-Himmelfahrt-Codepfade wirklich laufen. **Keine bestehende Assertion
+    gelockert.** `sim.test.ts` bleibt grün (39 Tests, ~7 s < 10 s).
+  - **F10(a)/F10(b)/F10(c) — in Part 1 aufgelöst.** F10a: `gear.ts` gated Diamant-Booty auf
+    die reale `ctx.transcendences` (via `gearUnlockCtx`), keine zweite Wahrheitsquelle mehr.
+    F10b: `transcendGlobalMult` liest bewusst gehaltenes `te` (Spending auf Mythos handelt
+    Global-Power gegen Content — konsistent mit Souls/HPF). F10c: `ch-state.test.ts` hat den
+    echten P1-Neutralitäts-Assert (TE skaliert `clickDamageOf` UND `dpsOf` um exakt `3^3`,
+    Klick:Idle-Verhältnis invariant, an den realen Pipelines).
+  - **Headless-Smoke (Wegwerf, nicht committet).** `scratchpad/smoke-m15.mjs` über `vite
+preview :4188` + Playwright-Chromium: 14/14 Checks grün — 🔮-Tab existiert/öffnet; ein
+    v9-Save mit `hpfLifetime ≥ 100` zeigt „Transzendieren" enabled (+2 TE), Arm→Bestätigen
+    bankt TE (te = 2, persistiert), resettet Seelen/Zone/HPF auf frisch und lässt `🔮 ×9` im
+    HUD; ein Save unter dem Gate (50 HPF) zeigt „gesperrt"; null Seitenfehler (der bekannte
+    `navigator.vibrate`-Headless-Hinweis gefiltert). Staging via `addInitScript`, weil der
+    App-`beforeunload`-`persist()` sonst einen gecrafteten Save mit dem alten In-Memory-State
+    überschreibt.
+
 ## M14 — Endless-QA, Transzendenz-Gerüst & Release 2.0
 
 - **2026-07-18 (Review) — Review-Pass-Fixes (Ehrlichkeit & billige Korrektheit).**
@@ -43,19 +118,25 @@ here (spec §7).
     als Wegwerf-Messskript markiert — analog zum AC3-Capture, damit kein Doc auf eine
     nicht-existente Repo-Datei verweist.
 
-- **M15-TODO (im Review-Pass bewusst NICHT gefixt, für M15 vorgemerkt):**
+- **M15-TODO (im Review-Pass bewusst NICHT gefixt, für M15 vorgemerkt) — ALLE in M15
+  aufgelöst (siehe M15-Sektion oben):**
   - **F7 — E2 durch eine Ära-Sim mit Ahnen + Himmelfahrt** fahren (näher an den
     „ersten 30" Verbesserungen); aktuell validiert E2 unter der Kalibrier-Baseline mit
-    ~12–16 Verbesserungen als ehrliche Decke.
+    ~12–16 Verbesserungen als ehrliche Decke. — **✅ M15 Part 2:** `simulateContinuous`
+    hat jetzt `fullPrestige` (Ahnen-Käufe + echte Himmelfahrt); E2 asserted ≥ 16
+    Verbesserungen + `himmelfahrten ≥ 1`. Residual (~Bühne-80-Decke, nicht 30) dokumentiert.
   - **F10(a) — `gear.ts` (~Z. 485) `case 'transcend': return false`** ist eine ZWEITE
     Wahrheitsquelle unabhängig von `flags.ts`. M15 muss das umlegen (oder `gear.ts` das
-    Flag lesen lassen), wenn `TRANSCEND_ENABLED` gekippt wird.
+    Flag lesen lassen), wenn `TRANSCEND_ENABLED` gekippt wird. — **✅ M15 Part 1:**
+    `skinUnlocked` gated Diamant-Booty auf die reale `ctx.transcendences`.
   - **F10(b) — `transcendGlobalMult`:** festzurren, ob der Faktor gehaltenes `te` oder
     `teLifetime` liest (aktuell held `te`, spending-empfindlich) — Design-Entscheid M15.
+    — **✅ M15 Part 1:** bleibt gehaltenes `te` (Spending handelt Global-Power gegen Mythos).
   - **F10(c) — echter P1-Neutralitäts-Beweis:** ein expliziter M15-Akzeptanztest, dass
     der `×3^TE`-Mult **identisch** in `clickDamageOf` UND `dpsOf` gefaltet wird und das
     Klick:Idle-Verhältnis invariant bleibt (heute nur im `transcend.test.ts` an
-    entkoppelten Basiswerten gezeigt, nicht an den realen Pipelines).
+    entkoppelten Basiswerten gezeigt, nicht an den realen Pipelines). — **✅ M15 Part 1:**
+    `ch-state.test.ts` `P1-neutrality`-Test an den realen Pipelines (`3^3`, Ratio invariant).
 
 - **2026-07-18 — Performance-Pass: gemessen, nicht geschätzt; Hot-Path unverändert
   (AC2 + §9.6).** Headless über `vite preview` + das vorinstallierte Chromium

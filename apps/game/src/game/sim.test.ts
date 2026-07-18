@@ -140,27 +140,46 @@ describe('simulateEndless — E1 (no hard cap)', () => {
 
 // E2 (weiche Wand, §4.8): time to `lifetimeMaxZone + 5` rises by ≤ ×2 per improvement —
 // the endless soft wall never explodes. This is the §4.8 criterion for the **prestige**
-// progression ("volles v2-System": souls/gilds/ancients/HPF, the plateau-lifting
-// stack), so — like the §4.8 table — it is validated under the calibration baseline
-// (`economy: false`): the M12 loot layer adds per-improvement RNG variance that a
-// strict single-step ×2 bound is fragile to, and its *presence* (and non-hard-wall) is
-// asserted by the economy suite. The full "first 30" lands once HPF fully lifts the M9
-// plateau (~z80); until then the reachable improvements are the honest ceiling.
-// Observed worst ratio ≈ 1.9 across seeds.
-describe('simulateEndless — E2 (bounded soft wall)', () => {
+// progression ("volles v2-System": souls/gilds/ancients/HPF, the plateau-lifting stack),
+// so — like the §4.8 table — it is validated under the calibration baseline
+// (`economy: false`): the M12 loot layer adds per-improvement RNG variance that a strict
+// single-step ×2 bound is fragile to, and its *presence* (and non-hard-wall) is asserted
+// by the economy suite.
+//
+// M15 (resolves the M14 F7 M15-TODO — E2 previously ran through a `simulateContinuous`
+// that "buys no Ancients and never Himmelfahrts"): the driver now runs `fullPrestige`,
+// so the bot buys Twerk-Ahnen greedily each ascension AND performs a real
+// Ruhmes-Himmelfahrt (`bankHimmelfahrt`) the instant the souls bank plateaus — exercising
+// the full v2 prestige stack end-to-end. We assert (a) the ×2 soft-wall bound holds, (b)
+// ≥ 16 productive +5 improvements are reached (up from the pre-M15 ≥ 12 floor), and (c) at
+// least one Himmelfahrt fired across ≥ 8 ancient-buying ascensions.
+//
+// RESIDUAL (documented, not forced — see DECISIONS.md F7): the reachable ceiling within a
+// < 1 s budget stays ~z80 / 16 improvements, NOT the spec's "first ~30". The first
+// Himmelfahrt at the z80 souls-wall banks only ⌊√(2074/1000)⌋ = 1 HPF (+2 % global), which
+// is far too little to break z80 — and a 2nd HPF needs rsLifetime ≥ 4000 (≈ z88), which 1
+// HPF can't reach: a genuine chicken-and-egg soft wall that only the intended multi-HPF,
+// days-scale grind (§4.5.2/§4.8 pacing) resolves. Reproducing 30 improvements would need a
+// many-minute sim, so we assert the honest reachable ceiling and the fact that the
+// Ancients + Himmelfahrt code paths are truly exercised. Observed worst ratio ≈ 1.89.
+describe('simulateEndless — E2 (bounded soft wall, full v2 prestige stack)', () => {
   for (const seed of SEEDS_HEAVY) {
-    it(`seed ${seed}: no +5 improvement more than doubles the worst prior gap`, () => {
+    it(`seed ${seed}: no +5 improvement more than doubles the worst prior gap (Ahnen + Himmelfahrt)`, () => {
       const c = simulateContinuous(
         { ...ACTIVE_CAL, seed },
-        { stallSeconds: 90, maxSeconds: 60_000, plateauAscensions: 3 },
+        { stallSeconds: 90, maxSeconds: 60_000, plateauAscensions: 3, fullPrestige: true },
       );
       const zones = [...c.timeToLifetime.keys()].sort((a, b) => a - b).filter((z) => z % 5 === 0);
       const times = zones.map((z) => c.timeToLifetime.get(z)!);
       const gaps: number[] = [];
       for (let i = 1; i < times.length; i++) gaps.push(times[i] - times[i - 1]);
 
-      // Enough productive improvements to be meaningful for M9 (30 is a M10 target).
-      expect(zones.length).toBeGreaterThanOrEqual(12);
+      // Deep, productive climb: the full v2 stack reliably reaches the z80 wall.
+      expect(zones.length).toBeGreaterThanOrEqual(16);
+      // The full v2 prestige stack is genuinely exercised — Ancients bought each
+      // ascension, and at least one real Himmelfahrt banked HPF + reset the L1 stack.
+      expect(c.himmelfahrten).toBeGreaterThanOrEqual(1);
+      expect(c.ascensions).toBeGreaterThanOrEqual(8);
 
       let runMax = gaps[0];
       for (let i = 1; i < gaps.length; i++) {

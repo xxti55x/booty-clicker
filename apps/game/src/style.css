@@ -106,7 +106,7 @@ body {
 .tabs {
   display: flex;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-  /* Eight tabs (🕺 🎽 🌀 ✨ 🌈 🎁 📋 ⚙️): scroll horizontally if they don't fit a
+  /* Nine tabs (🕺 🎽 🌀 ✨ 🌈 🔮 🎁 📋 ⚙️): scroll horizontally if they don't fit a
      narrow shop rather than letting any shrink to unclickable. */
   overflow-x: auto;
   scrollbar-width: none;
@@ -1104,7 +1104,7 @@ body {
 }
 
 /* ---- M11: 🎽 Gear/Skins tab (emoji-only tabs so they fit; skin grid + kulisse) ---- */
-/* Eight tabs now (🕺 🎽 🌀 ✨ 🌈 🎁 📋 ⚙️): emoji-only, each keeps a min touch width
+/* Nine tabs now (🕺 🎽 🌀 ✨ 🌈 🔮 🎁 📋 ⚙️): emoji-only, each keeps a min touch width
    and the row scrolls (see `.tabs`) rather than shrinking a tab out of reach. */
 .tabs .tab {
   font-size: 15px;
@@ -1807,4 +1807,22 @@ body {
   font-size: 10px;
   color: #8a8a99;
   line-height: 1.25;
+}
+
+/* ---- M15: 🔮 Transzendenz tab (prestige L3, §4.5.3) — a distinct amethyst accent
+   distinguishes the deepest reset from the 🌈 Himmel (gold) panel. ---- */
+.rebirth-info.transcend-info {
+  color: #d0a8ff;
+}
+.tc-locked {
+  color: #ffb37a;
+  font-weight: 700;
+}
+.item.mythos-soon {
+  cursor: default;
+  border-color: rgba(208, 168, 255, 0.28);
+  background: rgba(208, 168, 255, 0.05);
+}
+.item.mythos-soon .lv {
+  color: #d0a8ff;
 }

@@ -85,6 +85,16 @@ describe('CH achievements — predicates over the snapshot ctx', () => {
     expect(ids).not.toContain('souls-10k');
   });
 
+  it('the first Transzendenz unlocks transcend-1 (L3, §4.5.3)', () => {
+    const fresh: ChState = createChState();
+    expect(unlockedIds(fresh)).not.toContain('transcend-1');
+    const transcended: ChState = {
+      ...fresh,
+      transcend: { ...fresh.transcend, transcendences: 1, te: 2, teLifetime: 2 },
+    };
+    expect(unlockedIds(transcended)).toContain('transcend-1');
+  });
+
   it('newlyUnlocked excludes ids already in the unlocked set', () => {
     const s: ChState = { ...createChState(), lifetimeMaxZone: 30 };
     const all = unlockedIds(s);

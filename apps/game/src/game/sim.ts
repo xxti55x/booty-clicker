@@ -30,10 +30,14 @@
  *  · Daily-Login / Quest faucets (§7.1/§7.2): they *do* drip 🔑/🧩, but only on a
  *    real-time daily cadence (≤ a handful per in-game day) — dwarfed by the per-boss
  *    faucet the bot already models, so they are omitted rather than approximated.
- *  · **The heaven layer (L2) is inert in the bot**: no driver banks a Himmelfahrt, so
- *    `sim.heaven` stays at hpf 0 and every heaven-derived factor folds as ×1 — the
- *    +2 %/HPF global mult (`heavenGlobalMult`), the HPF soul-amplifier (`soulBonusEff`),
- *    the Truhen-Magnet key-drop (`truhenMagnetBonus`) and the Twerk-Coach idle tick.
+ *  · **The heaven layer (L2)** is inert in most drivers (`sim.heaven` stays at hpf 0,
+ *    so `heavenGlobalMult`/`soulBonusEff`/`truhenMagnetBonus`/the Twerk-Coach idle tick
+ *    all fold as ×1) — EXCEPT the E2 soft-wall driver (`simulateContinuous` with
+ *    `fullPrestige`, M15), which greedily buys Twerk-Ahnen AND performs real
+ *    Ruhmes-Himmelfahrten (`bankHimmelfahrt`) to lift the M9 wall, exercising the full
+ *    v2 prestige stack. The Transzendenz layer (L3, §4.5.3) stays at te = 0 in every
+ *    driver — its ×3^TE global mult is P1-neutral and never gated, so folding it would
+ *    only scale both bots equally; no sim drives a Transzendenz.
  *    Likewise Twerk-Ekstase (§4.3), the boss-damage mults, the Chronilla timer and
  *    `travelTo` re-farming of cleared zones are not modeled. Every one of these can
  *    only ADD power / speed the bot, so leaving them out keeps E1–E4 honest *lower*
@@ -83,6 +87,7 @@ import { MAX_SKIN_LEVEL, shardCost } from './gear';
 import { awardGildOnZone, type Gilds, isGildZone } from './gild';
 import {
   type HeavenState,
+  bankHimmelfahrt,
   canHimmelfahrt,
   createHeaven,
   heavenGlobalMult,
@@ -723,6 +728,17 @@ export interface ContinuousOptions {
   maxSeconds: number;
   /** Stop after this many consecutive +0-soul ascensions (the honest M9 plateau). */
   plateauAscensions: number;
+  /**
+   * Fold the full v2 prestige stack into the adaptive loop (M15 — resolves the M14 F7
+   * M15-TODO that E2 "buys no Ancients and never Himmelfahrts"). When on, the bot buys
+   * Twerk-Ahnen greedily with freshly-earned souls after every ascension (§4.6) AND
+   * performs a real Ruhmes-Himmelfahrt (`bankHimmelfahrt`, banking HPF + resetting the
+   * L1 souls/rsLifetime/Ancients stack, §4.5.2) the instant the soul bank plateaus while
+   * one is available — HPF's global mult + soul-amplifier then LIFT the M9 wall, so the
+   * frontier keeps climbing past ~z80 into the spec's "first ~30 improvements" instead
+   * of stalling. Off (default) preserves the original crew+gild+soul-only measurement.
+   */
+  fullPrestige?: boolean;
 }
 
 /** The result of a continuous (adaptive-ascension) progression. */
@@ -730,6 +746,8 @@ export interface ContinuousResult {
   /** Global second at which each new lifetime-record zone was first reached. */
   timeToLifetime: Map<number, number>;
   ascensions: number;
+  /** Ruhmes-Himmelfahrten performed (0 unless `fullPrestige`). */
+  himmelfahrten: number;
   maxBestZone: number;
   finalBank: number;
   /** Whether the run stopped because souls stopped growing (the M9 wall, N1). */
@@ -740,9 +758,13 @@ export interface ContinuousResult {
  * Play continuously, ascending **adaptively** the moment the frontier stalls for
  * `stallSeconds` (the player's "I'm stuck — retire" reflex) rather than on a fixed
  * clock. Souls/gilds/loot compound across ascensions, so re-climbs get faster; this is
- * the fair measurement for the endless soft-wall criterion E2 (§4.8). Stops at the
- * M9 linear-mult plateau (souls stop growing) — which §4.5.2/§4.6 (HPF + Ancients,
- * M10) lift; until then a bounded number of improvements is the honest ceiling.
+ * the fair measurement for the endless soft-wall criterion E2 (§4.8).
+ *
+ * With `fullPrestige` (M15) the bot runs the **full v2 prestige stack**: it buys
+ * Twerk-Ahnen greedily each ascension and performs real Ruhmes-Himmelfahrten to lift
+ * the M9 souls plateau, so the frontier climbs deep into the spec's "first ~30
+ * improvements" (the F7 resolution). Without it the bot stops at the M9 linear-mult
+ * plateau (souls stop growing) — the honest crew+gild+soul-only ceiling.
  */
 export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): ContinuousResult {
   const sim = newSim(config.seed ?? 1);
@@ -753,6 +775,7 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
   let lastAdvanceT = 0;
   let maxBest = 1;
   let ascensions = 0;
+  let himmelfahrten = 0;
   let plateauStreak = 0;
   let plateaued = false;
 
@@ -779,11 +802,30 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
       combat = spawnFor(1, 0, 1);
       lastAdvanceT = globalT;
       ascensions++;
+      if (opts.fullPrestige) {
+        const crit = critFactor(config, sim.permTokens);
+        buyAncientsGreedy(sim, config, combo, crit); // §4.6 soul sink → deeper re-climbs
+      }
       if (gained <= 0) {
-        plateauStreak++;
-        if (plateauStreak >= opts.plateauAscensions) {
-          plateaued = true;
-          break;
+        // Soul bank plateaued (the M9 linear-mult wall). With the full prestige stack,
+        // a Himmelfahrt lifts it (§4.5.2): bank HPF, reset the L1 souls/rsLifetime/
+        // Ancients stack, and keep climbing — HPF's +2 %/HPF global mult + soul-amp
+        // re-open the frontier. Only a plateau with NO Himmelfahrt available is the
+        // true endgame ceiling that stops the run.
+        if (opts.fullPrestige && canHimmelfahrt(sim.heaven, sim.rsLifetime)) {
+          sim.heaven = bankHimmelfahrt(sim.heaven, sim.rsLifetime);
+          sim.souls = 0;
+          sim.rsLifetime = 0;
+          sim.ancients = {};
+          sim.lifetimeMaxZone = 1;
+          himmelfahrten++;
+          plateauStreak = 0;
+        } else {
+          plateauStreak++;
+          if (plateauStreak >= opts.plateauAscensions) {
+            plateaued = true;
+            break;
+          }
         }
       } else {
         plateauStreak = 0;
@@ -791,7 +833,14 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
     }
   }
 
-  return { timeToLifetime, ascensions, maxBestZone: maxBest, finalBank: sim.souls, plateaued };
+  return {
+    timeToLifetime,
+    ascensions,
+    himmelfahrten,
+    maxBestZone: maxBest,
+    finalBank: sim.souls,
+    plateaued,
+  };
 }
 
 /**

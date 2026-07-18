@@ -30,6 +30,8 @@ export interface AchievementCtx {
   ascensions: number;
   /** L2 Himmelfahrten performed (lifetime). */
   himmelfahrten: number;
+  /** L3 Transzendenzen performed (lifetime). */
+  transcendences: number;
   /** Vergoldungen earned (total across the crew). */
   gilds: number;
   /** Pfirsich-Truhen opened (lifetime). */
@@ -256,6 +258,14 @@ export const CH_ACHIEVEMENTS: readonly Achievement[] = [
     icon: '🌸',
     check: (c) => c.hpf >= 1,
   },
+  // --- Transzendenz (L3, §4.5.3) ---
+  {
+    id: 'transcend-1',
+    name: 'Transzendent',
+    desc: 'Zum ersten Mal transzendiert',
+    icon: '🔮',
+    check: (c) => c.transcendences >= 1,
+  },
 ];
 
 const CH_ACHIEVEMENT_IDS_SET: ReadonlySet<string> = new Set(CH_ACHIEVEMENTS.map((a) => a.id));
@@ -285,6 +295,7 @@ export function buildAchievementCtx(state: ChState): AchievementCtx {
     crits: s.crits,
     ascensions: s.ascensions,
     himmelfahrten: state.heaven.ascensions2,
+    transcendences: state.transcend?.transcendences ?? 0,
     gilds: totalGilds(state.gilds),
     chestsOpened: s.chestsOpened,
     keys: s.keysEarned,

@@ -3,6 +3,7 @@ import { type CombatState, bossTimeFraction, hpFraction, isBossZone } from '../g
 import { MONSTERS_PER_ZONE } from '../game/combat';
 import { comboTierName } from '../game/combo';
 import { soulBonusEff } from '../game/heaven';
+import { transcendGlobalMult } from '../game/transcend';
 import { fmt } from './format';
 
 function byId(id: string): HTMLElement {
@@ -87,10 +88,15 @@ export class ChHud {
     this.cStats = this.setText(this.stats, `DPS ${fmt(dps)} · Klick ${fmt(clickDmg)}`, this.cStats);
 
     const hpf = state.heaven.hpf;
+    // 🔮 Transzendenz global boost (×3^TE, §4.5.3): shown once transcended even at 0
+    // souls/HPF (the mult persists a full L1+L2 wipe), mirroring the 🍑 HPF badge. This
+    // is the change-detected souls line, never the per-click hot-path innerHTML.
+    const transcended = state.transcend.transcendences > 0;
     const soulsTxt =
-      state.souls > 0 || hpf > 0
+      state.souls > 0 || hpf > 0 || transcended
         ? `✨ ${fmt(state.souls)} Seelen · +${Math.round(state.souls * soulBonusEff(hpf) * 100)}% Schaden` +
-          (hpf > 0 ? ` · 🍑 ${fmt(hpf)} HPF` : '')
+          (hpf > 0 ? ` · 🍑 ${fmt(hpf)} HPF` : '') +
+          (transcended ? ` · 🔮 ×${fmt(transcendGlobalMult(state.transcend.te))}` : '')
         : '';
     if (soulsTxt !== this.cSouls) {
       this.cSouls = soulsTxt;
