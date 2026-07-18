@@ -82,7 +82,8 @@ export class ChHud {
   /** Full HUD refresh (call on discrete events + the 0.25 s tick). */
   update(state: ChState, combat: CombatState, dps: number, clickDmg: number): void {
     this.cZone = this.setText(this.zone, String(combat.zone), this.cZone);
-    const kind = combat.boss ? '👑 BOSS' : isBossZone(combat.zone) ? '⚔️' : '';
+    // Rendered as a stamped gold chip (`.zone-kind`), so plain text reads best.
+    const kind = combat.boss ? 'BOSS' : isBossZone(combat.zone) ? 'VS' : '';
     this.cKind = this.setText(this.zoneKind, kind, this.cKind);
     this.cGold = this.setText(this.gold, fmt(state.gold), this.cGold);
     this.cStats = this.setText(this.stats, `DPS ${fmt(dps)} · Klick ${fmt(clickDmg)}`, this.cStats);
@@ -94,9 +95,9 @@ export class ChHud {
     const transcended = state.transcend.transcendences > 0;
     const soulsTxt =
       state.souls > 0 || hpf > 0 || transcended
-        ? `✨ ${fmt(state.souls)} Seelen · +${Math.round(state.souls * soulBonusEff(hpf) * 100)}% Schaden` +
-          (hpf > 0 ? ` · 🍑 ${fmt(hpf)} HPF` : '') +
-          (transcended ? ` · 🔮 ×${fmt(transcendGlobalMult(state.transcend.te))}` : '')
+        ? `${fmt(state.souls)} Seelen · +${Math.round(state.souls * soulBonusEff(hpf) * 100)}%` +
+          (hpf > 0 ? ` · ${fmt(hpf)} HPF` : '') +
+          (transcended ? ` · TE ×${fmt(transcendGlobalMult(state.transcend.te))}` : '')
         : '';
     if (soulsTxt !== this.cSouls) {
       this.cSouls = soulsTxt;
@@ -117,7 +118,7 @@ export class ChHud {
   private updateTravel(combat: CombatState): void {
     const frontier = combat.maxZone;
     const farming = combat.zone < frontier;
-    const info = farming ? `🌾 Farmen · Front: Bühne ${frontier}` : 'An der Frontier';
+    const info = farming ? `Farmen · Front: Bühne ${frontier}` : 'An der Frontier';
     this.cTravel = this.setText(this.travelInfo, info, this.cTravel);
     this.travelPrev.disabled = combat.zone <= 1;
     this.travelNext.disabled = combat.zone >= frontier;

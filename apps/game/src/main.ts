@@ -768,11 +768,12 @@ document.getElementById('toggleShop')?.addEventListener('click', () => {
   if (!shop.classList.contains('hidden')) syncTabVisibility(); // reflect fresh unlocks on open
 });
 
+// The speaker icon is inline SVG; `.muted` swaps its wave arcs for a strike-cross.
 const muteBtn = document.getElementById('muteBtn') as HTMLButtonElement;
-muteBtn.textContent = audio.muted ? '🔇' : '🔊';
+muteBtn.classList.toggle('muted', audio.muted);
 muteBtn.addEventListener('click', () => {
   audio.unlock();
-  muteBtn.textContent = audio.toggleMute() ? '🔇' : '🔊';
+  muteBtn.classList.toggle('muted', audio.toggleMute());
 });
 
 // ---------- background: zone-tier auto-rotation, gated on the kulisse chooser ----------
