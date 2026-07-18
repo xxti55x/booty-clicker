@@ -2,10 +2,18 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
 /**
- * Booty Clicker leaderboard API — Cloudflare Worker (Hono). Spec §5 M5 / §6.
+ * Booty Clicker leaderboard API — Cloudflare Worker (Hono). Spec §5 M5 / §6 / §9.7.
  *
- *   POST /api/scores       { nickname, bestTimeS } -> 201 { rank } | 400 | 429
- *   GET  /api/scores/top?limit=50 -> 200 [{ nickname, bestTimeS, createdAt }]
+ *   v1 (boss-kill time, lower = better):
+ *     POST /api/scores          { nickname, bestTimeS } -> 201 { rank } | 400 | 429
+ *     GET  /api/scores/top?limit=50 -> 200 [{ nickname, bestTimeS, createdAt }]
+ *
+ *   v2 (endless `maxZone`, higher = better; §7.4/§9.7, behebt B8):
+ *     POST /api/v2/scores       { nickname, maxZone, souls, ascensions } -> 201 { rank } | 400 | 429
+ *     GET  /api/v2/scores/top?limit=50
+ *          -> 200 [{ nickname, maxZone, souls, ascensions, updatedAt }]
+ *     Upsert per nickname (D1 UNIQUE(nickname)); the stored row is only replaced
+ *     when the submitted `maxZone` is strictly greater than the one on file.
  *
  * Storage (D1) and the per-IP rate limiter (KV) sit behind small interfaces so
  * the request logic is unit-testable with in-memory fakes (no wrangler needed).
@@ -18,11 +26,37 @@ export interface ScoreRow {
   createdAt: string;
 }
 
+/** Leaderboard v2 row: the endless `maxZone` metric plus display stats (§9.7). */
+export interface ScoreRowV2 {
+  nickname: string;
+  maxZone: number;
+  souls: number;
+  ascensions: number;
+  updatedAt: string;
+}
+
 export interface ScoreRepo {
   insert(row: ScoreRow): Promise<void>;
   /** 1-based rank: how many stored times beat `bestTimeS`, plus one (lower = better). */
   rankFor(bestTimeS: number): Promise<number>;
   top(limit: number): Promise<ScoreRow[]>;
+
+  // --- v2 (§9.7) ---
+  /**
+   * Upsert by nickname: insert a fresh row, or update the existing one ONLY when
+   * `row.maxZone` is strictly greater than the stored `maxZone`. Returns the row
+   * that is now on file (the submitted values on a write, the untouched stored
+   * values when the update was suppressed) so the caller can rank the real entry.
+   */
+  upsertV2(row: ScoreRowV2): Promise<ScoreRowV2>;
+  /**
+   * 1-based rank of `row` under the total order maxZone DESC, then souls DESC,
+   * then nickname ASC (a strict order — nickname is unique). Equals 1 + the count
+   * of stored rows that sort strictly ahead of `row`.
+   */
+  rankForV2(row: ScoreRowV2): Promise<number>;
+  /** Top rows ordered by maxZone DESC (ties: souls DESC, then nickname ASC). */
+  topV2(limit: number): Promise<ScoreRowV2[]>;
 }
 
 export interface RateLimiter {
@@ -45,6 +79,16 @@ export function validateNickname(v: unknown): string | null {
 /** Boss-kill time in whole seconds, 1..86400. Returns null if invalid. */
 export function validateTime(v: unknown): number | null {
   return typeof v === 'number' && Number.isInteger(v) && v > 0 && v <= 86_400 ? v : null;
+}
+
+/** `maxZone`: a positive integer (endless stage reached, §7.4). Returns null if invalid. */
+export function validateZone(v: unknown): number | null {
+  return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null;
+}
+
+/** Display stat (`souls`/`ascensions`): a non-negative finite number. Returns null if invalid. */
+export function validateStat(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
 }
 
 export type EnvFactory<E, T> = (env: E) => T;
@@ -92,6 +136,50 @@ export function createApp<E extends object>(
     return c.json(rows, 200);
   });
 
+  // ---- v2: endless `maxZone`, upsert per nickname (§9.7) ----
+
+  app.post('/api/v2/scores', async (c) => {
+    const ip = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? 'anonymous';
+    if (!(await makeLimiter(c.env).allow(ip))) {
+      return c.json({ error: 'rate_limited' }, 429);
+    }
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'invalid_json' }, 400);
+    }
+    const b = (body ?? {}) as Record<string, unknown>;
+    const nickname = validateNickname(b.nickname);
+    const maxZone = validateZone(b.maxZone);
+    const souls = validateStat(b.souls);
+    const ascensions = validateStat(b.ascensions);
+    if (nickname === null || maxZone === null || souls === null || ascensions === null) {
+      return c.json({ error: 'validation' }, 400);
+    }
+
+    const repo = makeRepo(c.env);
+    // Upsert returns the row actually on file (may keep a higher stored maxZone),
+    // so the rank reflects the persisted entry, not a suppressed submission.
+    const stored = await repo.upsertV2({
+      nickname,
+      maxZone,
+      souls,
+      ascensions,
+      updatedAt: new Date().toISOString(),
+    });
+    const rank = await repo.rankForV2(stored);
+    return c.json({ rank }, 201);
+  });
+
+  app.get('/api/v2/scores/top', async (c) => {
+    const raw = Number(c.req.query('limit') ?? '50');
+    const limit = Number.isFinite(raw) ? Math.min(50, Math.max(1, Math.floor(raw))) : 50;
+    const rows = await makeRepo(c.env).topV2(limit);
+    return c.json(rows, 200);
+  });
+
   return app;
 }
 
@@ -123,6 +211,51 @@ function d1Repo(env: Bindings): ScoreRepo {
       )
         .bind(limit)
         .all<ScoreRow>();
+      return res.results ?? [];
+    },
+    async upsertV2(row) {
+      // Insert, or update the existing nickname only when the new maxZone wins.
+      await env.DB.prepare(
+        `INSERT INTO scores_v2 (nickname, max_zone, souls, ascensions, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(nickname) DO UPDATE SET
+           max_zone = excluded.max_zone,
+           souls = excluded.souls,
+           ascensions = excluded.ascensions,
+           updated_at = excluded.updated_at
+         WHERE excluded.max_zone > scores_v2.max_zone`,
+      )
+        .bind(row.nickname, row.maxZone, row.souls, row.ascensions, row.updatedAt)
+        .run();
+      // Read back the row now on file (a suppressed update keeps the prior values).
+      const stored = await env.DB.prepare(
+        'SELECT nickname, max_zone AS maxZone, souls, ascensions, updated_at AS updatedAt FROM scores_v2 WHERE nickname = ?',
+      )
+        .bind(row.nickname)
+        .first<ScoreRowV2>();
+      return stored ?? row;
+    },
+    async rankForV2(row) {
+      // 1 + rows that sort strictly ahead: maxZone DESC, then souls DESC, then nickname ASC.
+      const r = await env.DB.prepare(
+        `SELECT COUNT(*) AS c FROM scores_v2
+         WHERE max_zone > ?1
+            OR (max_zone = ?1 AND souls > ?2)
+            OR (max_zone = ?1 AND souls = ?2 AND nickname < ?3)`,
+      )
+        .bind(row.maxZone, row.souls, row.nickname)
+        .first<{ c: number }>();
+      return (r?.c ?? 0) + 1;
+    },
+    async topV2(limit) {
+      const res = await env.DB.prepare(
+        `SELECT nickname, max_zone AS maxZone, souls, ascensions, updated_at AS updatedAt
+         FROM scores_v2
+         ORDER BY max_zone DESC, souls DESC, nickname ASC
+         LIMIT ?`,
+      )
+        .bind(limit)
+        .all<ScoreRowV2>();
       return res.results ?? [];
     },
   };
