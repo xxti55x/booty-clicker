@@ -27,7 +27,13 @@ import {
 import { type GearState, KULISSE_BUFFS, createGear } from '../game/gear';
 import { type Gilds, createGilds } from '../game/gild';
 import { COACH_CLICK_SHARE, type HeavenState, createHeaven } from '../game/heaven';
-import type { CrewLevels } from '../game/heroes';
+import {
+  type CrewLevels,
+  type CrewUps,
+  CREW,
+  abilityTiersUnlocked,
+  createCrewUps,
+} from '../game/heroes';
 import {
   DAILY_QUEST_SLOTS,
   MAX_REROLLS,
@@ -44,7 +50,7 @@ import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 9;
+export const CH_SCHEMA = 10;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -74,7 +80,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (M15, v9): the live ChState + envelope. */
+/** The current persisted shape (v10, kaufbare Crew-Fähigkeiten): ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -416,6 +422,25 @@ function repairTranscend(v: unknown): TranscendState {
   return { te, teLifetime, transcendences, mythos: repairCountMap(v.mythos) };
 }
 
+/**
+ * Repair the bought-ability ledger (v10): non-negative integer counts, and each
+ * hero's bought count clamped to what its LEVEL has actually unlocked
+ * (`abilityTiersUnlocked`) — a crafted save cannot hold abilities its levels
+ * never reached. Junk/absent ⇒ fresh empty ledger. Never throws.
+ */
+function repairCrewUps(v: unknown, crew: Record<string, number>): CrewUps {
+  if (!isRecord(v)) return createCrewUps();
+  const out: CrewUps = {};
+  for (const cfg of CREW) {
+    const raw = v[cfg.id];
+    if (!isFiniteNumber(raw) || raw <= 0) continue;
+    const unlocked = abilityTiersUnlocked(crew[cfg.id] ?? 0);
+    const n = Math.min(Math.floor(raw), unlocked);
+    if (n > 0) out[cfg.id] = n;
+  }
+  return out;
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
 function stateFromSave(save: ChSaveLatest): ChState {
   const souls = save.souls;
@@ -426,6 +451,7 @@ function stateFromSave(save: ChSaveLatest): ChState {
     killsThisZone: save.killsThisZone,
     runMaxZone: Math.max(save.runMaxZone, save.zone),
     crew: { ...save.crew },
+    crewUp: repairCrewUps(save.crewUp, save.crew),
     souls,
     lifetimeMaxZone,
     totalClicks: save.totalClicks,
@@ -568,6 +594,20 @@ function migrateChV8toV9(raw: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+/**
+ * v9 → v10: fill the buyable-crew-abilities default — an empty bought ledger.
+ * Pre-v10 saves earned their ×2 milestones free with levels; those multipliers
+ * now cost BP, so an old save simply starts with nothing bought (its levels
+ * already unlock the tiers for purchase). Lossless for every existing field.
+ */
+function migrateChV9toV10(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    v: 10,
+    crewUp: createCrewUps(),
+  };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
@@ -577,6 +617,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
   6: migrateChV6toV7,
   7: migrateChV7toV8,
   8: migrateChV8toV9,
+  9: migrateChV9toV10,
 };
 
 /**

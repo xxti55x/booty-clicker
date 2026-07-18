@@ -32,5 +32,20 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Node-CLI-Tooling (tools/**) ist CommonJS: require/__dirname sind hier idiomatisch.
+    files: ['**/*.cjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: {
+        ...globals.node,
+        ...globals.browser, // page.evaluate/waitForFunction-Callbacks laufen im Browser
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
   prettier,
 );

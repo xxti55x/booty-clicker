@@ -44,7 +44,14 @@ import {
   soulBonusEff,
   truhenMagnetBonus,
 } from './heaven';
-import { type CrewLevels, clickDamageRaw, createCrew, totalRawDps } from './heroes';
+import {
+  type CrewLevels,
+  type CrewUps,
+  clickDamageRaw,
+  createCrew,
+  createCrewUps,
+  totalRawDps,
+} from './heroes';
 import { incomeMultiplier } from './peach';
 import { type MetaState, createMeta } from './quests';
 import {
@@ -169,6 +176,12 @@ export interface ChState {
   runMaxZone: number;
   /** Crew levels by hero id. */
   crew: CrewLevels;
+  /**
+   * BOUGHT crew abilities by hero id (CH-save v10): tier n unlocks at Lv 25+50·(n−1)
+   * and must be paid in BP (+100 % base output each). Lives and dies with `crew` —
+   * every reset that clears levels clears the bought abilities too.
+   */
+  crewUp: CrewUps;
   /** Banked Ruhm-Seelen (permanent damage bonus). */
   souls: number;
   /** Deepest zone reached across ALL runs (drives soul gains). */
@@ -231,6 +244,7 @@ export function createChState(): ChState {
     killsThisZone: 0,
     runMaxZone: 1,
     crew: createCrew(),
+    crewUp: createCrewUps(),
     souls: 0,
     lifetimeMaxZone: 1,
     totalClicks: 0,
@@ -264,6 +278,8 @@ type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'hea
   gear?: GearState;
   permTokens?: PermTokens;
   transcend?: TranscendState;
+  /** Bought crew abilities (optional so pre-v10 test fixtures fold ×1). */
+  crewUp?: CrewUps;
 };
 
 /**
@@ -278,7 +294,7 @@ type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'hea
 export function dpsOf(state: DerivedInput): number {
   const hpf = state.heaven.hpf;
   return (
-    totalRawDps(state.crew, state.gilds) *
+    totalRawDps(state.crew, state.gilds, state.crewUp ?? {}) *
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientDpsMult(state.ancients) *
     heavenGlobalMult(hpf) *
@@ -298,7 +314,7 @@ export function dpsOf(state: DerivedInput): number {
 export function clickDamageOf(state: DerivedInput): number {
   const hpf = state.heaven.hpf;
   return (
-    clickDamageRaw(state.crew, state.gilds) *
+    clickDamageRaw(state.crew, state.gilds, state.crewUp ?? {}) *
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientClickMult(state.ancients) *
     heavenGlobalMult(hpf) *

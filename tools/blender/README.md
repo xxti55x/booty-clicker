@@ -28,11 +28,20 @@ pip install bpy          # Blender als Python-Modul, headless (~350 MB, Py 3.11)
 Kein GUI, kein GPU nötig. Export + Modifier-Stack laufen in Sekunden;
 CPU-Preview-Renders (Cycles) sind möglich, aber langsam.
 
+## Skripte in diesem Ordner
+
+| Skript              | Zweck                                                           |
+| ------------------- | --------------------------------------------------------------- |
+| `export_all.cjs`    | Exportiert ALLE Spielmodelle → `models/*.glb` (vite + headless) |
+| `verify_models.py`  | Blender-Import-Roundtrip über `models/**/*.glb` (bpy)           |
+| `export_example.py` | Minimalbeispiel: Modell in bpy bauen → .glb                     |
+
 ## Benutzung
 
 ```sh
+node tools/blender/export_all.cjs        # models/-Ordner neu generieren
+python3 tools/blender/verify_models.py   # in Blender gegenprüfen
 python3 tools/blender/export_example.py out/model.glb
-node  # laden: siehe Snippet unten
 ```
 
 Regeln für Assets, die ins Spiel gehen:
