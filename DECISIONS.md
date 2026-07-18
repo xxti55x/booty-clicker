@@ -3,6 +3,42 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M13 — Meta, Retention & Leaderboard v2 (Teil 1: pure Logik + CH-Save v8 + Client)
+
+- **2026-07-18 — CH-Achievements liegen in `game/ch-achievements.ts`, nicht in
+  `game/achievements.ts`.** Das legacy M4-Set (`achievements.ts`, über
+  `GameState`/`UpgradeState`) bleibt eingefrorenes Archiv mit grünen Tests (N4). Das
+  frische CH-native Set (Bühnen/Boss/Combo/Krit/Aszension/HPF …) bekommt einen eigenen
+  Modulnamen analog zur `ch-state`/`ch-store`-Konvention, statt das Archiv zu überschreiben.
+
+- **2026-07-18 — Tagesgrenze = UTC (`floor(now/86.4e6)`).** `dayNumber` zählt Tage seit
+  der Unix-Epoche an der **UTC-Mitternachtsgrenze** — timezone-stabil und deterministisch
+  (§7.1). Spieler nahe Mitternacht rollen ggf. ein paar Stunden neben lokaler Mitternacht
+  über; akzeptiert (§11.10).
+
+- **2026-07-18 — Uhr-Manipulations-Neutralität via monotone High-Water-Marks.** `meta.day`
+  und `meta.lastLoginDay` steigen nur (`rollDay`/`dailyLogin` reagieren ausschließlich auf
+  `day > gespeichert`). Uhr zurückstellen ⇒ kein Reset, kein erneuter Login-Grant, kein
+  erneutes Claimen bereits geclaimter Quests (AC1); Vorstellen advanced nur den Tag (§11.10).
+  Wöchentlicher Streak-Schutz ist an die **Kalenderwoche des Login-Tags** gebunden
+  (`weekNumber(day)`), deckt genau **einen** verpassten Tag (Gap = 2), Gap ≥ 3 bricht immer.
+
+- **2026-07-18 — Leaderboard-Client v2: injizierbares `fetch`/`base` statt Env-Mutation.**
+  `submitScore`/`fetchTop` nehmen ein optionales `{ base, fetchImpl, timeoutMs }`, sodass
+  Erfolg/Fehler/Timeout/deaktiviert deterministisch mit einem Fake getestet werden (M5-Disziplin,
+  ohne `import.meta.env` zu verbiegen). Default-aus bleibt an `VITE_API_BASE` (leer ⇒ `null`
+  ohne Netz-Call). Die M5-`ui/leaderboard.ts` (nicht am CH-Loop verdrahtet) wurde minimal auf
+  die v2-Signatur (`ScorePayload`, `maxZone`) gezogen, damit `tsc` grün bleibt — echte
+  Prompt-Verdrahtung ist Teil 2.
+
+- **2026-07-18 — Lifetime-Zähler auf `ChStats` ergänzt; Aszensions-Zähler wird von Teil 2
+  inkrementiert.** Neu in `ChStats`: `ascensions`, `chestsOpened`, `maxCombo`, `bossStreak`,
+  `maxBossStreak`, `keysEarned` (alle 0-Default, via `repairStats` migrationssicher). `stats`
+  wird von `ascendState`/`himmelfahrtState` unverändert weitergereicht ⇒ automatisch monoton
+  über beide Prestige-Schichten (AC5). `himmelfahrten` wird aus `heaven.ascensions2` abgeleitet
+  (keine Dublette), `gilds` aus `totalGilds`. `stats.ascensions` wird bewusst NICHT im puren
+  `ascendState` hochgezählt (Event-Increment = Teil 2), damit die Reducer verhaltensgleich bleiben.
+
 ## M12 — Review-Fixes (Pfirsich-Truhen & Loot)
 
 - **2026-07-18 (Review) — Boost-Fenster wird beim Boot GEKLEMMT, nie gelöscht

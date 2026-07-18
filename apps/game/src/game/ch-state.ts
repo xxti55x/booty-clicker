@@ -46,6 +46,7 @@ import {
 } from './heaven';
 import { type CrewLevels, clickDamageRaw, createCrew, totalRawDps } from './heroes';
 import { incomeMultiplier } from './peach';
+import { type MetaState, createMeta } from './quests';
 import { createRngState, type RngState } from '../util/rng';
 
 /** Persisted combo slice (CH-save v3): only the stack count survives a reload. */
@@ -99,11 +100,16 @@ export function createPeach(): PeachState {
   return { nextPeachAt: 0, boostUntil: 0 };
 }
 
-/** Lifetime bookkeeping counters (spec §9.2, CH-save v2). All non-negative. */
+/**
+ * Lifetime bookkeeping counters (spec §9.2 / §7.5). All non-negative and monotonic
+ * across BOTH prestige layers — `ascendState`/`himmelfahrtState` carry this slice
+ * forward untouched, so the stats page (§7.5) and the CH achievements/quests (§7.3)
+ * read stable lifetime totals. Run-scoped values (current zone/gold) are NOT here.
+ */
 export interface ChStats {
   /** Crit clicks landed (lifetime). */
   crits: number;
-  /** On-beat clicks (stays 0 until M8 wires the beat bonus). */
+  /** On-beat clicks (§4.2.3). */
   onBeatClicks: number;
   /** Bosses defeated (lifetime). */
   bossKills: number;
@@ -113,6 +119,18 @@ export interface ChStats {
   goldLifetime: number;
   /** Seconds of active play accumulated in the loop. */
   playTimeS: number;
+  /** L1 ascensions performed (lifetime; §7.5). */
+  ascensions: number;
+  /** Pfirsich-Truhen opened (lifetime; §7.5/§6). */
+  chestsOpened: number;
+  /** Highest combo stacks ever reached (§7.5 „höchste Combo"). */
+  maxCombo: number;
+  /** Current no-timeout boss streak (reset by part 2 on a boss timeout). */
+  bossStreak: number;
+  /** Longest no-timeout boss streak ever reached (achievement gate, §7.3). */
+  maxBossStreak: number;
+  /** Truhenschlüssel earned over the lifetime (§7.3/§7.5). */
+  keysEarned: number;
 }
 
 /** A zeroed stats block. */
@@ -124,6 +142,12 @@ export function createStats(): ChStats {
     bossTimeouts: 0,
     goldLifetime: 0,
     playTimeS: 0,
+    ascensions: 0,
+    chestsOpened: 0,
+    maxCombo: 0,
+    bossStreak: 0,
+    maxBossStreak: 0,
+    keysEarned: 0,
   };
 }
 
@@ -181,6 +205,10 @@ export interface ChState {
   permTokens: PermTokens;
   /** Golden-Peach event schedule + active ×3 boost window (CH-save v7, §6.1). */
   peach: PeachState;
+  /** Daily-Login/Streak + rotating Quests (CH-save v8, §7.1/§7.2). Survives prestige. */
+  meta: MetaState;
+  /** Unlocked CH-achievement ids (CH-save v8, §7.3). Survives prestige. */
+  achievements: string[];
 }
 
 /** A brand-new run/profile. */
@@ -208,6 +236,8 @@ export function createChState(): ChState {
     chests: createChests(),
     permTokens: createPermTokens(),
     peach: createPeach(),
+    meta: createMeta(),
+    achievements: [],
   };
 }
 
@@ -405,6 +435,10 @@ export function ascendState(state: ChState): ChState {
     chests: state.chests,
     permTokens: state.permTokens,
     peach: state.peach,
+    // Retention meta (§7) — daily/streak/quests + unlocked achievements are lifetime
+    // acquisitions, never reset by prestige.
+    meta: state.meta,
+    achievements: state.achievements,
   };
 }
 
@@ -437,5 +471,8 @@ export function himmelfahrtState(state: ChState): ChState {
     chests: state.chests,
     permTokens: state.permTokens,
     peach: state.peach,
+    // Retention meta (§7) survives a Himmelfahrt too (lifetime acquisitions).
+    meta: state.meta,
+    achievements: state.achievements,
   };
 }

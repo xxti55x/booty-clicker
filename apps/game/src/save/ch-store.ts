@@ -28,12 +28,21 @@ import { type GearState, KULISSE_BUFFS, createGear } from '../game/gear';
 import { type Gilds, createGilds } from '../game/gild';
 import { COACH_CLICK_SHARE, type HeavenState, createHeaven } from '../game/heaven';
 import type { CrewLevels } from '../game/heroes';
+import {
+  MAX_REROLLS,
+  STREAK_MAX,
+  type MetaState,
+  type QuestProgress,
+  createMeta,
+  isQuestId,
+} from '../game/quests';
+import { isAchievementId } from '../game/ch-achievements';
 import { SKINS } from '../character/skins';
 import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 7;
+export const CH_SCHEMA = 8;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -63,7 +72,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (M12, v7): the live ChState + envelope. */
+/** The current persisted shape (M13, v8): the live ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -91,12 +100,13 @@ function isFiniteNumber(v: unknown): v is number {
  * Never-throw validation of a stored CH save (the v5 guard). The gameplay-
  * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
  * The meta/juice fields (rng/stats/legacyImported/ability/combo/gilds/rsLifetime/
- * ancients/heaven/gear/chests/permTokens/peach) are deliberately NOT gated here:
- * they are runtime bookkeeping and get repaired (fresh seed / zeroed stats / false
- * flag / default ability+combo / pruned gilds / clamped highwater / sanitised
- * ancients+heaven+gear / defaulted loot slices) in `stateFromSave` — the same
- * "repair, don't nuke progress" spirit as the runMaxZone invariant. Per-field
- * type+range checks for them live in the `repair*` helpers below.
+ * ancients/heaven/gear/chests/permTokens/peach/meta/achievements) are deliberately
+ * NOT gated here: they are runtime bookkeeping and get repaired (fresh seed / zeroed
+ * stats / false flag / default ability+combo / pruned gilds / clamped highwater /
+ * sanitised ancients+heaven+gear / defaulted loot slices / defaulted meta / pruned
+ * achievements) in `stateFromSave` — the same "repair, don't nuke progress" spirit as
+ * the runMaxZone invariant. Per-field type+range checks for them live in the `repair*`
+ * helpers below.
  */
 export function isChSave(raw: unknown): raw is ChSaveLatest {
   if (!isRecord(raw)) return false;
@@ -139,6 +149,13 @@ function repairStats(v: unknown): ChStats {
     bossTimeouts: num(src.bossTimeouts),
     goldLifetime: num(src.goldLifetime),
     playTimeS: num(src.playTimeS),
+    // v8 counters — absent in older saves ⇒ 0 (§7.5).
+    ascensions: num(src.ascensions),
+    chestsOpened: num(src.chestsOpened),
+    maxCombo: num(src.maxCombo),
+    bossStreak: num(src.bossStreak),
+    maxBossStreak: num(src.maxBossStreak),
+    keysEarned: num(src.keysEarned),
   };
 }
 
@@ -325,6 +342,51 @@ function repairPeach(v: unknown): PeachState {
   return { nextPeachAt: nn(v.nextPeachAt), boostUntil: nn(v.boostUntil) };
 }
 
+/**
+ * Repair the persisted retention-meta slice (v8, §7.1/§7.2): each field is
+ * validated in ISOLATION — a bad `questIds`/`questProgress`/`questsClaimed` (junk
+ * ids, negative progress) is pruned to real catalog ids/non-negative ints, the day
+ * high-waters and streak are range-clamped, and a wholly non-object meta becomes a
+ * fresh `createMeta()`. Never throws; a corrupt meta slice repairs to defaults and
+ * never nukes real progress on other slices.
+ */
+function repairMeta(v: unknown): MetaState {
+  const def = createMeta();
+  if (!isRecord(v)) return def;
+  const int = (x: unknown, fallback: number): number =>
+    isFiniteNumber(x) && Number.isInteger(x) ? x : fallback;
+  const questIds = Array.isArray(v.questIds)
+    ? [...new Set(v.questIds.filter(isQuestId))].slice(0, 3)
+    : def.questIds;
+  const questProgress: QuestProgress = {};
+  if (isRecord(v.questProgress)) {
+    for (const [id, n] of Object.entries(v.questProgress)) {
+      if (isQuestId(id) && isFiniteNumber(n) && n >= 0) questProgress[id] = Math.floor(n);
+    }
+  }
+  const questsClaimed = Array.isArray(v.questsClaimed)
+    ? [...new Set(v.questsClaimed.filter(isQuestId))]
+    : def.questsClaimed;
+  const rerollsUsed = Math.max(0, Math.min(MAX_REROLLS, int(v.rerollsUsed, 0)));
+  const streak = Math.max(0, Math.min(STREAK_MAX, int(v.streak, 0)));
+  return {
+    day: int(v.day, def.day),
+    questIds,
+    questProgress,
+    questsClaimed,
+    rerollsUsed,
+    streak,
+    lastLoginDay: int(v.lastLoginDay, def.lastLoginDay),
+    streakProtectWeek: int(v.streakProtectWeek, def.streakProtectWeek),
+  };
+}
+
+/** Repair the persisted achievements slice (v8, §7.3): keep only real catalog ids (deduped). */
+function repairAchievements(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.filter(isAchievementId))];
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
 function stateFromSave(save: ChSaveLatest): ChState {
   const souls = save.souls;
@@ -355,6 +417,8 @@ function stateFromSave(save: ChSaveLatest): ChState {
     chests: repairChests(save.chests),
     permTokens: repairPermTokens(save.permTokens),
     peach: repairPeach(save.peach),
+    meta: repairMeta(save.meta),
+    achievements: repairAchievements(save.achievements),
   };
 }
 
@@ -445,6 +509,22 @@ function migrateChV6toV7(raw: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+/**
+ * v7 → v8: fill the M13 defaults — a fresh retention-meta slice (no quests rolled
+ * yet: `day: -1` forces the first quest roll + login on the next boot, streak 0) and
+ * an empty achievements set. No existing field is touched, so the migration is
+ * lossless; the new v8 stats counters (ascensions/chestsOpened/maxCombo/…) are
+ * absent in the v7 `stats` and default to 0 via `repairStats`.
+ */
+function migrateChV7toV8(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    v: 8,
+    meta: createMeta(),
+    achievements: [],
+  };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
@@ -452,6 +532,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
   4: migrateChV4toV5,
   5: migrateChV5toV6,
   6: migrateChV6toV7,
+  7: migrateChV7toV8,
 };
 
 /**
