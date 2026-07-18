@@ -115,12 +115,14 @@ import {
 import { awardGildOnZone, isGildZone } from './game/gild';
 import {
   buyTreeNode,
+  canHimmelfahrt,
   coachCps,
   coachDps,
   ekstaseBonusMs,
   fruhstarterFraction,
   offlineCapS,
 } from './game/heaven';
+import { canAscend } from './game/ascension';
 import { CREW, type CrewLevels } from './game/heroes';
 import { buildAchievementCtx, newlyUnlocked } from './game/ch-achievements';
 import {
@@ -700,10 +702,71 @@ for (const tab of Array.from(document.querySelectorAll<HTMLElement>('.tab'))) {
   });
 }
 
+// ---------- progressive tab disclosure ----------
+// A fresh player at Bühne 1 should not face nine cryptic icons for layers they
+// can't touch for hours. Each deeper tab reveals itself the moment its layer is
+// first *reachable* — driven by monotonic lifetime highwaters (rsLifetime,
+// stats.ascensions, hpfLifetime, teLifetime, keysEarned) or a live "can-do-now"
+// gate — so a tab never re-hides once shown. This is pure presentation: it toggles
+// visibility only and changes no gate, formula or balance.
+function tabUnlocked(key: string): boolean {
+  switch (key) {
+    case 'crew': // core loop — always
+    case 'gear': // skins/kulisse — always (cosmetic identity from the start)
+    case 'set': // options must always be reachable (mute, quality, import/export)
+      return true;
+    case 'meta': // 📋 Ziele: after a few stages, once goals become meaningful
+      return state.lifetimeMaxZone >= 5 || state.stats.ascensions > 0;
+    case 'pr': // ✨ Ruhm: the first time an ascension is worth doing, or ever done
+      return (
+        state.rsLifetime > 0 || canAscend(state.runMaxZone, state.lifetimeMaxZone, state.rsLifetime)
+      );
+    case 'anc': // 🌀 Ahnen: the soul sink — only after a first ascension banks souls
+      return state.stats.ascensions > 0 || Object.keys(state.ancients).length > 0;
+    case 'heaven': // 🌈 Himmel (L2): once a Himmelfahrt is reachable or done
+      return state.heaven.hpfLifetime > 0 || canHimmelfahrt(state.heaven, state.rsLifetime);
+    case 'transcend': // 🔮 Transzendenz (L3): only if enabled AND reachable/done
+      return (
+        !!transcendPanel &&
+        (state.transcend.teLifetime > 0 || canTranscend(state.transcend, state.heaven.hpfLifetime))
+      );
+    case 'chest': // 🎁 Truhen: once the first key/chest has ever dropped
+      return state.stats.keysEarned > 0 || state.stats.chestsOpened > 0 || state.chests.keys > 0;
+    default:
+      return true;
+  }
+}
+
+let tabVisSig = '';
+function syncTabVisibility(): void {
+  let sig = '';
+  const vis: Record<string, boolean> = {};
+  for (const key of Object.keys(tabBodies)) {
+    const u = tabUnlocked(key);
+    vis[key] = u;
+    sig += u ? '1' : '0';
+  }
+  if (sig === tabVisSig) return; // change-detected: no DOM churn on the common path
+  tabVisSig = sig;
+  for (const [key, unlocked] of Object.entries(vis)) {
+    document
+      .querySelector<HTMLElement>(`.tab[data-t="${key}"]`)
+      ?.style.setProperty('display', unlocked ? 'flex' : 'none');
+  }
+  // Safety net: monotonic gates never hide a revealed tab, but if the active tab
+  // were ever hidden, fall back to Crew so the body is never left blank.
+  const active = document.querySelector<HTMLElement>('.tab.active');
+  if (active && active.style.display === 'none') {
+    document.querySelector<HTMLElement>('.tab[data-t="crew"]')?.click();
+  }
+}
+syncTabVisibility();
+
 const shop = document.getElementById('shop') as HTMLElement;
-document
-  .getElementById('toggleShop')
-  ?.addEventListener('click', () => shop.classList.toggle('hidden'));
+document.getElementById('toggleShop')?.addEventListener('click', () => {
+  shop.classList.toggle('hidden');
+  if (!shop.classList.contains('hidden')) syncTabVisibility(); // reflect fresh unlocks on open
+});
 
 const muteBtn = document.getElementById('muteBtn') as HTMLButtonElement;
 muteBtn.textContent = audio.muted ? '🔇' : '🔊';
@@ -1570,6 +1633,7 @@ function loop(nowMs: number): void {
     checkAchievements();
     maybeLeaderboardPrompt();
     hud.update(state, combat, dps, clickDmg);
+    syncTabVisibility(); // reveal a tab the instant its layer becomes reachable
     // keep the open shop tab's affordability/previews fresh while idling
     const active = document.querySelector('.tab.active') as HTMLElement | null;
     if (active?.dataset.t) renderActiveTab(active.dataset.t);

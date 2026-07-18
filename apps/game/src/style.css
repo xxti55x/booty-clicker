@@ -35,16 +35,44 @@ body {
   mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
-.hud {
+/* Grouped top-UI: the HUD card and the rival/combat card live in one centred
+   column so they can never overlap (the old fixed 120px rival collided with a
+   taller HUD on phones). A single glass container per card lifts the readout off
+   the busy 3D scene for legibility. */
+.topui {
   position: fixed;
-  top: 14px;
-  /* B13b: keep the HUD clear of a notch/status bar (0 on non-notched devices). */
-  top: calc(14px + env(safe-area-inset-top, 0px));
+  top: calc(12px + env(safe-area-inset-top, 0px));
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: min(440px, 94vw);
+  z-index: 10;
+  pointer-events: none;
+}
+.hud {
+  width: 100%;
   text-align: center;
   pointer-events: none;
-  z-index: 10;
+}
+.hud-card {
+  display: inline-block;
+  padding: 8px 18px 10px;
+  border-radius: 18px;
+  background: rgba(9, 9, 15, 0.5);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.38);
+}
+.hud-top {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 3px;
 }
 .bp {
   font-size: 38px;
@@ -115,15 +143,27 @@ body {
   display: none;
 }
 .tab {
-  flex: 1;
-  padding: 14px 0;
-  text-align: center;
-  font-size: 12.5px;
+  flex: 1 0 auto;
+  min-width: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 9px 4px 7px;
   font-weight: 600;
   color: #8a8a99;
   cursor: pointer;
   transition: 0.15s;
   border-bottom: 2px solid transparent;
+}
+.tab-ic {
+  font-size: 17px;
+  line-height: 1;
+}
+.tab-lb {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
 }
 .tab.active {
   color: #a8e831;
@@ -757,11 +797,18 @@ body {
     width: 100%;
     max-width: 100%;
   }
+  /* Drop the top-UI below the corner controls (Crew / mute) so they never overlap
+     the readout on a narrow screen — the old fixed HUD sat right under them. */
+  .topui {
+    top: calc(60px + env(safe-area-inset-top, 0px));
+    width: min(440px, 96vw);
+    gap: 6px;
+  }
   .bp {
     font-size: 30px;
   }
   .tab {
-    padding: 16px 0;
+    padding: 10px 4px 8px;
   }
   .toggleShop,
   .bossStart {
@@ -783,7 +830,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.5px;
   color: #c9c9d6;
-  margin-bottom: 2px;
+  white-space: nowrap;
 }
 .zone-kind {
   font-size: 12px;
@@ -794,9 +841,7 @@ body {
 .travel {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  margin: 3px 0 1px;
+  gap: 5px;
   pointer-events: auto;
 }
 .tvbtn {
@@ -822,7 +867,7 @@ body {
 .tv-info {
   font-size: 11px;
   color: #9a9aad;
-  min-width: 120px;
+  margin: 0 0 1px;
 }
 .gild {
   display: inline-block;
@@ -837,16 +882,20 @@ body {
   margin-top: 2px;
 }
 .rival {
-  position: fixed;
-  top: 120px;
-  /* B13b: shift the rival HP widget down with the HUD on notched phones. */
-  top: calc(120px + env(safe-area-inset-top, 0px));
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(520px, 92vw);
-  z-index: 10;
+  width: 100%;
   text-align: center;
   pointer-events: none;
+}
+.rival-card {
+  display: inline-block;
+  width: min(420px, 100%);
+  padding: 8px 15px 9px;
+  border-radius: 15px;
+  background: rgba(9, 9, 15, 0.46);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 90, 120, 0.24);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.32);
 }
 .rival-name {
   font-size: 14px;
@@ -1103,14 +1152,13 @@ body {
   }
 }
 
-/* ---- M11: 🎽 Gear/Skins tab (emoji-only tabs so they fit; skin grid + kulisse) ---- */
-/* Nine tabs now (🕺 🎽 🌀 ✨ 🌈 🔮 🎁 📋 ⚙️): emoji-only, each keeps a min touch width
-   and the row scrolls (see `.tabs`) rather than shrinking a tab out of reach. */
+/* ---- M11: 🎽 Gear/Skins tab (skin grid + kulisse) ---- */
+/* Up to nine tabs (🕺 🎽 🌀 ✨ 🌈 🔮 🎁 📋 ⚙️), but progressive disclosure hides the
+   deep-layer ones until reached, so a fresh player sees only three. Each tab keeps a
+   min touch width and the row scrolls (see `.tabs`) rather than shrinking out of reach. */
 .tabs .tab {
-  font-size: 15px;
-  padding: 12px 0;
   flex: 1 0 auto;
-  min-width: 38px;
+  min-width: 56px;
 }
 
 .gear-bal {

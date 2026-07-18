@@ -31,33 +31,46 @@
     <div class="fx vignette"></div>
     <div class="fx grain"></div>
 
-    <div class="hud">
-      <div class="zone">
-        Bühne <span id="zone">1</span> <span class="zone-kind" id="zoneKind"></span>
+    <div class="topui">
+      <div class="hud">
+        <div class="hud-card">
+          <div class="hud-top">
+            <div class="zone">
+              Bühne <span id="zone">1</span> <span class="zone-kind" id="zoneKind"></span>
+            </div>
+            <div class="travel" id="travel">
+              <button
+                class="tvbtn"
+                id="travelPrev"
+                type="button"
+                title="Eine Bühne zurück (farmen)"
+              >
+                ◀
+              </button>
+              <button class="tvbtn" id="travelNext" type="button" title="Eine Bühne vor">▶</button>
+              <button class="tvbtn frontier" id="travelFrontier" type="button" title="Zur Frontier">
+                ⏫
+              </button>
+            </div>
+          </div>
+          <div class="tv-info" id="travelInfo">Front</div>
+          <div class="bp"><span id="gold">0</span> BP</div>
+          <div class="stats" id="stats">DPS 0 · Klick 1</div>
+          <div class="combo" id="combo"></div>
+          <div class="ngplus hidden" id="souls"></div>
+        </div>
       </div>
-      <div class="travel" id="travel">
-        <button class="tvbtn" id="travelPrev" type="button" title="Eine Bühne zurück (farmen)">
-          ◀
-        </button>
-        <span class="tv-info" id="travelInfo">Front</span>
-        <button class="tvbtn" id="travelNext" type="button" title="Eine Bühne vor">▶</button>
-        <button class="tvbtn frontier" id="travelFrontier" type="button" title="Zur Frontier">
-          ⏫ Front
-        </button>
-      </div>
-      <div class="bp"><span id="gold">0</span> BP</div>
-      <div class="stats" id="stats">DPS 0 · Klick 1</div>
-      <div class="combo" id="combo"></div>
-      <div class="ngplus hidden" id="souls"></div>
-    </div>
 
-    <div class="rival" id="rival">
-      <div class="rival-name" id="rivalName">Groupie</div>
-      <div class="rival-hpbar"><div class="rival-hpfill" id="rivalHpFill"></div></div>
-      <div class="rival-row">
-        <span class="rival-hp" id="rivalHpText">10 / 10</span>
-        <span class="rival-prog" id="zoneProgress">0 / 10</span>
-        <span class="rival-timer hidden" id="rivalTimer">30</span>
+      <div class="rival" id="rival">
+        <div class="rival-card">
+          <div class="rival-name" id="rivalName">Groupie</div>
+          <div class="rival-hpbar"><div class="rival-hpfill" id="rivalHpFill"></div></div>
+          <div class="rival-row">
+            <span class="rival-hp" id="rivalHpText">10 / 10</span>
+            <span class="rival-prog" id="zoneProgress">0 / 10</span>
+            <span class="rival-timer hidden" id="rivalTimer">30</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -90,15 +103,33 @@
 
     <div class="shop" id="shop">
       <div class="tabs">
-        <div class="tab active" data-t="crew" title="Crew">🕺</div>
-        <div class="tab" data-t="gear" title="Gear / Skins">🎽</div>
-        <div class="tab" data-t="anc" title="Ahnen">🌀</div>
-        <div class="tab" data-t="pr" title="Ruhm">✨</div>
-        <div class="tab" data-t="heaven" title="Himmel">🌈</div>
-        <div class="tab" data-t="transcend" title="Transzendenz">🔮</div>
-        <div class="tab" data-t="chest" title="Truhen">🎁</div>
-        <div class="tab" data-t="meta" title="Ziele">📋</div>
-        <div class="tab" data-t="set" title="Einstellungen">⚙️</div>
+        <div class="tab active" data-t="crew" title="Crew">
+          <span class="tab-ic">🕺</span><span class="tab-lb">Crew</span>
+        </div>
+        <div class="tab" data-t="gear" title="Gear / Skins">
+          <span class="tab-ic">🎽</span><span class="tab-lb">Skins</span>
+        </div>
+        <div class="tab" data-t="anc" title="Ahnen">
+          <span class="tab-ic">🌀</span><span class="tab-lb">Ahnen</span>
+        </div>
+        <div class="tab" data-t="pr" title="Ruhm">
+          <span class="tab-ic">✨</span><span class="tab-lb">Ruhm</span>
+        </div>
+        <div class="tab" data-t="heaven" title="Himmel">
+          <span class="tab-ic">🌈</span><span class="tab-lb">Himmel</span>
+        </div>
+        <div class="tab" data-t="transcend" title="Transzendenz">
+          <span class="tab-ic">🔮</span><span class="tab-lb">Trans.</span>
+        </div>
+        <div class="tab" data-t="chest" title="Truhen">
+          <span class="tab-ic">🎁</span><span class="tab-lb">Truhen</span>
+        </div>
+        <div class="tab" data-t="meta" title="Ziele">
+          <span class="tab-ic">📋</span><span class="tab-lb">Ziele</span>
+        </div>
+        <div class="tab" data-t="set" title="Einstellungen">
+          <span class="tab-ic">⚙️</span><span class="tab-lb">Mehr</span>
+        </div>
       </div>
       <div class="tabbody" id="tabCrew"></div>
       <div class="tabbody" id="tabGear" style="display: none"></div>
