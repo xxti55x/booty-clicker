@@ -118,6 +118,12 @@ describe('beatBonus', () => {
     expect(beatBonus(true)).toBe(ON_BEAT_MULT);
     expect(beatBonus(false)).toBe(1);
   });
+
+  it('widens by a gear/tier bonus on the beat (Neon-Ninja ×1.5 → ×1.6/⭐)', () => {
+    expect(beatBonus(true, 0.1)).toBeCloseTo(ON_BEAT_MULT + 0.1, 9);
+    expect(beatBonus(false, 0.1)).toBe(1); // off-beat is always ×1
+    expect(beatBonus(true, -1)).toBe(ON_BEAT_MULT); // negatives ignored
+  });
 });
 
 describe('beatWindowMs', () => {

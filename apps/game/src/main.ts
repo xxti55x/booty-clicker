@@ -58,6 +58,26 @@ import {
   tierCritMultBonus,
 } from './game/combo';
 import { type CombatState, hit, spawnFor, tickBoss, travelTo } from './game/combat';
+import {
+  accrueSugar,
+  beatWindowBonus,
+  bossDmgMult,
+  bossShardReward,
+  bossTimerBonus,
+  coachCpsBonus,
+  comboDecayReduction,
+  comboWindowBonus,
+  critChanceBonus,
+  critMultBonus,
+  frenzyChargeReduction,
+  frenzyDurBonus,
+  frenzyDurSecBonus,
+  goldGearMult,
+  offlineCapBonus,
+  offlineRateBonus,
+  onBeatMultBonus,
+  SUGAR_PERIOD_MS,
+} from './game/gear';
 import { awardGildOnZone, isGildZone } from './game/gild';
 import {
   buyTreeNode,
@@ -138,7 +158,17 @@ if (loaded) {
 
 // „Erbe der alten Tour" — one-time legacy-save inheritance (§9.2.3). Idempotent:
 // the `legacyImported` flag (persisted below) guarantees no double bonus.
-state = applyLegacyInheritance(state, loadGame());
+const legacySave = loadGame();
+state = applyLegacyInheritance(state, legacySave);
+// Redeem the Tyrann-skin claim even for players who already ran the one-time import
+// during M7–M10 (their `legacyImported` is already true, so the line above no-ops):
+// the archived legacy save is re-read every boot, so a `bossDefeated` tour latches
+// the persisted flag here too. A boolean latch — idempotent, self-healing.
+if (legacySave?.bossDefeated === true) state.legacyTyrann = true;
+
+// Seed the first Zuckerpfirsich to ripen 24 h after first play (§5.4); a migrated
+// or fresh gear slice arrives with `nextSugarAt: 0` (unseeded).
+if (state.gear.nextSugarAt === 0) state.gear.nextSugarAt = Date.now() + SUGAR_PERIOD_MS;
 
 // Seedable RNG for all gameplay rolls (crit now; loot/quests later). Resumes the
 // persisted stream so save-scumming a crit is impossible.
@@ -146,9 +176,9 @@ let rng = new Rng(state.rng);
 
 let combat: CombatState = spawnFor(state.zone, state.killsThisZone, state.runMaxZone);
 
-/** Extend a freshly-spawned boss timer by Chronilla's bonus (§4.6). No-op off-boss. */
+/** Extend a freshly-spawned boss timer by Chronilla + gear bossTimer (§4.6/§5). No-op off-boss. */
 function withBossTimerBonus(c: CombatState): CombatState {
-  const bonus = ancientBossTimerBonus(state.ancients);
+  const bonus = ancientBossTimerBonus(state.ancients) + bossTimerBonus(state.gear);
   return c.boss && bonus > 0 ? { ...c, bossTimer: c.bossTimer + bonus } : c;
 }
 combat = withBossTimerBonus(combat);
@@ -161,20 +191,36 @@ function recompute(): void {
 }
 recompute();
 
-/** Effective Ekstase charge threshold, lowered by Ekstasius (§4.6, ≤ 50 % off). */
+/**
+ * Effective Ekstase charge threshold, lowered by Ekstasius (§4.6) + Gyrator gear
+ * charge-reduction (§5). The combined reduction is clamped below 1 so a full
+ * Diamant `allPct` fold can never drive the meter to zero (≥ 10 charge always).
+ */
 function ekstaseChargeMax(): number {
-  return ABILITY_CHARGE_MAX * (1 - ancientEkstaseChargeReduction(state.ancients));
+  const reduction = Math.min(
+    0.9,
+    ancientEkstaseChargeReduction(state.ancients) + frenzyChargeReduction(state.gear),
+  );
+  return ABILITY_CHARGE_MAX * (1 - reduction);
 }
 
-// Offline accrual folds in the Twerk-Coach (25 % of click value × cps), the
-// Nachtschicht-raised cap (§4.3.5/§4.5.2) and Peachiel's gold mult (§4.6) — the
-// same kills as live play, so click-heavy/crewless builds earn consistently too.
-function offlineOpts(): { clickDmg: number; coachCps: number; capS: number; goldMult: number } {
+// Offline accrual folds in the Twerk-Coach (25 % of click value × cps) + Robo gear
+// cps, the Nachtschicht-raised cap + Beach gear cap, Peachiel × gold-gear mult, and
+// the Endless-Summer offline-rate bump (§4.3.5/§4.5.2/§5) — the same kills as live
+// play, so click-heavy/crewless builds earn consistently too.
+function offlineOpts(): {
+  clickDmg: number;
+  coachCps: number;
+  capS: number;
+  goldMult: number;
+  rateBonus: number;
+} {
   return {
     clickDmg,
-    coachCps: coachCps(state.heaven),
-    capS: offlineCapS(state.heaven),
-    goldMult: ancientGoldMult(state.ancients),
+    coachCps: coachCps(state.heaven) + coachCpsBonus(state.gear),
+    capS: offlineCapS(state.heaven) + offlineCapBonus(state.gear),
+    goldMult: ancientGoldMult(state.ancients) * goldGearMult(state.gear),
+    rateBonus: offlineRateBonus(state.gear),
   };
 }
 if (loaded) {
@@ -462,8 +508,8 @@ function onKillProgress(
   x?: number,
   y?: number,
 ): void {
-  // Peachiel (§4.6) multiplies kill gold.
-  const gold = Math.floor(r.gold * ancientGoldMult(state.ancients));
+  // Peachiel (§4.6) + gold-gear (§5) multiply kill gold.
+  const gold = Math.floor(r.gold * ancientGoldMult(state.ancients) * goldGearMult(state.gear));
   state.gold += gold;
   state.stats.goldLifetime += gold;
   if (wasBoss) state.stats.bossKills += 1;
@@ -494,7 +540,11 @@ function onKillProgress(
     // was the kill a boss? (advanced from a boss target)
     updateBackground();
     if (combat.zone % 5 === 1 && combat.zone > 1) {
-      toasts.show('🏆', `Boss besiegt!`, `Bühne ${combat.zone} erreicht`);
+      // Provisional pre-M12 🧩 faucet (§5.4): a boss kill grants a few Splitter,
+      // scaling gently with the cleared boss zone. M12's Truhen supply the real source.
+      const shards = bossShardReward(combat.zone - 1);
+      state.gear.shards += shards;
+      toasts.show('🏆', `Boss besiegt!`, `Bühne ${combat.zone} erreicht · +${shards} 🧩`);
       audio.bossWin();
       if (effects.screenShake) shakeMag = Math.max(shakeMag, SHAKE_BOSS_KILL);
       haptics.boss(effects.haptics);
@@ -505,8 +555,8 @@ function onKillProgress(
 
 function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void {
   const wasBoss = combat.boss;
-  // Glutaeus Maximus (§4.6) boosts damage dealt to a boss.
-  const effDmg = wasBoss ? dmg * ancientBossDmgMult(state.ancients) : dmg;
+  // Glutaeus Maximus (§4.6) + Tyrann/Krönung gear (§5) boost damage dealt to a boss.
+  const effDmg = wasBoss ? dmg * ancientBossDmgMult(state.ancients) * bossDmgMult(state.gear) : dmg;
   const r = hit(combat, effDmg);
   // A newly-spawned boss gets Chronilla's extra timer seconds.
   combat = r.bossSpawned ? withBossTimerBonus(r.state) : r.state;
@@ -532,23 +582,31 @@ function doShake(x?: number, y?: number): void {
   const onBeat = isOnBeat(
     choreo.phase,
     phaseVelocity(drive),
-    // Beatrix (§4.6) widens the on-beat window on top of the combo-tier bonus.
-    beatWindowMs(tierBeatWindowBonusMs(curTier) + ancientBeatWindowBonusMs(state.ancients)),
+    // Beatrix (§4.6) + Neon/Synth gear (§5) widen the on-beat window on top of the tier bonus.
+    beatWindowMs(
+      tierBeatWindowBonusMs(curTier) +
+        ancientBeatWindowBonusMs(state.ancients) +
+        beatWindowBonus(state.gear),
+    ),
   );
 
-  // Wackelias (§4.6) widens the combo grace window.
+  // Wackelias (§4.6) + Showmaster/Club gear (§5) widen the combo grace window.
   comboState = comboOnClick(
     comboState,
     onBeat,
-    COMBO_WINDOW_S + ancientComboWindowBonus(state.ancients),
+    COMBO_WINDOW_S + ancientComboWindowBonus(state.ancients) + comboWindowBonus(state.gear),
   );
   drive = Math.min(drive + 1.2, 6);
 
   const tier = comboTier(comboState.stacks);
-  // Cheeksana (§4.6) adds crit chance on top of the combo-tier bonus (40 % cap).
+  // Cheeksana (§4.6) + Disco gear (§5) add crit chance on top of the combo-tier bonus (40 % cap).
   const crit = rollCrit(
     rng.next(),
-    critChance(tierCritChanceBonus(tier) + ancientCritChanceBonus(state.ancients)),
+    critChance(
+      tierCritChanceBonus(tier) +
+        ancientCritChanceBonus(state.ancients) +
+        critChanceBonus(state.gear),
+    ),
   );
   if (crit) state.stats.crits += 1;
   if (onBeat) state.stats.onBeatClicks += 1;
@@ -560,8 +618,9 @@ function doShake(x?: number, y?: number): void {
     baseClick: clickDmg,
     combo: comboState.stacks,
     crit,
-    critMultBonus: tierCritMultBonus(tier),
-    extraMult: beatBonus(onBeat) * frenzyMult(state.ability, now),
+    // Combo-tier + Disco/Lava gear (§5) crit-mult; Neon-Ninja gear widens on-beat ×.
+    critMultBonus: tierCritMultBonus(tier) + critMultBonus(state.gear),
+    extraMult: beatBonus(onBeat, onBeatMultBonus(state.gear)) * frenzyMult(state.ability, now),
   });
   const px = x ?? window.innerWidth / 2;
   const py = y ?? window.innerHeight / 2;
@@ -603,8 +662,11 @@ function activateEkstase(): void {
   const now = Date.now();
   const chargeMax = ekstaseChargeMax();
   if (!canActivate(state.ability, chargeMax)) return;
-  // Ekstase-Ausdauer (§4.5.2) extends the ×10 window beyond the base 12 s.
-  const durationMs = FRENZY_DURATION_MS + ekstaseBonusMs(state.heaven);
+  // Ekstase-Ausdauer (§4.5.2) + Lava gear flat seconds extend the base window, then
+  // Gyrator gear scales the whole duration by (1 + frenzyDur) (§5).
+  const durationMs =
+    (FRENZY_DURATION_MS + ekstaseBonusMs(state.heaven) + frenzyDurSecBonus(state.gear) * 1000) *
+    (1 + frenzyDurBonus(state.gear));
   state.ability = activate(state.ability, now, chargeMax, durationMs);
   audio.unlockJingle();
   audio.setIntensity(3);
@@ -697,8 +759,9 @@ function loop(nowMs: number): void {
     }
   }
 
-  // Combo soft-decay (§4.2.2) + tier-driven juice (music/ability bar), each frame.
-  comboState = comboStep(comboState, dt);
+  // Combo soft-decay (§4.2.2, slowed by Showmaster gear §5) + tier-driven juice
+  // (music/ability bar), each frame.
+  comboState = comboStep(comboState, dt, comboDecayReduction(state.gear));
   const epochMs = Date.now();
   const tier = comboTier(comboState.stacks);
   const frenzy = isFrenzyActive(state.ability, epochMs);
@@ -728,6 +791,19 @@ function loop(nowMs: number): void {
   uiTimer -= dt;
   if (uiTimer <= 0) {
     uiTimer = 0.25;
+    // 🍬 faucet (§5.4): fold any ripened Zuckerpfirsiche into the gear slice (one per
+    // 24 h real-time; a backwards clock clamps, never a negative timer/count). Pure —
+    // `accrueSugar` returns the same ref when nothing matured, so this is cheap.
+    const sugarBefore = state.gear.sugarPeaches;
+    state.gear = accrueSugar(state.gear, epochMs);
+    const ripened = state.gear.sugarPeaches - sugarBefore;
+    if (ripened > 0) {
+      toasts.show(
+        '🍬',
+        'Zuckerpfirsich gereift!',
+        `+${ripened} 🍬 (${fmt(state.gear.sugarPeaches)} gesamt)`,
+      );
+    }
     document.title = titleFor(state.gold);
     hud.update(state, combat, dps, clickDmg);
     // keep the open shop tab's affordability/previews fresh while idling

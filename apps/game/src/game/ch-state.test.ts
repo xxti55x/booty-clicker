@@ -4,13 +4,16 @@ import { createAbility } from './ability';
 import { soulsForMaxZone } from './ascension';
 import {
   ascendState,
+  bossFirstKillZones,
   clickDamageOf,
   createChState,
   createComboSave,
   dpsOf,
+  gearUnlockCtx,
   himmelfahrtState,
 } from './ch-state';
 import { createAncients } from './ancients';
+import { createGear, skinUnlocked } from './gear';
 import { createHeaven } from './heaven';
 import { clickDamageRaw, totalRawDps } from './heroes';
 
@@ -47,6 +50,31 @@ describe('ch-state', () => {
     const global = 1 + 0.02 * 5; // 1.1
     expect(dpsOf(s)).toBeCloseTo(totalRawDps({ boss: 20 }) * soulM * 1.3 * global, 6);
     expect(clickDamageOf(s)).toBeCloseTo(clickDamageRaw({ boss: 20 }) * soulM * 1.2 * global, 6);
+  });
+
+  // M11-AC1: equipping a non-default skin/level/star folds deterministically into
+  // the derived DPS/click numbers (backs the equip-changes-numbers acceptance).
+  it('gear folds into dpsOf / clickDamageOf (§5 threading)', () => {
+    const base = { ...createChState(), crew: { boss: 20 } };
+    // Default classic/club gear is the empty (×1) bonus — numbers unchanged.
+    expect(dpsOf(base)).toBeCloseTo(totalRawDps({ boss: 20 }), 6);
+    expect(clickDamageOf(base)).toBeCloseTo(clickDamageRaw({ boss: 20 }), 6);
+
+    // Robo-Twerk lv 10 = +8 %/lvl crew-DPS ⇒ dpsGearMult ×1.8; click unaffected.
+    const robo = {
+      ...base,
+      gear: { ...createGear(), skin: 'robo' as const, skinLevels: { robo: 10 } },
+    };
+    expect(dpsOf(robo)).toBeCloseTo(totalRawDps({ boss: 20 }) * 1.8, 6);
+    expect(clickDamageOf(robo)).toBeCloseTo(clickDamageRaw({ boss: 20 }), 6);
+
+    // Classic lv 10 + 2⭐ = 0.4 + 0.2 = +60 % click ⇒ clickGearMult ×1.6; DPS unaffected.
+    const classic = {
+      ...base,
+      gear: { ...createGear(), skinLevels: { classic: 10 }, skinStars: { classic: 2 } },
+    };
+    expect(clickDamageOf(classic)).toBeCloseTo(clickDamageRaw({ boss: 20 }) * 1.6, 6);
+    expect(dpsOf(classic)).toBeCloseTo(totalRawDps({ boss: 20 }), 6);
   });
 
   it('ascending banks souls, resets the run, keeps totals', () => {
@@ -134,5 +162,75 @@ describe('ch-state', () => {
     expect(after.heaven.ascensions2).toBe(2);
     expect(after.heaven.tree).toEqual({ coach: 1 });
     expect(after.totalClicks).toBe(5000);
+  });
+
+  it('gear (skins/levels/stars) + the legacy-Tyrann latch survive L1 and Himmelfahrt', () => {
+    const gear = {
+      ...createGear(),
+      skin: 'boss' as const,
+      skinLevels: { boss: 20 },
+      skinStars: { boss: 3 },
+      shards: 200,
+      sugarPeaches: 5,
+    };
+    const s = {
+      ...createChState(),
+      zone: 60,
+      runMaxZone: 60,
+      lifetimeMaxZone: 60,
+      rsLifetime: 1_000_000,
+      gear,
+      legacyTyrann: true,
+    };
+    const asc = ascendState(s);
+    expect(asc.gear).toEqual(gear); // permanent meta — survives ascension
+    expect(asc.legacyTyrann).toBe(true);
+    const hf = himmelfahrtState(s);
+    expect(hf.gear).toEqual(gear); // survives Himmelfahrt too
+    expect(hf.legacyTyrann).toBe(true);
+  });
+});
+
+describe('ch-state — gear unlock context (§5.3)', () => {
+  it('derives boss-first-kills from lifetimeMaxZone (boss Z killed ⇔ zone > Z)', () => {
+    // lifetimeMaxZone 11 ⇒ bosses 5 and 10 cleared (advanced past), not 15.
+    expect(bossFirstKillZones({ lifetimeMaxZone: 11, legacyTyrann: false })).toEqual(
+      new Set([5, 10]),
+    );
+    // Exactly at a boss zone is NOT yet a first-kill (need to advance past it).
+    expect(bossFirstKillZones({ lifetimeMaxZone: 50, legacyTyrann: false })).not.toContain(50);
+    expect(bossFirstKillZones({ lifetimeMaxZone: 51, legacyTyrann: false })).toContain(50);
+  });
+
+  it('unions the legacy-Tyrann latch as zone 10 even at a shallow CH zone', () => {
+    const shallow = { lifetimeMaxZone: 1, legacyTyrann: true, heaven: createHeaven() };
+    expect(bossFirstKillZones(shallow)).toEqual(new Set([10]));
+    // ⇒ Tyrann unlocks; Lava (boss@50) stays locked.
+    expect(skinUnlocked('boss', gearUnlockCtx(shallow))).toBe(true);
+    expect(skinUnlocked('lava', gearUnlockCtx(shallow))).toBe(false);
+  });
+
+  it('maps Himmelfahrten and zone gates through gearUnlockCtx', () => {
+    const ctx = gearUnlockCtx({
+      lifetimeMaxZone: 25,
+      legacyTyrann: false,
+      heaven: { ...createHeaven(), ascensions2: 1 },
+    });
+    expect(ctx.lifetimeMaxZone).toBe(25);
+    expect(ctx.himmelfahrten).toBe(1);
+    expect(skinUnlocked('robo', ctx)).toBe(true); // zone ≥ 15
+    expect(skinUnlocked('host', ctx)).toBe(true); // zone ≥ 25
+    expect(skinUnlocked('gyrator', ctx)).toBe(true); // ≥ 1 Himmelfahrt
+    expect(skinUnlocked('boss', ctx)).toBe(true); // boss@10 cleared (25 > 10)
+    expect(skinUnlocked('lava', ctx)).toBe(false); // boss@50 not yet reached
+    expect(skinUnlocked('diamond', ctx)).toBe(false); // Transzendenz-locked (M14)
+
+    // A shallow, non-legacy run keeps the boss-kill skins locked.
+    const shallow = gearUnlockCtx({
+      lifetimeMaxZone: 8,
+      legacyTyrann: false,
+      heaven: createHeaven(),
+    });
+    expect(skinUnlocked('boss', shallow)).toBe(false); // boss@10 not killed, no legacy claim
   });
 });

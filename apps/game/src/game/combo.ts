@@ -60,11 +60,20 @@ export function comboOnClick(
  * Modelled continuously so it is frame-rate independent: an exponential regime
  * (base `1 − rate`) while the 20 % loss exceeds the floor (stacks > 5), then a
  * linear −1/s regime below. Never a hard reset.
+ *
+ * `reduction` (0…1, e.g. Showmaster stars −4 %/⭐) scales BOTH decay rates down by
+ * `(1 − reduction)`, so the shape (and the stacks-5 threshold, their ratio) is
+ * preserved and a fully-immune combo (reduction ≥ 1) simply never bleeds. Defaults
+ * to 0 so existing callers are unaffected.
  */
-export function decay(stacks: number, seconds: number): number {
+export function decay(stacks: number, seconds: number, reduction = 0): number {
   if (!(stacks > 0) || !(seconds > 0)) return Math.max(0, stacks);
-  const base = 1 - COMBO_DECAY_PER_S; // 0.8
-  const threshold = COMBO_DECAY_MIN_PER_S / COMBO_DECAY_PER_S; // 5
+  const scale = 1 - Math.max(0, Math.min(1, reduction));
+  const perS = COMBO_DECAY_PER_S * scale; // 0.2·scale
+  const minPerS = COMBO_DECAY_MIN_PER_S * scale; // 1·scale
+  if (perS <= 0) return stacks; // reduction ≥ 1 ⇒ no decay
+  const base = 1 - perS;
+  const threshold = minPerS / perS; // 5 (scale cancels)
   let s = stacks;
   let t = seconds;
   if (s > threshold) {
@@ -74,19 +83,20 @@ export function decay(stacks: number, seconds: number): number {
     s = threshold;
     t -= tToThreshold;
   }
-  return Math.max(0, s - COMBO_DECAY_MIN_PER_S * t);
+  return Math.max(0, s - minPerS * t);
 }
 
 /**
  * Advance the combo by `dt` seconds: spend the grace window first; any time
- * beyond it soft-decays the stacks. Pure — the glue keeps no combo timer of
- * its own.
+ * beyond it soft-decays the stacks (scaled down by `decayReduction`, e.g. from
+ * Showmaster stars). Pure — the glue keeps no combo timer of its own. `decayReduction`
+ * defaults to 0 so existing callers are unaffected.
  */
-export function comboStep(state: ComboState, dt: number): ComboState {
+export function comboStep(state: ComboState, dt: number, decayReduction = 0): ComboState {
   if (!(dt > 0)) return state;
   const window = state.window - dt;
   if (window >= 0) return { stacks: state.stacks, window };
-  return { stacks: decay(state.stacks, -window), window: 0 };
+  return { stacks: decay(state.stacks, -window, decayReduction), window: 0 };
 }
 
 /**

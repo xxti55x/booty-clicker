@@ -10,6 +10,7 @@ import {
 } from '../game/heroes';
 import { soulMult } from '../game/ascension';
 import { ancientDpsMult } from '../game/ancients';
+import { dpsGearMult } from '../game/gear';
 import { heavenGlobalMult, soulBonusEff } from '../game/heaven';
 import { fmt } from './format';
 
@@ -84,7 +85,8 @@ export class Crew {
     const mult =
       soulMult(s.souls, soulBonusEff(s.heaven.hpf)) *
       ancientDpsMult(s.ancients) *
-      heavenGlobalMult(s.heaven.hpf);
+      heavenGlobalMult(s.heaven.hpf) *
+      dpsGearMult(s.gear); // keep the per-hero display in lockstep with dpsOf (§5)
     const rows: string[] = [];
     CREW.forEach((cfg, i) => {
       if (!this.revealed(i)) return;

@@ -9,6 +9,7 @@
 import { type AbilityState, createAbility } from './ability';
 import { applyAscension, soulMult } from './ascension';
 import { type AncientLevels, ancientClickMult, ancientDpsMult, createAncients } from './ancients';
+import { type GearState, type UnlockCtx, clickGearMult, createGear, dpsGearMult } from './gear';
 import { type Gilds, createGilds } from './gild';
 import {
   type HeavenState,
@@ -98,6 +99,14 @@ export interface ChState {
   ancients: AncientLevels;
   /** Prestige layer 2 — Himmelspfirsiche + Himmelsbaum (CH-save v5, §4.5.2). */
   heaven: HeavenState;
+  /** Skins-as-Gear slice: equipped skin/kulisse + level/star progress (CH-save v6, §5). */
+  gear: GearState;
+  /**
+   * Legacy Tyrann-skin claim latch (§9.2.3): a `bossDefeated` old-save unlocks the
+   * Goldener Twerk-Tyrann even at a shallow CH zone. A persisted boolean unioned into
+   * the boss-first-kill unlock context; set once at boot, survives everything.
+   */
+  legacyTyrann: boolean;
 }
 
 /** A brand-new run/profile. */
@@ -120,16 +129,25 @@ export function createChState(): ChState {
     rsLifetime: 0,
     ancients: createAncients(),
     heaven: createHeaven(),
+    gear: createGear(),
+    legacyTyrann: false,
   };
 }
 
-/** The fields the derived combat numbers depend on. */
-type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'heaven'>;
+/**
+ * The fields the derived combat numbers depend on. `gear` is optional so callers
+ * (and older tests) that don't supply it still fold correctly — a missing gear
+ * contributes the empty (×1) bonus, matching a fresh classic/club default.
+ */
+type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'heaven'> & {
+  gear?: GearState;
+};
 
 /**
  * Total crew DPS: raw crew (with gilds) × the held-soul multiplier (amplified by
- * held HPF) × Poposeidon's Ancient DPS mult × the +2 %/HPF global mult. Idle DPS
- * never draws crit/combo/beat/frenzy — active clicking stays king (P1).
+ * held HPF) × Poposeidon's Ancient DPS mult × the +2 %/HPF global mult × the gear
+ * DPS mult (§5). Idle DPS never draws crit/combo/beat/frenzy — active clicking
+ * stays king (P1).
  */
 export function dpsOf(state: DerivedInput): number {
   const hpf = state.heaven.hpf;
@@ -137,13 +155,15 @@ export function dpsOf(state: DerivedInput): number {
     totalRawDps(state.crew, state.gilds) *
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientDpsMult(state.ancients) *
-    heavenGlobalMult(hpf)
+    heavenGlobalMult(hpf) *
+    (state.gear ? dpsGearMult(state.gear) : 1)
   );
 }
 
 /**
  * Click (shake) damage before crit/combo/beat/frenzy: raw click × held-soul mult
- * (HPF-amplified) × Twerkules' Ancient click mult × the +2 %/HPF global mult.
+ * (HPF-amplified) × Twerkules' Ancient click mult × the +2 %/HPF global mult × the
+ * gear click mult (§5 — the strongest gear buffs are click buffs, P1).
  */
 export function clickDamageOf(state: DerivedInput): number {
   const hpf = state.heaven.hpf;
@@ -151,8 +171,42 @@ export function clickDamageOf(state: DerivedInput): number {
     clickDamageRaw(state.crew, state.gilds) *
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientClickMult(state.ancients) *
-    heavenGlobalMult(hpf)
+    heavenGlobalMult(hpf) *
+    (state.gear ? clickGearMult(state.gear) : 1)
   );
+}
+
+/**
+ * Boss zones whose boss has been first-killed, for the gear unlock context (§5.3).
+ * Normal play: a boss zone Z (multiple of 5) is first-killed ⇔ `lifetimeMaxZone > Z`
+ * (advancing past it as a new record). The legacy Tyrann claim (§9.2.3) is unioned
+ * in as zone 10 so a `bossDefeated` old-save unlocks Tyrann even at a shallow CH zone.
+ */
+export function bossFirstKillZones(
+  state: Pick<ChState, 'lifetimeMaxZone' | 'legacyTyrann'>,
+): Set<number> {
+  const zones = new Set<number>();
+  for (let z = 5; z < state.lifetimeMaxZone; z += 5) zones.add(z);
+  if (state.legacyTyrann) zones.add(10);
+  return zones;
+}
+
+/**
+ * Build the pure gear-unlock context (§5.3) from the CH-state: zone gate from
+ * `lifetimeMaxZone`, boss-first-kills from `bossFirstKillZones` (incl. the legacy
+ * Tyrann claim), Himmelfahrten from the L2 count. `crafted` is empty until M12's
+ * Truhen supply craftable skins (Neon-Ninja/Pfirsich-Pirat stay locked for now).
+ * Consumed by `skinUnlocked` in the glue and part 3's equip UI.
+ */
+export function gearUnlockCtx(
+  state: Pick<ChState, 'lifetimeMaxZone' | 'legacyTyrann' | 'heaven'>,
+): UnlockCtx {
+  return {
+    lifetimeMaxZone: state.lifetimeMaxZone,
+    bossFirstKills: bossFirstKillZones(state),
+    himmelfahrten: state.heaven.ascensions2,
+    crafted: new Set<string>(),
+  };
 }
 
 /**
@@ -181,6 +235,8 @@ export function ascendState(state: ChState): ChState {
     gilds: state.gilds,
     ancients: state.ancients, // Ancients survive L1 (§4.5 reset table)
     heaven: state.heaven, // L2 state survives L1
+    gear: state.gear, // skins/levels/stars are permanent meta (§5) — survive L1
+    legacyTyrann: state.legacyTyrann,
   };
 }
 
@@ -200,5 +256,7 @@ export function himmelfahrtState(state: ChState): ChState {
     rng: state.rng,
     stats: state.stats,
     legacyImported: state.legacyImported,
+    gear: state.gear, // skins/levels/stars are permanent meta (§5) — survive Himmelfahrt
+    legacyTyrann: state.legacyTyrann,
   };
 }

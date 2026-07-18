@@ -58,6 +58,18 @@ describe('decay (soft-decay, spec §4.2.2)', () => {
       prev = s;
     }
   });
+
+  it('slows with a gear decay-reduction (Showmaster stars), immune at ≥ 1', () => {
+    // 20 % → 16 %/s at reduction 0.2 (base 0.84); the stacks-5 threshold is preserved.
+    expect(decay(100, 1, 0.2)).toBeCloseTo(84, 9);
+    expect(decay(100, 2, 0.2)).toBeCloseTo(84 * 0.84, 9);
+    // Small-combo floor scales too: −1/s → −0.8/s at reduction 0.2.
+    expect(decay(3, 1, 0.2)).toBeCloseTo(3 - 0.8, 9);
+    // Full immunity ⇒ no bleed at all.
+    expect(decay(100, 100, 1)).toBe(100);
+    // A stronger reduction never bleeds faster than a weaker one.
+    expect(decay(80, 2, 0.4)).toBeGreaterThanOrEqual(decay(80, 2, 0));
+  });
 });
 
 describe('comboStep', () => {
@@ -79,6 +91,14 @@ describe('comboStep', () => {
   it('is a no-op for non-positive dt', () => {
     const c = { stacks: 10, window: 1 };
     expect(comboStep(c, 0)).toBe(c);
+  });
+
+  it('forwards a gear decay-reduction into the decay past the window', () => {
+    const c = { stacks: 100, window: 0.2 };
+    const stepped = comboStep(c, 1.2, 0.3); // 0.2 s window + 1.0 s decay at 30 % slower
+    expect(stepped.stacks).toBeCloseTo(decay(100, 1.0, 0.3), 9);
+    // Slower than the un-reduced decay over the same time.
+    expect(stepped.stacks).toBeGreaterThan(comboStep(c, 1.2).stacks);
   });
 });
 

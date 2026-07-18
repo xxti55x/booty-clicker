@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { createChState } from './ch-state';
+import { createChState, gearUnlockCtx } from './ch-state';
+import { skinUnlocked } from './gear';
 import { applyLegacyInheritance, LEGACY_RS_PER_REBIRTH } from './legacy-import';
 import type { SaveDataV4 } from '../save/schema';
 
@@ -71,5 +72,20 @@ describe('applyLegacyInheritance (Erbe der alten Tour)', () => {
     expect(applyLegacyInheritance(createChState(), legacySave(0)).souls).toBe(0);
     expect(applyLegacyInheritance(createChState(), legacySave(-3)).souls).toBe(0);
     expect(applyLegacyInheritance(createChState(), legacySave(Number.NaN)).souls).toBe(0);
+  });
+
+  // AC3 (§5, §9.2.3): a bossDefeated legacy tour ⇒ the Tyrann skin is unlocked from
+  // M11 on, even at a shallow CH zone (the persisted latch feeds the unlock context).
+  it('AC3: a bossDefeated legacy save latches legacyTyrann ⇒ Tyrann unlocked', () => {
+    const after = applyLegacyInheritance(createChState(), legacySave(0, { bossDefeated: true }));
+    expect(after.legacyTyrann).toBe(true);
+    // Fresh CH run (lifetimeMaxZone 1) — normally no boss kills — yet Tyrann unlocks.
+    expect(skinUnlocked('boss', gearUnlockCtx(after))).toBe(true);
+  });
+
+  it('a legacy save WITHOUT bossDefeated leaves Tyrann locked', () => {
+    const after = applyLegacyInheritance(createChState(), legacySave(2, { bossDefeated: false }));
+    expect(after.legacyTyrann).toBe(false);
+    expect(skinUnlocked('boss', gearUnlockCtx(after))).toBe(false);
   });
 });

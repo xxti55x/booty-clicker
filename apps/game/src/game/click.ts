@@ -68,9 +68,13 @@ export function rollCrit(rngFloat: number, chance: number = CRIT_CHANCE): boolea
   return rngFloat < chance;
 }
 
-/** Multiplicative bonus for a click landed on the beat (§4.2.3). */
-export function beatBonus(onBeat: boolean): number {
-  return onBeat ? ON_BEAT_MULT : 1;
+/**
+ * Multiplicative bonus for a click landed on the beat (§4.2.3): `ON_BEAT_MULT`
+ * plus a gear/tier `bonus` (Neon-Ninja stars raise ×1.5 → ×1.6 per ⭐). Off-beat
+ * clicks always ×1. `bonus` defaults to 0 so existing callers are unaffected.
+ */
+export function beatBonus(onBeat: boolean, bonus = 0): number {
+  return onBeat ? ON_BEAT_MULT + Math.max(0, bonus) : 1;
 }
 
 /** Instantaneous choreography phase velocity (phase-units/sec) for a given drive. */

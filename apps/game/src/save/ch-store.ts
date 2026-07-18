@@ -13,13 +13,16 @@ import {
   createComboSave,
   createStats,
 } from '../game/ch-state';
+import { type GearState, KULISSE_BUFFS, createGear } from '../game/gear';
 import { type Gilds, createGilds } from '../game/gild';
 import { COACH_CLICK_SHARE, type HeavenState, createHeaven } from '../game/heaven';
 import type { CrewLevels } from '../game/heroes';
+import { SKINS } from '../character/skins';
+import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 5;
+export const CH_SCHEMA = 6;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -49,7 +52,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (M10, v5): the live ChState + envelope. */
+/** The current persisted shape (M11, v6): the live ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -185,6 +188,52 @@ function repairHeaven(v: unknown): HeavenState {
   return { hpf, hpfLifetime, ascensions2: nn(v.ascensions2), tree };
 }
 
+/** Keep only non-negative-finite level/star counts (junk values dropped), else empty. */
+function repairCountMap(v: unknown): Record<string, number> {
+  if (!isRecord(v)) return {};
+  const out: Record<string, number> = {};
+  for (const [id, n] of Object.entries(v)) if (isFiniteNumber(n) && n >= 0) out[id] = Math.floor(n);
+  return out;
+}
+
+/**
+ * Repair the persisted gear slice (v6): each sub-field is validated with
+ * `Object.hasOwn` discipline and, if corrupt/absent, falls to its `createGear`
+ * default — a bad `skin`/`bg` key, non-boolean `bgAuto`, junk level/star maps,
+ * negative shards/sugar or a NaN `nextSugarAt` are all repaired **in isolation**,
+ * so real progress (valid levels/stars) is never nuked. A wholly non-object gear
+ * (or missing gear) becomes a fresh `createGear()`. Never throws.
+ */
+function repairGear(v: unknown): GearState {
+  const def = createGear();
+  if (!isRecord(v)) return def;
+  // `Object.hasOwn`, not `in` — a save with skin:"toString" must not sneak through.
+  const skin: SkinKey =
+    typeof v.skin === 'string' && Object.hasOwn(SKINS, v.skin) ? (v.skin as SkinKey) : def.skin;
+  const bg: BackgroundKey =
+    typeof v.bg === 'string' && Object.hasOwn(KULISSE_BUFFS, v.bg)
+      ? (v.bg as BackgroundKey)
+      : def.bg;
+  const bgAuto = typeof v.bgAuto === 'boolean' ? v.bgAuto : def.bgAuto;
+  const shards = isFiniteNumber(v.shards) && v.shards >= 0 ? Math.floor(v.shards) : def.shards;
+  const sugarPeaches =
+    isFiniteNumber(v.sugarPeaches) && v.sugarPeaches >= 0
+      ? Math.floor(v.sugarPeaches)
+      : def.sugarPeaches;
+  const nextSugarAt =
+    isFiniteNumber(v.nextSugarAt) && v.nextSugarAt >= 0 ? v.nextSugarAt : def.nextSugarAt;
+  return {
+    skin,
+    bg,
+    bgAuto,
+    skinLevels: repairCountMap(v.skinLevels),
+    skinStars: repairCountMap(v.skinStars),
+    shards,
+    sugarPeaches,
+    nextSugarAt,
+  };
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
 function stateFromSave(save: ChSaveLatest): ChState {
   const souls = save.souls;
@@ -210,6 +259,8 @@ function stateFromSave(save: ChSaveLatest): ChState {
     rsLifetime: Math.max(repairRsLifetime(save.rsLifetime), souls),
     ancients: repairAncients(save.ancients),
     heaven: repairHeaven(save.heaven),
+    gear: repairGear(save.gear),
+    legacyTyrann: save.legacyTyrann === true,
   };
 }
 
@@ -270,11 +321,26 @@ function migrateChV4toV5(raw: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+/**
+ * v5 → v6: fill the M11 default — a fresh gear slice (classic/club Tour-Modus, no
+ * levels/stars, `nextSugarAt: 0`). The unseeded timer is seeded to `now + 24 h` by
+ * the glue on the first boot. The legacy Tyrann latch (`legacyTyrann`) is a meta
+ * field defaulted by `stateFromSave`, so it needs no explicit migration step.
+ */
+function migrateChV5toV6(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    v: 6,
+    gear: createGear(),
+  };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
   3: migrateChV3toV4,
   4: migrateChV4toV5,
+  5: migrateChV5toV6,
 };
 
 /**
@@ -400,6 +466,11 @@ export interface OfflineOpts {
    * rival kills as live play, so the +10 %/lv gold ancient applies here too.
    */
   goldMult?: number;
+  /**
+   * Offline-efficiency bonus added to the `OFFLINE_EFF` base (Endless Summer set,
+   * §5.5 — defaults to 0). The effective rate is capped at 1 (full live rate).
+   */
+  rateBonus?: number;
 }
 
 /**
@@ -423,7 +494,9 @@ export function offlineGold(
   const seconds = Math.min(elapsedMs / 1000, capS);
   const killsPerSec = effectiveDps / monsterHp(zone);
   const goldPerSec = killsPerSec * goldFor(zone, false) * Math.max(0, opts.goldMult ?? 1);
-  return Math.floor(goldPerSec * seconds * OFFLINE_EFF);
+  // Idle efficiency: 50 % base, raised by gear (Endless Summer set), capped at 100 %.
+  const eff = Math.min(1, OFFLINE_EFF + Math.max(0, opts.rateBonus ?? 0));
+  return Math.floor(goldPerSec * seconds * eff);
 }
 
 /**

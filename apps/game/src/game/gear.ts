@@ -370,6 +370,39 @@ export function maturedSugar(
   return { ripened, nextSugarAt: next + ripened * SUGAR_PERIOD_MS };
 }
 
+/**
+ * Apply matured sugar to a gear slice at `now` (the 🍬 faucet, §5.4): fold any
+ * ripened Zuckerpfirsiche into `sugarPeaches` and advance/clamp `nextSugarAt`.
+ * Returns the SAME reference when nothing changed (no ripening, no clamp needed),
+ * else a new slice — so the glue can cheaply skip a persist. Pure; the loop injects
+ * `now`. All other gear fields (skin/levels/stars/shards) pass through untouched.
+ */
+export function accrueSugar(gear: GearState, now: number): GearState {
+  const { ripened, nextSugarAt } = maturedSugar(gear.nextSugarAt, now);
+  if (ripened === 0 && nextSugarAt === gear.nextSugarAt) return gear;
+  return { ...gear, sugarPeaches: gear.sugarPeaches + ripened, nextSugarAt };
+}
+
+// ---------------------------------------------------------------------------
+// Shard faucet (PROVISIONAL, pre-M12) — spec §5.4/§6.1
+// ---------------------------------------------------------------------------
+
+/** Base 🧩 a boss kill grants before the gentle per-zone bump (provisional). */
+export const BOSS_SHARD_BASE = 3;
+
+/**
+ * PROVISIONAL pre-M12 Pfirsich-Splitter (🧩) faucet: a boss kill grants
+ * `BOSS_SHARD_BASE + ⌊zone / 10⌋` shards (zone = the cleared boss zone), scaling
+ * gently so deeper bosses pay a little more (boss@10 ⇒ 4, boss@50 ⇒ 8). This exists
+ * only so the level economy (`shardCost`) is playable before M12's Pfirsich-Truhen
+ * supply the real 🧩 source (§6.1: guaranteed chest per boss kill); M12 replaces it.
+ * Pure & clamped (a non-positive zone yields 0).
+ */
+export function bossShardReward(zone: number): number {
+  if (!(zone > 0)) return 0;
+  return BOSS_SHARD_BASE + Math.floor(zone / 10);
+}
+
 // ---------------------------------------------------------------------------
 // Unlock gating (spec §5.1/§5.3) — pure
 // ---------------------------------------------------------------------------

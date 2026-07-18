@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { ABILITY_CHARGE_MAX, createAbility } from '../game/ability';
 import { pendingSouls, soulsForMaxZone } from '../game/ascension';
 import { type ChState, createChState, createComboSave, createStats } from '../game/ch-state';
+import { createGear } from '../game/gear';
 import { monsterHp } from '../game/combat';
 import {
   CH_SAVE_KEY,
@@ -171,7 +172,7 @@ describe('ch-store — v2 migration & repair', () => {
 
   it('rejects unknown / future versions to a clean fresh start', () => {
     const store = memStorage();
-    store.setItem(CH_SAVE_KEY, JSON.stringify({ v: 6, gold: 0 }));
+    store.setItem(CH_SAVE_KEY, JSON.stringify({ v: 7, gold: 0 }));
     expect(loadCh(store)).toBeNull();
     store.setItem(CH_SAVE_KEY, JSON.stringify({ v: 0, gold: 0 }));
     expect(loadCh(store)).toBeNull();
@@ -329,6 +330,134 @@ describe('ch-store — v5 migration & repair (M10)', () => {
     const s = deserializeCh(JSON.stringify(raw));
     expect(s!.heaven.hpf).toBe(10); // clamped to hpfLifetime
     expect(s!.heaven.tree).toEqual({ coach: 5 });
+  });
+});
+
+describe('ch-store — v6 migration & repair (M11)', () => {
+  it('migrates a v5 blob losslessly into v6 (gear default, all v5 fields intact)', () => {
+    const store = memStorage();
+    const v5 = {
+      v: 5,
+      lastSeen: 12000,
+      gold: 3000,
+      zone: 40,
+      killsThisZone: 2,
+      runMaxZone: 40,
+      crew: { boss: 22, legend: 3 },
+      souls: 100,
+      lifetimeMaxZone: 40,
+      totalClicks: 900,
+      rng: { seed: 444, cursor: 88 },
+      stats: { ...createStats(), crits: 33 },
+      legacyImported: true,
+      ability: createAbility(),
+      combo: { stacks: 40 },
+      gilds: { boss: 5 },
+      rsLifetime: 100,
+      ancients: { twerkules: 8 },
+      heaven: { hpf: 2, hpfLifetime: 5, ascensions2: 1, tree: { coach: 3 } },
+    };
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v5));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    // v5 fields carried through losslessly.
+    expect(s.gold).toBe(3000);
+    expect(s.crew).toEqual({ boss: 22, legend: 3 });
+    expect(s.souls).toBe(100);
+    expect(s.ancients).toEqual({ twerkules: 8 });
+    expect(s.heaven).toEqual({ hpf: 2, hpfLifetime: 5, ascensions2: 1, tree: { coach: 3 } });
+    expect(s.gilds).toEqual({ boss: 5 });
+    // v6 default added — a fresh classic/club Tour-Modus gear slice, and the
+    // legacy-Tyrann latch defaults false (no legacy import inferred at load).
+    expect(s.gear).toEqual(createGear());
+    expect(s.legacyTyrann).toBe(false);
+  });
+
+  it('round-trips gear (skin/level/star/shards/sugar) through a v6 save', () => {
+    const store = memStorage();
+    const s = {
+      ...createChState(),
+      zone: 20,
+      runMaxZone: 20,
+      lifetimeMaxZone: 20,
+      legacyTyrann: true,
+      gear: {
+        skin: 'disco' as const,
+        bg: 'synth' as const,
+        bgAuto: false,
+        skinLevels: { disco: 10, classic: 3 },
+        skinStars: { disco: 2 },
+        shards: 140,
+        sugarPeaches: 4,
+        nextSugarAt: 1_800_000_000_000,
+      },
+    };
+    saveCh(s, 5000, store);
+    const loaded = loadCh(store);
+    expect(loaded!.state.gear).toEqual(s.gear);
+    expect(loaded!.state.legacyTyrann).toBe(true);
+  });
+
+  it('repairs a wholly corrupt gear slice to createGear() defaults (never nukes progress)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.gear = 'garbage';
+    // Real progress on OTHER slices must survive the gear repair.
+    raw.souls = 42;
+    raw.crew = { boss: 7 };
+    let s: ChState | null = null;
+    expect(() => {
+      s = deserializeCh(JSON.stringify(raw));
+    }).not.toThrow();
+    expect(s).not.toBeNull();
+    expect(s!.gear).toEqual(createGear());
+    expect(s!.souls).toBe(42);
+    expect(s!.crew).toEqual({ boss: 7 });
+  });
+
+  it('repairs corrupt gear SUB-fields in isolation (valid levels/stars preserved)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.gear = {
+      skin: 'toString', // not a real SkinKey (Object.hasOwn discipline) ⇒ classic
+      bg: 'nope', // not a real kulisse ⇒ club
+      bgAuto: 'yes', // not a boolean ⇒ default true
+      skinLevels: { host: 12, junk: 'x', neg: -3 }, // keep host:12, drop junk/neg
+      skinStars: { host: 3 },
+      shards: -50, // negative ⇒ 0
+      sugarPeaches: 2.9, // floored ⇒ 2
+      nextSugarAt: Number.NaN, // NaN ⇒ 0 (glue re-seeds)
+    };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.gear.skin).toBe('classic');
+    expect(s!.gear.bg).toBe('club');
+    expect(s!.gear.bgAuto).toBe(true);
+    expect(s!.gear.skinLevels).toEqual({ host: 12 }); // real progress preserved
+    expect(s!.gear.skinStars).toEqual({ host: 3 });
+    expect(s!.gear.shards).toBe(0);
+    expect(s!.gear.sugarPeaches).toBe(2);
+    expect(s!.gear.nextSugarAt).toBe(0);
+  });
+
+  it('migrates a v1 blob all the way through to v6 (gear default present)', () => {
+    const store = memStorage();
+    const v1 = {
+      v: 1,
+      lastSeen: 5000,
+      gold: 500,
+      zone: 12,
+      killsThisZone: 3,
+      runMaxZone: 12,
+      crew: { boss: 5 },
+      souls: 3,
+      lifetimeMaxZone: 12,
+      totalClicks: 42,
+    };
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v1));
+    const s = loadCh(store)!.state;
+    expect(s.gold).toBe(500);
+    expect(s.gear).toEqual(createGear());
+    expect(s.legacyTyrann).toBe(false);
   });
 });
 
@@ -526,6 +655,23 @@ describe('ch-store — offline gold', () => {
     // Defaults to ×1 and guards a nonsense negative multiplier.
     expect(offlineGold(dps, 5, 3600_000, { goldMult: 1 })).toBe(base);
     expect(offlineGold(dps, 5, 3600_000, { goldMult: -2 })).toBe(0);
+  });
+
+  // Endless Summer set (§5.5): the offline efficiency rises above the 50 % base,
+  // capped at the full live rate (100 %). A nonsense negative bonus is guarded.
+  it('applies the gear offline-rate bonus (base 50 %, capped at 100 %)', () => {
+    const dps = monsterHp(5) * 2;
+    const base = offlineGold(dps, 5, 3600_000);
+    const boosted = offlineGold(dps, 5, 3600_000, { rateBonus: 0.15 });
+    // 65 % / 50 % = 1.3× the base throughput.
+    expect(boosted).toBeCloseTo(base * (0.65 / OFFLINE_EFF), -1);
+    expect(boosted).toBeGreaterThan(base);
+    // Clamped at 100 %: a huge bonus never exceeds full live-rate accrual.
+    const full = offlineGold(dps, 5, 3600_000, { rateBonus: 5 });
+    expect(full).toBe(Math.floor(base / OFFLINE_EFF));
+    // Guards + defaults.
+    expect(offlineGold(dps, 5, 3600_000, { rateBonus: 0 })).toBe(base);
+    expect(offlineGold(dps, 5, 3600_000, { rateBonus: -2 })).toBe(base);
   });
 
   it('a raised offline cap (Nachtschicht) lets more time accrue', () => {

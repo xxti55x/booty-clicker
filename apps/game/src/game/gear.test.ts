@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { BuffStat } from '../types';
 import {
+  accrueSugar,
   activeSets,
   beatWindowBonus,
+  BOSS_SHARD_BASE,
   bossDmgMult,
+  bossShardReward,
   chestLuckBonus,
   clickGearMult,
   coachCpsBonus,
@@ -252,6 +255,48 @@ describe('gear — sugar maturation (backwards-clock safe, AC2)', () => {
     expect(maturedSugar(NaN, now).ripened).toBe(0);
     // Never a negative count regardless of how far back the clock jumped.
     expect(maturedSugar(now, now - 5 * SUGAR_PERIOD_MS).ripened).toBe(0);
+  });
+});
+
+describe('gear — sugar faucet (accrueSugar, injected clock)', () => {
+  const now = 1_700_000_000_000;
+
+  it('folds one ripened 🍬 into the slice per 24 h and advances the timer', () => {
+    const g = { ...createGear(), sugarPeaches: 2, nextSugarAt: now };
+    const one = accrueSugar(g, now);
+    expect(one.sugarPeaches).toBe(3);
+    expect(one.nextSugarAt).toBe(now + SUGAR_PERIOD_MS);
+    // 2.5 periods later ⇒ +3 (from the freshly-advanced timer).
+    const more = accrueSugar(one, now + 3.5 * SUGAR_PERIOD_MS);
+    expect(more.sugarPeaches).toBe(6);
+    expect(more.nextSugarAt).toBe(now + 4 * SUGAR_PERIOD_MS);
+  });
+
+  it('is a no-op (same reference) before the timer ripens', () => {
+    const g = { ...createGear(), sugarPeaches: 1, nextSugarAt: now + SUGAR_PERIOD_MS };
+    expect(accrueSugar(g, now)).toBe(g); // unchanged ref — nothing matured, no clamp
+  });
+
+  it('clamps a far-future timer (clock forward then back) without a negative/added count', () => {
+    const g = { ...createGear(), sugarPeaches: 3, nextSugarAt: now + 100 * SUGAR_PERIOD_MS };
+    const clamped = accrueSugar(g, now);
+    expect(clamped.sugarPeaches).toBe(3); // no phantom ripening
+    expect(clamped.nextSugarAt).toBe(now + SUGAR_PERIOD_MS); // clamped, persisted
+    expect(clamped).not.toBe(g); // changed ref because the timer was repaired
+  });
+});
+
+describe('gear — shard faucet (provisional pre-M12)', () => {
+  it('grants BOSS_SHARD_BASE + ⌊zone/10⌋ per boss kill, clamped', () => {
+    expect(bossShardReward(10)).toBe(BOSS_SHARD_BASE + 1); // 4
+    expect(bossShardReward(50)).toBe(BOSS_SHARD_BASE + 5); // 8
+    expect(bossShardReward(5)).toBe(BOSS_SHARD_BASE); // 3
+    expect(bossShardReward(0)).toBe(0);
+    expect(bossShardReward(-5)).toBe(0);
+    // Monotonic non-decreasing in the boss zone.
+    for (let z = 5; z <= 200; z += 5) {
+      expect(bossShardReward(z + 5)).toBeGreaterThanOrEqual(bossShardReward(z));
+    }
   });
 });
 
