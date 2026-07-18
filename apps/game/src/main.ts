@@ -100,6 +100,7 @@ import { Ancients } from './ui/ancients';
 import { ChHud } from './ui/ch-hud';
 import { ChSettings } from './ui/ch-settings';
 import { Crew } from './ui/crew';
+import { Gear } from './ui/gear-panel';
 import { Heaven } from './ui/heaven-panel';
 import { Haptics } from './ui/haptics';
 import { Pops } from './ui/pops';
@@ -234,10 +235,16 @@ const world = new World(scene, skyMat, floorMat, glowSprite);
 const audio = new AudioEngine();
 const beatTracker = new BeatTracker();
 const choreo = new Choreographer();
-const char: CharacterInstance = buildCharacter(scene, SKINS.classic);
-let currentBg = bgForZone(combat.zone);
+// The equipped skin drives the 3D rig now (§5) — no longer always classic.
+let char: CharacterInstance = buildCharacter(scene, SKINS[state.gear.skin]);
+// Kulisse (§5.5): in Tour-Modus (`bgAuto`) the background rotates with the zone tier;
+// otherwise the manually chosen `gear.bg` is fixed. Keep `gear.bg` in lockstep with
+// what's on screen so the kulisse mini-buff + set detection match the view.
+let currentBg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
+if (state.gear.bgAuto) state.gear.bg = currentBg;
 world.setBackground(currentBg);
 audio.setBackground(currentBg);
+recompute(); // fold the (possibly view-synced) kulisse buff into the derived numbers
 choreo.setMove(0);
 
 const hud = new ChHud();
@@ -308,6 +315,32 @@ const crew = new Crew({
   },
 });
 
+// 🎽 Gear/Skins (§5): equipping rebuilds the 3D rig for the new skin and re-folds
+// the gear buff into click/DPS immediately (AC1); levelling/starring/crafting re-fold
+// too; the kulisse chooser drives the background + auto-rotation toggle.
+const gearPanel = new Gear({
+  state,
+  onEquip: () => {
+    char = buildCharacter(scene, SKINS[state.gear.skin], char);
+    recompute();
+    audio.buy();
+    hud.update(state, combat, dps, clickDmg);
+    persist();
+  },
+  onProgress: () => {
+    recompute();
+    audio.buy();
+    hud.update(state, combat, dps, clickDmg);
+    persist();
+  },
+  onKulisse: () => {
+    updateBackground(true);
+    recompute();
+    hud.update(state, combat, dps, clickDmg);
+    persist();
+  },
+});
+
 // Frühstarter (§4.5.2): after an ascension the Himmelsbaum can restore a fraction
 // of the previous crew levels, so re-climbs start warmer.
 function applyFruhstarter(prevCrew: CrewLevels): void {
@@ -336,6 +369,7 @@ const prestige = new Prestige({
     crew.render();
     ancients.render();
     heaven.refresh();
+    gearPanel.render();
     hud.update(state, combat, dps, clickDmg);
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     toasts.show('✨', 'Ruhm eingeheimst!', `Jetzt ${fmt(state.souls)} Seelen`);
@@ -367,6 +401,7 @@ const heaven = new Heaven({
     crew.render();
     ancients.render();
     prestige.refresh();
+    gearPanel.render();
     hud.update(state, combat, dps, clickDmg);
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     toasts.show('🌈', 'Himmelfahrt!', `${fmt(state.heaven.hpf)} Himmelspfirsiche`);
@@ -395,12 +430,14 @@ new ChSettings({
     rng = new Rng(state.rng); // resume the imported save's RNG stream
     combat = withBossTimerBonus(spawnFor(state.zone, state.killsThisZone, state.runMaxZone));
     comboState = createCombo(state.combo.stacks);
+    char = buildCharacter(scene, SKINS[state.gear.skin], char); // rig follows the imported skin
     recompute();
     updateBackground(true);
     crew.render();
     ancients.render();
     prestige.refresh();
     heaven.refresh();
+    gearPanel.render();
     hud.update(state, combat, dps, clickDmg);
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     persist();
@@ -436,6 +473,7 @@ if (offlineEarned >= 1) showWelcomeBack(offlineEarned, offlineEarnedMs);
 // ---------- tabs ----------
 const tabBodies: Record<string, string> = {
   crew: 'tabCrew',
+  gear: 'tabGear',
   anc: 'tabAnc',
   pr: 'tabPr',
   heaven: 'tabHeaven',
@@ -443,6 +481,7 @@ const tabBodies: Record<string, string> = {
 };
 function renderActiveTab(key: string): void {
   if (key === 'crew') crew.render();
+  else if (key === 'gear') gearPanel.render();
   else if (key === 'anc') ancients.render();
   else if (key === 'pr') prestige.refresh();
   else if (key === 'heaven') heaven.refresh();
@@ -471,14 +510,20 @@ muteBtn.addEventListener('click', () => {
   muteBtn.textContent = audio.toggleMute() ? '🔇' : '🔊';
 });
 
-// ---------- background follows zone tier ----------
+// ---------- background: zone-tier auto-rotation, gated on the kulisse chooser ----------
+// In Tour-Modus (`gear.bgAuto`) the tier rotation drives the kulisse and keeps
+// `gear.bg` (⇒ its mini-buff/set) synced with the view; with a manual pick the
+// chosen `gear.bg` is fixed and the loop never rotates away from it (§5.5).
 function updateBackground(force = false): void {
-  const bg = bgForZone(combat.zone);
-  if (force || bg !== currentBg) {
-    currentBg = bg;
-    world.setBackground(bg);
-    audio.setBackground(bg);
+  const bg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
+  if (!force && bg === currentBg) return;
+  currentBg = bg;
+  if (state.gear.bgAuto && state.gear.bg !== bg) {
+    state.gear.bg = bg;
+    recompute(); // Space +5 % dpsPct etc. follow the auto-rotation
   }
+  world.setBackground(bg);
+  audio.setBackground(bg);
 }
 
 // ---------- farm / travel (G10, §4.4) ----------

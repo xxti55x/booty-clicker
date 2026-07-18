@@ -1095,3 +1095,226 @@ body {
     transform: translateY(100%);
   }
 }
+
+/* ---- M11: 🎽 Gear/Skins tab (emoji-only tabs so 6 fit; skin grid + kulisse) ---- */
+/* Six tabs now: drop the text labels to emoji-only and enlarge them a touch. */
+.tabs .tab {
+  font-size: 17px;
+  padding: 12px 0;
+}
+
+.gear-bal {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+.gb-shard {
+  color: #c4b5fd;
+}
+.gb-sugar {
+  color: #ff9ecb;
+}
+
+.kulisse-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.kbtn {
+  flex: 1 1 28%;
+  min-width: 62px;
+  padding: 7px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #c9c9d6;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  cursor: pointer;
+}
+.kbtn.active {
+  background: rgba(168, 232, 49, 0.16);
+  color: #a8e831;
+  border-color: rgba(168, 232, 49, 0.4);
+}
+
+.gear-set {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 10px;
+  padding: 7px 10px;
+  margin-bottom: 6px;
+  font-size: 11px;
+}
+.gs-name {
+  font-weight: 800;
+  color: #c4b5fd;
+}
+.gs-eff {
+  font-weight: 700;
+  color: #a8e831;
+}
+
+.skingrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.skincard {
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left-width: 3px;
+  border-radius: 12px;
+  padding: 9px 9px 10px;
+}
+.skincard.active {
+  border-color: #a8e831;
+  background: rgba(168, 232, 49, 0.08);
+}
+.skincard.locked {
+  opacity: 0.74;
+}
+/* Rarity accents (§5.3): left border + rarity label colour. */
+.rarity-common {
+  border-left-color: #9aa0ad;
+}
+.rarity-common .sc-rarity {
+  color: #9aa0ad;
+}
+.rarity-rare {
+  border-left-color: #4d9fff;
+}
+.rarity-rare .sc-rarity {
+  color: #4d9fff;
+}
+.rarity-epic {
+  border-left-color: #b06bff;
+}
+.rarity-epic .sc-rarity {
+  color: #b06bff;
+}
+.rarity-legendary {
+  border-left-color: #ffd24d;
+}
+.rarity-legendary .sc-rarity {
+  color: #ffd24d;
+}
+.rarity-mythic {
+  border-left-color: #67e8f9;
+}
+.rarity-mythic .sc-rarity {
+  color: #67e8f9;
+}
+.sc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.sc-icon {
+  font-size: 20px;
+}
+.sc-rarity {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.sc-name {
+  font-size: 11.5px;
+  font-weight: 700;
+  margin-top: 3px;
+  line-height: 1.2;
+}
+.sc-buff {
+  font-size: 10px;
+  color: #c9c9d6;
+  margin-top: 4px;
+  line-height: 1.35;
+}
+.sc-now {
+  font-size: 9.5px;
+  color: #8b9bff;
+  font-weight: 700;
+  margin-top: 2px;
+}
+.sc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.sc-level {
+  font-size: 10px;
+  color: #9a9aad;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.sc-stars {
+  font-size: 10px;
+  color: #ffd24d;
+  font-weight: 700;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+.sc-btn {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 7px;
+  border-radius: 8px;
+  border: 1px solid rgba(168, 232, 49, 0.4);
+  background: rgba(168, 232, 49, 0.14);
+  color: #a8e831;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sc-btn.off,
+.sc-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: #9a9aad;
+}
+.sc-equip {
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 0;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8e8ef;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.sc-equip.on {
+  background: #a8e831;
+  color: #12140a;
+  border-color: #a8e831;
+}
+.sc-equip.craft {
+  border-color: rgba(139, 92, 246, 0.5);
+  background: rgba(139, 92, 246, 0.16);
+  color: #c4b5fd;
+}
+.sc-equip.off,
+.sc-equip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.sc-lock {
+  margin-top: 6px;
+  font-size: 9.5px;
+  color: #8a8a99;
+  text-align: center;
+}

@@ -19,8 +19,8 @@ CI (real browsers, touch input, performance).
 - [ ] `npm run lint` — ESLint clean
 - [ ] `npm run format:check` — Prettier clean
 - [ ] `npm test` — all unit tests green (game + API workspaces)
-- [ ] `npm run build` — type-checks and builds; bundle **< 5 MB** (currently ~594 KB JS / ~156 KB gzip; +~11 KB for M10 Ahnen/Himmel)
-- [ ] `npm run test:sim` — the `simulateEndless` gate (E1/E2/**E3**/E4 + §4.8 pacing + first-Himmelfahrt window) is green (also runs inside `npm test` + CI)
+- [ ] `npm run build` — type-checks and builds; bundle **< 5 MB** (currently ~614 KB JS / ~162 KB gzip; +~13 KB for the M11 🎽 Gear tab)
+- [ ] `npm run test:sim` — the `simulateEndless` gate (E1/E2/**E3**/E4 + **E4-with-gear** + §4.8 pacing + first-Himmelfahrt window) is green (also runs inside `npm test` + CI)
 - [ ] `npm run build:itch` — produces `apps/game/release/booty-clicker-itch.zip` with `index.html` at the archive root
 
 ## 2. Browser matrix (manual smoke)
@@ -209,3 +209,47 @@ Manual passes (real device / browser):
       banks the HPF and resets RS/Ahnen/tour, while gilds + HPF + Himmelsbaum persist.
 - [ ] **Himmelsbaum.** Buying Twerk-Coach spawns an auto-clicker (1→4 cps at 25 % click);
       Nachtschicht raises the offline cap; the HUD shows held „🍑 X HPF".
+
+### M11 — Skins als Gear
+
+Automated (unit + `test:sim` + headless smoke `smoke-ch.mjs`, now v6):
+
+- Gear fold (`gear.test.ts`): **AC1** — `gearBonus` is pure over `gear`; skin buff·level +
+  star·stars + kulisse fold deterministically; Diamant `allPct` hits every percentage stat
+  but no absolute stat. **AC2** — ≥ 2 set bonuses covered (Studio 54, Retrowelle, Endless
+  Summer, Void-Funk, Krönung); 🍬 ripens 1×/24 h with a backwards-clock **clamp** (never a
+  negative timer/count). Economy (`shardCost`/`sugarCostForStar`/`craftCost`).
+- Provisional craft (`gear.test.ts`): `craftSkin` spends `craftCost` 🧩, latches the id, and
+  reads back as unlocked; refuses on too-few-🧩 / already-crafted / non-craft skin (same ref).
+- Unlock context (`ch-state.test.ts`): **AC3** — `bossFirstKillZones` derives boss kills from
+  `lifetimeMaxZone`; the **legacy `bossDefeated` latch** (`legacyTyrann`) unions zone 10 so
+  Tyrann unlocks even at a shallow CH zone; `gearUnlockCtx` threads `gear.crafted` into
+  `skinUnlocked` (Neon-Ninja/Pfirsich-Pirat).
+- Save v6 (`ch-store.test.ts`): v5→v6 lossless (fresh gear default); gear round-trips
+  (skin/level/star/shards/sugar/**crafted**); corrupt sub-fields repair in isolation
+  (`"toString"`/junk/dupe crafted dropped) without nuking valid progress.
+- Sim (`sim.test.ts`): **AC5** — E4 holds **with gear**: an active twerker with best-in-slot
+  **click** gear (Klassiker lv 50 + 5★ ⇒ ×3.5) stays ≥ 8 zones ahead of an idler with
+  best-in-slot **idle** gear (Robo-Twerk lv 50 ⇒ ×5 crew DPS). E1/E2/E3 + pacing stay green.
+- Headless (`smoke-ch.mjs`): the 🎽 tab opens; a skin card shows **rarity + buff + level +
+  cost** (AC4); equipping a leveled Robo raises the **DPS HUD** immediately (AC1) and marks
+  the card equipped; a manual kulisse pick (Space) persists `bg` + `bgAuto:false` and shifts
+  DPS (+5 %); a `legacyTyrann` v6 save shows the **Tyrann card unlocked + equippable** (AC3).
+  Zero page errors.
+
+Manual passes (real device / browser):
+
+- [ ] **Equip changes numbers.** In the 🎽 tab, equipping a non-classic skin swaps the 3D
+      figure **and** shifts the DPS/Klick HUD instantly (e.g. Robo → DPS up; leveled Klassiker
+      → Klick up); the active card is highlighted.
+- [ ] **Level & Star.** Level-up spends 🧩 (`10·⌈1.25^lv⌉`, disabled when broke / at Lv 50);
+      Star-up spends 🍬 (`star+1`, disabled when broke / at ★5); a 🍬 ripens once per 24 h
+      (toast on ripen), and setting the clock **back** never yields a negative timer/count.
+- [ ] **Kulisse chooser.** Club/Synth/Beach/Space fix the background + its mini-buff (auto-
+      rotation stops); **„Auto (Tour)"** resumes the zone-tier rotation (default). The chosen
+      kulisse survives a reload.
+- [ ] **Set bonus.** A matching Skin × Kulisse (e.g. Disco-King + Club = „Studio 54") lists the
+      active set + effect; a non-matching combo shows the „kein Set aktiv" hint.
+- [ ] **Locked / craft states.** Zone/boss/Himmelfahrt-gated skins show their unlock hint;
+      Neon-Ninja / Pfirsich-Pirat show a **Craft (🧩)** button (spending shards unlocks them);
+      Diamant-Booty stays „ab Transzendenz". Every card still shows rarity/buff/level/cost.

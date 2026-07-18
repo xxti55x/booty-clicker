@@ -41,6 +41,13 @@ export interface GearState {
   sugarPeaches: number;
   /** Epoch-ms when the next 🍬 ripens (0 = unseeded; part 2 seeds `now + 24 h`). */
   nextSugarAt: number;
+  /**
+   * Skin ids craft-unlocked with 🧩 (Neon-Ninja/Pfirsich-Pirat, §5.3). Provisional
+   * pre-M12 path: crafting spends `craftCost` shards and latches the id here so
+   * `skinUnlocked` sees it via the `crafted` set. M12's Pfirsich-Truhen become the
+   * primary source, but this field stays the persisted record of what's crafted.
+   */
+  crafted: string[];
 }
 
 /** A brand-new gear slice (deterministic/pure — part 2 seeds `nextSugarAt`). */
@@ -54,6 +61,7 @@ export function createGear(): GearState {
     shards: 0,
     sugarPeaches: 0,
     nextSugarAt: 0,
+    crafted: [],
   };
 }
 
@@ -474,4 +482,25 @@ export function skinUnlocked(skinId: SkinKey, ctx: UnlockCtx): boolean {
 /** 🧩 craft cost for a craftable skin, or `null` when it isn't craft-gated. */
 export function craftCost(skinId: SkinKey): number | null {
   return SKIN_UNLOCKS[skinId]?.craftCost ?? null;
+}
+
+/** Whether `skinId` has been craft-unlocked in this gear slice. */
+export function skinCrafted(gear: GearState, skinId: SkinKey): boolean {
+  return gear.crafted.includes(skinId);
+}
+
+/**
+ * Provisional pre-M12 craft (§5.3/§5.4): if `skinId` is a craft-gated skin, not yet
+ * crafted, and the slice holds ≥ `craftCost` shards, spend them and latch the id into
+ * `crafted`. Returns `{ ok, gear }` — a NEW slice on success, the SAME reference when
+ * nothing can be crafted (unknown/non-craft skin, already crafted, or too few 🧩).
+ * Pure over `gear` alone; M12's Truhen become the real source but reuse this latch.
+ */
+export function craftSkin(gear: GearState, skinId: SkinKey): { ok: boolean; gear: GearState } {
+  const cost = craftCost(skinId);
+  if (cost === null || skinCrafted(gear, skinId) || gear.shards < cost) return { ok: false, gear };
+  return {
+    ok: true,
+    gear: { ...gear, shards: gear.shards - cost, crafted: [...gear.crafted, skinId] },
+  };
 }

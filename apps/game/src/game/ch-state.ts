@@ -194,18 +194,19 @@ export function bossFirstKillZones(
 /**
  * Build the pure gear-unlock context (§5.3) from the CH-state: zone gate from
  * `lifetimeMaxZone`, boss-first-kills from `bossFirstKillZones` (incl. the legacy
- * Tyrann claim), Himmelfahrten from the L2 count. `crafted` is empty until M12's
- * Truhen supply craftable skins (Neon-Ninja/Pfirsich-Pirat stay locked for now).
+ * Tyrann claim), Himmelfahrten from the L2 count, and `crafted` from the gear slice's
+ * craft latch (Neon-Ninja/Pfirsich-Pirat once a provisional 🧩-craft has run, §5.3).
+ * `gear` is optional so older call sites (which never craft) still get an empty set.
  * Consumed by `skinUnlocked` in the glue and part 3's equip UI.
  */
 export function gearUnlockCtx(
-  state: Pick<ChState, 'lifetimeMaxZone' | 'legacyTyrann' | 'heaven'>,
+  state: Pick<ChState, 'lifetimeMaxZone' | 'legacyTyrann' | 'heaven'> & { gear?: GearState },
 ): UnlockCtx {
   return {
     lifetimeMaxZone: state.lifetimeMaxZone,
     bossFirstKills: bossFirstKillZones(state),
     himmelfahrten: state.heaven.ascensions2,
-    crafted: new Set<string>(),
+    crafted: new Set<string>(state.gear?.crafted ?? []),
   };
 }
 

@@ -233,4 +233,17 @@ describe('ch-state — gear unlock context (§5.3)', () => {
     });
     expect(skinUnlocked('boss', shallow)).toBe(false); // boss@10 not killed, no legacy claim
   });
+
+  it('threads the gear craft latch into `crafted` (Neon-Ninja/Pfirsich-Pirat)', () => {
+    const base = { lifetimeMaxZone: 8, legacyTyrann: false, heaven: createHeaven() };
+    // No gear ⇒ empty crafted set (older call sites) ⇒ craft skins stay locked.
+    expect(skinUnlocked('neon', gearUnlockCtx(base))).toBe(false);
+    // A gear slice with a craft latch unlocks exactly the crafted skin.
+    const withCraft = gearUnlockCtx({
+      ...base,
+      gear: { ...createGear(), crafted: ['neon'] },
+    });
+    expect(skinUnlocked('neon', withCraft)).toBe(true);
+    expect(skinUnlocked('pirate', withCraft)).toBe(false); // only neon was crafted
+  });
 });

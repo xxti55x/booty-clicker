@@ -103,6 +103,40 @@ describe('simulateEndless — E4 (click is king, P1)', () => {
   }
 });
 
+// M11-AC5 (§5, §4.8): E4 (click is king, P1) STILL holds once gear is in play. The
+// gear system's strongest buffs are CLICK buffs by design (§5.1), so the fair endgame
+// comparison is: the active twerker equips their best-in-slot CLICK skin (Klassiker
+// lv 50 + 5★ ⇒ clickPct 2.5 ⇒ ×3.5 click) and the casual/idle player their best-in-slot
+// IDLE skin (Robo-Twerk lv 50 ⇒ dpsPct 4.0 ⇒ ×5 crew DPS). Even with maxed idle gear the
+// idler stays ≥ 8 zones behind the active twerker over 45 min — idle-boosting gear cannot
+// overturn the click-is-king ordering. Observed gap ≈ 10.
+//
+// NOTE (balance finding, DECISIONS.md): a bare active bot (no gear) is NOT ≥ 8 ahead of a
+// ×5-idle-geared casual in this fresh-single-run model — strong idle `dpsPct` alone would
+// flip the ordering. P1 is preserved because click gear is the strongest buff and the
+// active player equips it; that is the invariant asserted here.
+describe('simulateEndless — E4 with best-in-slot gear (M11-AC5, P1 intact)', () => {
+  const CLICK_BIS = 3.5; // Klassiker lv 50 + 5★: 0.04·50 + 0.1·5 = 2.5 ⇒ clickGearMult ×3.5
+  const IDLE_BIS = 5; // Robo-Twerk lv 50: 0.08·50 = 4 ⇒ idle dpsGearMult ×5
+  for (const seed of SEEDS) {
+    it(`seed ${seed}: active(best click gear) ≥ 8 zones ahead of idler(best idle gear)`, () => {
+      const active = simulateSingleRun(
+        { clickRate: 3, juice: true, clickGearMult: CLICK_BIS, seed },
+        RUN_S,
+      );
+      const idler = simulateSingleRun(
+        { clickRate: 1, juice: false, idleGearMult: IDLE_BIS, seed },
+        RUN_S,
+      );
+      expect(active.bestZone - idler.bestZone).toBeGreaterThanOrEqual(8);
+      // The idle gear DOES lift the idler well above a bare casual (it isn't useless) —
+      // it simply can't catch the active twerker.
+      const bareCasual = simulateSingleRun({ clickRate: 1, juice: false, seed }, RUN_S);
+      expect(idler.bestZone).toBeGreaterThan(bareCasual.bestZone);
+    });
+  }
+});
+
 // E3 (loop stays lively, §4.8): total power (effective DPS+click at best-zone farm)
 // grows by +50 % at least every 90 min over the first 20 ascensions, with the bot
 // buying Ancients after each ascension. The active bot compounds souls/gilds/

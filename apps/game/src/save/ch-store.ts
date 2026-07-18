@@ -222,6 +222,17 @@ function repairGear(v: unknown): GearState {
       : def.sugarPeaches;
   const nextSugarAt =
     isFiniteNumber(v.nextSugarAt) && v.nextSugarAt >= 0 ? v.nextSugarAt : def.nextSugarAt;
+  // Craft latch: keep only real skin keys (deduped); junk/absent ⇒ empty (§5.3).
+  // `Object.hasOwn`, not `in` — a crafted:["toString"] must not sneak through.
+  const crafted = Array.isArray(v.crafted)
+    ? [
+        ...new Set(
+          v.crafted.filter(
+            (id): id is string => typeof id === 'string' && Object.hasOwn(SKINS, id),
+          ),
+        ),
+      ]
+    : def.crafted;
   return {
     skin,
     bg,
@@ -231,6 +242,7 @@ function repairGear(v: unknown): GearState {
     shards,
     sugarPeaches,
     nextSugarAt,
+    crafted,
   };
 }
 

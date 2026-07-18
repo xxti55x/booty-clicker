@@ -43,6 +43,18 @@ export interface SimConfig {
   juice: boolean;
   /** RNG seed (deterministic gild targets). */
   seed?: number;
+  /**
+   * Best-in-slot IDLE gear multiplier on crew DPS only (§5, M11-AC5): a max
+   * `dpsPct` skin (e.g. Robo-Twerk lv 50 ⇒ ×5) folded into the idle term ALONE,
+   * never into the click term. Defaults to 1 (no gear).
+   */
+  idleGearMult?: number;
+  /**
+   * Best-in-slot CLICK gear multiplier on click damage only (§5): a max `clickPct`
+   * skin (Klassiker lv 50 + 5★ ⇒ ×3.5) folded into the click term ALONE. The
+   * active twerker's counterpart to `idleGearMult`; defaults to 1 (no gear).
+   */
+  clickGearMult?: number;
 }
 
 /** The mutable bot state that persists across ascensions within a chain. */
@@ -103,8 +115,16 @@ function powerFor(
   const hpf = heaven.hpf;
   const sm = soulMult(souls, soulBonusEff(hpf));
   const global = heavenGlobalMult(hpf);
-  const baseClick = clickDamageRaw(crew, gilds) * sm * ancientClickMult(ancients) * global;
-  const idle = totalRawDps(crew, gilds) * sm * ancientDpsMult(ancients) * global;
+  // Click gear (§5) multiplies the click term only (P1: the strongest gear is click).
+  const baseClick =
+    clickDamageRaw(crew, gilds) *
+    sm *
+    ancientClickMult(ancients) *
+    global *
+    (config.clickGearMult ?? 1);
+  // Idle gear (§5) multiplies crew DPS only — never the click term (P1, M11-AC5).
+  const idle =
+    totalRawDps(crew, gilds) * sm * ancientDpsMult(ancients) * global * (config.idleGearMult ?? 1);
   return config.clickRate * baseClick * combo * crit + idle;
 }
 

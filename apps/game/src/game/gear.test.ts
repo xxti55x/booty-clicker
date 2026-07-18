@@ -13,6 +13,7 @@ import {
   coachCpsBonus,
   comboWindowBonus,
   craftCost,
+  craftSkin,
   createGear,
   critChanceBonus,
   critMultBonus,
@@ -35,6 +36,7 @@ import {
   PERCENT_STATS,
   shardCost,
   SKIN_UNLOCKS,
+  skinCrafted,
   skinLevel,
   skinStarCount,
   skinUnlocked,
@@ -72,6 +74,7 @@ describe('gear — createGear default', () => {
       shards: 0,
       sugarPeaches: 0,
       nextSugarAt: 0,
+      crafted: [],
     });
   });
 });
@@ -351,5 +354,34 @@ describe('gear — unlock gating (spec §5.3)', () => {
     expect(craftCost('classic')).toBeNull();
     // Every skin has an unlock rule.
     expect(Object.keys(SKIN_UNLOCKS)).toHaveLength(10);
+  });
+});
+
+describe('gear — provisional craft (spec §5.3, pure)', () => {
+  it('spends craftCost 🧩, latches the id, and then reads as unlocked', () => {
+    const g = { ...createGear(), shards: 200 };
+    expect(skinCrafted(g, 'neon')).toBe(false);
+    const r = craftSkin(g, 'neon');
+    expect(r.ok).toBe(true);
+    expect(r.gear.shards).toBe(80); // 200 − 120
+    expect(r.gear.crafted).toEqual(['neon']);
+    expect(skinCrafted(r.gear, 'neon')).toBe(true);
+    expect(r.gear).not.toBe(g); // new slice on success
+    // Pure: the original is untouched.
+    expect(g.shards).toBe(200);
+    expect(g.crafted).toEqual([]);
+  });
+
+  it('refuses when too few 🧩, already crafted, or not a craft skin (same ref)', () => {
+    const poor = { ...createGear(), shards: 79 };
+    expect(craftSkin(poor, 'pirate').ok).toBe(false); // needs 80
+    expect(craftSkin(poor, 'pirate').gear).toBe(poor);
+    const done = { ...createGear(), shards: 500, crafted: ['neon'] };
+    const twice = craftSkin(done, 'neon');
+    expect(twice.ok).toBe(false); // already crafted
+    expect(twice.gear).toBe(done);
+    const rich = { ...createGear(), shards: 9999 };
+    expect(craftSkin(rich, 'classic').ok).toBe(false); // classic isn't craft-gated
+    expect(craftSkin(rich, 'boss').ok).toBe(false); // boss is boss-gated, not craft
   });
 });

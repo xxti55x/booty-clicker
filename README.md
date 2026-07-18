@@ -63,6 +63,18 @@ Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 M
 - **Idle & Offline.** Deine Crew (und deine Coaches) farmen weiter, während du weg bist
   (50 % Rate, Cap 8 h, per Nachtschicht bis 24 h) — beim Wiedereinstieg gibt's eine
   „Willkommen zurück"-Zusammenfassung.
+- **Skins als Gear (🎽).** Deine Figur ist kein reines Kostüm mehr: der **ausgerüstete
+  Skin** gibt einen echten Buff (die stärksten sind **Klick-Buffs**, P1). **Ausrüsten**
+  tauscht Figur _und_ Werte sofort (DPS/Klick im HUD ändern sich sichtbar). **Levele**
+  einen Skin mit **Pfirsich-Splittern 🧩** (Level 1–50, lineare Buff-Skalierung; 🧩 fallen
+  vorläufig aus Boss-Kills, bis M12 die Truhen bringt) und setze **Sterne ★** mit
+  **Zuckerpfirsichen 🍬** (0–5; ein 🍬 reift **1×/24 h** Echtzeit — der tägliche
+  Login-Grund). **Kulissen** kehren als Wahl zurück (**Club** +Combo-Fenster · **Synth**
+  +Beat-Fenster · **Beach** +Offline-Cap · **Space** +Crew-DPS) plus **„Auto (Tour)"**
+  (rotiert mit der Bühne, Default). Passende **Skin × Kulisse**-Kombis schalten **Set-Boni**
+  frei (z. B. Disco-King + Club = „Studio 54"). Neon-Ninja & Pfirsich-Pirat lassen sich
+  mit 🧩 **craften**; der Goldene Twerk-Tyrann wird per Boss-Erst-Kill (Bühne 10) **oder
+  Erbe der alten Tour** frei, Diamant-Booty erst ab Transzendenz.
 
 ## Steuerung
 
@@ -71,9 +83,10 @@ Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 M
 - Maus ziehen = Kamera drehen, Scrollen = Zoom
 - 🕺-Button (links oben) blendet das Panel ein/aus · 🔊 = Ton an/aus
 - Auf dem Handy ist der Shop ein **Bottom-Sheet** — Figur & Rivale bleiben sichtbar
-- Tabs: **🕺 Crew** · **🌀 Ahnen** (Seelen-Sink) · **✨ Ruhm** (Ascension + Statistik) ·
-  **🌈 Himmel** (Himmelfahrt + Himmelsbaum) · **⚙️** (Grafik, Effekte,
-  Save-Export/Import/Reset)
+- Tabs (jetzt Emoji-only, Titel per Hover, damit alle **sechs** passen): **🕺 Crew** ·
+  **🎽 Gear** (Skins/Kulisse/Set-Boni) · **🌀 Ahnen** (Seelen-Sink) · **✨ Ruhm**
+  (Ascension + Statistik) · **🌈 Himmel** (Himmelfahrt + Himmelsbaum) · **⚙️** (Grafik,
+  Effekte, Save-Export/Import/Reset)
 
 ## Architektur
 
@@ -92,13 +105,21 @@ npm-Workspaces-Monorepo:
     `buyAncient`, Aggregat-Modifikatoren (der Seelen-Sink, §4.6).
   - `game/heaven.ts` — Ruhmes-Himmelfahrt: `hpfForRsLifetime=⌊√(RS/1000)⌋`, Doppelwirkung
     (+2 %/HPF global + Seelen-Verstärker), `bankHimmelfahrt`, Himmelsbaum-Grundknoten.
+  - `game/gear.ts` — **Skins als Gear**: faltet aktiven Skin (Buff·Level + Stern·Sterne) +
+    Kulissen-Mini-Buff + Set-Boni zu einem puren `GearBonus`; Ökonomie (`shardCost`,
+    `sugarCostForStar`, `craftCost`/`craftSkin`), 🍬-Reifung (rückwärts-Uhr-sicher) und
+    Unlock-Gating (`skinUnlocked`). Konsumiert von `effectiveClick`/`dpsOf` (die stärksten
+    Buffs sind Klick-Buffs, P1).
   - `game/sim.ts` — `simulateEndless`: deterministischer Balancing-Bot über die echten
-    Module; Endlos-Kriterien E1/E2/**E3**/E4 + Pacing + erste-Himmelfahrt als CI-Gate (`npm run test:sim`).
-  - `game/ch-state.ts` + `save/ch-store.ts` — CH-State (Save **v5**: `ancients`, `heaven`),
-    eigener versionierter Save-Key (`bootyclicker.ch`), Offline-Gold (inkl. Coach),
+    Module; Endlos-Kriterien E1/E2/**E3**/E4 (inkl. **E4-mit-Gear**: Best-in-Slot-Klick-Gear
+    schlägt Best-in-Slot-Idle-Gear ≥ 8 Zonen) + Pacing + erste-Himmelfahrt als CI-Gate
+    (`npm run test:sim`).
+  - `game/ch-state.ts` + `save/ch-store.ts` — CH-State (Save **v6**: `gear` + `legacyTyrann`),
+    eigener versionierter Save-Key (`bootyclicker.ch`), Offline-Gold (inkl. Coach + Gear-Bonus),
     Base64-Export/Import (never-throw, injizierbar).
-  - `ui/*` — HUD/Rival + Travel-Stepper, Crew, **Ahnen**, Prestige, **Himmel**, Settings;
-    `main.ts` verdrahtet alles.
+  - `ui/*` — HUD/Rival + Travel-Stepper, Crew, **Gear/Skins**, **Ahnen**, Prestige,
+    **Himmel**, Settings; `main.ts` verdrahtet alles (Skin-Wechsel baut die 3D-Figur neu,
+    Kulissen-Wahl gated die Auto-Rotation).
 - `apps/api` — optionaler Cloudflare-Worker (Hono + D1 + KV) als Bestenlisten-Backend.
 
 Audio ist komplett **prozedural** (Web Audio, keine Dateien). Three.js kommt als

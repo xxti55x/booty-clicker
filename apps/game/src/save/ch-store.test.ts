@@ -391,6 +391,7 @@ describe('ch-store — v6 migration & repair (M11)', () => {
         shards: 140,
         sugarPeaches: 4,
         nextSugarAt: 1_800_000_000_000,
+        crafted: ['neon'],
       },
     };
     saveCh(s, 5000, store);
@@ -426,6 +427,7 @@ describe('ch-store — v6 migration & repair (M11)', () => {
       shards: -50, // negative ⇒ 0
       sugarPeaches: 2.9, // floored ⇒ 2
       nextSugarAt: Number.NaN, // NaN ⇒ 0 (glue re-seeds)
+      crafted: ['neon', 'toString', 42, 'neon', 'notaskin'], // keep real keys, dedupe
     };
     const s = deserializeCh(JSON.stringify(raw));
     expect(s).not.toBeNull();
@@ -437,6 +439,7 @@ describe('ch-store — v6 migration & repair (M11)', () => {
     expect(s!.gear.shards).toBe(0);
     expect(s!.gear.sugarPeaches).toBe(2);
     expect(s!.gear.nextSugarAt).toBe(0);
+    expect(s!.gear.crafted).toEqual(['neon']); // junk/dupes/prototype keys dropped
   });
 
   it('migrates a v1 blob all the way through to v6 (gear default present)', () => {
