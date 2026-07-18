@@ -95,7 +95,9 @@
         <div class="tab" data-t="anc" title="Ahnen">🌀</div>
         <div class="tab" data-t="pr" title="Ruhm">✨</div>
         <div class="tab" data-t="heaven" title="Himmel">🌈</div>
+        <div class="tab" data-t="transcend" title="Transzendenz">🔮</div>
         <div class="tab" data-t="chest" title="Truhen">🎁</div>
+        <div class="tab" data-t="meta" title="Ziele">📋</div>
         <div class="tab" data-t="set" title="Einstellungen">⚙️</div>
       </div>
       <div class="tabbody" id="tabCrew"></div>
@@ -103,7 +105,9 @@
       <div class="tabbody" id="tabAnc" style="display: none"></div>
       <div class="tabbody" id="tabPr" style="display: none"></div>
       <div class="tabbody" id="tabHeaven" style="display: none"></div>
+      <div class="tabbody" id="tabTranscend" style="display: none"></div>
       <div class="tabbody" id="tabChest" style="display: none"></div>
+      <div class="tabbody" id="tabMeta" style="display: none"></div>
       <div class="tabbody" id="tabSet" style="display: none"></div>
     </div>
 
@@ -112,6 +116,25 @@
         <div class="dt">🍑 Willkommen zurück!</div>
         <div class="dd" id="wbText"></div>
         <button class="btn" id="wbClose">Einsammeln</button>
+      </div>
+    </div>
+
+    <!-- Leaderboard v2 (§7.4): best-zone submit + top-50 overlays. -->
+    <div class="overlay hidden" id="lbSubmit">
+      <div class="dialog">
+        <div class="dt">🏅 Bestenliste</div>
+        <div class="dd" id="lbSubmitText"></div>
+        <input class="lb-input" id="lbNick" maxlength="16" placeholder="Nickname (2–16 Zeichen)" />
+        <div class="msg" id="lbMsg"></div>
+        <button class="btn" id="lbSubmitBtn" type="button">Absenden</button>
+        <button class="btn ghost" id="lbSkipBtn" type="button">Überspringen</button>
+      </div>
+    </div>
+    <div class="overlay hidden" id="lbTop">
+      <div class="dialog wide">
+        <div class="dt">🏅 Top 50</div>
+        <div class="lb-list" id="lbList"></div>
+        <button class="btn" id="lbClose" type="button">Schließen</button>
       </div>
     </div>
 

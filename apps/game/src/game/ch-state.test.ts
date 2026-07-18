@@ -20,12 +20,14 @@ import {
   keyDropMult,
   peachIncomeMult,
   rivalChestChance,
+  transcendState,
 } from './ch-state';
 import { createAncients } from './ancients';
 import { createGear, skinUnlocked } from './gear';
 import { createHeaven } from './heaven';
 import { clickDamageRaw, totalRawDps } from './heroes';
 import { PEACH_BOOST } from './peach';
+import { TRANSCEND_GLOBAL_BASE, createTranscend } from './transcend';
 
 describe('ch-state', () => {
   it('fresh state starts at zone 1 with nothing', () => {
@@ -372,5 +374,167 @@ describe('ch-state — gear unlock context (§5.3)', () => {
     });
     expect(skinUnlocked('neon', withCraft)).toBe(true);
     expect(skinUnlocked('pirate', withCraft)).toBe(false); // only neon was crafted
+  });
+});
+
+// M15 (§4.5.3): the Transzendenz layer folds into the ch-state derived power and the
+// L3 reset glue. The ×3^TE global mult is P1-neutral (hits click and idle identically),
+// and `transcendState` resets all of L1 AND L2 while preserving every „nie"-reset meta.
+describe('ch-state — Transzendenz threading (§4.5.3)', () => {
+  it('fresh state seeds an empty transcend slice (×1 global mult, no power change)', () => {
+    const s = createChState();
+    expect(s.transcend).toEqual(createTranscend());
+    // Empty slice ⇒ ×1: a fresh state's derived numbers are the raw crew values.
+    const base = { ...createChState(), crew: { boss: 20 } };
+    expect(dpsOf(base)).toBeCloseTo(totalRawDps({ boss: 20 }), 6);
+    expect(clickDamageOf(base)).toBeCloseTo(clickDamageRaw({ boss: 20 }), 6);
+  });
+
+  // The M14 F10c acceptance: the REAL derived pipeline (not the isolated formula) must
+  // scale click AND idle by exactly 3^TE and leave their ratio invariant — the proof
+  // idle can never out-scale active clicking through TE (P1 „aktiv bleibt König").
+  it('P1-neutrality: TE scales clickDamageOf AND dpsOf by exactly 3^3, ratio invariant', () => {
+    // A state with both idle (crew DPS) and click contributions, plus soul/Ancient/HPF
+    // folds, so the ratio is finite, non-trivial and genuinely at risk if TE were biased.
+    const base = {
+      ...createChState(),
+      crew: { boss: 30 },
+      souls: 8,
+      ancients: { twerkules: 3, poposeidon: 2 },
+      heaven: { ...createHeaven(), hpf: 4 },
+    };
+    const te0 = { ...base, transcend: createTranscend() }; // te 0 ⇒ ×1
+    const te3 = {
+      ...base,
+      transcend: { ...createTranscend(), te: 3, teLifetime: 3, transcendences: 1 },
+    };
+    const factor = TRANSCEND_GLOBAL_BASE ** 3; // 27
+
+    // Sanity: both channels are non-zero so the ratio assertion below is meaningful.
+    expect(dpsOf(te0)).toBeGreaterThan(0);
+    expect(clickDamageOf(te0)).toBeGreaterThan(0);
+    // BOTH click and idle scaled by exactly 3^3 — the same global scalar on each.
+    expect(clickDamageOf(te3)).toBeCloseTo(clickDamageOf(te0) * factor, 6);
+    expect(dpsOf(te3)).toBeCloseTo(dpsOf(te0) * factor, 6);
+    // ⇒ the click:idle ratio is invariant: TE never lets idle out-scale click (P1).
+    expect(clickDamageOf(te3) / dpsOf(te3)).toBeCloseTo(clickDamageOf(te0) / dpsOf(te0), 9);
+  });
+
+  // The L3 reset glue mirrors `himmelfahrtState` but ALSO wipes L2 (heaven fresh) and
+  // preserves the banked Transzendenz slice. Gate metric = lifetime HPF.
+  it('transcendState banks TE (from lifetime HPF), resets L1+L2, preserves meta', () => {
+    const s = {
+      ...createChState(),
+      zone: 60,
+      killsThisZone: 4,
+      runMaxZone: 80,
+      lifetimeMaxZone: 80,
+      gold: 12345,
+      crew: { boss: 40, legend: 3 },
+      souls: 900,
+      rsLifetime: 1_000_000,
+      totalClicks: 5000,
+      ancients: { twerkules: 10, poposeidon: 4 },
+      gilds: { boss: 5, dj: 2 },
+      // Held HPF is low (5) but the LIFETIME highwater is 1 000 ⇒ ⌊log10⌋ = 3 TE.
+      heaven: { hpf: 5, hpfLifetime: 1_000, ascensions2: 20, tree: { coach: 4 } },
+      gear: { ...createGear(), skin: 'boss' as const, skinLevels: { boss: 20 } },
+      chests: {
+        keys: 7,
+        inventory: { wood: 2, gold: 1, diamond: 0, mythic: 0 },
+        pity: { wood: 0, gold: 5, diamond: 1, mythic: 0 },
+        skins: ['gold-royal'],
+      },
+      permTokens: { critDmg: 4 },
+      peach: { nextPeachAt: 5_000, boostUntil: 9_000 },
+      achievements: ['zone-10'],
+    };
+    const after = transcendState(s);
+
+    // Banked TE from the LIFETIME HPF total (1 000 ⇒ 3), not held HPF (5 ⇒ would be 0).
+    expect(after.transcend.te).toBe(3);
+    expect(after.transcend.teLifetime).toBe(3);
+    expect(after.transcend.transcendences).toBe(1);
+
+    // All of L1 resets to a fresh tour.
+    expect(after.gold).toBe(0);
+    expect(after.crew).toEqual({});
+    expect(after.zone).toBe(1);
+    expect(after.killsThisZone).toBe(0);
+    expect(after.runMaxZone).toBe(1);
+    expect(after.lifetimeMaxZone).toBe(1);
+    expect(after.souls).toBe(0);
+    expect(after.rsLifetime).toBe(0);
+    expect(after.ancients).toEqual({});
+    // All of L2 resets too — heaven (HPF + Himmelsbaum) is fresh.
+    expect(after.heaven).toEqual(createHeaven());
+
+    // Survivors: gilds, gear (+ zoneEver latch), loot, retention meta, lifetime stats.
+    expect(after.gilds).toEqual({ boss: 5, dj: 2 });
+    expect(after.totalClicks).toBe(5000);
+    expect(after.gear.skin).toBe('boss');
+    expect(after.gear.skinLevels).toEqual({ boss: 20 });
+    expect(after.gear.zoneEver).toBe(80); // latched before lifetimeMaxZone fell to 1
+    expect(after.chests).toEqual(s.chests);
+    expect(after.permTokens).toEqual(s.permTokens);
+    expect(after.peach).toEqual(s.peach);
+    expect(after.achievements).toEqual(['zone-10']);
+
+    // ⇒ Diamant-Booty unlocks now that a Transzendenz is banked (§5.3).
+    expect(skinUnlocked('diamond', gearUnlockCtx(after))).toBe(true);
+  });
+
+  it('a prior transcend slice survives; only NEW TE beyond the highwater is banked', () => {
+    const s = {
+      ...createChState(),
+      heaven: { hpf: 2, hpfLifetime: 10_000, ascensions2: 5, tree: {} }, // ⌊log10⌋ = 4
+      // Already transcended once (te 3), then spent 1 on a Mythos node (held 2).
+      transcend: { te: 2, teLifetime: 3, transcendences: 1, mythos: { someNode: 1 } },
+    };
+    const after = transcendState(s);
+    // Earned highwater lifts 3 → 4 (gain 1); held 2 + 1 = 3; spending stays spent.
+    expect(after.transcend.teLifetime).toBe(4);
+    expect(after.transcend.te).toBe(3);
+    expect(after.transcend.transcendences).toBe(2);
+    expect(after.transcend.mythos).toEqual({ someNode: 1 }); // ledger preserved
+    // Safe at 0 gain: a second call at the SAME lifetime HPF banks no TE, just resets.
+    const again = transcendState(after);
+    expect(again.transcend.te).toBe(3);
+    expect(again.transcend.teLifetime).toBe(4);
+    expect(again.transcend.transcendences).toBe(3);
+  });
+
+  // Regression (P0): the held TE slice MUST survive a plain L1 ascension AND an L2
+  // Himmelfahrt — nothing above L2 resets it (§4.5.3). Without carrying `transcend`
+  // forward, `createChState()`'s zeroed seed would wipe held TE / teLifetime /
+  // transcendences / mythos on the very next reset — killing the ×3^TE boost, the 🔮
+  // HUD badge and re-locking Diamant-Booty.
+  it('held TE survives ascension and Himmelfahrt (L3 never resets below §4.5.3)', () => {
+    const slice = { te: 2, teLifetime: 3, transcendences: 1, mythos: { someNode: 1 } };
+    const s = {
+      ...createChState(),
+      zone: 60,
+      runMaxZone: 60,
+      lifetimeMaxZone: 60,
+      rsLifetime: 1_000_000,
+      transcend: slice,
+    };
+    // A plain L1 ascension preserves the banked L3 slice untouched.
+    expect(ascendState(s).transcend).toEqual(slice);
+    // An L2 Himmelfahrt (which wipes L1 + L2) still preserves the L3 slice.
+    const hf = himmelfahrtState(s);
+    expect(hf.transcend).toEqual(slice);
+    // ⇒ Diamant-Booty stays unlocked after a Himmelfahrt (transcendences carried over).
+    expect(skinUnlocked('diamond', gearUnlockCtx(hf))).toBe(true);
+    // And the ×3^TE global mult survives: with the same crew, the post-Himmelfahrt
+    // DPS carries the surviving te=2 factor (×9). Compared against the same state with
+    // a wiped slice, the ratio is exactly 3^2 — isolating the TE factor from the
+    // (banked-HPF) heaven mult, which a wiped `transcend` would collapse to ×1.
+    const hfCrew = { ...hf, crew: { boss: 20 } };
+    const hfNoTE = { ...hfCrew, transcend: createTranscend() };
+    expect(dpsOf(hfNoTE)).toBeGreaterThan(0);
+    expect(dpsOf(hfCrew)).toBeCloseTo(dpsOf(hfNoTE) * TRANSCEND_GLOBAL_BASE ** 2, 6);
+    // The existing `transcendState` preserve behaviour is unchanged: it also carries it.
+    expect(transcendState(s).transcend.transcendences).toBe(2); // banked once more here
   });
 });

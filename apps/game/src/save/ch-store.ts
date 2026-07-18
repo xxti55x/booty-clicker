@@ -28,12 +28,23 @@ import { type GearState, KULISSE_BUFFS, createGear } from '../game/gear';
 import { type Gilds, createGilds } from '../game/gild';
 import { COACH_CLICK_SHARE, type HeavenState, createHeaven } from '../game/heaven';
 import type { CrewLevels } from '../game/heroes';
+import {
+  DAILY_QUEST_SLOTS,
+  MAX_REROLLS,
+  STREAK_MAX,
+  type MetaState,
+  type QuestProgress,
+  createMeta,
+  isQuestId,
+} from '../game/quests';
+import { isAchievementId } from '../game/ch-achievements';
+import { type TranscendState, createTranscend } from '../game/transcend';
 import { SKINS } from '../character/skins';
 import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 7;
+export const CH_SCHEMA = 9;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -63,7 +74,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (M12, v7): the live ChState + envelope. */
+/** The current persisted shape (M15, v9): the live ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -91,12 +102,14 @@ function isFiniteNumber(v: unknown): v is number {
  * Never-throw validation of a stored CH save (the v5 guard). The gameplay-
  * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
  * The meta/juice fields (rng/stats/legacyImported/ability/combo/gilds/rsLifetime/
- * ancients/heaven/gear/chests/permTokens/peach) are deliberately NOT gated here:
- * they are runtime bookkeeping and get repaired (fresh seed / zeroed stats / false
- * flag / default ability+combo / pruned gilds / clamped highwater / sanitised
- * ancients+heaven+gear / defaulted loot slices) in `stateFromSave` — the same
- * "repair, don't nuke progress" spirit as the runMaxZone invariant. Per-field
- * type+range checks for them live in the `repair*` helpers below.
+ * ancients/heaven/gear/chests/permTokens/peach/meta/achievements/transcend) are
+ * deliberately NOT gated here: they are runtime bookkeeping and get repaired (fresh
+ * seed / zeroed stats / false flag / default ability+combo / pruned gilds / clamped
+ * highwater / sanitised ancients+heaven+gear / defaulted loot slices / defaulted
+ * meta / pruned achievements / sanitised transcend) in `stateFromSave` — the same
+ * "repair, don't nuke progress" spirit as
+ * the runMaxZone invariant. Per-field type+range checks for them live in the `repair*`
+ * helpers below.
  */
 export function isChSave(raw: unknown): raw is ChSaveLatest {
   if (!isRecord(raw)) return false;
@@ -139,6 +152,13 @@ function repairStats(v: unknown): ChStats {
     bossTimeouts: num(src.bossTimeouts),
     goldLifetime: num(src.goldLifetime),
     playTimeS: num(src.playTimeS),
+    // v8 counters — absent in older saves ⇒ 0 (§7.5).
+    ascensions: num(src.ascensions),
+    chestsOpened: num(src.chestsOpened),
+    maxCombo: num(src.maxCombo),
+    bossStreak: num(src.bossStreak),
+    maxBossStreak: num(src.maxBossStreak),
+    keysEarned: num(src.keysEarned),
   };
 }
 
@@ -325,6 +345,77 @@ function repairPeach(v: unknown): PeachState {
   return { nextPeachAt: nn(v.nextPeachAt), boostUntil: nn(v.boostUntil) };
 }
 
+/**
+ * Repair the persisted retention-meta slice (v8, §7.1/§7.2): each field is
+ * validated in ISOLATION — a bad `questIds`/`questProgress`/`questsClaimed` (junk
+ * ids, negative progress) is pruned to real catalog ids/non-negative ints, the day
+ * high-waters and streak are range-clamped, and a wholly non-object meta becomes a
+ * fresh `createMeta()`. Never throws; a corrupt meta slice repairs to defaults and
+ * never nukes real progress on other slices.
+ */
+function repairMeta(v: unknown): MetaState {
+  const def = createMeta();
+  if (!isRecord(v)) return def;
+  const int = (x: unknown, fallback: number): number =>
+    isFiniteNumber(x) && Number.isInteger(x) ? x : fallback;
+  const questIds = Array.isArray(v.questIds)
+    ? [...new Set(v.questIds.filter(isQuestId))].slice(0, DAILY_QUEST_SLOTS)
+    : def.questIds;
+  const questProgress: QuestProgress = {};
+  if (isRecord(v.questProgress)) {
+    for (const [id, n] of Object.entries(v.questProgress)) {
+      if (isQuestId(id) && isFiniteNumber(n) && n >= 0) questProgress[id] = Math.floor(n);
+    }
+  }
+  const questsClaimed = Array.isArray(v.questsClaimed)
+    ? [...new Set(v.questsClaimed.filter(isQuestId))]
+    : def.questsClaimed;
+  const rerollsUsed = Math.max(0, Math.min(MAX_REROLLS, int(v.rerollsUsed, 0)));
+  const streak = Math.max(0, Math.min(STREAK_MAX, int(v.streak, 0)));
+  return {
+    day: int(v.day, def.day),
+    questIds,
+    questProgress,
+    questsClaimed,
+    rerollsUsed,
+    streak,
+    lastLoginDay: int(v.lastLoginDay, def.lastLoginDay),
+    streakProtectWeek: int(v.streakProtectWeek, def.streakProtectWeek),
+  };
+}
+
+/** Repair the persisted achievements slice (v8, §7.3): keep only real catalog ids (deduped). */
+function repairAchievements(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.filter(isAchievementId))];
+}
+
+/**
+ * Repair the persisted L3 (transcend) slice (v9, §4.5.3): `te`/`teLifetime`/
+ * `transcendences` are clamped to non-negative finite (junk/NaN/negative ⇒ 0), the
+ * `mythos` spent-ledger runs through the shared count-map repair, and a wholly
+ * non-object (or absent) slice becomes a fresh `createTranscend()`. The held-vs-earned
+ * invariant `teLifetime ≥ te` is restored by LIFTING the earned highwater to at least
+ * the held balance (`max(teLifetime, te)`) — the non-nuking direction: it never
+ * discards held TE (a dropped/zeroed `teLifetime` field must not erase real power),
+ * unlike `repairHeaven` which clamps held HPF DOWN because held HPF is spent in a tree
+ * that can't exceed the earned total. Never throws; isolates corruption to this slice.
+ */
+function repairTranscend(v: unknown): TranscendState {
+  if (!isRecord(v)) return createTranscend();
+  const nn = (x: unknown): number => (isFiniteNumber(x) && x >= 0 ? x : 0);
+  // Floor + cap all counters (defense-in-depth): a corrupt/crafted save with a
+  // fractional te (×3^2.5) or an absurd te (1e300 ⇒ transcendGlobalMult = Infinity ⇒
+  // dpsOf = Infinity) is neutralised. `teForHpfLifetime` can never legitimately exceed
+  // ⌊log10(Number.MAX_VALUE)⌋ = 308, so cap held/earned TE there; the mult stays finite.
+  const cap = 308;
+  const te = Math.min(Math.floor(nn(v.te)), cap);
+  // Held TE can never exceed what was ever earned; lift the highwater, don't nuke held.
+  const teLifetime = Math.min(Math.max(Math.floor(nn(v.teLifetime)), te), cap);
+  const transcendences = Math.floor(nn(v.transcendences));
+  return { te, teLifetime, transcendences, mythos: repairCountMap(v.mythos) };
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
 function stateFromSave(save: ChSaveLatest): ChState {
   const souls = save.souls;
@@ -355,6 +446,9 @@ function stateFromSave(save: ChSaveLatest): ChState {
     chests: repairChests(save.chests),
     permTokens: repairPermTokens(save.permTokens),
     peach: repairPeach(save.peach),
+    meta: repairMeta(save.meta),
+    achievements: repairAchievements(save.achievements),
+    transcend: repairTranscend(save.transcend),
   };
 }
 
@@ -445,6 +539,35 @@ function migrateChV6toV7(raw: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+/**
+ * v7 → v8: fill the M13 defaults — a fresh retention-meta slice (no quests rolled
+ * yet: `day: -1` forces the first quest roll + login on the next boot, streak 0) and
+ * an empty achievements set. No existing field is touched, so the migration is
+ * lossless; the new v8 stats counters (ascensions/chestsOpened/maxCombo/…) are
+ * absent in the v7 `stats` and default to 0 via `repairStats`.
+ */
+function migrateChV7toV8(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    v: 8,
+    meta: createMeta(),
+    achievements: [],
+  };
+}
+
+/**
+ * v8 → v9: fill the M15 default — a fresh (never-transcended) L3 slice. v8 saves have
+ * no Transzendenz layer, so `transcend` defaults to `createTranscend()` (0 TE, empty
+ * Mythos ledger). No existing field is touched, so the migration is lossless.
+ */
+function migrateChV8toV9(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    v: 9,
+    transcend: createTranscend(),
+  };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
@@ -452,6 +575,8 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
   4: migrateChV4toV5,
   5: migrateChV5toV6,
   6: migrateChV6toV7,
+  7: migrateChV7toV8,
+  8: migrateChV8toV9,
 };
 
 /**

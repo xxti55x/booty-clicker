@@ -13,7 +13,8 @@
  *
  * This is the M11 CORE only: the `GearState` shape is defined here but persisted by
  * part 2 (CH-save v6), and the glue/UI wiring is part 3. Chest/key stats are
- * data-only until M12; Diamant-Booty is locked until Transzendenz (M14).
+ * data-only until M12; Diamant-Booty unlocks „ab Transzendenz" (live as of M15 —
+ * `skinUnlocked` gates it on `ctx.transcendences >= 1`).
  */
 import { SKINS } from '../character/skins';
 import type { BackgroundKey, BuffStat, SkinKey, SkinRarity } from '../types';
@@ -459,6 +460,8 @@ export interface UnlockCtx {
   readonly bossFirstKills: ReadonlySet<number>;
   /** Number of Himmelfahrten performed (drives Gyrator). */
   readonly himmelfahrten: number;
+  /** Number of Transzendenzen performed (drives Diamant-Booty, §4.5.3). */
+  readonly transcendences: number;
   /** Skin ids already crafted with shards (drives Neon-Ninja/Pfirsich-Pirat). */
   readonly crafted: ReadonlySet<string>;
 }
@@ -466,7 +469,8 @@ export interface UnlockCtx {
 /**
  * Whether `skinId` is unlocked given `ctx`. Tyrann's legacy claim (`bossDefeated`
  * old-save ⇒ unlocked) is handled by part 2 seeding `bossFirstKills` with zone 10.
- * Diamant-Booty stays locked until Transzendenz (M14) — always false for now.
+ * Diamant-Booty unlocks „ab Transzendenz" — once ≥ 1 Transzendenz has been banked
+ * (§4.5.3), mirroring how Gyrator gates on the first Himmelfahrt.
  */
 export function skinUnlocked(skinId: SkinKey, ctx: UnlockCtx): boolean {
   const rule = SKIN_UNLOCKS[skinId];
@@ -480,10 +484,10 @@ export function skinUnlocked(skinId: SkinKey, ctx: UnlockCtx): boolean {
       return ctx.bossFirstKills.has(rule.zone ?? -1);
     case 'himmelfahrt':
       return ctx.himmelfahrten >= 1;
+    case 'transcend':
+      return ctx.transcendences >= 1;
     case 'craft':
       return ctx.crafted.has(skinId);
-    case 'transcend':
-      return false;
     default:
       return false;
   }

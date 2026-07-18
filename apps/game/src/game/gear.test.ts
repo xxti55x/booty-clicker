@@ -310,6 +310,7 @@ describe('gear — unlock gating (spec §5.3)', () => {
       lifetimeMaxZone: 1,
       bossFirstKills: new Set<number>(),
       himmelfahrten: 0,
+      transcendences: 0,
       crafted: new Set<string>(),
       ...over,
     };
@@ -339,14 +340,23 @@ describe('gear — unlock gating (spec §5.3)', () => {
     expect(skinUnlocked('gyrator', ctx({ himmelfahrten: 1 }))).toBe(true);
   });
 
-  it('Neon-Ninja / Pfirsich-Pirat = crafted; Diamant locked until Transzendenz', () => {
+  it('Neon-Ninja / Pfirsich-Pirat = crafted', () => {
     expect(skinUnlocked('neon', ctx())).toBe(false);
     expect(skinUnlocked('neon', ctx({ crafted: new Set(['neon']) }))).toBe(true);
     expect(skinUnlocked('pirate', ctx({ crafted: new Set(['pirate']) }))).toBe(true);
     expect(skinUnlocked('pirate', ctx({ crafted: new Set(['neon']) }))).toBe(false);
-    expect(skinUnlocked('diamond', ctx({ crafted: new Set(['diamond']), himmelfahrten: 9 }))).toBe(
+  });
+
+  // M15: Diamant-Booty unlocks „ab Transzendenz" — locked at 0 Transzendenzen (even
+  // deep into Himmelfahrten), unlocked once ≥ 1 Transzendenz has been banked.
+  it('Diamant-Booty = ≥ 1 Transzendenz (§4.5.3)', () => {
+    expect(skinUnlocked('diamond', ctx({ transcendences: 0 }))).toBe(false);
+    // Not gated on Himmelfahrten or crafting — only a real Transzendenz opens it.
+    expect(skinUnlocked('diamond', ctx({ himmelfahrten: 9, crafted: new Set(['diamond']) }))).toBe(
       false,
     );
+    expect(skinUnlocked('diamond', ctx({ transcendences: 1 }))).toBe(true);
+    expect(skinUnlocked('diamond', ctx({ transcendences: 3 }))).toBe(true);
   });
 
   it('exposes craft costs from the catalog (120 / 80 🧩)', () => {

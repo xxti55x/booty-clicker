@@ -15,6 +15,17 @@ npm run dev        # Dev-Server (Vite, HMR) → http://localhost:5173
 Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 MB),
 `npm run build:itch` (itch.io-ZIP), `npm test` (Vitest), `npm run lint`, `npm run format`.
 
+**Release 2.0 (M15).** Das Spiel ist der endlose, klick-zentrierte CH-Loop mit **allen
+drei** Prestige-Schichten (Ascension → Himmelfahrt → **Transzendenz**) plus Gear, Loot,
+Retention-Meta und Bestenliste. Die **Transzendenz** (Schicht 3, §4.5.3) ist seit M15
+**live**: CH-Save **v9**, ein globaler **×3^TE**-Boost (P1-neutral — dieselbe Zahl auf
+Klick _und_ Idle) und der 🔮-Tab. Der Produktions-Build ist ~0,68 MB (658 KB JS gzip 176 KB), rein
+relativ-gepfadet (`base: './'`). `npm run build:itch` baut und packt `dist/` (mit
+`index.html` an der ZIP-Wurzel) nach `apps/game/release/booty-clicker-itch.zip` — hochladbar
+als itch.io-HTML-Projekt; dieselbe `dist/` deployt CI auf Cloudflare Pages, wenn die Secrets
+gesetzt sind (sonst sauber übersprungen). Das eigentliche Veröffentlichen liegt außerhalb
+dieses Repos — siehe `TESTPLAN.md` §7/§8.
+
 ## So spielt es sich
 
 - **Twerken = Schaden.** Klick auf die Figur oder drück die Leertaste — jeder Shake
@@ -57,6 +68,15 @@ Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 M
   zurück; **Vergoldungen, HPF und der Himmelsbaum bleiben.** Gib HPF im **Himmelsbaum**
   aus (permanent über alle Prestiges): **Twerk-Coach I–IV**, **Frühstarter**,
   **Nachtschicht** (Offline-Cap 8 → 16 → 24 h), **Ekstase-Ausdauer**.
+- **Transzendenz (🔮).** Ab **100 HPF Lebenszeit** (mehrere Himmelfahrten tief) kannst du
+  ein **drittes Mal** prestige-n und **Transzendente Essenz (TE)** ernten:
+  `TE = ⌊log10(HPF_life)⌋`, am Gate also schon **+2 TE**. Jede gehaltene TE gibt einen
+  dauerhaften **×3-Globalboost** (`×3^TE`, gleich auf Klick **und** Idle — daher
+  **P1-neutral**, verschiebt das Aktiv-zu-Idle-Verhältnis nie). Eine Transzendenz ist der
+  **tiefste Reset**: sie setzt die ganze Tour, Ruhm-Seelen, Ahnen **und den kompletten
+  Himmel** (HPF + Himmelsbaum) zurück — **Vergoldungen, Gear/Skins, Truhen und die
+  gehaltene TE bleiben für immer.** (Der **Mythos**-Zweig für ausgegebene TE ist in M15
+  noch ein Platzhalter — „bald".) Schaltet auch **Diamant-Booty** frei.
 - **Twerk-Coaches.** Ein per Himmelsbaum freigeschalteter Coach **klickt automatisch
   1×/s** mit 25 % deines Klickwerts (bis 4 cps) — idle **und** offline, sodass auch
   reine Klick-Builds ohne Crew über Nacht verdienen.
@@ -91,6 +111,27 @@ Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 M
   (~8 s klickbar). Fang ihn für **×3 Einkommen für 60 s** (HUD-Badge „×3 Boost") plus **25 %
   Chance auf 1 🔑**. Auf dem Handy wird er **im Viewport gehalten** (auch beim Drehen) und
   **verschwindet unter dem geöffneten Bottom-Sheet**, damit er nie darunter feststeckt.
+- **Ziele, Dailies & Bestenliste (📋).** Der **📋-Tab** bündelt die Retention-Meta —
+  komplett **offline, ohne Server, ohne Account**:
+  - **Täglicher Login-Streak** (1–7): jeder Tag eine **🥇 Goldtruhe**, an **Tag 7** eine
+    **💎 Diamanttruhe + 2 🔑**; ein **Streak-Schutz** (1×/Woche gratis) fängt einen
+    verpassten Tag ab, kein FOMO. Die Belohnung kommt automatisch beim ersten Boot des Tages.
+  - **3 Tages-Quests**, deterministisch aus dem Datum gewürfelt (gleiches Datum ⇒ gleiche
+    Quests), mit Fortschrittsbalken + **Einlösen**-Knopf; **1× pro Tag** kannst du **neu
+    würfeln**. Beispiele: „Combo-Tier 3" (2 🔑) · „4 Bosse besiegen" (🥇) · „500 On-Beat-Klicks"
+    (💎) · „Neue Bestzone" (5 ✨) · „Aszendiere" (20 🧩). Uhr-zurückstellen bringt nichts
+    (Tage sind monotone High-Water-Marken).
+  - **Erfolge**: ein CH-natives Set (Bühnen-Meilensteine, Boss-Serien ohne Timeout,
+    Combo-Tiers, Krit-Zähler, Aszensionen, Himmelfahrten, **Transzendenzen** (🔮
+    „Transzendent"), Vergoldungen, Truhen …) mit
+    freigeschaltet/gesperrt-Ansicht; überleben Ascension, Himmelfahrt **und** Transzendenz.
+  - **Bestenliste v2 (optional)**: Metrik ist die **Bestzone** (`maxZone`) + Anzeige von
+    Seelen/Aszensionen. **Fail-silent & standardmäßig aus** — ohne `VITE_API_BASE` ist alles
+    voll spielbar, der Eintrag zeigt nur einen **Offline-Hinweis**. Ist eine API konfiguriert,
+    fragt das Spiel **nur bei einer neuen Bestzone** (überspringbar) nach dem Eintrag; ein
+    **Top-50** ist jederzeit über den 📋-Tab abrufbar.
+  - **Saison-Flavor (📆)**: rein datumsbasiert, **Oktober „Spooky Booty" 🎃** und
+    **Dezember „Frost-Twerk" ❄️** — ein Banner im 📋-Tab + Boot-Hinweis, **kein** Gameplay-Hardlock.
 
 ## Steuerung
 
@@ -100,11 +141,15 @@ Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 M
 - Maus ziehen = Kamera drehen, Scrollen = Zoom
 - 🕺-Button (links oben) blendet das Panel ein/aus · 🔊 = Ton an/aus
 - Auf dem Handy ist der Shop ein **Bottom-Sheet** — Figur & Rivale bleiben sichtbar
-- Tabs (Emoji-only, Titel per Hover, damit alle **sieben** passen): **🕺 Crew** ·
+- Tabs (Emoji-only, Titel per Hover; die Tab-Leiste **scrollt horizontal**, falls die
+  **neun** Tabs auf einem schmalen Panel nicht in eine Zeile passen): **🕺 Crew** ·
   **🎽 Gear** (Skins/Kulisse/Set-Boni) · **🌀 Ahnen** (Seelen-Sink) · **✨ Ruhm**
-  (Ascension + Statistik) · **🌈 Himmel** (Himmelfahrt + Himmelsbaum) · **🎁 Truhen**
-  (🔑/Truhen öffnen, Token & Skins, transparente Drop-Chancen) · **⚙️** (Grafik,
-  Effekte, Save-Export/Import/Reset)
+  (Ascension + Statistik) · **🌈 Himmel** (Himmelfahrt + Himmelsbaum) · **🔮 Transzendenz**
+  (Schicht 3: TE ernten, ×3^TE-Boost, Mythos-Platzhalter) · **🎁 Truhen**
+  (🔑/Truhen öffnen, Token & Skins, transparente Drop-Chancen) · **📋 Ziele** (Daily,
+  Quests, Erfolge, Bestenliste, Saison) · **⚙️** (**📊 Statistik** — lifetime vs. Lauf —,
+  Grafik, Effekte, Save-Export/Import/Reset). Der 🔮-Tab steht direkt hinter 🌈 Himmel,
+  hält die Prestige-Leiter ✨ → 🌈 → 🔮 zusammen.
 
 ## Architektur
 
@@ -129,20 +174,34 @@ npm-Workspaces-Monorepo:
     Unlock-Gating (`skinUnlocked`). Konsumiert von `effectiveClick`/`dpsOf` (die stärksten
     Buffs sind Klick-Buffs, P1).
   - `game/sim.ts` — `simulateEndless`: deterministischer Balancing-Bot über die echten
-    Module; Endlos-Kriterien E1/E2/**E3**/E4 (inkl. **E4-mit-Gear**: Best-in-Slot-Klick-Gear
-    schlägt Best-in-Slot-Idle-Gear ≥ 8 Zonen) + Pacing + erste-Himmelfahrt als CI-Gate
-    (`npm run test:sim`).
+    Module, mit der **kompletten** Loot-Ökonomie im Bot (Peach/Truhen/Token/Shards→Gear).
+    Endlos-Kriterien E1/E2/**E3**/E4 (inkl. **E4-mit-Gear**: Best-in-Slot-Klick-Gear schlägt
+    Best-in-Slot-Idle-Gear ≥ 8 Zonen) + §4.8-Pacing + erste-Himmelfahrt + **Float-Guard bis
+    Bühne 300** (jede Größe endlich & < 1e300) als CI-Gate (`npm run test:sim`, 39 Tests).
+    **E2 fährt seit M15 den vollen v2-Prestige-Stack** (`fullPrestige`: Ahnen-Käufe **und**
+    echte Himmelfahrten via `bankHimmelfahrt`) durch die weiche-Wand-Messung.
+  - `game/transcend.ts` + `game/flags.ts` — **Transzendenz** (Schicht 3, §4.5.3) — **live seit
+    M15** (`TRANSCEND_ENABLED = true`): reine, getestete Formeln `TE = ⌊log10 HPF_life⌋`
+    (100-HPF-Gate), `×3^TE` globaler (P1-neutraler) Multiplikator (gefaltet in `dpsOf`
+    **und** `clickDamageOf`), held-vs-spent-Buchhaltung + der L1+L2-Reset-Vertrag
+    (`transcendState` in `ch-state.ts`). CH-Save **v9** persistiert die Schicht; der
+    **🔮-Tab** (`ui/transcend-panel.ts`) verdrahtet sie. `VITE_TRANSCEND=0` blendet sie im
+    Dev-Build sauber aus.
   - `game/chests.ts` — reine Loot-Engine: Truhen-Tiers, gewichtete Loot-Tabellen,
     deterministisches `openChest` (seedbarer RNG), per-Tier **Pity**, **Luck**-Umgewichtung,
     Duplikat-Schutz und der Permanent-Token-Katalog (alles Daten + reine Funktionen).
   - `game/peach.ts` — Goldener-Pfirsich-Logik: `rollNextPeachAt` (seedbares Spawn-Fenster),
     ×3-Einkommens-Boost + der 25 %-🔑-Roll — deterministisch/save-scum-fest.
-  - `game/ch-state.ts` + `save/ch-store.ts` — CH-State (Save **v7**: `chests {keys, inventory,
-pity, skins}` · `permTokens` · `peach {nextPeachAt, boostUntil}`), eigener versionierter
-    Save-Key (`bootyclicker.ch`), Offline-Gold (inkl. Coach + Gear-Bonus), Base64-Export/Import
-    (never-throw, injizierbar).
+  - `game/ch-state.ts` + `save/ch-store.ts` — CH-State (Save **v9**: `chests {keys, inventory,
+pity, skins}` · `permTokens` · `peach {nextPeachAt, boostUntil}` · `meta` (Retention:
+    Streak/Quests/Erfolge) · **`transcend {te, teLifetime, transcendences, mythos}`**),
+    eigener versionierter Save-Key (`bootyclicker.ch`), Offline-Gold (inkl. Coach +
+    Gear-Bonus), Base64-Export/Import (never-throw, injizierbar). `transcendState` bankt TE
+    aus Lebenszeit-HPF und setzt L1 **und** L2 zurück, bewahrt aber die TE-Schicht + alle
+    „nie"-Meta (Gilds/Gear/Loot/Retention).
   - `ui/*` — HUD/Rival + Travel-Stepper, Crew, **Gear/Skins**, **Ahnen**, Prestige,
-    **Himmel**, **Truhen** (🎁: Öffnen-Animation + transparente Drop-Tabellen), Settings;
+    **Himmel**, **🔮 Transzendenz** (`transcend-panel.ts`: Arm→Bestätigen-Reset, TE-Vorschau,
+    Gate-Fortschritt, Mythos-Platzhalter), **Truhen** (🎁: Öffnen-Animation + transparente Drop-Tabellen), Settings;
     `main.ts` verdrahtet alles (Skin-Wechsel baut die 3D-Figur neu, Kulissen-Wahl gated die
     Auto-Rotation, der schwebende 🍑-Button wird geclampt/despawnt).
 - `apps/api` — optionaler Cloudflare-Worker (Hono + D1 + KV) als Bestenlisten-Backend.

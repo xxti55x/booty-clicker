@@ -3,6 +3,372 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M15 — Transzendenz LIVE (Schicht 3, §4.5.3)
+
+- **2026-07-18 (Part 2) — UI, Glue, Sim & Docs für die volle Transzendenz-Schicht.**
+  Part 1 (`8ea3c81`) hat die Live-Verrohrung geliefert (CH-State-`transcend`-Slice,
+  CH-Save **v9** inkl. Migration v8→v9 + `repairTranscend`, `×3^TE` gefaltet in `dpsOf`
+  **und** `clickDamageOf`, `transcendState`-Reset-Glue, `TRANSCEND_ENABLED = true`,
+  Diamant-Booty ab `transcendences ≥ 1`). Part 2 macht die Schicht spielbar:
+  - **🔮-Tab (`ui/transcend-panel.ts`).** Spiegelt das 🌈-Himmel-Panel: Arm→Bestätigen-
+    „Transzendieren"-Button (zwei Klicks, 4-s-Fenster) — **disabled außer**
+    `canTranscend(state.transcend, state.heaven.hpfLifetime)`. Zeigt gehaltene/Lebenszeit-TE,
+    die Transzendenzen-Zahl, den `×3^TE`-Boost, die +TE-Vorschau und — vor der ersten
+    Transzendenz — den Gate-Fortschritt `hpfLifetime / 100` mit klarem „🔒 gesperrt"-Hinweis,
+    dass eine Transzendenz L1 **und** L2 wipet. **Gate-Metrik = `state.heaven.hpfLifetime`**
+    (Lebenszeit-HPF), NICHT gehaltene HPF.
+  - **Tab-Reihenfolge:** 🔮 sitzt **direkt hinter 🌈 Himmel** (vor 🎁 Truhen) — das hält die
+    Prestige-Leiter ✨ Ruhm → 🌈 Himmel → 🔮 Transzendenz zusammenhängend und in Reihenfolge,
+    was am besten liest. Neun Tabs; die Tab-Leiste scrollt seit M13 horizontal (nichts clippt).
+  - **Mythos = bewusst minimaler Platzhalter.** Der Spent-TE-Content-Baum ist im M15-Scaffold
+    leer (§11 offene Frage #5 „bewusst dünn"). Das Panel rendert einen sauberen
+    „Mythos-Skins — bald"-Platzhalter; **keine** Balance erfunden, kein realer TE-Sink
+    gebaut. Absichtlich, damit die Held-TE der einzige (P1-neutrale) Effekt bleibt.
+  - **L2-Wipe-Gefahr im Handler (`main.ts`).** `transcendState` setzt `heaven =
+createHeaven()` — ein **strikt tieferer** Reset als eine Himmelfahrt. Der `onTranscend`-
+    Handler repliziert daher **exakt** die Post-Himmelfahrt-Re-Seeds, damit kein Timer/State
+    an der alten (weggewischten) Heaven hängt: `syncMaxZones()` **zuerst** (faltet
+    Combat-Maxzonen + **RNG-Cursor** + Combo in den State, bevor der Reset greift) → `combat =
+withBossTimerBonus(spawnFor(1,0,1))` (Zonen/Front-Travel auf Bühne 1) → `comboState =
+createCombo(state.combo.stacks)` → `comboT3KeyAwardedThisRun = false` → `lastShakeTier = 0`
+    → `recompute()` → `updateBackground(true)` → Panel-Refreshes `crew/ancients/prestige/
+heaven/gear/meta` (**inkl. `heaven.refresh()`** — anders als der Himmelfahrt-Handler, weil
+    L2 hier resettet wird) → `hud.update(...)` (malt das 🔮-Badge) → `abilityBar.update(...)`
+    → Toast → `checkAchievements()` → `audio.unlockJingle()` → `persist()`. **Peach
+    `nextPeachAt` und Sugar `nextSugarAt` brauchen KEINEN Re-Seed** — `transcendState`
+    bewahrt `peach`/`gear` (wie die Himmelfahrt), die Zeitstempel bleiben gültige Zukunft;
+    der Boot-Glue re-seedet sie nur bei `≤ 0`/absurder Zukunft. Der Live-`rng` wird NICHT neu
+    erzeugt (nur der Import-Handler tut das) — Cursor-Kontinuität via `syncMaxZones`.
+  - **HUD-Badge.** `ch-hud.ts` hängt `· 🔮 ×N` (`transcendGlobalMult(te)`) an die
+    change-detektierte Seelen-Zeile (`#souls`), sobald `transcendences > 0` — analog zum
+    `🍑 HPF`-Badge und wie dieses **außerhalb** des Klick-Hot-Path-`innerHTML`. Zeigt auch bei
+    0 Seelen/HPF (der Mult überlebt den L1+L2-Wipe): z. B. `✨ 0 Seelen · +0% Schaden · 🔮 ×9`.
+  - **Achievement `transcend-1` („Transzendent", 🔮).** Erste Transzendenz; `AchievementCtx`
+    um `transcendences` erweitert (`state.transcend?.transcendences ?? 0`), mit Test.
+  - **Flag-Respekt.** `isTranscendEnabled()` gated die Panel-Instanz + den Tab; bei
+    `VITE_TRANSCEND=0` blendet der Handler die 🔮-Tab **und** ihren Body sauber aus.
+  - **F7 aufgelöst (E2 durch den vollen v2-Prestige-Stack).** `simulateContinuous` bekam ein
+    `fullPrestige`-Flag: der Bot kauft nach jeder Aszension **Twerk-Ahnen** greedy **und**
+    führt beim Seelen-Plateau eine **echte Himmelfahrt** (`bankHimmelfahrt` + L1-Reset) aus.
+    E2 fährt jetzt darüber und asserted (a) die ×2-Soft-Wall-Schranke, (b) ≥ 16 produktive
+    +5-Verbesserungen (hoch von ≥ 12), (c) `himmelfahrten ≥ 1` über ≥ 8 Ahnen-kaufende
+    Aszensionen — der volle Stack ist nachweislich exerziert (`himmelfahrten = 1`,
+    `ascensions ≈ 10–12`, worst ratio ≈ 1,89, ~0,2 s/Seed).
+    **RESIDUAL (dokumentiert, nicht erzwungen):** die erreichbare Decke bleibt im
+    < 1-s-Budget bei ~Bühne 80 / 16 Verbesserungen, **nicht** den „ersten ~30" der Spec. Die
+    erste Himmelfahrt an der Bühne-80-Seelen-Wand bankt nur `⌊√(2074/1000)⌋ = 1` HPF (+2 %
+    global) — viel zu wenig, um Bühne 80 zu brechen; eine 2. HPF bräuchte `rsLife ≥ 4000`
+    (≈ Bühne 88), was 1 HPF nicht erreicht: eine echte Henne-Ei-Soft-Wall, die nur der
+    beabsichtigte Multi-HPF-Grind über Tage (§4.5.2/§4.8-Pacing) löst. 30 Verbesserungen
+    bräuchten eine minutenlange Sim — also asserten wir die ehrliche Decke + die Tatsache,
+    dass die Ahnen-+-Himmelfahrt-Codepfade wirklich laufen. **Keine bestehende Assertion
+    gelockert.** `sim.test.ts` bleibt grün (39 Tests, ~7 s < 10 s).
+  - **F10(a)/F10(b)/F10(c) — in Part 1 aufgelöst.** F10a: `gear.ts` gated Diamant-Booty auf
+    die reale `ctx.transcendences` (via `gearUnlockCtx`), keine zweite Wahrheitsquelle mehr.
+    F10b: `transcendGlobalMult` liest bewusst gehaltenes `te` (Spending auf Mythos handelt
+    Global-Power gegen Content — konsistent mit Souls/HPF). F10c: `ch-state.test.ts` hat den
+    echten P1-Neutralitäts-Assert (TE skaliert `clickDamageOf` UND `dpsOf` um exakt `3^3`,
+    Klick:Idle-Verhältnis invariant, an den realen Pipelines).
+  - **Headless-Smoke (Wegwerf, nicht committet).** `scratchpad/smoke-m15.mjs` über `vite
+preview :4188` + Playwright-Chromium: 14/14 Checks grün — 🔮-Tab existiert/öffnet; ein
+    v9-Save mit `hpfLifetime ≥ 100` zeigt „Transzendieren" enabled (+2 TE), Arm→Bestätigen
+    bankt TE (te = 2, persistiert), resettet Seelen/Zone/HPF auf frisch und lässt `🔮 ×9` im
+    HUD; ein Save unter dem Gate (50 HPF) zeigt „gesperrt"; null Seitenfehler (der bekannte
+    `navigator.vibrate`-Headless-Hinweis gefiltert). Staging via `addInitScript`, weil der
+    App-`beforeunload`-`persist()` sonst einen gecrafteten Save mit dem alten In-Memory-State
+    überschreibt.
+
+## M14 — Endless-QA, Transzendenz-Gerüst & Release 2.0
+
+- **2026-07-18 (Review) — Review-Pass-Fixes (Ehrlichkeit & billige Korrektheit).**
+  - **Nicht-endliches TE-Gate:** `teForHpfLifetime(Infinity)` gab `Infinity` zurück,
+    obwohl der JSDoc „Non-finite ⇒ 0" versprach. Guard auf
+    `!Number.isFinite(hpfLifetime) || hpfLifetime < TRANSCEND_MIN_HPF_LIFETIME` gezogen
+    (Threshold-Semantik unverändert), Test `teForHpfLifetime(+∞) === 0` ergänzt.
+  - **§9.3 Präzisions-Assert (§9.5 Assert #3, Teil AC4):** `simulateFloatGuard` trackt
+    jetzt `minGainRatio` = min(Gold-Zuwachs/Gold-Total, Schaden/Ziel-HP-Max) und der
+    AC4-Test asserted `> 2^-50` (additiver Stall-Guard — kein Per-Tick-Zuwachs
+    unterläuft seinen Akkumulator). `FloatGuardResult` um das Feld erweitert.
+  - **Ehrliche Sim-Kommentare:** die §4.8-„weit früher/optimal-vs-real"-Zitate (ein Satz
+    ohne Spec-Entsprechung) in beiden Bühne-80/Himmelfahrt-Blöcken auf eine ehrliche
+    Modellierungs-Begründung umformuliert (player-facing Tabelle vs. realistischer Bot),
+    ohne Logikänderung. Modul-Header von `sim.ts` entschärft: statt „folds _every_
+    power-affecting system" jetzt „folds the crew/gild/soul/ancient/heaven/gear/loot
+    terms; see exclusions below" + explizite Ausschlussliste (**Heaven-Layer inert** —
+    kein Treiber bankt eine Himmelfahrt, also `sim.heaven` hpf 0 und alle
+    Heaven/Truhen-Magnet/Coach-Mults ×1 — plus Twerk-Ekstase, Boss-Schadens-Mults,
+    Chronilla-Timer, `travelTo`-Farming; jeder nur beschleunigend ⇒ E1–E4 bleiben
+    ehrliche Untergrenzen). `stepSecond`-Doc auf die tatsächliche Frontier-Gatung des
+    Rival-Truhen-Rolls korrigiert (nicht „jeder Rival-Kill").
+  - **Krit-Chance im Sim gedeckelt:** `critFactor` deckelt die Chance jetzt auf
+    `CRIT_CHANCE_CAP` (0,4) wie die echte Klick-Pipeline (`click.critChance`), damit ein
+    fetter Token-Pool die EV nicht über das Spiel hebt.
+  - **Schärfere Sim-Asserts:** E1 prüft wieder run2 ≥ run1 (nicht-strikt, Loot-RNG darf
+    gleichziehen); der Float-Guard-Tiefen-Assert von `> 1e40` auf `> 1e58` gezogen
+    (reale `bossHp(300)` ≈ 1,3e63) und der stale „~1e58"-Kommentar auf ~1e63 korrigiert.
+  - **N4-Nachzug:** `ui/hud.ts`, `ui/settings.ts`, `ui/shop.ts` entfernt (0 Importeure,
+    repo-weit gegrept inkl. Tests) — beweisbar tot nach N4s eigenem Kriterium. Kein Test
+    betraf sie ⇒ Game-Testzahl bleibt 480; Bundle unverändert (nie im Entry-Graph). Der
+    frühere N4-Eintrag (falsche Erbe-Pfad-Begründung) ist oben korrigiert.
+  - **`flags.ts`-Kommentar:** „production builds inline the constants" war irreführend —
+    der `import.meta.env[`VITE_${key}`]`-Zugriff per **berechnetem** Key wird von Vite
+    **nicht** statisch ersetzt; Kommentar auf „Laufzeit-Auflösung, in Prod `undefined`,
+    FLAGS-Default gewinnt" korrigiert (null Laufzeitrisiko: kein Live-Importeur).
+  - **`TESTPLAN.md` §5.1:** die Referenz auf `scratchpad/perf.mjs` (nicht im Repo)
+    als Wegwerf-Messskript markiert — analog zum AC3-Capture, damit kein Doc auf eine
+    nicht-existente Repo-Datei verweist.
+
+- **M15-TODO (im Review-Pass bewusst NICHT gefixt, für M15 vorgemerkt) — ALLE in M15
+  aufgelöst (siehe M15-Sektion oben):**
+  - **F7 — E2 durch eine Ära-Sim mit Ahnen + Himmelfahrt** fahren (näher an den
+    „ersten 30" Verbesserungen); aktuell validiert E2 unter der Kalibrier-Baseline mit
+    ~12–16 Verbesserungen als ehrliche Decke. — **✅ M15 Part 2:** `simulateContinuous`
+    hat jetzt `fullPrestige` (Ahnen-Käufe + echte Himmelfahrt); E2 asserted ≥ 16
+    Verbesserungen + `himmelfahrten ≥ 1`. Residual (~Bühne-80-Decke, nicht 30) dokumentiert.
+  - **F10(a) — `gear.ts` (~Z. 485) `case 'transcend': return false`** ist eine ZWEITE
+    Wahrheitsquelle unabhängig von `flags.ts`. M15 muss das umlegen (oder `gear.ts` das
+    Flag lesen lassen), wenn `TRANSCEND_ENABLED` gekippt wird. — **✅ M15 Part 1:**
+    `skinUnlocked` gated Diamant-Booty auf die reale `ctx.transcendences`.
+  - **F10(b) — `transcendGlobalMult`:** festzurren, ob der Faktor gehaltenes `te` oder
+    `teLifetime` liest (aktuell held `te`, spending-empfindlich) — Design-Entscheid M15.
+    — **✅ M15 Part 1:** bleibt gehaltenes `te` (Spending handelt Global-Power gegen Mythos).
+  - **F10(c) — echter P1-Neutralitäts-Beweis:** ein expliziter M15-Akzeptanztest, dass
+    der `×3^TE`-Mult **identisch** in `clickDamageOf` UND `dpsOf` gefaltet wird und das
+    Klick:Idle-Verhältnis invariant bleibt (heute nur im `transcend.test.ts` an
+    entkoppelten Basiswerten gezeigt, nicht an den realen Pipelines). — **✅ M15 Part 1:**
+    `ch-state.test.ts` `P1-neutrality`-Test an den realen Pipelines (`3^3`, Ratio invariant).
+
+- **2026-07-18 — Performance-Pass: gemessen, nicht geschätzt; Hot-Path unverändert
+  (AC2 + §9.6).** Headless über `vite preview` + das vorinstallierte Chromium
+  (SwiftShader/ANGLE) gemessen (Wegwerf-Messskript, **nicht committet** — wie das
+  AC3-Capture): **Draw Calls
+  114/Frame** (< 150 ✓, per Wrapping von `drawArrays`/`drawElements` gezählt — die
+  Zahl ist renderer-getrieben und damit hardware-unabhängig), **Partikel-Integration
+  ~0,002 ms/Frame** bei voller 200-Slot-Belegung (Mess-AC „< 1 ms" ✓, der flache
+  Float-Loop in `engine/particles.ts`), **Popup-Pool exakt bei 24 Nodes gekappt**
+  (nie überschritten, `POP_POOL_MAX`), **12-cps-Stress** (60 Klicks/5 s): mittlere
+  Klick-Hot-Path-Zeit ~1,6 ms, p50 ~1,3 ms, ein Ausreißer ~9–13 ms (der gedrosselte
+  0,25-s-Voll-HUD-Tick), **keine** Konsolenfehler, Gold zählt hoch. Ergebnis des
+  Hot-Path-Audits: **sauber, keine Änderung nötig.** Der Klick-Pfad (`doShake` →
+  `applyHit` → `pops.damage` → `ChHud.update`) baut **kein** `innerHTML` neu —
+  `ChHud` ist change-detected (`setText` schreibt nur bei echter Wertänderung),
+  `Pops` recycelt gepoolte Nodes per `textContent`/`style` (kein `createElement`
+  nach Warmup, kein `innerHTML`); alle `innerHTML`-Stellen liegen ausschließlich in
+  Tab-Render-Funktionen (on-demand, nicht pro Klick). **Lighthouse ehrlich:** ein
+  echter Lighthouse-Lauf ist headless unter SwiftShader (Software-GL) nicht als
+  60-fps-Laptop-Referenz belastbar — statt eine Zahl zu erfinden, dokumentieren wir
+  Bundle-Größe + die obigen hardware-unabhängigen Kennzahlen als 60-fps-Referenz.
+  **Bundle:** `dist` = **652,3 KB JS** (gzip 174,5 KB) + 25,0 KB CSS + 6,1 KB HTML
+  ≈ 0,68 MB — weit unter dem 5-MB-Budget (§9.6). Die N4-Entfernung ließ das Bundle
+  unverändert (toter Code war nie im Entry-Graph → Tree-Shaking hatte ihn längst
+  gedroppt).
+
+- **2026-07-18 — N4-Legacy-Entfernung (§11 #7, Default-Zeitpunkt M14): drei
+  komplett tote Ketten entfernt, konservativ verifiziert.** Der Erbe-Import ist
+  verschifft (M7), damit greift der N4-Entscheid. Vor jeder Löschung den ganzen
+  `apps/`-Baum (ts/html/js) gegrept. Entfernt (Modul + Test + toter einziger
+  Importeur):
+  - `game/events.ts` + `events.test.ts` — **null** Referenzen irgendwo.
+  - `game/boss.ts` + `boss.test.ts` + `ui/boss.ts` — `game/boss.ts` wurde **nur**
+    von `ui/boss.ts` importiert, und `ui/boss.ts` von **niemandem** (kein `main.ts`,
+    kein Test, kein Barrel, kein `index.html`).
+  - `game/achievements.ts` + `achievements.test.ts` + `ui/achievements.ts` — analog:
+    `game/achievements.ts` (das M4-Legacy-Set über `GameState`) nur von
+    `ui/achievements.ts` importiert, das selbst tot ist. Ersetzt durch
+    `ch-achievements.ts` (M13, CH-natives Set) — siehe M13-Eintrag.
+
+  Alle drei Ketten sind vom einzigen Entry (`/src/main.ts`) und von **jedem** Test
+  aus unerreichbar → beweisbar tot. Bewusste Auslegung von „referenced anywhere
+  **live**": ein Verweis aus totem Quellcode (`ui/boss.ts`/`ui/achievements.ts`,
+  selbst 0 Importeure) ist **kein** lebender Verweis; um `game/boss.ts` bzw.
+  `game/achievements.ts` sauber zu entfernen, MUSS der tote UI-Importeur mit weg
+  (sonst bricht `tsc --noEmit` über den ganzen Baum). **Nicht** angefasst: alles,
+  was der CH-Modus lebt (combat/economy/state/ability/settings/heroes/gild/ancients/
+  ascension/heaven/gear/chests/peach/quests/season/ch-\* …) und der legacy Save-Layer
+  (`save/store.ts`, `save/migrate.ts`, `save/schema.ts`) samt `game/state.ts` — der lebt,
+  weil die aktive Erbe/Lese-Kette `main.ts → save/store.ts → save/migrate.ts →
+save/schema.ts` ihn (über `save/store.ts`, das `createGameState`/`GameState` importiert)
+  noch konstruiert und liest. **Korrektur eines früheren Fehl-Eintrags:** die alte
+  Begründung nannte `ui/hud.ts` als von „`legacy-import.ts` / dem Erbe-Pfad" gelesen —
+  das ist falsch. `legacy-import.ts` importiert nur `ch-state`/`save/schema`, und **kein**
+  Modul importiert `ui/hud.ts`, `ui/settings.ts` oder `ui/shop.ts` (repo-weit gegrept,
+  Tests inklusive). Diese drei sind nach N4s eigenem Kriterium beweisbar tot und wurden im
+  Review-Pass unten mit-entfernt. Netto (ursprüngliche N4-Löschung): **8 Dateien**,
+  Game-Testzahl **500 → 480** (−20 Tests / −3 Testdateien), erwartet; Suite bleibt grün,
+  **keine** Verhaltensänderung an bleibendem Legacy-Code.
+
+- **2026-07-18 — AC3 dokumentierter Playthrough (frischer Save → 3 Aszensionen → 1
+  Himmelfahrt) mit ECHTEN Zahlen aus den echten Modulen.** Getrieben durch
+  `simulateAscensionEra` (echte Ökonomie: ROI-Crew, Loot-Faucets, Ahnen-Kauf) +
+  die realen Prestige-Formeln (`soulsForMaxZone`, `hpfForRsLifetime`), Seed 7, aus
+  einem Wegwerf-Vitest-Capture (nicht committet). Beobachtet: Aszension 1 → Bühne
+  **60** / RS-Lifetime **320**; Aszension 2 → Bühne **75** / RS **1 295** (das
+  1 000-RS-Himmelfahrt-Gate wird hier überschritten, `firstHimmelfahrtT` ≈ 1 145 s
+  Sim-Zeit); Aszension 3 → Bühne **80** / RS **2 074**, MaxPower ≈ 2,1e16 DPS (alles
+  endlich, weit unter dem Float-Ceiling). Erste Himmelfahrt bankt
+  `hpfForRsLifetime(2074) = ⌊√2,074⌋ = 1` HPF und setzt L1 zurück, während HPF (+2 %
+  global + Seelen-Verstärker), Vergoldungen und der Himmelsbaum bleiben. Tabelle in
+  `TESTPLAN.md` §11. Ehrlich: die Zahlen sind Sim-getrieben (nicht echte Wanduhr-
+  Stunden) — der Zweck von AC3 ist der funktionale Nachweis, dass die Prestige-Kette
+  korrekt verkettet und reale Zahlen erzeugt.
+
+- **2026-07-18 — Transzendenz-Gerüst (Schicht 3, §4.5.3) landet als reine,
+  getestete Formeln HINTER einem Flag (§11 #5).** `game/transcend.ts` spiegelt
+  `ascension.ts`/`heaven.ts`: `TE_earned = ⌊log10(HPF_life)⌋` mit 100-HPF-Gate,
+  `×3^TE` **globaler** (P1-neutraler) Multiplikator, held-vs-spent-Buchhaltung und
+  ein dokumentierter L1+L2-Reset/Preserve-Vertrag für M15. `game/flags.ts` hält
+  `TRANSCEND_ENABLED = false` als einzige Wahrheitsquelle; ein Guard-Test sichert,
+  dass die Konstante `false` ist, damit die halbfertige Schicht **nie** versehentlich
+  in einen Build leckt. Bewusst dünn (§11 #5): kein `ChState`-Slice, kein Save-Feld,
+  keine UI — M15 flippt das Flag und verdrahtet State/Save/UI, **ohne eine Formel
+  anzufassen**. Der `×3^TE`-Faktor ist ein Global-Multiplikator (gleich auf Klick
+  UND Idle) und daher per Konstruktion P1-neutral (E4/§4.8: „aktiv bleibt König").
+
+- **2026-07-18 — `simulateEndless` voll ausgebaut als CI-Pflicht (E1–E4 +
+  Float-Guard, ganze Ökonomie im Bot, §9.5/AC1+AC4).** Der Balancing-Bot fährt jetzt
+  die **komplette** M12-Loot-Ökonomie über die echten Module (Golden-Peach ×3 +
+  🔑-Chance, Boss/Rival-Truhen, gieriges Truhen-Öffnen → Permanent-Token, 🧩-Shards →
+  Gear-Level über die reale `shardCost`-Kurve, Keys aus Boss/Peach). Vollständige
+  E1–E4-Suite asserted (E1 kein Hard-Cap, E2 beschränkte Soft-Wall, E3 +50 % Power
+  ≤ 90 min, E4 „click is king" — der Abstand wächst mit eingeschalteter Ökonomie —
+  plus Best-in-Slot-Gear-P1-Guard). **Float-Guard bis Bühne 300** (AC4, HP ~1e63):
+  `simulateFloatGuard` treibt die reale Combat-Frontier via ehrlichem analytischem
+  Fast-Forward auf ≥ 300 und auditiert jede getrackte Größe (Monster/Boss-HP, Gold,
+  Seelen, Power, Shards/Keys) als endlich und < 1e300. §4.8-Pacing-Tabelle (±25 %)
+  bleibt unter den dokumentierten no-loot-Kalibrierbedingungen gültig. Ganze Suite
+  grün in ~6 s (**39 Tests**, `npm run test:sim`).
+
+## M13 — Review-Fixes (Meta & Retention)
+
+- **2026-07-18 (Review) — Zukunfts-Tage werden beim Boot GEKLEMMT (`repairFutureDays`),
+  analog zu Peach/Sugar (§9.2.2).** `meta.day`/`meta.lastLoginDay` sind monotone
+  High-Water-Marks — ein Save, der unter einer weit vorgestellten Uhr geschrieben wurde
+  (BIOS-Reset, Test, Cheese), fror damit Dailies/Quests/Logins ein, bis die echte Uhr
+  aufholt (im Extremfall Jahre). Neu: pure `repairFutureDays(meta, day)` (quests.ts,
+  getestet) klemmt beide Marks in `maybeNewDay` auf HEUTE — neutral (heute wird nichts
+  erneut gewährt oder neu gerollt, morgen läuft alles normal weiter). Kein neuer Exploit:
+  Vorstell-Farming war laut AC1-Entscheid schon immer möglich („Vorstellen advanced nur
+  den Tag") und bleibt davon unberührt.
+
+- **2026-07-18 (Review) — `advanceQuests` ist jetzt auch NACH dem Clamp ein echter No-op.**
+  Vorher allozierte jeder Shake zwei Objekte, sobald eine passende Quest ihr Ziel erreicht
+  hatte (`min(target, target+1)` schrieb denselben Wert in eine neue Kopie) — die
+  DECISIONS-Begründung „no-op-günstig pro Shake" galt also nur bis zur Zielerreichung.
+  Jetzt wird erst kopiert, wenn sich mindestens ein Wert wirklich ändert (Referenz-Test in
+  quests.test.ts), womit `advanceMeta('clicks')` im Klick-Hot-Path dauerhaft allokationsfrei
+  bleibt.
+
+- **2026-07-18 (Review) — AKZEPTIERT: die 5-RS-Quest-Belohnung wird bei Nicht-Ausgebern
+  von der nächsten Aszension „zurückverrechnet".** `syncMaxZones` hält `rsLifetime ≥ souls`
+  (Highwater), und `applyAscension` zahlt `soulsForMaxZone(deepest) − rsLifetime` aus — wer
+  seine Seelen nie in Ahnen steckt (souls == rsLifetime), bekommt die +5 also faktisch nur
+  als Vorschuss auf die nächste Aszension; wer je ≥ 5 RS ausgegeben hat (praktisch jeder ab
+  dem ersten Ahnen), erhält sie voll. Bewusst NICHT „gefixt": die saubere Trennung
+  (Zonen-Gutschrift vs. Lifetime-Einnahmen) bräuchte ein neues Save-Feld (v8 ist
+  eingefroren) und Umbauten an der M9/M10-Aszensionsmathematik — für ±5 RS gegenüber
+  `1,10^z`-Wachstum unverhältnismäßig. Fehlerrichtung ist deflationär (P1-sicher).
+
+## M13 — Meta, Retention & Leaderboard v2 (Teil 2: UI + Wiring + Docs)
+
+- **2026-07-18 — Event-Increments zentral über einen `earnKeys(n)`-Helfer.** Jeder
+  🔑-Faucet (Boss-Kill, Combo-Tier-3, Goldener Pfirsich, Truhen-Reward, Daily-Login,
+  Quest-Reward) läuft über eine einzige Funktion, die `chests.keys` **und** den Lifetime-Zähler
+  `stats.keysEarned` gemeinsam hochzählt — so wird kein Faucet doppelt oder gar nicht gezählt.
+  Schlüssel **ausgeben** (Truhe öffnen) berührt den Lifetime-Zähler nie. Analog werden
+  `stats.bossKills` (bereits vorhanden) NICHT verdoppelt — Teil 2 ergänzt nur die fehlenden
+  `bossStreak`/`maxBossStreak` + `advanceMeta`-Aufrufe an denselben Sites.
+
+- **2026-07-18 — Achievement- & Tageswechsel-Checks laufen auf dem gedrosselten 0,25-s-Tick,
+  nicht im Klick-Hot-Path.** `checkAchievements` (≈ 30 reine Prädikate) und `maybeNewDay`
+  (Tag-Roll + Login) sind billig und werden pro Tick + bei diskreten Events (Ascension,
+  Himmelfahrt, Truhe öffnen, Boot) aufgerufen. So erscheinen Toasts binnen ≤ 250 ms, ohne pro
+  Klick zu allozieren. `advanceMeta` selbst ist no-op-günstig: ohne passende aktive Quest gibt
+  `advanceQuests` dieselbe Referenz zurück (keine Allokation) — daher darf `advanceMeta('clicks')`
+  pro Shake laufen.
+
+- **2026-07-18 — Combo-Tier-3-Quest auf der steigenden Flanke.** `comboTier3` wird nur
+  gefeuert, wenn der Tier von < 3 auf ≥ 3 wechselt (`lastShakeTier`-Tracker), statt bei jedem
+  Klick auf Tier ≥ 3 — vermeidet Dauer-Allokation bei gehaltenem Feuer. `maxCombo` wird per
+  billiger `Math.max`-Zuweisung jeden Klick aktualisiert (keine Allokation).
+
+- **2026-07-18 — Submit-Prompt-Throttle in separatem `localStorage`-Key, nicht im CH-Save.**
+  Die zuletzt angebotene Bestzone liegt unter `bootyclicker.lb` (`{ prompted }`), damit das
+  **v8-Save-Schema unverändert** bleibt (Teil 1 hat v8 committet). Der Prompt erscheint **nur
+  bei einer neuen Bestzone > prompted** (überspringen bleibt gemerkt) und ausschließlich vom
+  Tick — nie aus dem Klick-Pfad, nie erneut, während der Dialog offen ist. Ohne
+  `VITE_API_BASE` ist `leaderboard.enabled` falsch ⇒ der Auto-Prompt ist ein No-op (kein Modal
+  im Headless-/Offline-Fall, AC4).
+
+- **2026-07-18 — `promptSubmit` (Auto) vs. `openSubmit` (manuell) getrennt.** Der Auto-Pfad
+  (neue Bestzone) zeigt den Dialog **nur bei aktiver API** (kein störendes Modal offline). Der
+  manuelle 📋-Knopf „Eintragen" zeigt den Dialog **immer** und blendet offline einen
+  Offline-Hinweis ein + deaktiviert „Absenden" — so gibt es klares Feedback statt eines toten
+  Buttons (AC4). Beide teilen `showSubmit`.
+
+- **2026-07-18 — 8-Tab-Leiste: horizontales Scrollen statt Umbruch.** Mit der neuen 📋-Ziele-
+  Tab sind es acht Emoji-Tabs. `.tabs` bekommt `overflow-x: auto` (Scrollbar versteckt) und
+  jede `.tab` eine **Mindest-Touchbreite** (`flex: 1 0 auto; min-width: 38px`): bei ≥ 320 px
+  passen alle acht in eine Zeile, darunter scrollt die Leiste — keine Tab schrumpft unter eine
+  klickbare Größe. (Umbruch auf zwei Zeilen wäre die Alternative gewesen; Scrollen hält die
+  Kopfhöhe konstant und stört das Bottom-Sheet-Layout nicht.)
+
+- **2026-07-18 — Meta-Panel change-detected wie die anderen Panels; Claim per Event-Delegation.**
+  `ui/meta-panel.ts` baut ein stabiles Skelett einmal und rendert die dynamischen Abschnitte
+  (Season/Daily/Quests/Erfolge) nur bei geänderter Signatur neu (Tick + Tab-Open, **nie** im
+  Klick-Hot-Path). Claim-Klicks laufen über **einen** delegierten Listener auf `#metaQuests`,
+  damit ein Rebuild nie einen Handler verliert; Reroll/Leaderboard-Buttons liegen im stabilen
+  Skelett (einmal verdrahtet).
+
+- **2026-07-18 — 📊 Statistik im ⚙️-Tab, gerendert vom Tick (nicht im Konstruktor).** Der
+  `ChSettings.render()`-Aufruf läuft über `renderActiveTab('set')`, weil `getState()` in
+  `main.ts` `syncMaxZones()` triggert, das die erst später deklarierte `comboState`/`rng`
+  referenziert — ein Konstruktor-Aufruf liefe in die temporale Todeszone. Zur Laufzeit (Tab
+  offen) sind alle Bindungen initialisiert. On-Beat-Quote wird als %, Spielzeit als h/min/s
+  formatiert, alles andere über `ui/format.ts`.
+
+- **2026-07-18 — Saison-Events als winziges reines `game/season.ts` (datumsbasiert).**
+  `seasonFor(date)` mappt Monat → optionalen Banner (Oktober „Spooky Booty" 🎃, Dezember
+  „Frost-Twerk" ❄️), sonst `null`. Total, DOM-frei, unit-getestet (P6). Wirkung: nur ein
+  Banner im 📋-Tab + ein Boot-Toast — **kein** Gameplay-Hardlock, kein Server, Monat in
+  **Lokalzeit** gelesen (kosmetisch, daher unabhängig von der UTC-Quest-Uhr; §11.10 akzeptiert
+  Zeitzonen-/Datum-Cheese).
+
+## M13 — Meta, Retention & Leaderboard v2 (Teil 1: pure Logik + CH-Save v8 + Client)
+
+- **2026-07-18 — CH-Achievements liegen in `game/ch-achievements.ts`, nicht in
+  `game/achievements.ts`.** Das legacy M4-Set (`achievements.ts`, über
+  `GameState`/`UpgradeState`) bleibt eingefrorenes Archiv mit grünen Tests (N4). Das
+  frische CH-native Set (Bühnen/Boss/Combo/Krit/Aszension/HPF …) bekommt einen eigenen
+  Modulnamen analog zur `ch-state`/`ch-store`-Konvention, statt das Archiv zu überschreiben.
+
+- **2026-07-18 — Tagesgrenze = UTC (`floor(now/86.4e6)`).** `dayNumber` zählt Tage seit
+  der Unix-Epoche an der **UTC-Mitternachtsgrenze** — timezone-stabil und deterministisch
+  (§7.1). Spieler nahe Mitternacht rollen ggf. ein paar Stunden neben lokaler Mitternacht
+  über; akzeptiert (§11.10).
+
+- **2026-07-18 — Uhr-Manipulations-Neutralität via monotone High-Water-Marks.** `meta.day`
+  und `meta.lastLoginDay` steigen nur (`rollDay`/`dailyLogin` reagieren ausschließlich auf
+  `day > gespeichert`). Uhr zurückstellen ⇒ kein Reset, kein erneuter Login-Grant, kein
+  erneutes Claimen bereits geclaimter Quests (AC1); Vorstellen advanced nur den Tag (§11.10).
+  Wöchentlicher Streak-Schutz ist an die **Kalenderwoche des Login-Tags** gebunden
+  (`weekNumber(day)`), deckt genau **einen** verpassten Tag (Gap = 2), Gap ≥ 3 bricht immer.
+
+- **2026-07-18 — Leaderboard-Client v2: injizierbares `fetch`/`base` statt Env-Mutation.**
+  `submitScore`/`fetchTop` nehmen ein optionales `{ base, fetchImpl, timeoutMs }`, sodass
+  Erfolg/Fehler/Timeout/deaktiviert deterministisch mit einem Fake getestet werden (M5-Disziplin,
+  ohne `import.meta.env` zu verbiegen). Default-aus bleibt an `VITE_API_BASE` (leer ⇒ `null`
+  ohne Netz-Call). Die M5-`ui/leaderboard.ts` (nicht am CH-Loop verdrahtet) wurde minimal auf
+  die v2-Signatur (`ScorePayload`, `maxZone`) gezogen, damit `tsc` grün bleibt — echte
+  Prompt-Verdrahtung ist Teil 2.
+
+- **2026-07-18 — Lifetime-Zähler auf `ChStats` ergänzt; Aszensions-Zähler wird von Teil 2
+  inkrementiert.** Neu in `ChStats`: `ascensions`, `chestsOpened`, `maxCombo`, `bossStreak`,
+  `maxBossStreak`, `keysEarned` (alle 0-Default, via `repairStats` migrationssicher). `stats`
+  wird von `ascendState`/`himmelfahrtState` unverändert weitergereicht ⇒ automatisch monoton
+  über beide Prestige-Schichten (AC5). `himmelfahrten` wird aus `heaven.ascensions2` abgeleitet
+  (keine Dublette), `gilds` aus `totalGilds`. `stats.ascensions` wird bewusst NICHT im puren
+  `ascendState` hochgezählt (Event-Increment = Teil 2), damit die Reducer verhaltensgleich bleiben.
+
 ## M12 — Review-Fixes (Pfirsich-Truhen & Loot)
 
 - **2026-07-18 (Review) — Boost-Fenster wird beim Boot GEKLEMMT, nie gelöscht

@@ -11,6 +11,8 @@ import {
   createStats,
 } from '../game/ch-state';
 import { createGear } from '../game/gear';
+import { createMeta, dailyQuests } from '../game/quests';
+import { createTranscend, transcendGlobalMult } from '../game/transcend';
 import { monsterHp } from '../game/combat';
 import {
   CH_SAVE_KEY,
@@ -337,6 +339,326 @@ describe('ch-store — v5 migration & repair (M10)', () => {
     const s = deserializeCh(JSON.stringify(raw));
     expect(s!.heaven.hpf).toBe(10); // clamped to hpfLifetime
     expect(s!.heaven.tree).toEqual({ coach: 5 });
+  });
+});
+
+describe('ch-store — v9 migration & repair (M15)', () => {
+  // A full v8 blob (the pre-M15 shape) for the migration tests.
+  const v8Blob = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    v: 8,
+    lastSeen: 15000,
+    gold: 5000,
+    zone: 65,
+    killsThisZone: 2,
+    runMaxZone: 65,
+    crew: { boss: 30, legend: 6 },
+    souls: 200,
+    lifetimeMaxZone: 65,
+    totalClicks: 2000,
+    rng: { seed: 777, cursor: 300 },
+    stats: { ...createStats(), crits: 100, bossKills: 20 },
+    legacyImported: true,
+    ability: createAbility(),
+    combo: { stacks: 70 },
+    gilds: { boss: 8 },
+    rsLifetime: 200,
+    ancients: { twerkules: 12 },
+    heaven: { hpf: 5, hpfLifetime: 1000, ascensions2: 3, tree: { coach: 4 } },
+    gear: { ...createGear(), skin: 'disco', shards: 400 },
+    legacyTyrann: true,
+    chests: {
+      keys: 6,
+      inventory: { wood: 1, gold: 2, diamond: 1, mythic: 0 },
+      pity: { wood: 0, gold: 0, diamond: 0, mythic: 0 },
+      skins: [],
+    },
+    permTokens: { critDmg: 5 },
+    peach: createPeach(),
+    meta: createMeta(),
+    achievements: ['zone-10'],
+    ...over,
+  });
+
+  it('migrates a v8 blob losslessly into v9 (transcend default, all v8 fields intact)', () => {
+    const store = memStorage();
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v8Blob()));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    // v8 fields carried through losslessly.
+    expect(s.gold).toBe(5000);
+    expect(s.crew).toEqual({ boss: 30, legend: 6 });
+    expect(s.souls).toBe(200);
+    expect(s.heaven).toEqual({ hpf: 5, hpfLifetime: 1000, ascensions2: 3, tree: { coach: 4 } });
+    expect(s.meta).toEqual(createMeta());
+    expect(s.achievements).toEqual(['zone-10']);
+    // v9 default added — a fresh (never-transcended) L3 slice.
+    expect(s.transcend).toEqual(createTranscend());
+  });
+
+  it('round-trips a full transcend slice (te/teLifetime/transcendences/mythos)', () => {
+    const store = memStorage();
+    const s: ChState = {
+      ...createChState(),
+      transcend: { te: 4, teLifetime: 6, transcendences: 3, mythos: { diamantBooty: 2 } },
+    };
+    saveCh(s, 8000, store);
+    const loaded = loadCh(store);
+    expect(loaded!.state.transcend).toEqual({
+      te: 4,
+      teLifetime: 6,
+      transcendences: 3,
+      mythos: { diamantBooty: 2 },
+    });
+  });
+
+  it('repairs a wholly corrupt transcend slice to createTranscend() (never nukes progress)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.transcend = 'garbage';
+    // Real progress on OTHER slices must survive the transcend repair.
+    raw.souls = 55;
+    raw.crew = { boss: 8 };
+    let s: ChState | null = null;
+    expect(() => {
+      s = deserializeCh(JSON.stringify(raw));
+    }).not.toThrow();
+    expect(s).not.toBeNull();
+    expect(s!.transcend).toEqual(createTranscend());
+    expect(s!.souls).toBe(55);
+    expect(s!.crew).toEqual({ boss: 8 });
+  });
+
+  it('repairs corrupt transcend SUB-fields in isolation (held ≤ earned invariant restored)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.transcend = {
+      te: 5, // held above the (corrupt) lifetime ⇒ LIFT lifetime, never nuke held
+      teLifetime: 3,
+      transcendences: -2, // negative ⇒ 0
+      mythos: { good: 2, bad: -1, junk: 'x', frac: 1.5 }, // count-map: keep non-neg, floor
+    };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.transcend.te).toBe(5); // held preserved
+    expect(s!.transcend.teLifetime).toBe(5); // lifted to ≥ held (not clamped down to 3)
+    expect(s!.transcend.transcendences).toBe(0);
+    expect(s!.transcend.mythos).toEqual({ good: 2, frac: 1 }); // 1.5 floored, bad/junk dropped
+  });
+
+  it('floors + caps TE counters (fractional te floored; huge te capped ⇒ mult stays finite)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.transcend = {
+      te: 2.5, // fractional ⇒ floored to 2 (no ×3^2.5)
+      teLifetime: 2.9, // fractional ⇒ floored to 2 (still ≥ held)
+      transcendences: 1.7, // fractional ⇒ floored to 1
+      mythos: {},
+    };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.transcend.te).toBe(2); // 2.5 floored
+    expect(s!.transcend.teLifetime).toBe(2);
+    expect(s!.transcend.transcendences).toBe(1);
+    expect(Number.isFinite(transcendGlobalMult(s!.transcend.te))).toBe(true);
+
+    // A crafted, absurd te must be capped so transcendGlobalMult stays finite
+    // (te 1e300 ⇒ 3^1e300 = Infinity ⇒ dpsOf = Infinity without the cap).
+    const huge = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    huge.transcend = { te: 1e300, teLifetime: 1e300, transcendences: 0, mythos: {} };
+    const hs = deserializeCh(JSON.stringify(huge));
+    expect(hs).not.toBeNull();
+    expect(hs!.transcend.te).toBe(308); // capped at ⌊log10(MAX_VALUE)⌋
+    expect(hs!.transcend.teLifetime).toBe(308);
+    expect(Number.isFinite(transcendGlobalMult(hs!.transcend.te))).toBe(true);
+  });
+
+  it('migrates a v1 blob all the way through to v9 (transcend default present)', () => {
+    const store = memStorage();
+    const v1 = {
+      v: 1,
+      lastSeen: 5000,
+      gold: 500,
+      zone: 12,
+      killsThisZone: 3,
+      runMaxZone: 12,
+      crew: { boss: 5 },
+      souls: 3,
+      lifetimeMaxZone: 12,
+      totalClicks: 42,
+    };
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v1));
+    const s = loadCh(store)!.state;
+    expect(s.gold).toBe(500);
+    expect(s.gear).toEqual(createGear());
+    expect(s.chests).toEqual(createChests());
+    expect(s.meta).toEqual(createMeta());
+    expect(s.achievements).toEqual([]);
+    expect(s.transcend).toEqual(createTranscend());
+  });
+});
+
+describe('ch-store — v8 migration & repair (M13)', () => {
+  // A full v7 blob (the pre-M13 shape) for the migration tests.
+  const v7Blob = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    v: 7,
+    lastSeen: 14000,
+    gold: 4200,
+    zone: 60,
+    killsThisZone: 5,
+    runMaxZone: 60,
+    crew: { boss: 26, legend: 5 },
+    souls: 140,
+    lifetimeMaxZone: 60,
+    totalClicks: 1500,
+    rng: { seed: 666, cursor: 200 },
+    stats: { ...createStats(), crits: 88, bossKills: 12 },
+    legacyImported: true,
+    ability: createAbility(),
+    combo: { stacks: 60 },
+    gilds: { boss: 7 },
+    rsLifetime: 140,
+    ancients: { twerkules: 10 },
+    heaven: { hpf: 4, hpfLifetime: 9, ascensions2: 2, tree: { coach: 4 } },
+    gear: { ...createGear(), skin: 'disco', shards: 300 },
+    legacyTyrann: true,
+    chests: {
+      keys: 5,
+      inventory: { wood: 1, gold: 2, diamond: 0, mythic: 0 },
+      pity: { wood: 0, gold: 0, diamond: 0, mythic: 0 },
+      skins: [],
+    },
+    permTokens: { critDmg: 4 },
+    peach: createPeach(),
+    ...over,
+  });
+
+  it('migrates a v7 blob losslessly into v8 (meta/achievements defaults, v7 fields intact)', () => {
+    const store = memStorage();
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v7Blob()));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    // v7 fields carried through losslessly.
+    expect(s.gold).toBe(4200);
+    expect(s.crew).toEqual({ boss: 26, legend: 5 });
+    expect(s.souls).toBe(140);
+    expect(s.ancients).toEqual({ twerkules: 10 });
+    expect(s.heaven).toEqual({ hpf: 4, hpfLifetime: 9, ascensions2: 2, tree: { coach: 4 } });
+    expect(s.chests.keys).toBe(5);
+    expect(s.permTokens).toEqual({ critDmg: 4 });
+    // v8 defaults added.
+    expect(s.meta).toEqual(createMeta());
+    expect(s.achievements).toEqual([]);
+    // v8 stats counters absent in v7 default to 0; existing stats preserved.
+    expect(s.stats.crits).toBe(88);
+    expect(s.stats.bossKills).toBe(12);
+    expect(s.stats.ascensions).toBe(0);
+    expect(s.stats.chestsOpened).toBe(0);
+    expect(s.stats.maxCombo).toBe(0);
+    expect(s.stats.maxBossStreak).toBe(0);
+    expect(s.stats.keysEarned).toBe(0);
+  });
+
+  it('round-trips a full meta slice + achievements + v8 stats counters', () => {
+    const store = memStorage();
+    const s: ChState = {
+      ...createChState(),
+      zone: 30,
+      runMaxZone: 30,
+      lifetimeMaxZone: 30,
+      stats: {
+        ...createStats(),
+        ascensions: 7,
+        chestsOpened: 12,
+        maxCombo: 130,
+        bossStreak: 4,
+        maxBossStreak: 18,
+        keysEarned: 44,
+      },
+      meta: {
+        day: 20_289,
+        questIds: dailyQuests(20_289, 0),
+        questProgress: { 'boss-4': 2 },
+        questsClaimed: ['boss-4'],
+        rerollsUsed: 1,
+        streak: 5,
+        lastLoginDay: 20_289,
+        streakProtectWeek: 2898,
+      },
+      achievements: ['zone-10', 'boss-1'],
+    };
+    saveCh(s, 7000, store);
+    const loaded = loadCh(store);
+    expect(loaded!.state.meta).toEqual(s.meta);
+    expect(loaded!.state.achievements).toEqual(['zone-10', 'boss-1']);
+    expect(loaded!.state.stats.ascensions).toBe(7);
+    expect(loaded!.state.stats.maxCombo).toBe(130);
+    expect(loaded!.state.stats.maxBossStreak).toBe(18);
+    expect(loaded!.state.stats.keysEarned).toBe(44);
+  });
+
+  it('repairs wholly corrupt meta/achievements to defaults (never nukes progress)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.meta = 'garbage';
+    raw.achievements = 42;
+    raw.souls = 77;
+    raw.crew = { boss: 9 };
+    let s: ChState | null = null;
+    expect(() => {
+      s = deserializeCh(JSON.stringify(raw));
+    }).not.toThrow();
+    expect(s).not.toBeNull();
+    expect(s!.meta).toEqual(createMeta());
+    expect(s!.achievements).toEqual([]);
+    expect(s!.souls).toBe(77);
+    expect(s!.crew).toEqual({ boss: 9 });
+  });
+
+  it('repairs corrupt meta SUB-fields in isolation (valid values preserved)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.meta = {
+      day: 1.5, // non-integer ⇒ default -1
+      questIds: ['boss-4', 'not-a-quest', 42, 'boss-4'], // keep real ids, dedupe
+      questProgress: { 'boss-4': 3, junk: 'x', 'crits-200': -5 }, // keep valid non-neg ints
+      questsClaimed: ['boss-4', 'nope'], // keep real ids
+      rerollsUsed: 9, // clamp to MAX_REROLLS (1)
+      streak: 99, // clamp to STREAK_MAX (7)
+      lastLoginDay: 20_000,
+      streakProtectWeek: 'x', // junk ⇒ default -1
+    };
+    raw.achievements = ['zone-10', 'fake-ach', 7, 'zone-10']; // keep real ids, dedupe
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.meta.day).toBe(-1);
+    expect(s!.meta.questIds).toEqual(['boss-4']);
+    expect(s!.meta.questProgress).toEqual({ 'boss-4': 3 });
+    expect(s!.meta.questsClaimed).toEqual(['boss-4']);
+    expect(s!.meta.rerollsUsed).toBe(1);
+    expect(s!.meta.streak).toBe(7);
+    expect(s!.meta.lastLoginDay).toBe(20_000);
+    expect(s!.meta.streakProtectWeek).toBe(-1);
+    expect(s!.achievements).toEqual(['zone-10']);
+  });
+
+  it('migrates a v1 blob all the way through to v8 (meta/achievements defaults present)', () => {
+    const store = memStorage();
+    const v1 = {
+      v: 1,
+      lastSeen: 5000,
+      gold: 500,
+      zone: 12,
+      killsThisZone: 3,
+      runMaxZone: 12,
+      crew: { boss: 5 },
+      souls: 3,
+      lifetimeMaxZone: 12,
+      totalClicks: 42,
+    };
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v1));
+    const s = loadCh(store)!.state;
+    expect(s.gold).toBe(500);
+    expect(s.gear).toEqual(createGear());
+    expect(s.chests).toEqual(createChests());
+    expect(s.meta).toEqual(createMeta());
+    expect(s.achievements).toEqual([]);
   });
 });
 
