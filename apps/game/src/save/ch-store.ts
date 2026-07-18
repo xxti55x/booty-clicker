@@ -404,10 +404,16 @@ function repairAchievements(v: unknown): string[] {
 function repairTranscend(v: unknown): TranscendState {
   if (!isRecord(v)) return createTranscend();
   const nn = (x: unknown): number => (isFiniteNumber(x) && x >= 0 ? x : 0);
-  const te = nn(v.te);
+  // Floor + cap all counters (defense-in-depth): a corrupt/crafted save with a
+  // fractional te (×3^2.5) or an absurd te (1e300 ⇒ transcendGlobalMult = Infinity ⇒
+  // dpsOf = Infinity) is neutralised. `teForHpfLifetime` can never legitimately exceed
+  // ⌊log10(Number.MAX_VALUE)⌋ = 308, so cap held/earned TE there; the mult stays finite.
+  const cap = 308;
+  const te = Math.min(Math.floor(nn(v.te)), cap);
   // Held TE can never exceed what was ever earned; lift the highwater, don't nuke held.
-  const teLifetime = Math.max(nn(v.teLifetime), te);
-  return { te, teLifetime, transcendences: nn(v.transcendences), mythos: repairCountMap(v.mythos) };
+  const teLifetime = Math.min(Math.max(Math.floor(nn(v.teLifetime)), te), cap);
+  const transcendences = Math.floor(nn(v.transcendences));
+  return { te, teLifetime, transcendences, mythos: repairCountMap(v.mythos) };
 }
 
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */

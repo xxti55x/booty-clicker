@@ -12,7 +12,7 @@ import {
 } from '../game/ch-state';
 import { createGear } from '../game/gear';
 import { createMeta, dailyQuests } from '../game/quests';
-import { createTranscend } from '../game/transcend';
+import { createTranscend, transcendGlobalMult } from '../game/transcend';
 import { monsterHp } from '../game/combat';
 import {
   CH_SAVE_KEY,
@@ -442,6 +442,32 @@ describe('ch-store — v9 migration & repair (M15)', () => {
     expect(s!.transcend.teLifetime).toBe(5); // lifted to ≥ held (not clamped down to 3)
     expect(s!.transcend.transcendences).toBe(0);
     expect(s!.transcend.mythos).toEqual({ good: 2, frac: 1 }); // 1.5 floored, bad/junk dropped
+  });
+
+  it('floors + caps TE counters (fractional te floored; huge te capped ⇒ mult stays finite)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.transcend = {
+      te: 2.5, // fractional ⇒ floored to 2 (no ×3^2.5)
+      teLifetime: 2.9, // fractional ⇒ floored to 2 (still ≥ held)
+      transcendences: 1.7, // fractional ⇒ floored to 1
+      mythos: {},
+    };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.transcend.te).toBe(2); // 2.5 floored
+    expect(s!.transcend.teLifetime).toBe(2);
+    expect(s!.transcend.transcendences).toBe(1);
+    expect(Number.isFinite(transcendGlobalMult(s!.transcend.te))).toBe(true);
+
+    // A crafted, absurd te must be capped so transcendGlobalMult stays finite
+    // (te 1e300 ⇒ 3^1e300 = Infinity ⇒ dpsOf = Infinity without the cap).
+    const huge = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    huge.transcend = { te: 1e300, teLifetime: 1e300, transcendences: 0, mythos: {} };
+    const hs = deserializeCh(JSON.stringify(huge));
+    expect(hs).not.toBeNull();
+    expect(hs!.transcend.te).toBe(308); // capped at ⌊log10(MAX_VALUE)⌋
+    expect(hs!.transcend.teLifetime).toBe(308);
+    expect(Number.isFinite(transcendGlobalMult(hs!.transcend.te))).toBe(true);
   });
 
   it('migrates a v1 blob all the way through to v9 (transcend default present)', () => {

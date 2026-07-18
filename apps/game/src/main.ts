@@ -604,6 +604,7 @@ const chSettings = new ChSettings({
     ancients.render();
     prestige.refresh();
     heaven.refresh();
+    transcendPanel?.refresh(); // 🔮 L3 badge/mult must re-read the imported slice
     gearPanel.render();
     metaPanel.render(true);
     hud.update(state, combat, dps, clickDmg);

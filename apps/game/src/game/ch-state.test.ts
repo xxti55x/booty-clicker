@@ -503,4 +503,38 @@ describe('ch-state — Transzendenz threading (§4.5.3)', () => {
     expect(again.transcend.teLifetime).toBe(4);
     expect(again.transcend.transcendences).toBe(3);
   });
+
+  // Regression (P0): the held TE slice MUST survive a plain L1 ascension AND an L2
+  // Himmelfahrt — nothing above L2 resets it (§4.5.3). Without carrying `transcend`
+  // forward, `createChState()`'s zeroed seed would wipe held TE / teLifetime /
+  // transcendences / mythos on the very next reset — killing the ×3^TE boost, the 🔮
+  // HUD badge and re-locking Diamant-Booty.
+  it('held TE survives ascension and Himmelfahrt (L3 never resets below §4.5.3)', () => {
+    const slice = { te: 2, teLifetime: 3, transcendences: 1, mythos: { someNode: 1 } };
+    const s = {
+      ...createChState(),
+      zone: 60,
+      runMaxZone: 60,
+      lifetimeMaxZone: 60,
+      rsLifetime: 1_000_000,
+      transcend: slice,
+    };
+    // A plain L1 ascension preserves the banked L3 slice untouched.
+    expect(ascendState(s).transcend).toEqual(slice);
+    // An L2 Himmelfahrt (which wipes L1 + L2) still preserves the L3 slice.
+    const hf = himmelfahrtState(s);
+    expect(hf.transcend).toEqual(slice);
+    // ⇒ Diamant-Booty stays unlocked after a Himmelfahrt (transcendences carried over).
+    expect(skinUnlocked('diamond', gearUnlockCtx(hf))).toBe(true);
+    // And the ×3^TE global mult survives: with the same crew, the post-Himmelfahrt
+    // DPS carries the surviving te=2 factor (×9). Compared against the same state with
+    // a wiped slice, the ratio is exactly 3^2 — isolating the TE factor from the
+    // (banked-HPF) heaven mult, which a wiped `transcend` would collapse to ×1.
+    const hfCrew = { ...hf, crew: { boss: 20 } };
+    const hfNoTE = { ...hfCrew, transcend: createTranscend() };
+    expect(dpsOf(hfNoTE)).toBeGreaterThan(0);
+    expect(dpsOf(hfCrew)).toBeCloseTo(dpsOf(hfNoTE) * TRANSCEND_GLOBAL_BASE ** 2, 6);
+    // The existing `transcendState` preserve behaviour is unchanged: it also carries it.
+    expect(transcendState(s).transcend.transcendences).toBe(2); // banked once more here
+  });
 });

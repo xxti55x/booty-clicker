@@ -450,6 +450,7 @@ export function ascendState(state: ChState): ChState {
     stats: state.stats,
     legacyImported: state.legacyImported,
     gilds: state.gilds,
+    transcend: state.transcend, // L3 survives every lower-layer reset (§4.5.3)
     ancients: state.ancients, // Ancients survive L1 (§4.5 reset table)
     heaven: state.heaven, // L2 state survives L1
     // Skins/levels/stars are permanent meta (§5) — survive L1; latch the deepest
@@ -480,6 +481,7 @@ export function himmelfahrtState(state: ChState): ChState {
     ...createChState(),
     heaven,
     gilds: state.gilds, // Vergoldungen survive Himmelfahrt (M10-AC2)
+    transcend: state.transcend, // L3 survives every lower-layer reset (§4.5.3)
     totalClicks: state.totalClicks,
     rng: state.rng,
     stats: state.stats,

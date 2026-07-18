@@ -17,7 +17,7 @@
  * key (`import.meta.env[`VITE_${key}`]`), which Vite does **not** statically replace —
  * so it resolves at runtime (to `undefined` in a production build, where no such vars
  * exist), leaving the compile-time `FLAGS` default as the shipped value. It can never
- * change a shipped build; today the module has no live importer at all.
+ * change a shipped build; `main.ts` reads `isTranscendEnabled()` to gate the 🔮 tab.
  */
 
 /** Master switch for the Transzendenz layer (Schicht 3, §4.5.3). LIVE as of M15. */
