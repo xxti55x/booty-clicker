@@ -1,4 +1,5 @@
 import {
+  ABILITY_CHARGE_MAX,
   type AbilityState,
   canActivate,
   chargeFraction,
@@ -35,10 +36,10 @@ export class AbilityBar {
     this.btn.addEventListener('click', () => deps.onActivate());
   }
 
-  update(ability: AbilityState, now: number): void {
+  update(ability: AbilityState, now: number, chargeMax: number = ABILITY_CHARGE_MAX): void {
     const active = isFrenzyActive(ability, now);
-    const ready = canActivate(ability);
-    const frac = active ? frenzyFraction(ability, now) : chargeFraction(ability);
+    const ready = canActivate(ability, chargeMax);
+    const frac = active ? frenzyFraction(ability, now) : chargeFraction(ability, chargeMax);
     const pct = Math.round(frac * 1000) / 10;
     if (pct !== this.cWidth) {
       this.cWidth = pct;

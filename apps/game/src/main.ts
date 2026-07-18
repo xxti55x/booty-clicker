@@ -13,8 +13,31 @@ import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
 import { effectivePixelRatio, qualityPreset } from './engine/quality';
 import { createScene } from './engine/scene';
-import { abilityOnClick, activate, canActivate, frenzyMult, isFrenzyActive } from './game/ability';
-import { ascendState, clickDamageOf, createChState, dpsOf } from './game/ch-state';
+import {
+  ABILITY_CHARGE_MAX,
+  FRENZY_DURATION_MS,
+  abilityOnClick,
+  activate,
+  canActivate,
+  frenzyMult,
+  isFrenzyActive,
+} from './game/ability';
+import {
+  ancientBeatWindowBonusMs,
+  ancientBossDmgMult,
+  ancientBossTimerBonus,
+  ancientComboWindowBonus,
+  ancientCritChanceBonus,
+  ancientEkstaseChargeReduction,
+  ancientGoldMult,
+} from './game/ancients';
+import {
+  ascendState,
+  clickDamageOf,
+  createChState,
+  dpsOf,
+  himmelfahrtState,
+} from './game/ch-state';
 import {
   beatBonus,
   beatWindowMs,
@@ -25,6 +48,7 @@ import {
   rollCrit,
 } from './game/click';
 import {
+  COMBO_WINDOW_S,
   createCombo,
   comboOnClick,
   comboStep,
@@ -35,7 +59,15 @@ import {
 } from './game/combo';
 import { type CombatState, hit, spawnFor, tickBoss, travelTo } from './game/combat';
 import { awardGildOnZone, isGildZone } from './game/gild';
-import { CREW } from './game/heroes';
+import {
+  buyTreeNode,
+  coachCps,
+  coachDps,
+  ekstaseBonusMs,
+  fruhstarterFraction,
+  offlineCapS,
+} from './game/heaven';
+import { CREW, type CrewLevels } from './game/heroes';
 import { shouldShakeOnKey } from './game/input';
 import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
 import { applyLegacyInheritance } from './game/legacy-import';
@@ -44,9 +76,11 @@ import { loadCh, offlineGold, resetCh, saveCh } from './save/ch-store';
 import { loadGame } from './save/store';
 import { Rng } from './util/rng';
 import { AbilityBar } from './ui/ability-bar';
+import { Ancients } from './ui/ancients';
 import { ChHud } from './ui/ch-hud';
 import { ChSettings } from './ui/ch-settings';
 import { Crew } from './ui/crew';
+import { Heaven } from './ui/heaven-panel';
 import { Haptics } from './ui/haptics';
 import { Pops } from './ui/pops';
 import { fmt, titleFor } from './ui/format';
@@ -112,6 +146,13 @@ let rng = new Rng(state.rng);
 
 let combat: CombatState = spawnFor(state.zone, state.killsThisZone, state.runMaxZone);
 
+/** Extend a freshly-spawned boss timer by Chronilla's bonus (§4.6). No-op off-boss. */
+function withBossTimerBonus(c: CombatState): CombatState {
+  const bonus = ancientBossTimerBonus(state.ancients);
+  return c.boss && bonus > 0 ? { ...c, bossTimer: c.bossTimer + bonus } : c;
+}
+combat = withBossTimerBonus(combat);
+
 let dps = 0;
 let clickDmg = 1;
 function recompute(): void {
@@ -120,8 +161,18 @@ function recompute(): void {
 }
 recompute();
 
+/** Effective Ekstase charge threshold, lowered by Ekstasius (§4.6, ≤ 50 % off). */
+function ekstaseChargeMax(): number {
+  return ABILITY_CHARGE_MAX * (1 - ancientEkstaseChargeReduction(state.ancients));
+}
+
+// Offline accrual folds in the Twerk-Coach (25 % of click value × cps) and the
+// Nachtschicht-raised cap (§4.3.5/§4.5.2), so click-heavy/crewless builds earn too.
+function offlineOpts(): { clickDmg: number; coachCps: number; capS: number } {
+  return { clickDmg, coachCps: coachCps(state.heaven), capS: offlineCapS(state.heaven) };
+}
 if (loaded) {
-  offlineEarned = offlineGold(dps, combat.zone, offlineEarnedMs);
+  offlineEarned = offlineGold(dps, combat.zone, offlineEarnedMs, offlineOpts());
   state.gold += offlineEarned;
   state.stats.goldLifetime += offlineEarned;
 }
@@ -182,7 +233,7 @@ document.addEventListener('visibilitychange', () => {
   } else if (document.visibilityState === 'visible' && hiddenAt > 0) {
     const elapsed = Math.max(0, Date.now() - hiddenAt);
     hiddenAt = 0;
-    const grant = offlineGold(dps, combat.zone, elapsed);
+    const grant = offlineGold(dps, combat.zone, elapsed, offlineOpts());
     if (grant >= 1) {
       state.gold += grant;
       state.stats.goldLifetime += grant;
@@ -205,21 +256,79 @@ const crew = new Crew({
   },
 });
 
+// Frühstarter (§4.5.2): after an ascension the Himmelsbaum can restore a fraction
+// of the previous crew levels, so re-climbs start warmer.
+function applyFruhstarter(prevCrew: CrewLevels): void {
+  const frac = fruhstarterFraction(state.heaven);
+  if (frac <= 0) return;
+  const restored: CrewLevels = {};
+  for (const [id, lv] of Object.entries(prevCrew)) {
+    const n = Math.floor(lv * frac);
+    if (n > 0) restored[id] = n;
+  }
+  state.crew = restored;
+}
+
 const prestige = new Prestige({
   state,
   getRunMaxZone: () => Math.max(state.runMaxZone, combat.maxZone),
   onAscend: () => {
     syncMaxZones();
+    const prevCrew = { ...state.crew };
     Object.assign(state, ascendState(state)); // mutate in place — panels hold this ref
-    combat = spawnFor(1, 0, 1);
+    applyFruhstarter(prevCrew);
+    combat = withBossTimerBonus(spawnFor(1, 0, 1));
     comboState = createCombo(state.combo.stacks); // run-scoped juice resets
     recompute();
     updateBackground(true);
     crew.render();
+    ancients.render();
+    heaven.refresh();
     hud.update(state, combat, dps, clickDmg);
-    abilityBar.update(state.ability, Date.now());
+    abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     toasts.show('✨', 'Ruhm eingeheimst!', `Jetzt ${fmt(state.souls)} Seelen`);
     audio.unlockJingle();
+    persist();
+  },
+});
+
+const ancients = new Ancients({
+  state,
+  onBuy: () => {
+    recompute();
+    audio.buy();
+    hud.update(state, combat, dps, clickDmg);
+    prestige.refresh();
+    persist();
+  },
+});
+
+const heaven = new Heaven({
+  state,
+  onHimmelfahrt: () => {
+    syncMaxZones();
+    Object.assign(state, himmelfahrtState(state)); // mutate in place
+    combat = withBossTimerBonus(spawnFor(1, 0, 1));
+    comboState = createCombo(state.combo.stacks);
+    recompute();
+    updateBackground(true);
+    crew.render();
+    ancients.render();
+    prestige.refresh();
+    hud.update(state, combat, dps, clickDmg);
+    abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
+    toasts.show('🌈', 'Himmelfahrt!', `${fmt(state.heaven.hpf)} Himmelspfirsiche`);
+    audio.unlockJingle();
+    persist();
+  },
+  onBuyNode: (id) => {
+    const r = buyTreeNode(state.heaven, id);
+    if (!r.bought) return;
+    state.heaven = r.heaven;
+    recompute();
+    audio.buy();
+    hud.update(state, combat, dps, clickDmg);
+    heaven.refresh();
     persist();
   },
 });
@@ -232,14 +341,16 @@ new ChSettings({
   applyImported: (imported) => {
     Object.assign(state, imported); // mutate in place — panels hold this ref
     rng = new Rng(state.rng); // resume the imported save's RNG stream
-    combat = spawnFor(state.zone, state.killsThisZone, state.runMaxZone);
+    combat = withBossTimerBonus(spawnFor(state.zone, state.killsThisZone, state.runMaxZone));
     comboState = createCombo(state.combo.stacks);
     recompute();
     updateBackground(true);
     crew.render();
+    ancients.render();
     prestige.refresh();
+    heaven.refresh();
     hud.update(state, combat, dps, clickDmg);
-    abilityBar.update(state.ability, Date.now());
+    abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     persist();
   },
   reset: () => {
@@ -271,7 +382,19 @@ function showWelcomeBack(earned: number, elapsedMs: number): void {
 if (offlineEarned >= 1) showWelcomeBack(offlineEarned, offlineEarnedMs);
 
 // ---------- tabs ----------
-const tabBodies: Record<string, string> = { crew: 'tabCrew', pr: 'tabPr', set: 'tabSet' };
+const tabBodies: Record<string, string> = {
+  crew: 'tabCrew',
+  anc: 'tabAnc',
+  pr: 'tabPr',
+  heaven: 'tabHeaven',
+  set: 'tabSet',
+};
+function renderActiveTab(key: string): void {
+  if (key === 'crew') crew.render();
+  else if (key === 'anc') ancients.render();
+  else if (key === 'pr') prestige.refresh();
+  else if (key === 'heaven') heaven.refresh();
+}
 for (const tab of Array.from(document.querySelectorAll<HTMLElement>('.tab'))) {
   tab.addEventListener('click', () => {
     const key = tab.dataset.t!;
@@ -280,8 +403,7 @@ for (const tab of Array.from(document.querySelectorAll<HTMLElement>('.tab'))) {
     for (const [k, id] of Object.entries(tabBodies)) {
       (document.getElementById(id) as HTMLElement).style.display = k === key ? '' : 'none';
     }
-    if (key === 'crew') crew.render();
-    if (key === 'pr') prestige.refresh();
+    renderActiveTab(key);
   });
 }
 
@@ -334,8 +456,10 @@ function onKillProgress(
   x?: number,
   y?: number,
 ): void {
-  state.gold += r.gold;
-  state.stats.goldLifetime += r.gold;
+  // Peachiel (§4.6) multiplies kill gold.
+  const gold = Math.floor(r.gold * ancientGoldMult(state.ancients));
+  state.gold += gold;
+  state.stats.goldLifetime += gold;
   if (wasBoss) state.stats.bossKills += 1;
   if (r.bossSpawned) {
     toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
@@ -360,7 +484,7 @@ function onKillProgress(
       }
     }
     if (combat.zone > state.runMaxZone) state.runMaxZone = combat.zone;
-    if (fromClick && x !== undefined) pops.gold(r.gold, x, y ?? 0);
+    if (fromClick && x !== undefined) pops.gold(gold, x, y ?? 0);
     // was the kill a boss? (advanced from a boss target)
     updateBackground();
     if (combat.zone % 5 === 1 && combat.zone > 1) {
@@ -375,8 +499,11 @@ function onKillProgress(
 
 function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void {
   const wasBoss = combat.boss;
-  const r = hit(combat, dmg);
-  combat = r.state;
+  // Glutaeus Maximus (§4.6) boosts damage dealt to a boss.
+  const effDmg = wasBoss ? dmg * ancientBossDmgMult(state.ancients) : dmg;
+  const r = hit(combat, effDmg);
+  // A newly-spawned boss gets Chronilla's extra timer seconds.
+  combat = r.bossSpawned ? withBossTimerBonus(r.state) : r.state;
   if (r.killed) {
     onKillProgress(r, fromClick, wasBoss, x, y);
   } else if (wasBoss && fromClick) {
@@ -399,14 +526,24 @@ function doShake(x?: number, y?: number): void {
   const onBeat = isOnBeat(
     choreo.phase,
     phaseVelocity(drive),
-    beatWindowMs(tierBeatWindowBonusMs(curTier)),
+    // Beatrix (§4.6) widens the on-beat window on top of the combo-tier bonus.
+    beatWindowMs(tierBeatWindowBonusMs(curTier) + ancientBeatWindowBonusMs(state.ancients)),
   );
 
-  comboState = comboOnClick(comboState, onBeat);
+  // Wackelias (§4.6) widens the combo grace window.
+  comboState = comboOnClick(
+    comboState,
+    onBeat,
+    COMBO_WINDOW_S + ancientComboWindowBonus(state.ancients),
+  );
   drive = Math.min(drive + 1.2, 6);
 
   const tier = comboTier(comboState.stacks);
-  const crit = rollCrit(rng.next(), critChance(tierCritChanceBonus(tier)));
+  // Cheeksana (§4.6) adds crit chance on top of the combo-tier bonus (40 % cap).
+  const crit = rollCrit(
+    rng.next(),
+    critChance(tierCritChanceBonus(tier) + ancientCritChanceBonus(state.ancients)),
+  );
   if (crit) state.stats.crits += 1;
   if (onBeat) state.stats.onBeatClicks += 1;
 
@@ -451,21 +588,28 @@ function doShake(x?: number, y?: number): void {
   audio.setIntensity(intensityFor(tier, isFrenzyActive(state.ability, now)));
   hud.update(state, combat, dps, clickDmg);
   hud.setCombo(comboState.stacks, tier);
-  abilityBar.update(state.ability, now);
+  abilityBar.update(state.ability, now, ekstaseChargeMax());
 }
 
-/** Fire Twerk-Ekstase (spec §4.2.4): 12 s of ×10 click damage when the meter's full. */
+/** Fire Twerk-Ekstase (spec §4.2.4): ×10 click damage when the meter's full. */
 function activateEkstase(): void {
   audio.unlock();
   const now = Date.now();
-  if (!canActivate(state.ability)) return;
-  state.ability = activate(state.ability, now);
+  const chargeMax = ekstaseChargeMax();
+  if (!canActivate(state.ability, chargeMax)) return;
+  // Ekstase-Ausdauer (§4.5.2) extends the ×10 window beyond the base 12 s.
+  const durationMs = FRENZY_DURATION_MS + ekstaseBonusMs(state.heaven);
+  state.ability = activate(state.ability, now, chargeMax, durationMs);
   audio.unlockJingle();
   audio.setIntensity(3);
-  toasts.show('🍑', 'TWERK-EKSTASE!', '×10 Klick-Schaden für 12 Sekunden!');
+  toasts.show(
+    '🍑',
+    'TWERK-EKSTASE!',
+    `×10 Klick-Schaden für ${Math.round(durationMs / 1000)} Sekunden!`,
+  );
   if (effects.screenShake) shakeMag = Math.max(shakeMag, SHAKE_FRENZY);
   haptics.boss(effects.haptics);
-  abilityBar.update(state.ability, now);
+  abilityBar.update(state.ability, now, chargeMax);
   persist();
 }
 
@@ -532,8 +676,11 @@ function loop(nowMs: number): void {
   t0 += dt;
   state.stats.playTimeS += dt;
 
-  // Idle DPS chips away at the current target; boss timer ticks down.
+  // Idle DPS chips away at the current target; the Twerk-Coach auto-clicks at
+  // 25 % of the click value (no crit/beat, §4.3.5); boss timer ticks down.
   if (dps > 0) applyHit(dps * dt, false);
+  const cps = coachCps(state.heaven);
+  if (cps > 0) applyHit(coachDps(clickDmg, cps) * dt, false);
   if (combat.boss) {
     const bt = tickBoss(combat, dt);
     combat = bt.state;
@@ -551,7 +698,7 @@ function loop(nowMs: number): void {
   const frenzy = isFrenzyActive(state.ability, epochMs);
   hud.setCombo(comboState.stacks, tier);
   audio.setIntensity(intensityFor(tier, frenzy));
-  abilityBar.update(state.ability, epochMs);
+  abilityBar.update(state.ability, epochMs, ekstaseChargeMax());
   pops.frame(epochMs); // flush any trailing damage batch (B7)
 
   // physics
@@ -577,10 +724,9 @@ function loop(nowMs: number): void {
     uiTimer = 0.25;
     document.title = titleFor(state.gold);
     hud.update(state, combat, dps, clickDmg);
-    // keep crew affordability + prestige fresh while idling
+    // keep the open shop tab's affordability/previews fresh while idling
     const active = document.querySelector('.tab.active') as HTMLElement | null;
-    if (active?.dataset.t === 'crew') crew.render();
-    else if (active?.dataset.t === 'pr') prestige.refresh();
+    if (active?.dataset.t) renderActiveTab(active.dataset.t);
   }
 
   controls.update();

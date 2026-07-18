@@ -41,15 +41,27 @@ export function abilityOnClick(state: AbilityState, onBeat: boolean): AbilitySta
   return { ...state, charge: Math.min(ABILITY_CHARGE_MAX, state.charge + gain) };
 }
 
-/** Can Ekstase be fired? (Meter full.) */
-export function canActivate(state: AbilityState): boolean {
-  return state.charge >= ABILITY_CHARGE_MAX;
+/**
+ * Can Ekstase be fired? Full at `chargeMax` (default 100). Ekstasius (§4.6) lowers
+ * the effective threshold, so the caller passes a reduced `chargeMax`.
+ */
+export function canActivate(state: AbilityState, chargeMax: number = ABILITY_CHARGE_MAX): boolean {
+  return state.charge >= chargeMax;
 }
 
-/** Fire Ekstase at `now`: start the frenzy window and reset the meter (no-op if not full). */
-export function activate(state: AbilityState, now: number): AbilityState {
-  if (!canActivate(state)) return state;
-  return { ...state, charge: 0, frenzyUntil: now + FRENZY_DURATION_MS };
+/**
+ * Fire Ekstase at `now`: open the frenzy window and reset the meter (no-op if not
+ * charged to `chargeMax`). `durationMs` defaults to 12 s; Ekstase-Ausdauer (§4.5.2)
+ * extends it.
+ */
+export function activate(
+  state: AbilityState,
+  now: number,
+  chargeMax: number = ABILITY_CHARGE_MAX,
+  durationMs: number = FRENZY_DURATION_MS,
+): AbilityState {
+  if (!canActivate(state, chargeMax)) return state;
+  return { ...state, charge: 0, frenzyUntil: now + durationMs };
 }
 
 /** Whether the frenzy window is active at `now`. */
@@ -62,9 +74,12 @@ export function frenzyMult(state: AbilityState, now: number): number {
   return isFrenzyActive(state, now) ? FRENZY_MULT : 1;
 }
 
-/** Meter fill fraction in [0, 1] (for the ability bar). */
-export function chargeFraction(state: AbilityState): number {
-  return Math.max(0, Math.min(1, state.charge / ABILITY_CHARGE_MAX));
+/** Meter fill fraction in [0, 1] (for the ability bar), full at `chargeMax`. */
+export function chargeFraction(
+  state: AbilityState,
+  chargeMax: number = ABILITY_CHARGE_MAX,
+): number {
+  return Math.max(0, Math.min(1, state.charge / chargeMax));
 }
 
 /** Remaining-frenzy fraction in [0, 1] (for the active-window bar), 0 when idle. */

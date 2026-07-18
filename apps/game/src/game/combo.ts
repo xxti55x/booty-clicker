@@ -40,12 +40,17 @@ export function createCombo(stacks = 0): ComboState {
 
 /**
  * A click adds +1 stack (+1 more on the beat, so an on-beat click is +2) and
- * refreshes the grace window.
+ * refreshes the grace window. `windowS` defaults to `COMBO_WINDOW_S`; Wackelias
+ * (§4.6) widens it, so the caller passes an extended window.
  */
-export function comboOnClick(state: ComboState, onBeat: boolean): ComboState {
+export function comboOnClick(
+  state: ComboState,
+  onBeat: boolean,
+  windowS: number = COMBO_WINDOW_S,
+): ComboState {
   return {
     stacks: state.stacks + 1 + (onBeat ? ON_BEAT_COMBO_BONUS : 0),
-    window: COMBO_WINDOW_S,
+    window: windowS,
   };
 }
 

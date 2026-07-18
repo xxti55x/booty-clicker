@@ -9,6 +9,8 @@ import {
   nextMilestone,
 } from '../game/heroes';
 import { soulMult } from '../game/ascension';
+import { ancientDpsMult } from '../game/ancients';
+import { heavenGlobalMult, soulBonusEff } from '../game/heaven';
 import { fmt } from './format';
 
 function byId(id: string): HTMLElement {
@@ -78,7 +80,11 @@ export class Crew {
 
   render(): void {
     const list = byId('crewList');
-    const mult = soulMult(this.deps.state.souls);
+    const s = this.deps.state;
+    const mult =
+      soulMult(s.souls, soulBonusEff(s.heaven.hpf)) *
+      ancientDpsMult(s.ancients) *
+      heavenGlobalMult(s.heaven.hpf);
     const rows: string[] = [];
     CREW.forEach((cfg, i) => {
       if (!this.revealed(i)) return;

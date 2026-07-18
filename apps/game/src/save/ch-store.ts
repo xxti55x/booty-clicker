@@ -4,7 +4,6 @@
  * untouched. Never throws; injectable storage for node unit tests.
  */
 import { type AbilityState, ABILITY_CHARGE_MAX, createAbility } from '../game/ability';
-import { soulsForMaxZone } from '../game/ascension';
 import { type AncientLevels, createAncients } from '../game/ancients';
 import { goldFor, monsterHp } from '../game/combat';
 import {
@@ -252,22 +251,15 @@ function migrateChV3toV4(raw: Record<string, unknown>): Record<string, unknown> 
 }
 
 /**
- * v4 → v5: fill the M10 defaults — no Ancients, a fresh (empty) heaven state. A
- * pre-M10 player's souls were lifetime-pinned (held == earned), so lift the
- * lifetime-RS highwater to the deepest-zone souls-equivalent: that bakes in their
- * true earned total for the HPF gate before any spending exists.
+ * v4 → v5: fill the M10 defaults — no Ancients, a fresh (empty) heaven state. Set
+ * the lifetime-RS earned total to the player's **banked souls**: pre-M10 nothing
+ * spent souls, so earned == held == `souls`. (Deliberately NOT lifted to
+ * `soulsForMaxZone(lifetimeMaxZone)` — a player who reached a deep zone but hasn't
+ * ascended there has NOT earned those souls yet, and over-lifting would erase the
+ * souls still pending on their next ascension.)
  */
 function migrateChV4toV5(raw: Record<string, unknown>): Record<string, unknown> {
-  const deepest = Math.max(
-    isNonNegInt(raw.lifetimeMaxZone) ? raw.lifetimeMaxZone : 1,
-    isNonNegInt(raw.runMaxZone) ? raw.runMaxZone : 1,
-    isNonNegInt(raw.zone) ? raw.zone : 1,
-  );
-  const rsLifetime = Math.max(
-    isFiniteNumber(raw.rsLifetime) && raw.rsLifetime >= 0 ? raw.rsLifetime : 0,
-    isNonNegInt(raw.souls) ? raw.souls : 0,
-    soulsForMaxZone(deepest),
-  );
+  const rsLifetime = isNonNegInt(raw.souls) ? raw.souls : 0;
   return {
     ...raw,
     v: 5,

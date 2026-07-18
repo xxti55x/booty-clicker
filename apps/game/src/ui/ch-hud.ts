@@ -2,7 +2,7 @@ import type { ChState } from '../game/ch-state';
 import { type CombatState, bossTimeFraction, hpFraction, isBossZone } from '../game/combat';
 import { MONSTERS_PER_ZONE } from '../game/combat';
 import { comboTierName } from '../game/combo';
-import { SOUL_BONUS } from '../game/ascension';
+import { soulBonusEff } from '../game/heaven';
 import { fmt } from './format';
 
 function byId(id: string): HTMLElement {
@@ -86,9 +86,11 @@ export class ChHud {
     this.cGold = this.setText(this.gold, fmt(state.gold), this.cGold);
     this.cStats = this.setText(this.stats, `DPS ${fmt(dps)} · Klick ${fmt(clickDmg)}`, this.cStats);
 
+    const hpf = state.heaven.hpf;
     const soulsTxt =
-      state.souls > 0
-        ? `✨ ${fmt(state.souls)} Seelen · +${Math.round(state.souls * SOUL_BONUS * 100)}% Schaden`
+      state.souls > 0 || hpf > 0
+        ? `✨ ${fmt(state.souls)} Seelen · +${Math.round(state.souls * soulBonusEff(hpf) * 100)}% Schaden` +
+          (hpf > 0 ? ` · 🍑 ${fmt(hpf)} HPF` : '')
         : '';
     if (soulsTxt !== this.cSouls) {
       this.cSouls = soulsTxt;

@@ -180,7 +180,7 @@ describe('ch-store — v2 migration & repair', () => {
 });
 
 describe('ch-store — v5 migration & repair (M10)', () => {
-  it('migrates a v4 blob losslessly into v5 (ancients empty, heaven default, RS lifted)', () => {
+  it('migrates a v4 blob losslessly into v5 (ancients empty, heaven default, earned = souls)', () => {
     const store = memStorage();
     const v4 = {
       v: 4,
@@ -214,7 +214,8 @@ describe('ch-store — v5 migration & repair (M10)', () => {
     // v5 defaults added.
     expect(s.ancients).toEqual({});
     expect(s.heaven).toEqual({ hpf: 0, hpfLifetime: 0, ascensions2: 0, tree: {} });
-    // Pre-M10 souls were lifetime-pinned ⇒ earned highwater = soulsForMaxZone(50).
+    // Pre-M10 earned == held == souls (129 here, which equals soulsForMaxZone(50)).
+    expect(s.rsLifetime).toBe(129);
     expect(s.rsLifetime).toBe(soulsForMaxZone(50));
   });
 
