@@ -53,6 +53,10 @@ export class ChHud {
   private readonly hpText = byId('rivalHpText');
   private readonly prog = byId('zoneProgress');
   private readonly timer = byId('rivalTimer');
+  private readonly travelInfo = byId('travelInfo');
+  private readonly travelPrev = byId('travelPrev') as HTMLButtonElement;
+  private readonly travelNext = byId('travelNext') as HTMLButtonElement;
+  private readonly travelFrontier = byId('travelFrontier') as HTMLButtonElement;
 
   // Cached last-written values (change-detection, no DOM churn).
   private cZone = '';
@@ -67,6 +71,7 @@ export class ChHud {
   private cTimer = '';
   private cBoss: boolean | null = null;
   private cCombo = '';
+  private cTravel = '';
 
   private setText(el: HTMLElement, next: string, cache: string): string {
     if (next !== cache) el.textContent = next;
@@ -92,7 +97,23 @@ export class ChHud {
     }
 
     this.cRival = this.setText(this.rivalNameEl, rivalName(combat.zone, combat.boss), this.cRival);
+    this.updateTravel(combat);
     this.frame(combat);
+  }
+
+  /**
+   * Reflect the farm/travel controls (§4.4): the frontier is `combat.maxZone`;
+   * below it the player is farming a cleared zone. Buttons clamp to 1..frontier —
+   * the pure `travelTo` guarantees the same, this only greys out dead ends.
+   */
+  private updateTravel(combat: CombatState): void {
+    const frontier = combat.maxZone;
+    const farming = combat.zone < frontier;
+    const info = farming ? `🌾 Farmen · Front: Bühne ${frontier}` : 'An der Frontier';
+    this.cTravel = this.setText(this.travelInfo, info, this.cTravel);
+    this.travelPrev.disabled = combat.zone <= 1;
+    this.travelNext.disabled = combat.zone >= frontier;
+    this.travelFrontier.disabled = !farming;
   }
 
   /** Cheap per-frame refresh of the moving bits (HP bar + boss timer/progress). */

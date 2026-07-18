@@ -45,4 +45,22 @@ describe('ch-state', () => {
     expect(after.ability).toEqual(createAbility());
     expect(after.combo).toEqual(createComboSave());
   });
+
+  it('gilds survive ascension; rsLifetime never shrinks (M9 §4.3.4/§4.5.2)', () => {
+    const s = {
+      ...createChState(),
+      zone: 40,
+      runMaxZone: 40,
+      crew: { boss: 30 },
+      gilds: { boss: 2, legend: 1 },
+      souls: 5,
+      rsLifetime: 5,
+    };
+    const after = ascendState(s);
+    expect(after.gilds).toEqual({ boss: 2, legend: 1 }); // permanent, carried over
+    expect(after.crew).toEqual({}); // run reset
+    expect(after.souls).toBe(soulsForMaxZone(40)); // new bank
+    expect(after.rsLifetime).toBeGreaterThanOrEqual(after.souls); // highwater
+    expect(after.rsLifetime).toBeGreaterThanOrEqual(5); // never shrinks
+  });
 });

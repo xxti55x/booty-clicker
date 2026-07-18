@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ABILITY_CHARGE_MAX, createAbility } from '../game/ability';
+import { soulsForMaxZone } from '../game/ascension';
 import { type ChState, createChState, createComboSave, createStats } from '../game/ch-state';
 import { monsterHp } from '../game/combat';
 import {
@@ -170,11 +171,78 @@ describe('ch-store — v2 migration & repair', () => {
 
   it('rejects unknown / future versions to a clean fresh start', () => {
     const store = memStorage();
-    store.setItem(CH_SAVE_KEY, JSON.stringify({ v: 4, gold: 0 }));
+    store.setItem(CH_SAVE_KEY, JSON.stringify({ v: 5, gold: 0 }));
     expect(loadCh(store)).toBeNull();
     store.setItem(CH_SAVE_KEY, JSON.stringify({ v: 0, gold: 0 }));
     expect(loadCh(store)).toBeNull();
     expect(() => loadCh(store)).not.toThrow();
+  });
+});
+
+describe('ch-store — v4 migration & repair (M9)', () => {
+  it('migrates a v3 blob losslessly into v4 (gilds default empty, rsLifetime seeded)', () => {
+    const store = memStorage();
+    const v3 = {
+      v: 3,
+      lastSeen: 9000,
+      gold: 1200,
+      zone: 30,
+      killsThisZone: 2,
+      runMaxZone: 30,
+      crew: { boss: 12, dj: 4 },
+      souls: 21,
+      lifetimeMaxZone: 30,
+      totalClicks: 500,
+      rng: { seed: 222, cursor: 77 },
+      stats: { ...createStats(), crits: 11 },
+      legacyImported: true,
+      ability: createAbility(),
+      combo: { stacks: 12 },
+    };
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v3));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    // v3 fields carried through losslessly
+    expect(s.gold).toBe(1200);
+    expect(s.crew).toEqual({ boss: 12, dj: 4 });
+    expect(s.souls).toBe(21);
+    expect(s.rng).toEqual({ seed: 222, cursor: 77 });
+    expect(s.combo).toEqual({ stacks: 12 });
+    // v4 defaults added
+    expect(s.gilds).toEqual({});
+    // rsLifetime seeded from souls, then lifted to soulsForMaxZone(30).
+    expect(s.rsLifetime).toBe(Math.max(21, soulsForMaxZone(30)));
+  });
+
+  it('round-trips gilds + rsLifetime through a v4 save', () => {
+    const store = memStorage();
+    const s = {
+      ...createChState(),
+      zone: 25,
+      runMaxZone: 25,
+      lifetimeMaxZone: 25,
+      souls: 13,
+      gilds: { boss: 3, legend: 1 },
+      rsLifetime: 200,
+    };
+    saveCh(s, 3000, store);
+    const loaded = loadCh(store);
+    expect(loaded!.state.gilds).toEqual({ boss: 3, legend: 1 });
+    expect(loaded!.state.rsLifetime).toBe(200);
+  });
+
+  it('repairs a corrupt gilds slice + negative rsLifetime without throwing', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.gilds = { boss: -2, dj: 1.5, legend: 3, junk: 'x' }; // drop all but legend:3
+    raw.rsLifetime = -50;
+    let s: ChState | null = null;
+    expect(() => {
+      s = deserializeCh(JSON.stringify(raw));
+    }).not.toThrow();
+    expect(s).not.toBeNull();
+    expect(s!.gilds).toEqual({ legend: 3 });
+    expect(s!.rsLifetime).toBe(0);
   });
 });
 

@@ -33,7 +33,9 @@ import {
   tierCritChanceBonus,
   tierCritMultBonus,
 } from './game/combo';
-import { type CombatState, hit, spawnFor, tickBoss } from './game/combat';
+import { type CombatState, hit, spawnFor, tickBoss, travelTo } from './game/combat';
+import { awardGildOnZone, isGildZone } from './game/gild';
+import { CREW } from './game/heroes';
 import { shouldShakeOnKey } from './game/input';
 import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
 import { applyLegacyInheritance } from './game/legacy-import';
@@ -158,6 +160,7 @@ function syncMaxZones(): void {
   state.killsThisZone = combat.killsThisZone;
   state.runMaxZone = Math.max(state.runMaxZone, combat.maxZone);
   state.lifetimeMaxZone = Math.max(state.lifetimeMaxZone, state.runMaxZone);
+  state.rsLifetime = Math.max(state.rsLifetime, state.souls); // lifetime-RS highwater (§4.5.2)
   state.rng = rng.toState(); // fold the live RNG cursor back into the save
   state.combo = { stacks: comboState.stacks }; // ability is mutated on state in place
 }
@@ -304,6 +307,22 @@ function updateBackground(force = false): void {
   }
 }
 
+// ---------- farm / travel (G10, §4.4) ----------
+// The zone stepper drives the pure `travelTo` (clamped to 1..maxZone). Travelling
+// below the frontier lets you farm a cleared zone; the ⏫ button snaps back to it.
+function travel(toZone: number): void {
+  combat = travelTo(combat, toZone);
+  updateBackground();
+  syncMaxZones();
+  hud.update(state, combat, dps, clickDmg);
+  persist();
+}
+document.getElementById('travelPrev')?.addEventListener('click', () => travel(combat.zone - 1));
+document.getElementById('travelNext')?.addEventListener('click', () => travel(combat.zone + 1));
+document
+  .getElementById('travelFrontier')
+  ?.addEventListener('click', () => travel(Math.max(state.runMaxZone, combat.maxZone)));
+
 // ---------- combat glue ----------
 const particleTmp = new THREE.Vector3();
 let shakeMag = 0;
@@ -323,6 +342,23 @@ function onKillProgress(
     audio.unlockJingle();
   }
   if (r.advancedZone) {
+    // Vergoldung (§4.3.4): the first clear of each 10-zone (10, 20, 30, …) — i.e.
+    // advancing past it as a NEW lifetime record — grants a permanent ×1.25 gild to
+    // a seeded-random member. `lifetimeMaxZone` is the highwater, so a re-clear after
+    // ascension never double-awards. Gilds survive ascension (anti-plateau, P3).
+    const clearedZone = combat.zone - 1;
+    if (combat.zone > state.lifetimeMaxZone && isGildZone(clearedZone)) {
+      const before = state.gilds;
+      state.gilds = awardGildOnZone(before, clearedZone, false, rng);
+      if (state.gilds !== before) {
+        recompute();
+        const gildedId = Object.keys(state.gilds).find(
+          (id) => (state.gilds[id] ?? 0) > (before[id] ?? 0),
+        );
+        const name = CREW.find((c) => c.id === gildedId)?.name ?? 'Crew';
+        toasts.show('🏅', 'Vergoldung!', `${name} +25% DPS (Bühne ${clearedZone})`);
+      }
+    }
     if (combat.zone > state.runMaxZone) state.runMaxZone = combat.zone;
     if (fromClick && x !== undefined) pops.gold(r.gold, x, y ?? 0);
     // was the kill a boss? (advanced from a boss target)

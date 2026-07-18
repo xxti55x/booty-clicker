@@ -7,8 +7,9 @@
  * damage) are NEVER persisted — they're recomputed from crew levels + souls.
  */
 import { type AbilityState, createAbility } from './ability';
-import { applyAscension } from './ascension';
+import { applyAscension, soulsForMaxZone } from './ascension';
 import { soulMult } from './ascension';
+import { type Gilds, createGilds } from './gild';
 import { type CrewLevels, clickDamageRaw, createCrew, totalRawDps } from './heroes';
 import { createRngState, type RngState } from '../util/rng';
 
@@ -78,6 +79,13 @@ export interface ChState {
   ability: AbilityState;
   /** Combo stacks carried across a reload (CH-save v3, §4.2.2). */
   combo: ComboSave;
+  /** Permanent per-member gilds, ×1.25 DPS each; survive ascension (CH-save v4, §4.3.4). */
+  gilds: Gilds;
+  /**
+   * Running max of banked souls (lifetime RS), for the later Himmelfahrt gate
+   * (§4.5.2). Only ever grows; souls aren't spent yet, so it tracks `souls`.
+   */
+  rsLifetime: number;
 }
 
 /** A brand-new run/profile. */
@@ -96,17 +104,19 @@ export function createChState(): ChState {
     legacyImported: false,
     ability: createAbility(),
     combo: createComboSave(),
+    gilds: createGilds(),
+    rsLifetime: 0,
   };
 }
 
-/** Total crew DPS including the soul multiplier. */
-export function dpsOf(state: Pick<ChState, 'crew' | 'souls'>): number {
-  return totalRawDps(state.crew) * soulMult(state.souls);
+/** Total crew DPS including gilds and the soul multiplier. */
+export function dpsOf(state: Pick<ChState, 'crew' | 'souls' | 'gilds'>): number {
+  return totalRawDps(state.crew, state.gilds) * soulMult(state.souls);
 }
 
-/** Click (shake) damage including the soul multiplier (before crit/frenzy). */
-export function clickDamageOf(state: Pick<ChState, 'crew' | 'souls'>): number {
-  return clickDamageRaw(state.crew) * soulMult(state.souls);
+/** Click (shake) damage including gilds + the soul multiplier (before crit/frenzy). */
+export function clickDamageOf(state: Pick<ChState, 'crew' | 'souls' | 'gilds'>): number {
+  return clickDamageRaw(state.crew, state.gilds) * soulMult(state.souls);
 }
 
 /**
@@ -121,6 +131,9 @@ export function ascendState(state: ChState): ChState {
   );
   // Souls, lifetime record and all meta (RNG stream, lifetime stats, the
   // legacy-import flag) persist; only the run itself (gold/crew/zone) resets.
+  // Gilds are permanent (§4.3.4) — carried over so a soul-less run that still
+  // reached a new 10-zone keeps its power (anti-plateau, P3). `rsLifetime` is the
+  // never-shrinking lifetime-RS highwater for the later Himmelfahrt gate.
   return {
     ...createChState(),
     souls,
@@ -129,5 +142,7 @@ export function ascendState(state: ChState): ChState {
     rng: state.rng,
     stats: state.stats,
     legacyImported: state.legacyImported,
+    gilds: state.gilds,
+    rsLifetime: Math.max(state.rsLifetime, souls, soulsForMaxZone(lifetimeMaxZone)),
   };
 }

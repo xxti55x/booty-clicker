@@ -4,6 +4,7 @@
  * untouched. Never throws; injectable storage for node unit tests.
  */
 import { type AbilityState, ABILITY_CHARGE_MAX, createAbility } from '../game/ability';
+import { soulsForMaxZone } from '../game/ascension';
 import { goldFor, monsterHp } from '../game/combat';
 import {
   type ChStats,
@@ -12,11 +13,12 @@ import {
   createComboSave,
   createStats,
 } from '../game/ch-state';
+import { type Gilds, createGilds } from '../game/gild';
 import type { CrewLevels } from '../game/heroes';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 3;
+export const CH_SCHEMA = 4;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -46,9 +48,9 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The v3 persisted shape (M8): the current ChState + envelope. */
-interface ChSaveV3 extends ChState {
-  v: 3;
+/** The v4 persisted shape (M9): the current ChState + envelope. */
+interface ChSaveV4 extends ChState {
+  v: 4;
   lastSeen: number;
 }
 
@@ -71,15 +73,16 @@ function isFiniteNumber(v: unknown): v is number {
 }
 
 /**
- * Never-throw validation of a stored CH save (the v3 guard). The gameplay-
+ * Never-throw validation of a stored CH save (the v4 guard). The gameplay-
  * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
- * The meta/juice fields (rng/stats/legacyImported/ability/combo) are deliberately
- * NOT gated here: they are runtime bookkeeping and get repaired (fresh seed /
- * zeroed stats / false flag / default ability+combo) in `stateFromSave` — the
- * same "repair, don't nuke progress" spirit as the runMaxZone invariant.
- * Per-field type+range checks for them live in the `repair*` helpers below.
+ * The meta/juice fields (rng/stats/legacyImported/ability/combo/gilds/rsLifetime)
+ * are deliberately NOT gated here: they are runtime bookkeeping and get repaired
+ * (fresh seed / zeroed stats / false flag / default ability+combo / pruned gilds /
+ * clamped highwater) in `stateFromSave` — the same "repair, don't nuke progress"
+ * spirit as the runMaxZone invariant. Per-field type+range checks for them live in
+ * the `repair*` helpers below.
  */
-export function isChSave(raw: unknown): raw is ChSaveV3 {
+export function isChSave(raw: unknown): raw is ChSaveV4 {
   if (!isRecord(raw)) return false;
   if (raw.v !== CH_SCHEMA) return false;
   if (!isFiniteNumber(raw.gold) || raw.gold < 0) return false;
@@ -97,7 +100,7 @@ export function isChSave(raw: unknown): raw is ChSaveV3 {
 
 /** Serialize state + timestamp to a JSON string. */
 export function serializeCh(state: ChState, now: number): string {
-  const save: ChSaveV3 = { v: CH_SCHEMA, lastSeen: now, ...state };
+  const save: ChSaveV4 = { v: CH_SCHEMA, lastSeen: now, ...state };
   return JSON.stringify(save);
 }
 
@@ -146,22 +149,44 @@ function repairCombo(v: unknown): ComboSave {
   return createComboSave();
 }
 
+/** Repair the persisted gilds slice: keep only non-negative-int counts, else empty (v4). */
+function repairGilds(v: unknown): Gilds {
+  if (!isRecord(v)) return createGilds();
+  const out: Gilds = {};
+  for (const [id, n] of Object.entries(v)) if (isNonNegInt(n) && n > 0) out[id] = n;
+  return out;
+}
+
+/** Repair the persisted lifetime-RS highwater: non-negative finite, else 0 (v4). */
+function repairRsLifetime(v: unknown): number {
+  return isFiniteNumber(v) && v >= 0 ? v : 0;
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
-function stateFromSave(save: ChSaveV3): ChState {
+function stateFromSave(save: ChSaveV4): ChState {
+  const souls = save.souls;
+  const lifetimeMaxZone = Math.max(save.lifetimeMaxZone, save.runMaxZone, save.zone);
   return {
     gold: save.gold,
     zone: save.zone,
     killsThisZone: save.killsThisZone,
     runMaxZone: Math.max(save.runMaxZone, save.zone),
     crew: { ...save.crew },
-    souls: save.souls,
-    lifetimeMaxZone: Math.max(save.lifetimeMaxZone, save.runMaxZone, save.zone),
+    souls,
+    lifetimeMaxZone,
     totalClicks: save.totalClicks,
     rng: repairRng(save.rng),
     stats: repairStats(save.stats),
     legacyImported: save.legacyImported === true,
     ability: repairAbility(save.ability),
     combo: repairCombo(save.combo),
+    gilds: repairGilds(save.gilds),
+    // Keep the highwater ≥ souls and ≥ the souls-equivalent of the deepest zone.
+    rsLifetime: Math.max(
+      repairRsLifetime(save.rsLifetime),
+      souls,
+      soulsForMaxZone(lifetimeMaxZone),
+    ),
   };
 }
 
@@ -188,9 +213,24 @@ function migrateChV2toV3(raw: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+/**
+ * v3 → v4: fill the M9 defaults — no gilds yet, and seed the lifetime-RS highwater
+ * from the currently banked souls (a pre-M9 player keeps their earned RS as the
+ * floor). `stateFromSave` further lifts it to the deepest-zone souls-equivalent.
+ */
+function migrateChV3toV4(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    v: 4,
+    gilds: createGilds(),
+    rsLifetime: isNonNegInt(raw.souls) ? raw.souls : 0,
+  };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
+  3: migrateChV3toV4,
 };
 
 /**
@@ -198,7 +238,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
  * Never throws; unknown/future/corrupt data ⇒ null ⇒ clean fresh start.
  * (Registry pattern mirrors `save/migrate.ts`.)
  */
-function migrateCh(raw: unknown): ChSaveV3 | null {
+function migrateCh(raw: unknown): ChSaveV4 | null {
   if (!isRecord(raw)) return null;
   let version = raw.v;
   if (typeof version !== 'number' || !Number.isInteger(version)) return null;
