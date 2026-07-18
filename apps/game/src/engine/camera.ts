@@ -2,10 +2,10 @@ import type * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 /**
- * Replace the prototype's hand-rolled orbit with Three's OrbitControls, keeping
- * the same framing and limits (spec §5 M0):
- *  - initial view behind the character (theta = π + 0.3, phi = 1.32, radius = 9.5)
- *  - zoom clamp 5..24, polar clamp 0.4..2.3.
+ * Fixed stage camera. The view is authored (behind the character: theta = π + 0.3,
+ * phi = 1.32, radius = 9.5) and the player cannot move it — no pan, no rotate, no
+ * zoom. Dragging on the canvas is reserved entirely for clicking/twerking; only
+ * code (screen shake, future cutscene moves) drives the camera.
  */
 export function createControls(camera: THREE.PerspectiveCamera, dom: HTMLElement): OrbitControls {
   const theta = Math.PI + 0.3;
@@ -22,10 +22,8 @@ export function createControls(camera: THREE.PerspectiveCamera, dom: HTMLElement
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.enablePan = false;
-  controls.minDistance = 5;
-  controls.maxDistance = 24;
-  controls.minPolarAngle = 0.4;
-  controls.maxPolarAngle = 2.3;
+  controls.enableRotate = false;
+  controls.enableZoom = false;
   controls.update();
   return controls;
 }
