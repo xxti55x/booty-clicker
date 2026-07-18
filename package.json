@@ -14,6 +14,7 @@
     "build:itch": "npm run build:itch -w apps/game",
     "preview": "npm run preview -w apps/game",
     "test": "npm run test --workspaces --if-present",
+    "test:sim": "npm run test:sim -w apps/game",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

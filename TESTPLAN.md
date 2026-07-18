@@ -19,7 +19,8 @@ CI (real browsers, touch input, performance).
 - [ ] `npm run lint` — ESLint clean
 - [ ] `npm run format:check` — Prettier clean
 - [ ] `npm test` — all unit tests green (game + API workspaces)
-- [ ] `npm run build` — type-checks and builds; bundle **< 5 MB** (currently ~580 KB JS / ~152 KB gzip; +~9 KB for M8 juice)
+- [ ] `npm run build` — type-checks and builds; bundle **< 5 MB** (currently ~583 KB JS / ~153 KB gzip; +~2 KB for M9 scaling)
+- [ ] `npm run test:sim` — the `simulateEndless` gate (E1/E2/E4 + §4.8 pacing) is green (also runs inside `npm test` + CI)
 - [ ] `npm run build:itch` — produces `apps/game/release/booty-clicker-itch.zip` with `index.html` at the archive root
 
 ## 2. Browser matrix (manual smoke)
@@ -149,3 +150,31 @@ Manual passes (real device / browser):
       ⚙️ removes each effect independently; music intensity follows mute.
 - [ ] **Bottom-sheet (§3).** On a phone width the shop is a bottom sheet; the figure
       and rival stay visible while shopping.
+
+## 10. M9 — Endless-Skalierung (Anti-Plateau)
+
+Automated (unit): RS_v2 retune (`ascension.test.ts`: §4.5.1 table z40→53/z50→129/
+z100→13818, +5 ⇒ ≥ ×1.3 for z ≥ 40, bank never shrinks); endless milestones
+(`heroes.test.ts`: `milestoneMult(1600)=2⁸`, `(3200)=2⁹`; `bulkCost`/`maxAffordable`
+exact for the 5 new tiers vs. an iterative sum); gilds (`gild.test.ts`: seeded target
+determinism, award only on a fresh 10-zone, reassign 5 RS, ×1.25^n DPS fold); gild
+survives ascension + `rsLifetime` highwater (`ch-state.test.ts`); CH-save **v4**
+lossless v3→v4 + gild/rsLifetime repair (`ch-store.test.ts`); travel clamp
+(`sim.test.ts`: `travelTo` never leaves 1..maxZone). The `simulateEndless` gate
+(`sim.test.ts`, `npm run test:sim`): pacing (zone ≥ 75 & bank ≥ 500 RS in ≤ 6 runs),
+E1 (deeper state reachable), E2 (bounded soft wall), E4 (active ≥ 8 zones ahead of
+casual), determinism, self-runtime < 10 s. Headless smoke: `scratchpad/smoke-ch.mjs`
+(gild toast + banked gild on the zone-10 first clear; ascension banks RS_v2(50)=129).
+
+Manual passes (real device / browser):
+
+- [ ] **Deeper crew.** The 🕺-tab reveals the 5 new tiers (Viral-Video-Team →
+      Kosmische Twerk-Entität) as BP allows; milestone bars keep counting past Lv 800.
+- [ ] **Gilds 🏅.** The first clear of a 10-zone (10, 20, 30, …) pops a „Vergoldung!"
+      toast and a 🏅×n badge appears on a crew member (permanent ×1.25 DPS); the badge
+      and the DPS survive an ascension.
+- [ ] **Farming/travel.** The `◀ Bühne ▶` stepper farms cleared zones; `⏫ Front`
+      returns to the frontier; you can never travel past your deepest zone; the HUD
+      shows „🌾 Farmen · Front: Bühne N" while below the frontier.
+- [ ] **RS_v2 feel.** Ascension previews a much larger „+X Seelen" at depth than the
+      old curve (e.g. Bühne 50 → +129), and a new best zone visibly multiplies the bank.

@@ -3,6 +3,70 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M9 — Endless-Skalierung (Anti-Plateau)
+
+- **2026-07-18 — RS_v2 ist rein additiv, deshalb migrationsfrei.** `soulsForMaxZone`
+  bekommt den „Legendäre Auftritte"-Term: `⌊z^1.6/40⌋ + ⌊1.10^z − 1⌋` (§4.5.1). Der
+  bestehende `applyAscension`-`Math.max`-Boden (Bank schrumpft nie) macht den Retune
+  **ohne Save-Migration** sicher — eine bestehende Bank wird nie kleiner, nur die neue,
+  steilere Kurve gilt ab dem nächsten Rekord. Der exponentielle Term (Basis 1,10)
+  sorgt dafür, dass jede neue Bestzone die Bank **vervielfacht** statt inkrementiert
+  (Tabelle §4.5.1 exakt getroffen: z40→53, z50→129, z100→13818); Property-Test:
+  +5 Bestzone ⇒ ≥ ×1,3 für z ≥ 40.
+
+- **2026-07-18 — Endlose Meilensteine per Integer-Verdopplung (float-sicher).**
+  `milestoneCount(level)` zählt die 7 festen Schwellen plus jede weitere Verdopplung
+  ab 1600 in einer Integer-Schleife (`t *= 2`, exakt bis 2^53) statt via `log2` — so
+  gibt es keine Rundungskante an einer Schwelle. `milestoneMult(1600)=2⁸`,
+  `(3200)=2⁹`. `nextMilestone` liefert dadurch **immer** eine nächste Klammer (nie
+  mehr `null`), was die Crew-Fortschrittsbalken endlos macht (der tote
+  „alle Meilensteine erreicht"-Zweig entfällt).
+
+- **2026-07-18 — Gild-Multiplikator lebt in `heroes.ts`, Bookkeeping in `gild.ts`
+  (keine Zirkularität).** `gild.ts` braucht `CREW` (Ziel-Wahl) → importiert aus
+  `heroes.ts`. Die ×1,25-DPS-Faltung (`gildMult`/`heroDps(cfg,level,gild)`) liegt
+  dagegen in `heroes.ts`, damit die DPS **eine** Quelle hat und `heroes` nicht auf
+  `gild` zeigt. `totalRawDps`/`clickDamageRaw` nehmen ein optionales `gilds`-Argument
+  (Default `{}`) — alte Aufrufer/Tests bleiben unverändert grün.
+
+- **2026-07-18 — Gild-Award über einen Lifetime-Highwater, nicht pro Zone-Flag.**
+  `awardGildOnZone(gilds, zone, alreadyGilded, rng)` vergibt genau dann, wenn `zone`
+  eine 10er-Bühne ist und noch nicht vergoldet. Der Glue (`main.ts`) leitet
+  `alreadyGilded` aus `lifetimeMaxZone` ab: die geräumte 10er-Bühne (`combat.zone−1`)
+  bekommt ihr Gild nur, wenn die Front einen **neuen Lifetime-Rekord** setzt — ein
+  Re-Clear nach Ascension vergoldet also nie doppelt, und Migration (`gilds={}`) gibt
+  keine rückwirkenden Gilds. Ziel-Wahl über den seedbaren RNG ⇒ deterministisch &
+  save-scum-fest; das ×1,25 ist permanent und überlebt die Ascension (`ascendState`
+  trägt `gilds` mit — Anti-Plateau P3: auch ein „+0-Seelen-Run" hinterlässt Macht).
+
+- **2026-07-18 — CH-Save v4: Guard streng auf Kern, Repair auf `gilds`/`rsLifetime`.**
+  Wie schon rng/stats/ability/combo werden die neuen Felder **nicht** in `isChSave`
+  gegatet, sondern in `stateFromSave` repariert (`repairGilds` verwirft Nicht-
+  Ganzzahl-/Negativ-Einträge, `repairRsLifetime` klemmt auf ≥ 0). `migrateChV3toV4`
+  füllt `gilds={}` und seedt `rsLifetime` aus den aktuellen Seelen; die
+  Invarianten-Reparatur hebt `rsLifetime` zusätzlich auf `soulsForMaxZone(lifetime)`.
+  `rsLifetime` ist der nie schrumpfende Lifetime-RS-Highwater für das spätere
+  Himmelfahrts-Gate (§4.5.2), schon jetzt verdrahtet.
+
+- **2026-07-18 — Travel-UI treibt das pure `travelTo`; Klick-Hot-Path bleibt sauber.**
+  Der Stepper (`◀ Bühne ▶` + `⏫ Front`) ruft nur `travelTo(state, zone)` (clamped
+  1..maxZone) und rendert danach einmalig; die Button-Disabled-Zustände + der
+  Farm-Indikator laufen über die change-detected `hud.update`, nie pro Frame. Farmen
+  unter der Front lässt `maxZone` (die Frontier) unangetastet — nichts geht verloren.
+
+- **2026-07-18 — `simulateEndless` ersetzt `simulatePlaythrough` als Balancing-Gate.**
+  Deterministischer Bot über die echten Module (combat/heroes/ascension/click/gild),
+  1-s-Schritte, EV-basiertes Klicken (Combo ×2 + Krit-EV ×1,8 aktiv; nichts casual),
+  ROI-greedy-Crew, Boss-Whittling über den Timer, adaptive/fixe Ascension. Reproduziert
+  §4.8 Messung 3 (Bank 53→810→2074, Plateau ~Bühne 80). **E2 als „weiche Wand" über
+  einen Running-Max robustifiziert:** kein +5-Schritt darf mehr als das Doppelte des
+  bisher schlechtesten Schritts kosten (der rohe Nachbarschafts-Quotient ist fragil,
+  weil Sub-Sekunden-Re-Climb-Bursts winzige Nenner erzeugen). Beobachtet ≈ 1,9 < 2
+  über alle Seeds und ~16 Verbesserungen — die vollen „ersten 30" landen mit den
+  compoundenden Ahnen/HPF aus M10 (die den linearen-Mult-Plateau ~Bühne 80 anheben);
+  bis dahin sind die erreichbaren Verbesserungen die ehrliche Decke. Läuft in CI als
+  eigener Schritt (`npm run test:sim`) und ist Teil von `npm test`.
+
 ## M8 — Klick-Juice 2.0 (der Star zuerst)
 
 - **2026-07-18 — Combo-Tiers als absolute (nicht kumulative) Daten-Perks.** Die

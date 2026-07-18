@@ -9,6 +9,7 @@
     "build:itch": "npm run build && node scripts/pack-itch.mjs",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:sim": "vitest run src/game/sim.test.ts",
     "test:watch": "vitest"
   },
   "dependencies": {

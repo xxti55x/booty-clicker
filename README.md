@@ -27,15 +27,24 @@ Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 M
   Screen-Shake, Musik-Layer und Vibration (alles einzeln im ⚙️-Tab abschaltbar).
 - **Bühnen (Zonen).** Besiege 10 Rivalen, um eine Bühne zu räumen. Die Ausdauer (HP)
   der Rivalen wächst exponentiell — es geht **endlos** weiter.
-- **Crew = Idle-DPS.** Heuere im 🕺-Tab Tänzer:innen an (Booty-Boss → Twerk-Legende)
-  und level sie (×1 / ×10 / Max). Ihre DPS ticken die Rivalen-HP auch ohne Klicken
-  herunter — und pushen zusätzlich deinen Klick-Schaden.
+- **Crew = Idle-DPS.** Heuere im 🕺-Tab Tänzer:innen an (Booty-Boss → Twerk-Legende
+  → … → Kosmische Twerk-Entität — 15 Tiers) und level sie (×1 / ×10 / Max). Ihre DPS
+  ticken die Rivalen-HP auch ohne Klicken herunter — und pushen zusätzlich deinen
+  Klick-Schaden. Meilenstein-Verdopplungen gehen **endlos** weiter (…, 800, 1600, 3200, …).
+- **Vergoldungen (Gilds) 🏅.** Der **Erst-Clear jeder 10er-Bühne** (10, 20, 30, …)
+  vergoldet ein zufälliges Crew-Mitglied dauerhaft mit **×1,25 DPS**. Vergoldungen
+  überleben die Ascension — auch ein Lauf **ohne** neue Seelen, der eine neue 10er-Bühne
+  erreicht, hinterlässt bleibende Macht.
+- **Farmen & Reisen.** Der Bühnen-Stepper im HUD (`◀ Bühne ▶`, `⏫ Front`) lässt dich
+  tiefer geräumte Bühnen farmen und jederzeit zur Frontier zurückspringen (nie über deine
+  tiefste Bühne hinaus).
 - **Bosse.** Jede 5. Bühne ist ein Boss mit **30-Sekunden-Timer**. Schaffst du ihn
   nicht, farmst du die Bühne weiter und forderst ihn erneut heraus (kein Soft-Lock).
 - **Ruhm-Seelen (Ascension).** Starte deine Tournee im ✨-Tab neu und sammle Seelen —
-  **+10 % Schaden pro Seele, dauerhaft**. Seelen hängen an deiner tiefsten je erreichten
-  Bühne (kein Farm-Exploit). Das ist der Motor, der das Spiel endlos macht:
-  tiefer → mehr Seelen → mehr Schaden → tiefer.
+  **+10 % Schaden pro Seele, dauerhaft**. Der Seelen-Ertrag `⌊z^1.6/40⌋ + ⌊1.10^z−1⌋`
+  wächst mit der Tiefe **exponentiell**, sodass jede neue Bestzone die Bank vervielfacht.
+  Seelen hängen an deiner tiefsten je erreichten Bühne (kein Farm-Exploit): tiefer → mehr
+  Seelen → mehr Schaden → tiefer.
 - **Idle & Offline.** Deine Crew farmt weiter, während du weg bist (50 % Rate, max. 8 h)
   — beim Wiedereinstieg gibt's eine „Willkommen zurück"-Zusammenfassung.
 
@@ -57,12 +66,17 @@ npm-Workspaces-Monorepo:
   vs. dünne DOM/Three/Audio-Glue:
   - `game/combat.ts` — Zonen-/Rivalen-Loop: `monsterHp(zone)=10·1.6^(zone-1)`, 10 Rivalen/Zone,
     Boss alle 5 Zonen (HP ×10) mit 30 s-Timer, Gold `ceil(HP/15)` (Boss ×12), reine Reducer.
-  - `game/heroes.ts` — 10er-Crew, `1.07`-Kostenwachstum, ×2-Meilenstein-Verdopplungen,
-    Klick-Schaden = Basis + Anteil der Gesamt-DPS.
-  - `game/ascension.ts` — `soulsForMaxZone(z)=⌊z^1.6/40⌋`, +10 %/Seele, an Lifetime-Zone gepinnt.
-  - `game/ch-state.ts` + `save/ch-store.ts` — CH-State, eigener versionierter Save-Key
-    (`bootyclicker.ch`), Offline-Gold, Base64-Export/Import (never-throw, injizierbar).
-  - `ui/*` — HUD/Rival, Crew, Prestige, Settings; `main.ts` verdrahtet alles + Render-Loop.
+  - `game/heroes.ts` — 15er-Crew, `1.07`-Kostenwachstum, **endlose** ×2-Meilensteine
+    (fix bis 800, danach jede Verdopplung), Klick-Schaden = Basis + Anteil der Gesamt-DPS.
+  - `game/ascension.ts` — `soulsForMaxZone(z)=⌊z^1.6/40⌋+⌊1.10^z−1⌋` (RS_v2), +10 %/Seele,
+    an Lifetime-Zone gepinnt; Bank schrumpft nie (retune-sicher).
+  - `game/gild.ts` — Vergoldungen: seeded Ziel-Wahl, Award pro 10er-Erst-Clear, Umhängen (5 RS).
+  - `game/sim.ts` — `simulateEndless`: deterministischer Balancing-Bot über die echten
+    Module; Endlos-Kriterien E1/E2/E4 + Pacing als CI-Gate (`npm run test:sim`).
+  - `game/ch-state.ts` + `save/ch-store.ts` — CH-State (Save **v4**: `gilds`, `rsLifetime`),
+    eigener versionierter Save-Key (`bootyclicker.ch`), Offline-Gold, Base64-Export/Import
+    (never-throw, injizierbar).
+  - `ui/*` — HUD/Rival + Travel-Stepper, Crew, Prestige, Settings; `main.ts` verdrahtet alles.
 - `apps/api` — optionaler Cloudflare-Worker (Hono + D1 + KV) als Bestenlisten-Backend.
 
 Audio ist komplett **prozedural** (Web Audio, keine Dateien). Three.js kommt als
