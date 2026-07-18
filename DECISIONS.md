@@ -3,6 +3,29 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Blender-Refine-Pass — Modelle final, Szenerie als Dioramen (Goal)
+
+- **2026-07-18 — `tools/blender/refine_models.py`: Veredelung IN Blender, reproduzierbar.**
+  Spieler-Goal: „work in render and refine all the models; scenery is very important;
+  do everything in blender; no further refining needed afterwards." Statt die .glb
+  einmalig von Hand anzufassen, ist der Refine ein **deterministischer Pipeline-
+  Schritt** (export_all → refine_models → verify_models), damit „fertig" auch nach
+  jeder Regeneration fertig bleibt:
+  - **Mesh-Hygiene:** Merge-by-Distance 1e-4 (Primitive-Nähte), Normals konsistent
+    nach außen, Shade-Smooth-by-Angle 60° — Rundungen glatt, Kanten hart.
+  - **Material-Politur:** Roughness-Floor 0,65 (glTF-Defaults rendern sonst
+    plastikglänzend; das Spiel re-skinnt eh mit `toonMat`).
+  - **Szenerie = Dioramen:** jede Bühne bekommt einen thematisch materialisierten
+    Boden-Zylinder (Club glossy-dunkel, Synth violett-emissiv, Strand-Sand,
+    Weltraum-Asphalt), Radius aus der Prop-Bounding-Box — aus der losen Prop-Wolke
+    wird ein in sich geschlossenes Asset.
+  - **Render-Nachweis:** jedes Modell wird mit Studio-Rig (3-Punkt-Sun-Setup,
+    Auto-Framing-Kamera über die BBox, Cycles + OIDN-Denoise) nach
+    `models/renders/*.jpg` gerendert; das Rig wird NICht exportiert (Export vor
+    Rig-Aufbau). Stolperfalle dokumentiert: der glTF-Importer konvertiert nach
+    **Z-up** — Boden/Kamera-Mathe muss in Blender-Koordinaten rechnen, exportiert
+    wird wieder Y-up (`export_yup`).
+
 ## v10 — Kaufbare Crew-Fähigkeiten & langsamere Progression (Goal-Rebalance)
 
 - **2026-07-18 — Slot 1 = Klick-Linie, Rest = DPS; Meilensteine werden KAUFBAR.**
