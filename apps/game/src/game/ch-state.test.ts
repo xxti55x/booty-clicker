@@ -60,20 +60,20 @@ describe('ch-state', () => {
     expect(dpsOf(base)).toBeCloseTo(totalRawDps({ boss: 20 }), 6);
     expect(clickDamageOf(base)).toBeCloseTo(clickDamageRaw({ boss: 20 }), 6);
 
-    // Robo-Twerk lv 10 = +8 %/lvl crew-DPS ⇒ dpsGearMult ×1.8; click unaffected.
+    // Robo-Twerk lv 10 = +6 %/lvl crew-DPS ⇒ dpsGearMult ×1.6; click unaffected.
     const robo = {
       ...base,
       gear: { ...createGear(), skin: 'robo' as const, skinLevels: { robo: 10 } },
     };
-    expect(dpsOf(robo)).toBeCloseTo(totalRawDps({ boss: 20 }) * 1.8, 6);
+    expect(dpsOf(robo)).toBeCloseTo(totalRawDps({ boss: 20 }) * 1.6, 6);
     expect(clickDamageOf(robo)).toBeCloseTo(clickDamageRaw({ boss: 20 }), 6);
 
-    // Classic lv 10 + 2⭐ = 0.4 + 0.2 = +60 % click ⇒ clickGearMult ×1.6; DPS unaffected.
+    // Classic lv 10 + 2⭐ = 0.8 + 0.2 = +100 % click ⇒ clickGearMult ×2; DPS unaffected.
     const classic = {
       ...base,
       gear: { ...createGear(), skinLevels: { classic: 10 }, skinStars: { classic: 2 } },
     };
-    expect(clickDamageOf(classic)).toBeCloseTo(clickDamageRaw({ boss: 20 }) * 1.6, 6);
+    expect(clickDamageOf(classic)).toBeCloseTo(clickDamageRaw({ boss: 20 }) * 2, 6);
     expect(dpsOf(classic)).toBeCloseTo(totalRawDps({ boss: 20 }), 6);
   });
 
@@ -183,11 +183,41 @@ describe('ch-state', () => {
       legacyTyrann: true,
     };
     const asc = ascendState(s);
-    expect(asc.gear).toEqual(gear); // permanent meta — survives ascension
+    // Permanent meta — survives ascension; the deepest-zone latch lifts to 60.
+    expect(asc.gear).toEqual({ ...gear, zoneEver: 60 });
     expect(asc.legacyTyrann).toBe(true);
     const hf = himmelfahrtState(s);
-    expect(hf.gear).toEqual(gear); // survives Himmelfahrt too
+    expect(hf.gear).toEqual({ ...gear, zoneEver: 60 }); // survives Himmelfahrt too
     expect(hf.legacyTyrann).toBe(true);
+  });
+
+  // §5.3: skin unlocks are ONE-WAY acquisitions („Bühne 15 erreicht", „Erst-Kill").
+  // A Himmelfahrt resets lifetimeMaxZone to 1 (RS accounting, §4.5.2) but must
+  // never re-lock a skin — the gear.zoneEver latch keeps the unlock context deep.
+  it('zone/boss skin unlocks survive a Himmelfahrt (zoneEver latch)', () => {
+    const s = {
+      ...createChState(),
+      zone: 60,
+      runMaxZone: 60,
+      lifetimeMaxZone: 60,
+      rsLifetime: 1_000_000,
+    };
+    const before = gearUnlockCtx(s);
+    expect(skinUnlocked('robo', before)).toBe(true);
+    expect(skinUnlocked('host', before)).toBe(true);
+    expect(skinUnlocked('boss', before)).toBe(true); // boss@10 first-killed
+    expect(skinUnlocked('lava', before)).toBe(true); // boss@50 first-killed
+
+    const hf = himmelfahrtState(s);
+    expect(hf.lifetimeMaxZone).toBe(1); // the RS accounting reset stands (M10-AC2)
+    expect(hf.gear.zoneEver).toBe(60); // …but the unlock latch survives
+    const after = gearUnlockCtx(hf);
+    expect(skinUnlocked('robo', after)).toBe(true);
+    expect(skinUnlocked('host', after)).toBe(true);
+    expect(skinUnlocked('boss', after)).toBe(true);
+    expect(skinUnlocked('lava', after)).toBe(true);
+    expect(skinUnlocked('gyrator', after)).toBe(true); // 1 Himmelfahrt banked
+    expect(skinUnlocked('diamond', after)).toBe(false); // still Transzendenz-locked
   });
 });
 

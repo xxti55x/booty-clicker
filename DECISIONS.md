@@ -5,6 +5,42 @@ here (spec §7).
 
 ## M11 — Skins als Gear
 
+- **2026-07-18 (Review) — Katalog-Rebalance: Klick-Gear IST das stärkste Gear (P1),
+  per Daten erzwungen.** Die §5.3-Tabelle (Klassiker +4 %/Lv Klick, Robo-Twerk +8 %/Lv
+  Crew-DPS) widersprach §5.1 („die stärksten Buffs sind Klick-Buffs"): ein maxed
+  Idle-Skin (×5) überholte den maxed Klick-Skin (×3,5). Der Review löst den
+  Spec-internen Konflikt zugunsten des Prinzips (P1 ist Design-Pfeiler §1.2, die
+  Tabelle nur Balancing-Daten): **Klassiker +8 %/Lv** (Lv 50 + 5★ ⇒ ×5,5 Klick — der
+  stärkste Multiplikator im Katalog), **Robo-Twerk +6 %/Lv** (Lv 50 + Space ⇒ ×4,05 —
+  stark, aber strikt darunter). Reine `SKINS`-Datenänderung. Der AC5-Sim leitet die
+  Best-in-Slot-Multiplikatoren jetzt **aus dem Live-Katalog ab** (jeder Skin × jede
+  Kulisse bei Max-Level/Sternen durch den echten `gearBonus`-Fold) und asserted
+  zusätzlich den Katalog-P1-Guard `maxKlick > maxIdle` — ein künftiger Daten-Flip
+  fällt in CI durch. Beobachteter E4-mit-Gear-Gap ≈ 22 Zonen (vorher ≈ 10). Die
+  wörtliche Lesart „nackter Aktiver ≥ 8 vor Idle-Gear-Casual" bleibt unerreichbar
+  (Gap ≈ −3 selbst nach dem Rebalance), ohne Idle-Gear komplett zu entkernen — die
+  ehrliche, geschützte Invariante ist „beide Seiten mit ihrem besten Gear".
+  (Level bleiben 0-basiert gespeichert: 50 Käufe à `shardCost(0..49)`, Max-Buff =
+  perLevel·50 wie im Katalog; ein frisch ausgerüsteter Skin wirkt ab dem ersten
+  Level-Kauf.)
+
+- **2026-07-18 (Review) — `gear.zoneEver`: Skin-Unlocks sind Einbahnstraßen, auch
+  über eine Himmelfahrt.** Die Himmelfahrt setzt `lifetimeMaxZone` bewusst auf 1
+  (RS-Buchhaltung, M10) — dadurch verriegelten sich Zonen-/Boss-Skins
+  (Robo/Showmaster/Tyrann/Lava) wieder, obwohl §5.3 „Bühne X erreicht" und
+  „Erst-Kill" einmalige Erwerbe sind (und investierte 🧩/🍬 unbedienbar wurden).
+  Fix: das Gear-Slice (überlebt jede Prestige-Schicht) trägt ein nie-resetendes
+  `zoneEver`-Hochwasser; `gearUnlockCtx`/`bossFirstKillZones` gaten auf
+  `max(lifetimeMaxZone, zoneEver)`. Gelatcht in `ascendState`/`himmelfahrtState`
+  (pur) + `syncMaxZones` (Glue). Wie `crafted[]` ein Reparatur-beim-Laden-Feld
+  **innerhalb** v6 (fehlend ⇒ 1; der Kontext-Floor macht Alt-Saves verlustfrei) —
+  kein Schema-Bump.
+
+- **2026-07-18 (Review) — Live-Coach zählt Gear-cps mit.** Die Robo-Sterne
+  (+0,2 cps/⭐) flossen nur in die Offline-Akkrual (`offlineOpts`), nicht in den
+  Live-Loop — der Coach klickte online langsamer als offline. Der Loop nutzt jetzt
+  dieselbe Summe `coachCps(heaven) + coachCpsBonus(gear)` wie der Offline-Pfad.
+
 - **2026-07-18 — Skins sind Gear, kein Kostüm: ein einziger puren `GearBonus`-Fold.**
   Der aktive Skin (Buff·Level + Stern·Sterne), der Kulissen-Mini-Buff und die aktiven
   Set-Boni falten in `game/gear.ts` zu **einem** `GearBonus` (eine Summe je `BuffStat`).
@@ -56,7 +92,9 @@ here (spec §7).
   (×5). Dafür bekam `SimConfig` je einen `clickGearMult`/`idleGearMult` (nur Klick- bzw.
   nur Idle-Term). Beobachteter Gap ≈ 10 über alle Seeds — P1 intakt, weil Klick-Gear das
   stärkste Gear ist und der aktive Spieler es trägt. (Der 🍬-Reifungstest + die ≥ 2-Set-Tests
-  aus Teil 1 bleiben unverändert grün.)
+  aus Teil 1 bleiben unverändert grün.) **Superseded (Review, oben):** die Zahlen
+  (×3,5 vs ×5) verletzten §5.1 wörtlich; der Katalog wurde auf ×5,5 Klick vs ×4,05 Idle
+  rebalanciert und der Sim leitet die Multiplikatoren seither aus dem Katalog ab.
 
 ## M10 — Ahnen & Ruhmes-Himmelfahrt (Schicht 2)
 

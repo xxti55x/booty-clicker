@@ -75,6 +75,7 @@ describe('gear — createGear default', () => {
       sugarPeaches: 0,
       nextSugarAt: 0,
       crafted: [],
+      zoneEver: 1,
     });
   });
 });
@@ -92,11 +93,11 @@ describe('gear — level/star access (sanitised, clamped)', () => {
 });
 
 describe('gear — gearBonus folds skin (level + star) + kulisse', () => {
-  it('classic level 10 + 2⭐ on Club: clickPct 0.6, comboWindow +0.1 s', () => {
+  it('classic level 10 + 2⭐ on Club: clickPct 1.0, comboWindow +0.1 s', () => {
     const b = gearBonus(gear('classic', 'club', 10, 2));
-    // buff +4 %/lvl · 10 = 0.4, star +10 %/⭐ · 2 = 0.2 ⇒ 0.6
-    expect(b.clickPct).toBeCloseTo(0.6, 9);
-    expect(clickGearMult(gear('classic', 'club', 10, 2))).toBeCloseTo(1.6, 9);
+    // buff +8 %/lvl · 10 = 0.8, star +10 %/⭐ · 2 = 0.2 ⇒ 1.0 (P1 rebalance)
+    expect(b.clickPct).toBeCloseTo(1.0, 9);
+    expect(clickGearMult(gear('classic', 'club', 10, 2))).toBeCloseTo(2.0, 9);
     // Club mini-buff: +0.1 s combo-window (an absolute stat, untouched by allPct).
     expect(b.comboWindow).toBeCloseTo(0.1, 9);
     expect(comboWindowBonus(gear('classic', 'club', 10, 2))).toBeCloseTo(0.1, 9);

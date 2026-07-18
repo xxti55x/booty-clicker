@@ -392,6 +392,7 @@ describe('ch-store — v6 migration & repair (M11)', () => {
         sugarPeaches: 4,
         nextSugarAt: 1_800_000_000_000,
         crafted: ['neon'],
+        zoneEver: 20,
       },
     };
     saveCh(s, 5000, store);
@@ -428,6 +429,7 @@ describe('ch-store — v6 migration & repair (M11)', () => {
       sugarPeaches: 2.9, // floored ⇒ 2
       nextSugarAt: Number.NaN, // NaN ⇒ 0 (glue re-seeds)
       crafted: ['neon', 'toString', 42, 'neon', 'notaskin'], // keep real keys, dedupe
+      zoneEver: -7, // junk ⇒ default 1 (ctx also floors with lifetimeMaxZone)
     };
     const s = deserializeCh(JSON.stringify(raw));
     expect(s).not.toBeNull();
@@ -440,6 +442,20 @@ describe('ch-store — v6 migration & repair (M11)', () => {
     expect(s!.gear.sugarPeaches).toBe(2);
     expect(s!.gear.nextSugarAt).toBe(0);
     expect(s!.gear.crafted).toEqual(['neon']); // junk/dupes/prototype keys dropped
+    expect(s!.gear.zoneEver).toBe(1);
+  });
+
+  it('an early-v6 save without zoneEver/crafted repairs to the defaults (no bump needed)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    const g = raw.gear as Record<string, unknown>;
+    delete g.zoneEver;
+    delete g.crafted;
+    g.skinLevels = { robo: 5 };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.gear.zoneEver).toBe(1);
+    expect(s!.gear.crafted).toEqual([]);
+    expect(s!.gear.skinLevels).toEqual({ robo: 5 }); // progress untouched by the repair
   });
 
   it('migrates a v1 blob all the way through to v6 (gear default present)', () => {

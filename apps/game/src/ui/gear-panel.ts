@@ -276,6 +276,8 @@ export class Gear {
         return `🔒 Boss Bühne ${rule.zone} besiegen`;
       case 'himmelfahrt':
         return `🔒 nach 1. Himmelfahrt`;
+      case 'craft':
+        return `🔒 per Craft (${rule.craftCost} 🧩)`;
       case 'transcend':
         return `🔒 ab Transzendenz`;
       default:

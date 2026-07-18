@@ -233,6 +233,11 @@ function repairGear(v: unknown): GearState {
         ),
       ]
     : def.crafted;
+  // Never-resetting deepest-zone latch (unlock gating, §5.3). Absent in older v6
+  // saves ⇒ default 1; the unlock context also floors with `lifetimeMaxZone`, so
+  // nothing is lost for pre-latch saves.
+  const zoneEver =
+    isFiniteNumber(v.zoneEver) && v.zoneEver >= 1 ? Math.floor(v.zoneEver) : def.zoneEver;
   return {
     skin,
     bg,
@@ -243,6 +248,7 @@ function repairGear(v: unknown): GearState {
     sugarPeaches,
     nextSugarAt,
     crafted,
+    zoneEver,
   };
 }
 

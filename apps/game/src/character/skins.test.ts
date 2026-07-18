@@ -88,9 +88,12 @@ describe('SKINS — §5.3 catalog values (exact)', () => {
       SkinKey,
       { rarity: SkinRarity; buff: [BuffStat, number]; star: [BuffStat, number] }
     > = {
-      classic: { rarity: 'common', buff: ['clickPct', 0.04], star: ['clickPct', 0.1] },
+      // P1 rebalance (review, DECISIONS.md): Klassiker +8 %/lv click is the
+      // strongest buff; Robo-Twerk +6 %/lv crew-DPS sits strictly below it.
+      // (Deviates from the §5.3 table's 4 %/8 %, which contradicted §5.1.)
+      classic: { rarity: 'common', buff: ['clickPct', 0.08], star: ['clickPct', 0.1] },
       disco: { rarity: 'rare', buff: ['critChance', 0.004], star: ['critMult', 0.05] },
-      robo: { rarity: 'rare', buff: ['dpsPct', 0.08], star: ['coachCps', 0.2] },
+      robo: { rarity: 'rare', buff: ['dpsPct', 0.06], star: ['coachCps', 0.2] },
       host: { rarity: 'epic', buff: ['comboWindow', 0.06], star: ['comboDecay', 0.04] },
       boss: { rarity: 'legendary', buff: ['bossDmg', 0.12], star: ['chestLuck', 0.02] },
       neon: { rarity: 'epic', buff: ['beatWindow', 8], star: ['onBeatMult', 0.1] },

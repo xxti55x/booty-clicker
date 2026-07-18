@@ -177,16 +177,29 @@ export function clickDamageOf(state: DerivedInput): number {
 }
 
 /**
+ * The deepest zone ever reached for unlock gating (§5.3): `lifetimeMaxZone`,
+ * floored by the gear slice's never-resetting `zoneEver` latch — a Himmelfahrt
+ * drops `lifetimeMaxZone` to 1 (RS accounting, §4.5.2) but must never re-lock a
+ * skin („Bühne X erreicht" / „Erst-Kill" are one-way acquisitions).
+ */
+function unlockZone(state: Pick<ChState, 'lifetimeMaxZone'> & { gear?: GearState }): number {
+  return Math.max(state.lifetimeMaxZone, state.gear?.zoneEver ?? 1);
+}
+
+/**
  * Boss zones whose boss has been first-killed, for the gear unlock context (§5.3).
- * Normal play: a boss zone Z (multiple of 5) is first-killed ⇔ `lifetimeMaxZone > Z`
- * (advancing past it as a new record). The legacy Tyrann claim (§9.2.3) is unioned
- * in as zone 10 so a `bossDefeated` old-save unlocks Tyrann even at a shallow CH zone.
+ * Normal play: a boss zone Z (multiple of 5) is first-killed ⇔ the deepest zone
+ * ever reached (`lifetimeMaxZone`, floored by the Himmelfahrt-surviving
+ * `gear.zoneEver`) is > Z (advancing past it as a new record). The legacy Tyrann
+ * claim (§9.2.3) is unioned in as zone 10 so a `bossDefeated` old-save unlocks
+ * Tyrann even at a shallow CH zone.
  */
 export function bossFirstKillZones(
-  state: Pick<ChState, 'lifetimeMaxZone' | 'legacyTyrann'>,
+  state: Pick<ChState, 'lifetimeMaxZone' | 'legacyTyrann'> & { gear?: GearState },
 ): Set<number> {
   const zones = new Set<number>();
-  for (let z = 5; z < state.lifetimeMaxZone; z += 5) zones.add(z);
+  const deepest = unlockZone(state);
+  for (let z = 5; z < deepest; z += 5) zones.add(z);
   if (state.legacyTyrann) zones.add(10);
   return zones;
 }
@@ -203,7 +216,7 @@ export function gearUnlockCtx(
   state: Pick<ChState, 'lifetimeMaxZone' | 'legacyTyrann' | 'heaven'> & { gear?: GearState },
 ): UnlockCtx {
   return {
-    lifetimeMaxZone: state.lifetimeMaxZone,
+    lifetimeMaxZone: unlockZone(state), // floored by gear.zoneEver — survives Himmelfahrt
     bossFirstKills: bossFirstKillZones(state),
     himmelfahrten: state.heaven.ascensions2,
     crafted: new Set<string>(state.gear?.crafted ?? []),
@@ -236,7 +249,9 @@ export function ascendState(state: ChState): ChState {
     gilds: state.gilds,
     ancients: state.ancients, // Ancients survive L1 (§4.5 reset table)
     heaven: state.heaven, // L2 state survives L1
-    gear: state.gear, // skins/levels/stars are permanent meta (§5) — survive L1
+    // Skins/levels/stars are permanent meta (§5) — survive L1; latch the deepest
+    // zone ever reached so unlocks stay one-way through every later reset.
+    gear: { ...state.gear, zoneEver: Math.max(state.gear.zoneEver, lifetimeMaxZone) },
     legacyTyrann: state.legacyTyrann,
   };
 }
@@ -257,7 +272,13 @@ export function himmelfahrtState(state: ChState): ChState {
     rng: state.rng,
     stats: state.stats,
     legacyImported: state.legacyImported,
-    gear: state.gear, // skins/levels/stars are permanent meta (§5) — survive Himmelfahrt
+    // Skins/levels/stars are permanent meta (§5) — survive Himmelfahrt. Latch the
+    // deepest zone ever reached BEFORE `lifetimeMaxZone` falls to 1, so zone/boss
+    // skin unlocks (Robo/Showmaster/Tyrann/Lava) never re-lock (§5.3 one-way gates).
+    gear: {
+      ...state.gear,
+      zoneEver: Math.max(state.gear.zoneEver, state.lifetimeMaxZone, state.runMaxZone),
+    },
     legacyTyrann: state.legacyTyrann,
   };
 }

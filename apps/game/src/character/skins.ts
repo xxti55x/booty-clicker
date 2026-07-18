@@ -10,6 +10,13 @@ import type { SkinConfig, SkinKey } from '../types';
  * (`character/rig.ts`) still builds all ten. `cost`/`revealAt` are the old M0–M6
  * BP-shop fields (kept for the archived shop); M11 gating lives in `game/gear.ts`
  * (`skinUnlocked`), never here. No real people (spec §4.3/§4.5).
+ *
+ * P1 balance (review, DECISIONS.md): the strongest buff in the catalog MUST be a
+ * click buff (§5.1) — Klassiker leads at +8 %/lv click (×5 at Lv 50, ×5.5 with 5★),
+ * Robo-Twerk follows at +6 %/lv crew-DPS (×4 max). This deliberately deviates from
+ * the §5.3 table (4 %/8 %), which contradicted §5.1 by letting the idle skin
+ * out-scale the click skin; the sim gate (`sim.test.ts`, M11-AC5) derives its
+ * best-in-slot multipliers from THIS data, so a future flip fails CI.
  */
 export const SKINS: Record<SkinKey, SkinConfig> = {
   classic: {
@@ -22,7 +29,7 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     hair: 0x241608,
     revealAt: 0,
     rarity: 'common',
-    buff: { stat: 'clickPct', perLevel: 0.04 },
+    buff: { stat: 'clickPct', perLevel: 0.08 }, // strongest buff = click (P1, §5.1)
     star: { stat: 'clickPct', perStar: 0.1 },
   },
   disco: {
@@ -48,7 +55,7 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     hair: 0x333333,
     revealAt: 300,
     rarity: 'rare',
-    buff: { stat: 'dpsPct', perLevel: 0.08 },
+    buff: { stat: 'dpsPct', perLevel: 0.06 }, // strictly below the click skin (P1)
     star: { stat: 'coachCps', perStar: 0.2 },
   },
   host: {

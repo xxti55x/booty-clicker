@@ -229,8 +229,14 @@ Automated (unit + `test:sim` + headless smoke `smoke-ch.mjs`, now v6):
   (skin/level/star/shards/sugar/**crafted**); corrupt sub-fields repair in isolation
   (`"toString"`/junk/dupe crafted dropped) without nuking valid progress.
 - Sim (`sim.test.ts`): **AC5** — E4 holds **with gear**: an active twerker with best-in-slot
-  **click** gear (Klassiker lv 50 + 5★ ⇒ ×3.5) stays ≥ 8 zones ahead of an idler with
-  best-in-slot **idle** gear (Robo-Twerk lv 50 ⇒ ×5 crew DPS). E1/E2/E3 + pacing stay green.
+  **click** gear (Klassiker lv 50 + 5★ ⇒ ×5.5) stays ≥ 8 zones ahead of an idler with
+  best-in-slot **idle** gear (Robo-Twerk lv 50 + Space ⇒ ×4.05 crew DPS); observed gap ≈ 22.
+  Both multipliers are **derived from the live catalog** through the real `gearBonus` fold,
+  and a catalog **P1 guard** asserts max click mult > max idle mult (the review-pass
+  rebalance: Klassiker +8 %/lv, Robo +6 %/lv — see DECISIONS.md). E1/E2/E3 + pacing stay green.
+- Unlock permanence (`ch-state.test.ts`): a Himmelfahrt (which resets `lifetimeMaxZone` to 1)
+  never re-locks zone/boss skins — `gear.zoneEver` latches the deepest zone ever reached and
+  the unlock context floors with it.
 - Headless (`smoke-ch.mjs`): the 🎽 tab opens; a skin card shows **rarity + buff + level +
   cost** (AC4); equipping a leveled Robo raises the **DPS HUD** immediately (AC1) and marks
   the card equipped; a manual kulisse pick (Space) persists `bg` + `bgAuto:false` and shifts

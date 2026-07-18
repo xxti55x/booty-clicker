@@ -48,6 +48,15 @@ export interface GearState {
    * primary source, but this field stays the persisted record of what's crafted.
    */
   crafted: string[];
+  /**
+   * Deepest zone EVER reached, across every prestige layer — unlike
+   * `lifetimeMaxZone` this never resets (a Himmelfahrt drops `lifetimeMaxZone`
+   * to 1 for the RS accounting, §4.5.2). Skin unlocks are one-way acquisitions
+   * („Bühne 15 erreicht", „Boss-Erst-Kill", §5.3), so the unlock context reads
+   * `max(lifetimeMaxZone, zoneEver)` — a Himmelfahrt can never re-lock a skin.
+   * Repair-on-load field within v6 (absent ⇒ 1), like `crafted`.
+   */
+  zoneEver: number;
 }
 
 /** A brand-new gear slice (deterministic/pure — part 2 seeds `nextSugarAt`). */
@@ -62,6 +71,7 @@ export function createGear(): GearState {
     sugarPeaches: 0,
     nextSugarAt: 0,
     crafted: [],
+    zoneEver: 1,
   };
 }
 

@@ -270,6 +270,9 @@ function syncMaxZones(): void {
   state.killsThisZone = combat.killsThisZone;
   state.runMaxZone = Math.max(state.runMaxZone, combat.maxZone);
   state.lifetimeMaxZone = Math.max(state.lifetimeMaxZone, state.runMaxZone);
+  // Never-resetting deepest-zone latch: keeps skin unlocks one-way across a
+  // Himmelfahrt (which drops lifetimeMaxZone to 1, §4.5.2/§5.3).
+  state.gear.zoneEver = Math.max(state.gear.zoneEver, state.lifetimeMaxZone);
   state.rsLifetime = Math.max(state.rsLifetime, state.souls); // lifetime-RS highwater (§4.5.2)
   state.rng = rng.toState(); // fold the live RNG cursor back into the save
   state.combo = { stacks: comboState.stacks }; // ability is mutated on state in place
@@ -790,9 +793,10 @@ function loop(nowMs: number): void {
   state.stats.playTimeS += dt;
 
   // Idle DPS chips away at the current target; the Twerk-Coach auto-clicks at
-  // 25 % of the click value (no crit/beat, §4.3.5); boss timer ticks down.
+  // 25 % of the click value (no crit/beat, §4.3.5) — Robo gear stars add cps (§5),
+  // the same sum the offline accrual uses; boss timer ticks down.
   if (dps > 0) applyHit(dps * dt, false);
-  const cps = coachCps(state.heaven);
+  const cps = coachCps(state.heaven) + coachCpsBonus(state.gear);
   if (cps > 0) applyHit(coachDps(clickDmg, cps) * dt, false);
   if (combat.boss) {
     const bt = tickBoss(combat, dt);

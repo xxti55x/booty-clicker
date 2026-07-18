@@ -45,14 +45,16 @@ export interface SimConfig {
   seed?: number;
   /**
    * Best-in-slot IDLE gear multiplier on crew DPS only (§5, M11-AC5): a max
-   * `dpsPct` skin (e.g. Robo-Twerk lv 50 ⇒ ×5) folded into the idle term ALONE,
-   * never into the click term. Defaults to 1 (no gear).
+   * `dpsPct` skin (Robo-Twerk lv 50 + Space kulisse ⇒ ×4.05) folded into the idle
+   * term ALONE, never into the click term. Defaults to 1 (no gear).
    */
   idleGearMult?: number;
   /**
    * Best-in-slot CLICK gear multiplier on click damage only (§5): a max `clickPct`
-   * skin (Klassiker lv 50 + 5★ ⇒ ×3.5) folded into the click term ALONE. The
+   * skin (Klassiker lv 50 + 5★ ⇒ ×5.5) folded into the click term ALONE. The
    * active twerker's counterpart to `idleGearMult`; defaults to 1 (no gear).
+   * P1 (§5.1): the catalog keeps this the strongest gear multiplier — asserted in
+   * `sim.test.ts` by deriving both values from the live `SKINS` data.
    */
   clickGearMult?: number;
 }

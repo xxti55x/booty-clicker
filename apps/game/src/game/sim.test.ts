@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
+import { SKINS } from '../character/skins';
+import type { BackgroundKey, SkinKey } from '../types';
 import { spawnFor } from './combat';
+import { createGear, gearBonus, KULISSE_BUFFS, MAX_SKIN_LEVEL, MAX_SKIN_STARS } from './gear';
 import {
   farmZone,
   simulateAscensionEra,
@@ -104,28 +107,63 @@ describe('simulateEndless — E4 (click is king, P1)', () => {
 });
 
 // M11-AC5 (§5, §4.8): E4 (click is king, P1) STILL holds once gear is in play. The
-// gear system's strongest buffs are CLICK buffs by design (§5.1), so the fair endgame
-// comparison is: the active twerker equips their best-in-slot CLICK skin (Klassiker
-// lv 50 + 5★ ⇒ clickPct 2.5 ⇒ ×3.5 click) and the casual/idle player their best-in-slot
-// IDLE skin (Robo-Twerk lv 50 ⇒ dpsPct 4.0 ⇒ ×5 crew DPS). Even with maxed idle gear the
-// idler stays ≥ 8 zones behind the active twerker over 45 min — idle-boosting gear cannot
-// overturn the click-is-king ordering. Observed gap ≈ 10.
+// gear system's strongest buffs are CLICK buffs by design (§5.1) — the review-pass
+// catalog rebalance (DECISIONS.md) pins Klassiker at +8 %/lv click (BIS lv 50 + 5★
+// ⇒ ×5.5) above Robo-Twerk's +6 %/lv crew-DPS (BIS + Space kulisse ⇒ ×4.05). The
+// fair comparison in a geared world equips BOTH sides with their best: the active
+// twerker wears the best CLICK gear, the idler the best IDLE gear — and stays
+// ≥ 8 zones behind over 45 min. Observed gap ≈ 22 across seeds.
 //
-// NOTE (balance finding, DECISIONS.md): a bare active bot (no gear) is NOT ≥ 8 ahead of a
-// ×5-idle-geared casual in this fresh-single-run model — strong idle `dpsPct` alone would
-// flip the ordering. P1 is preserved because click gear is the strongest buff and the
-// active player equips it; that is the invariant asserted here.
+// The multipliers are DERIVED from the live catalog (every skin × kulisse at max
+// level/stars through the real `gearBonus` fold), so any future catalog change that
+// lets idle gear out-scale click gear fails this gate — the assertion cannot drift
+// from the data it protects.
+//
+// NOTE (balance finding, DECISIONS.md): a bare active bot (no gear) is NOT ≥ 8 ahead
+// of a best-idle-geared casual in this fresh-single-run model (gap ≈ −3 even after
+// the rebalance) — that literal reading would require gutting idle gear entirely.
+// P1 is preserved because click gear is the strongest buff and the active player
+// wears it; that is the invariant asserted here.
 describe('simulateEndless — E4 with best-in-slot gear (M11-AC5, P1 intact)', () => {
-  const CLICK_BIS = 3.5; // Klassiker lv 50 + 5★: 0.04·50 + 0.1·5 = 2.5 ⇒ clickGearMult ×3.5
-  const IDLE_BIS = 5; // Robo-Twerk lv 50: 0.08·50 = 4 ⇒ idle dpsGearMult ×5
+  /** Best-in-slot click/idle multipliers over the whole catalog (max lv + stars, any kulisse). */
+  function bisMults(): { click: number; idle: number } {
+    let click = 1;
+    let idle = 1;
+    for (const skin of Object.keys(SKINS) as SkinKey[]) {
+      for (const bg of Object.keys(KULISSE_BUFFS) as BackgroundKey[]) {
+        const b = gearBonus({
+          ...createGear(),
+          skin,
+          bg,
+          bgAuto: false,
+          skinLevels: { [skin]: MAX_SKIN_LEVEL },
+          skinStars: { [skin]: MAX_SKIN_STARS },
+        });
+        click = Math.max(click, 1 + b.clickPct);
+        idle = Math.max(idle, 1 + b.dpsPct);
+      }
+    }
+    return { click, idle };
+  }
+
+  it('catalog P1 guard: the strongest click multiplier beats the strongest idle multiplier', () => {
+    const { click, idle } = bisMults();
+    expect(click).toBeGreaterThan(idle);
+    // Pin the review-pass balance so an accidental catalog edit is caught loudly:
+    // Klassiker lv 50 + 5★ ⇒ ×5.5 click; Robo lv 50 + Space ⇒ ×4.05 crew-DPS.
+    expect(click).toBeCloseTo(5.5, 9);
+    expect(idle).toBeCloseTo(4.05, 9);
+  });
+
   for (const seed of SEEDS) {
     it(`seed ${seed}: active(best click gear) ≥ 8 zones ahead of idler(best idle gear)`, () => {
+      const { click, idle } = bisMults();
       const active = simulateSingleRun(
-        { clickRate: 3, juice: true, clickGearMult: CLICK_BIS, seed },
+        { clickRate: 3, juice: true, clickGearMult: click, seed },
         RUN_S,
       );
       const idler = simulateSingleRun(
-        { clickRate: 1, juice: false, idleGearMult: IDLE_BIS, seed },
+        { clickRate: 1, juice: false, idleGearMult: idle, seed },
         RUN_S,
       );
       expect(active.bestZone - idler.bestZone).toBeGreaterThanOrEqual(8);
