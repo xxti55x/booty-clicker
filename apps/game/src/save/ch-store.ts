@@ -239,7 +239,8 @@ function migrateChV2toV3(raw: Record<string, unknown>): Record<string, unknown> 
 /**
  * v3 → v4: fill the M9 defaults — no gilds yet, and seed the lifetime-RS highwater
  * from the currently banked souls (a pre-M9 player keeps their earned RS as the
- * floor). `stateFromSave` further lifts it to the deepest-zone souls-equivalent.
+ * floor). Since M10, `stateFromSave` only keeps `rsLifetime ≥ souls` — it must
+ * NEVER be lifted to `soulsForMaxZone(lifetimeMaxZone)` (see `migrateChV4toV5`).
  */
 function migrateChV3toV4(raw: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -394,6 +395,11 @@ export interface OfflineOpts {
   coachCps?: number;
   /** Offline cap in seconds (Nachtschicht raises it; defaults to `OFFLINE_CAP_S`). */
   capS?: number;
+  /**
+   * Gold multiplier (Peachiel, §4.6 — defaults to 1). Offline models the same
+   * rival kills as live play, so the +10 %/lv gold ancient applies here too.
+   */
+  goldMult?: number;
 }
 
 /**
@@ -416,7 +422,7 @@ export function offlineGold(
   if (effectiveDps <= 0 || elapsedMs <= 0) return 0;
   const seconds = Math.min(elapsedMs / 1000, capS);
   const killsPerSec = effectiveDps / monsterHp(zone);
-  const goldPerSec = killsPerSec * goldFor(zone, false);
+  const goldPerSec = killsPerSec * goldFor(zone, false) * Math.max(0, opts.goldMult ?? 1);
   return Math.floor(goldPerSec * seconds * OFFLINE_EFF);
 }
 

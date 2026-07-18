@@ -166,10 +166,16 @@ function ekstaseChargeMax(): number {
   return ABILITY_CHARGE_MAX * (1 - ancientEkstaseChargeReduction(state.ancients));
 }
 
-// Offline accrual folds in the Twerk-Coach (25 % of click value × cps) and the
-// Nachtschicht-raised cap (§4.3.5/§4.5.2), so click-heavy/crewless builds earn too.
-function offlineOpts(): { clickDmg: number; coachCps: number; capS: number } {
-  return { clickDmg, coachCps: coachCps(state.heaven), capS: offlineCapS(state.heaven) };
+// Offline accrual folds in the Twerk-Coach (25 % of click value × cps), the
+// Nachtschicht-raised cap (§4.3.5/§4.5.2) and Peachiel's gold mult (§4.6) — the
+// same kills as live play, so click-heavy/crewless builds earn consistently too.
+function offlineOpts(): { clickDmg: number; coachCps: number; capS: number; goldMult: number } {
+  return {
+    clickDmg,
+    coachCps: coachCps(state.heaven),
+    capS: offlineCapS(state.heaven),
+    goldMult: ancientGoldMult(state.ancients),
+  };
 }
 if (loaded) {
   offlineEarned = offlineGold(dps, combat.zone, offlineEarnedMs, offlineOpts());

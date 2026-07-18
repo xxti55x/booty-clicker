@@ -59,7 +59,7 @@ export class Ancients {
     const bonusPct = Math.round(state.souls * soulBonusEff(state.heaven.hpf) * 100);
     byId('ancInfo').innerHTML =
       `Gehaltene <b>${fmt(state.souls)}</b> Ruhm-Seelen (+${bonusPct}% Schaden über <span class="dim">soulMult</span>).<br>` +
-      `<span class="dim">Ausgegebene Seelen buffen nicht mehr über soulMult — sie kaufen dafür dauerhafte Ahnen-Perks (über Himmelfahrten hinweg zurückgesetzt).</span>`;
+      `<span class="dim">Ausgegebene Seelen buffen nicht mehr über soulMult — sie kaufen dafür dauerhafte Ahnen-Perks (überleben jede Aszension; erst eine Himmelfahrt setzt sie zurück).</span>`;
 
     const rows = ANCIENTS.map((cfg) => {
       const level = ancientLevel(state.ancients, cfg.id);

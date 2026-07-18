@@ -53,8 +53,10 @@ export class AbilityBar {
       this.btn.classList.toggle('ready', ready && !active);
     }
 
+    // Remaining seconds from the epoch-ms window directly, so an Ekstase-Ausdauer-
+    // extended frenzy (> 12 s) counts down correctly instead of pegging at 12.
     const label = active
-      ? `×10  ${Math.ceil((frac * 12000) / 1000)}s`
+      ? `×10  ${Math.max(0, Math.ceil((ability.frenzyUntil - now) / 1000))}s`
       : ready
         ? '🍑 Ekstase! · F'
         : '🍑 Ekstase';

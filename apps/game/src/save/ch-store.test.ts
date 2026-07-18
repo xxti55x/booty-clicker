@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ABILITY_CHARGE_MAX, createAbility } from '../game/ability';
-import { soulsForMaxZone } from '../game/ascension';
+import { pendingSouls, soulsForMaxZone } from '../game/ascension';
 import { type ChState, createChState, createComboSave, createStats } from '../game/ch-state';
 import { monsterHp } from '../game/combat';
 import {
@@ -219,6 +219,74 @@ describe('ch-store — v5 migration & repair (M10)', () => {
     expect(s.rsLifetime).toBe(soulsForMaxZone(50));
   });
 
+  // The M10 souls-accounting hazard: an un-ascended deep-zone save must keep its
+  // PENDING souls. souls=13 (old-curve bank, ascended at ~z25) but lifetimeMaxZone=50:
+  // rsLifetime must become 13 (banked), NOT soulsForMaxZone(50)=129 — a zone-lift
+  // would silently erase the 116 souls still claimable on the next ascension.
+  it('v4→v5 keeps pending souls of an un-ascended deep zone (earned = banked, no zone-lift)', () => {
+    const store = memStorage();
+    const v4 = {
+      v: 4,
+      lastSeen: 11000,
+      gold: 100,
+      zone: 50,
+      killsThisZone: 0,
+      runMaxZone: 50,
+      crew: { boss: 10 },
+      souls: 13,
+      lifetimeMaxZone: 50,
+      totalClicks: 100,
+      rng: { seed: 1, cursor: 0 },
+      stats: createStats(),
+      legacyImported: false,
+      ability: createAbility(),
+      combo: { stacks: 0 },
+      gilds: {},
+      rsLifetime: 13,
+    };
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v4));
+    const s = loadCh(store)!.state;
+    expect(s.souls).toBe(13);
+    expect(s.rsLifetime).toBe(13); // NOT lifted to soulsForMaxZone(50) = 129
+    expect(s.rsLifetime).not.toBe(soulsForMaxZone(50));
+    // The deep zone's souls remain pending for the next ascension.
+    expect(pendingSouls(s.runMaxZone, s.lifetimeMaxZone, s.rsLifetime)).toBe(
+      soulsForMaxZone(50) - 13,
+    );
+  });
+
+  // §9.2: the full chain — a v1 (MVP) blob still loads all the way to v5.
+  it('migrates a v1 blob through the whole chain to v5 (all defaults present)', () => {
+    const store = memStorage();
+    const v1 = {
+      v: 1,
+      lastSeen: 5000,
+      gold: 500,
+      zone: 12,
+      killsThisZone: 3,
+      runMaxZone: 12,
+      crew: { boss: 5 },
+      souls: 3,
+      lifetimeMaxZone: 12,
+      totalClicks: 42,
+    };
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v1));
+    const s = loadCh(store)!.state;
+    // v1 progress intact.
+    expect(s.gold).toBe(500);
+    expect(s.zone).toBe(12);
+    expect(s.crew).toEqual({ boss: 5 });
+    expect(s.souls).toBe(3);
+    // v2–v5 defaults all filled.
+    expect(s.stats).toEqual(createStats());
+    expect(s.ability).toEqual(createAbility());
+    expect(s.combo).toEqual(createComboSave());
+    expect(s.gilds).toEqual({});
+    expect(s.rsLifetime).toBe(3); // = banked souls, no zone-lift
+    expect(s.ancients).toEqual({});
+    expect(s.heaven).toEqual({ hpf: 0, hpfLifetime: 0, ascensions2: 0, tree: {} });
+  });
+
   it('round-trips Ancients + heaven through a v5 save', () => {
     const store = memStorage();
     const s = {
@@ -296,8 +364,9 @@ describe('ch-store — v4 migration & repair (M9)', () => {
     expect(s.combo).toEqual({ stacks: 12 });
     // v4 defaults added
     expect(s.gilds).toEqual({});
-    // rsLifetime seeded from souls, then lifted to soulsForMaxZone(30).
-    expect(s.rsLifetime).toBe(Math.max(21, soulsForMaxZone(30)));
+    // rsLifetime seeded from the banked souls (21 == soulsForMaxZone(30) here);
+    // NEVER zone-lifted — see the v4→v5 "pending souls survive" test below.
+    expect(s.rsLifetime).toBe(21);
   });
 
   it('round-trips gilds + rsLifetime through a v4 save', () => {
@@ -445,6 +514,18 @@ describe('ch-store — offline gold', () => {
     // Equivalent to a plain-DPS run at the coach's effective throughput.
     const coachDps = 2 * 0.25 * clickDmg;
     expect(withCoach).toBe(offlineGold(coachDps, 5, 3600_000));
+  });
+
+  // Peachiel (§4.6): offline models the same rival kills as live play, so the
+  // gold multiplier applies to offline/visibility accrual too (not only live kills).
+  it('applies the Peachiel gold multiplier to offline accrual', () => {
+    const dps = monsterHp(5) * 2;
+    const base = offlineGold(dps, 5, 3600_000);
+    const boosted = offlineGold(dps, 5, 3600_000, { goldMult: 1.5 });
+    expect(boosted).toBe(Math.floor(base * 1.5));
+    // Defaults to ×1 and guards a nonsense negative multiplier.
+    expect(offlineGold(dps, 5, 3600_000, { goldMult: 1 })).toBe(base);
+    expect(offlineGold(dps, 5, 3600_000, { goldMult: -2 })).toBe(0);
   });
 
   it('a raised offline cap (Nachtschicht) lets more time accrue', () => {
