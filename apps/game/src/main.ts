@@ -5,6 +5,7 @@ import './style.css';
 import { BeatTracker } from './audio/beat';
 import { AudioEngine } from './audio/engine';
 import { buildCharacter, type CharacterInstance } from './character/rig';
+import { buildEntity, entityVariant, type EntityInstance } from './character/entity';
 import { DT, renderCheeks, stepPhysics } from './character/physics';
 import { SKINS } from './character/skins';
 import { Choreographer } from './choreo/moves';
@@ -325,6 +326,21 @@ const beatTracker = new BeatTracker();
 const choreo = new Choreographer();
 // The equipped skin drives the 3D rig now (§5) — no longer always classic.
 let char: CharacterInstance = buildCharacter(scene, SKINS[state.gear.skin]);
+// Wave 2: the rival's visual body — a cartoon creature across the dance floor,
+// themed by the zone's tier (BG_BY_TIER), boss-sized on boss targets and
+// recoloured every 40-zone lap. Purely visual; combat logic is untouched.
+let entity: EntityInstance = buildEntity(scene, bgForZone(combat.zone), {
+  boss: combat.boss,
+  variant: entityVariant(combat.zone),
+});
+/** Rebuild the rival entity only when its look actually changes (cheap check). */
+function syncEntity(): void {
+  const theme = bgForZone(combat.zone);
+  const variant = entityVariant(combat.zone);
+  if (entity.theme !== theme || entity.boss !== combat.boss || entity.variant !== variant) {
+    entity = buildEntity(scene, theme, { boss: combat.boss, variant }, entity);
+  }
+}
 // Kulisse (§5.5): in Tour-Modus (`bgAuto`) the background rotates with the zone tier;
 // otherwise the manually chosen `gear.bg` is fixed. Keep `gear.bg` in lockstep with
 // what's on screen so the kulisse mini-buff + set detection match the view.
@@ -463,6 +479,7 @@ const prestige = new Prestige({
     lastShakeTier = 0;
     recompute();
     updateBackground(true);
+    syncEntity(); // fresh Bühne 1 ⇒ fresh club rival
     crew.render();
     ancients.render();
     heaven.refresh();
@@ -499,6 +516,7 @@ const heaven = new Heaven({
     lastShakeTier = 0;
     recompute();
     updateBackground(true);
+    syncEntity(); // fresh Bühne 1 ⇒ fresh club rival
     crew.render();
     ancients.render();
     prestige.refresh();
@@ -549,6 +567,7 @@ if (transcendEnabled) {
       lastShakeTier = 0;
       recompute();
       updateBackground(true); // background follows the fresh Bühne 1
+      syncEntity(); // fresh Bühne 1 ⇒ fresh club rival
       crew.render();
       ancients.render(); // Ahnen were wiped
       prestige.refresh(); // Ruhm-Seelen were wiped
@@ -600,6 +619,7 @@ const chSettings = new ChSettings({
     char = buildCharacter(scene, SKINS[state.gear.skin], char); // rig follows the imported skin
     recompute();
     updateBackground(true);
+    syncEntity(); // rival body follows the imported zone/boss state
     crew.render();
     ancients.render();
     prestige.refresh();
@@ -709,6 +729,7 @@ function updateBackground(force = false): void {
 function travel(toZone: number): void {
   combat = travelTo(combat, toZone);
   updateBackground();
+  syncEntity(); // the rival body follows the farmed zone's tier
   syncMaxZones();
   hud.update(state, combat, dps, clickDmg);
   persist();
@@ -823,10 +844,15 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
   // A newly-spawned boss gets Chronilla's extra timer seconds.
   combat = r.bossSpawned ? withBossTimerBonus(r.state) : r.state;
   if (r.killed) {
+    // Visual KO pop — the same body doubles as the next rival's spawn-in bounce,
+    // so rapid idle-DPS kills never rebuild geometry.
+    entity.defeat();
     onKillProgress(r, fromClick, wasBoss, x, y);
+    syncEntity(); // boss spawn/kill, tier change or recolour lap swaps the model
   } else if (wasBoss && fromClick) {
     audio.bossHit();
   }
+  if (!r.killed && fromClick) entity.flinch();
 }
 
 // ---------- input ----------
@@ -1442,6 +1468,12 @@ persist();
 const clock = new THREE.Clock();
 let acc = 0;
 let t0 = 0;
+// Headless-smoke hook (same spirit as `window.chLoot`): render time + the
+// live rival's look/facing, so the screenshot rig can time taunt/boss frames
+// under software-GL time dilation. Read-only; no gameplay surface.
+(
+  window as unknown as { chVs: () => { t0: number; theme: string; boss: boolean; rotY: number } }
+).chVs = () => ({ t0, theme: entity.theme, boss: entity.boss, rotY: entity.root.rotation.y });
 let uiTimer = 0;
 let lastRenderMs = 0;
 let firstFrame = true;
@@ -1468,6 +1500,7 @@ function loop(nowMs: number): void {
       state.stats.bossStreak = 0; // a timeout breaks the no-timeout boss streak (§7.3)
       toasts.show('⏱', 'Zeit um!', 'Farm die Bühne & fordere den Boss erneut.');
       audio.bossLose();
+      syncEntity(); // the boss bounced us — back to the normal rival body
     }
   }
 
@@ -1499,6 +1532,8 @@ function loop(nowMs: number): void {
   beat.intensity = beatV * drive * 4;
   if (beatTracker.update(choreo.phase)) audio.beat(0.5 + drive * 0.08);
   world.anims.forEach((a) => a(t0, beatV));
+  // The rival twerks back — same beat envelope, its own loop (independent of the rig).
+  entity.update(t0, beatV, drive);
 
   // HUD-throttle (B7): the moving HP bar / boss timer refresh cheaply per frame;
   // the full text HUD only rebuilds on the 0.25 s tick (or discrete events).
