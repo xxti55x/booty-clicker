@@ -15,6 +15,16 @@ npm run dev        # Dev-Server (Vite, HMR) → http://localhost:5173
 Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 MB),
 `npm run build:itch` (itch.io-ZIP), `npm test` (Vitest), `npm run lint`, `npm run format`.
 
+**Release 2.0 (M14).** Das Spiel ist der endlose, klick-zentrierte CH-Loop mit allen
+Prestige-Schichten (Ascension → Himmelfahrt) plus Gear, Loot, Retention-Meta und
+Bestenliste; die **Transzendenz** (Schicht 3) liegt als getestetes Gerüst hinter einem
+Flag bereit (M15). Der Produktions-Build ist ~0,68 MB (652 KB JS gzip 174 KB), rein
+relativ-gepfadet (`base: './'`). `npm run build:itch` baut und packt `dist/` (mit
+`index.html` an der ZIP-Wurzel) nach `apps/game/release/booty-clicker-itch.zip` — hochladbar
+als itch.io-HTML-Projekt; dieselbe `dist/` deployt CI auf Cloudflare Pages, wenn die Secrets
+gesetzt sind (sonst sauber übersprungen). Das eigentliche Veröffentlichen liegt außerhalb
+dieses Repos — siehe `TESTPLAN.md` §7/§8.
+
 ## So spielt es sich
 
 - **Twerken = Schaden.** Klick auf die Figur oder drück die Leertaste — jeder Shake
@@ -151,16 +161,23 @@ npm-Workspaces-Monorepo:
     Unlock-Gating (`skinUnlocked`). Konsumiert von `effectiveClick`/`dpsOf` (die stärksten
     Buffs sind Klick-Buffs, P1).
   - `game/sim.ts` — `simulateEndless`: deterministischer Balancing-Bot über die echten
-    Module; Endlos-Kriterien E1/E2/**E3**/E4 (inkl. **E4-mit-Gear**: Best-in-Slot-Klick-Gear
-    schlägt Best-in-Slot-Idle-Gear ≥ 8 Zonen) + Pacing + erste-Himmelfahrt als CI-Gate
-    (`npm run test:sim`).
+    Module, mit der **kompletten** Loot-Ökonomie im Bot (Peach/Truhen/Token/Shards→Gear).
+    Endlos-Kriterien E1/E2/**E3**/E4 (inkl. **E4-mit-Gear**: Best-in-Slot-Klick-Gear schlägt
+    Best-in-Slot-Idle-Gear ≥ 8 Zonen) + §4.8-Pacing + erste-Himmelfahrt + **Float-Guard bis
+    Bühne 300** (jede Größe endlich & < 1e300) als CI-Gate (`npm run test:sim`, 39 Tests).
+  - `game/transcend.ts` + `game/flags.ts` — **Transzendenz-Gerüst** (Schicht 3, §4.5.3) als
+    reine, getestete Formeln **hinter einem Flag** (`TRANSCEND_ENABLED = false`): `TE = ⌊log10
+HPF_life⌋` (100-HPF-Gate), `×3^TE` globaler (P1-neutraler) Multiplikator, held-vs-spent-
+    Buchhaltung + dokumentierter L1+L2-Reset-Vertrag. UI **aus**; M15 flippt das Flag und
+    verdrahtet State/Save/UI, ohne eine Formel anzufassen (§11 #5).
   - `game/chests.ts` — reine Loot-Engine: Truhen-Tiers, gewichtete Loot-Tabellen,
     deterministisches `openChest` (seedbarer RNG), per-Tier **Pity**, **Luck**-Umgewichtung,
     Duplikat-Schutz und der Permanent-Token-Katalog (alles Daten + reine Funktionen).
   - `game/peach.ts` — Goldener-Pfirsich-Logik: `rollNextPeachAt` (seedbares Spawn-Fenster),
     ×3-Einkommens-Boost + der 25 %-🔑-Roll — deterministisch/save-scum-fest.
-  - `game/ch-state.ts` + `save/ch-store.ts` — CH-State (Save **v7**: `chests {keys, inventory,
-pity, skins}` · `permTokens` · `peach {nextPeachAt, boostUntil}`), eigener versionierter
+  - `game/ch-state.ts` + `save/ch-store.ts` — CH-State (Save **v8**: `chests {keys, inventory,
+pity, skins}` · `permTokens` · `peach {nextPeachAt, boostUntil}` · `meta` (Retention:
+    Streak/Quests/Erfolge)), eigener versionierter
     Save-Key (`bootyclicker.ch`), Offline-Gold (inkl. Coach + Gear-Bonus), Base64-Export/Import
     (never-throw, injizierbar).
   - `ui/*` — HUD/Rival + Travel-Stepper, Crew, **Gear/Skins**, **Ahnen**, Prestige,

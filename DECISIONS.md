@@ -3,6 +3,100 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M14 — Endless-QA, Transzendenz-Gerüst & Release 2.0
+
+- **2026-07-18 — Performance-Pass: gemessen, nicht geschätzt; Hot-Path unverändert
+  (AC2 + §9.6).** Headless über `vite preview` + das vorinstallierte Chromium
+  (SwiftShader/ANGLE) gemessen (Skript in `scratchpad/perf.mjs`): **Draw Calls
+  114/Frame** (< 150 ✓, per Wrapping von `drawArrays`/`drawElements` gezählt — die
+  Zahl ist renderer-getrieben und damit hardware-unabhängig), **Partikel-Integration
+  ~0,002 ms/Frame** bei voller 200-Slot-Belegung (Mess-AC „< 1 ms" ✓, der flache
+  Float-Loop in `engine/particles.ts`), **Popup-Pool exakt bei 24 Nodes gekappt**
+  (nie überschritten, `POP_POOL_MAX`), **12-cps-Stress** (60 Klicks/5 s): mittlere
+  Klick-Hot-Path-Zeit ~1,6 ms, p50 ~1,3 ms, ein Ausreißer ~9–13 ms (der gedrosselte
+  0,25-s-Voll-HUD-Tick), **keine** Konsolenfehler, Gold zählt hoch. Ergebnis des
+  Hot-Path-Audits: **sauber, keine Änderung nötig.** Der Klick-Pfad (`doShake` →
+  `applyHit` → `pops.damage` → `ChHud.update`) baut **kein** `innerHTML` neu —
+  `ChHud` ist change-detected (`setText` schreibt nur bei echter Wertänderung),
+  `Pops` recycelt gepoolte Nodes per `textContent`/`style` (kein `createElement`
+  nach Warmup, kein `innerHTML`); alle `innerHTML`-Stellen liegen ausschließlich in
+  Tab-Render-Funktionen (on-demand, nicht pro Klick). **Lighthouse ehrlich:** ein
+  echter Lighthouse-Lauf ist headless unter SwiftShader (Software-GL) nicht als
+  60-fps-Laptop-Referenz belastbar — statt eine Zahl zu erfinden, dokumentieren wir
+  Bundle-Größe + die obigen hardware-unabhängigen Kennzahlen als 60-fps-Referenz.
+  **Bundle:** `dist` = **652,3 KB JS** (gzip 174,5 KB) + 25,0 KB CSS + 6,1 KB HTML
+  ≈ 0,68 MB — weit unter dem 5-MB-Budget (§9.6). Die N4-Entfernung ließ das Bundle
+  unverändert (toter Code war nie im Entry-Graph → Tree-Shaking hatte ihn längst
+  gedroppt).
+
+- **2026-07-18 — N4-Legacy-Entfernung (§11 #7, Default-Zeitpunkt M14): drei
+  komplett tote Ketten entfernt, konservativ verifiziert.** Der Erbe-Import ist
+  verschifft (M7), damit greift der N4-Entscheid. Vor jeder Löschung den ganzen
+  `apps/`-Baum (ts/html/js) gegrept. Entfernt (Modul + Test + toter einziger
+  Importeur):
+  - `game/events.ts` + `events.test.ts` — **null** Referenzen irgendwo.
+  - `game/boss.ts` + `boss.test.ts` + `ui/boss.ts` — `game/boss.ts` wurde **nur**
+    von `ui/boss.ts` importiert, und `ui/boss.ts` von **niemandem** (kein `main.ts`,
+    kein Test, kein Barrel, kein `index.html`).
+  - `game/achievements.ts` + `achievements.test.ts` + `ui/achievements.ts` — analog:
+    `game/achievements.ts` (das M4-Legacy-Set über `GameState`) nur von
+    `ui/achievements.ts` importiert, das selbst tot ist. Ersetzt durch
+    `ch-achievements.ts` (M13, CH-natives Set) — siehe M13-Eintrag.
+
+  Alle drei Ketten sind vom einzigen Entry (`/src/main.ts`) und von **jedem** Test
+  aus unerreichbar → beweisbar tot. Bewusste Auslegung von „referenced anywhere
+  **live**": ein Verweis aus totem Quellcode (`ui/boss.ts`/`ui/achievements.ts`,
+  selbst 0 Importeure) ist **kein** lebender Verweis; um `game/boss.ts` bzw.
+  `game/achievements.ts` sauber zu entfernen, MUSS der tote UI-Importeur mit weg
+  (sonst bricht `tsc --noEmit` über den ganzen Baum). **Nicht** angefasst: alles,
+  was der CH-Modus lebt (combat/economy/state/ability/settings/heroes/gild/ancients/
+  ascension/heaven/gear/chests/peach/quests/season/ch-\* …) und der legacy Save-Layer
+  (`save/store.ts`, `save/migrate.ts`) samt `game/state.ts`/`ui/hud.ts` — Letztere
+  bleiben, weil `legacy-import.ts` und der Erbe-Pfad sie noch lesen. Netto:
+  **8 Dateien**, Game-Testzahl **500 → 480** (−20 Tests / −3 Testdateien), erwartet;
+  Suite bleibt grün, **keine** Verhaltensänderung an bleibendem Legacy-Code.
+
+- **2026-07-18 — AC3 dokumentierter Playthrough (frischer Save → 3 Aszensionen → 1
+  Himmelfahrt) mit ECHTEN Zahlen aus den echten Modulen.** Getrieben durch
+  `simulateAscensionEra` (echte Ökonomie: ROI-Crew, Loot-Faucets, Ahnen-Kauf) +
+  die realen Prestige-Formeln (`soulsForMaxZone`, `hpfForRsLifetime`), Seed 7, aus
+  einem Wegwerf-Vitest-Capture (nicht committet). Beobachtet: Aszension 1 → Bühne
+  **60** / RS-Lifetime **320**; Aszension 2 → Bühne **75** / RS **1 295** (das
+  1 000-RS-Himmelfahrt-Gate wird hier überschritten, `firstHimmelfahrtT` ≈ 1 145 s
+  Sim-Zeit); Aszension 3 → Bühne **80** / RS **2 074**, MaxPower ≈ 2,1e16 DPS (alles
+  endlich, weit unter dem Float-Ceiling). Erste Himmelfahrt bankt
+  `hpfForRsLifetime(2074) = ⌊√2,074⌋ = 1` HPF und setzt L1 zurück, während HPF (+2 %
+  global + Seelen-Verstärker), Vergoldungen und der Himmelsbaum bleiben. Tabelle in
+  `TESTPLAN.md` §11. Ehrlich: die Zahlen sind Sim-getrieben (nicht echte Wanduhr-
+  Stunden) — der Zweck von AC3 ist der funktionale Nachweis, dass die Prestige-Kette
+  korrekt verkettet und reale Zahlen erzeugt.
+
+- **2026-07-18 — Transzendenz-Gerüst (Schicht 3, §4.5.3) landet als reine,
+  getestete Formeln HINTER einem Flag (§11 #5).** `game/transcend.ts` spiegelt
+  `ascension.ts`/`heaven.ts`: `TE_earned = ⌊log10(HPF_life)⌋` mit 100-HPF-Gate,
+  `×3^TE` **globaler** (P1-neutraler) Multiplikator, held-vs-spent-Buchhaltung und
+  ein dokumentierter L1+L2-Reset/Preserve-Vertrag für M15. `game/flags.ts` hält
+  `TRANSCEND_ENABLED = false` als einzige Wahrheitsquelle; ein Guard-Test sichert,
+  dass die Konstante `false` ist, damit die halbfertige Schicht **nie** versehentlich
+  in einen Build leckt. Bewusst dünn (§11 #5): kein `ChState`-Slice, kein Save-Feld,
+  keine UI — M15 flippt das Flag und verdrahtet State/Save/UI, **ohne eine Formel
+  anzufassen**. Der `×3^TE`-Faktor ist ein Global-Multiplikator (gleich auf Klick
+  UND Idle) und daher per Konstruktion P1-neutral (E4/§4.8: „aktiv bleibt König").
+
+- **2026-07-18 — `simulateEndless` voll ausgebaut als CI-Pflicht (E1–E4 +
+  Float-Guard, ganze Ökonomie im Bot, §9.5/AC1+AC4).** Der Balancing-Bot fährt jetzt
+  die **komplette** M12-Loot-Ökonomie über die echten Module (Golden-Peach ×3 +
+  🔑-Chance, Boss/Rival-Truhen, gieriges Truhen-Öffnen → Permanent-Token, 🧩-Shards →
+  Gear-Level über die reale `shardCost`-Kurve, Keys aus Boss/Peach). Vollständige
+  E1–E4-Suite asserted (E1 kein Hard-Cap, E2 beschränkte Soft-Wall, E3 +50 % Power
+  ≤ 90 min, E4 „click is king" — der Abstand wächst mit eingeschalteter Ökonomie —
+  plus Best-in-Slot-Gear-P1-Guard). **Float-Guard bis Bühne 300** (AC4, HP ~1e63):
+  `simulateFloatGuard` treibt die reale Combat-Frontier via ehrlichem analytischem
+  Fast-Forward auf ≥ 300 und auditiert jede getrackte Größe (Monster/Boss-HP, Gold,
+  Seelen, Power, Shards/Keys) als endlich und < 1e300. §4.8-Pacing-Tabelle (±25 %)
+  bleibt unter den dokumentierten no-loot-Kalibrierbedingungen gültig. Ganze Suite
+  grün in ~6 s (**39 Tests**, `npm run test:sim`).
+
 ## M13 — Review-Fixes (Meta & Retention)
 
 - **2026-07-18 (Review) — Zukunfts-Tage werden beim Boot GEKLEMMT (`repairFutureDays`),

@@ -1,27 +1,38 @@
-# Booty Clicker — Test Plan (CH loop, M7)
+# Booty Clicker — Test Plan (CH loop, Release 2.0 / M14)
 
 Manual + automated release checklist for the endless Clicker-Heroes-style loop.
 Automated coverage lives in the unit tests (`npm test`) and the headless smoke
 scripts; this document covers the manual passes that can't be fully asserted in
-CI (real browsers, touch input, performance).
+CI (real browsers, touch input, performance). The consolidated **M14 CH-loop
+manual matrix** (Bühnen · Bosse · Aszension · Himmelfahrt · Truhen/Loot ·
+Mobile-Sheet · Retention/Meta · Bestenliste) and the documented **AC3 playthrough**
+are in **§11 (M14)** at the end of this file.
 
 > **Note on scope (N5 — no ghost features).** The old M0–M6 game (upgrade shop,
 > single 50k-BP boss, additive rebirth at 100k, Golden Peach, skin/background
 > picker, achievements UI, leaderboard client) is **intentionally gone** in the
-> CH MVP. Do **not** test for it. Per the spec Gap-Checklist (§2.3) it returns
-> later: skin/background choice **with buffs → M11**, chests/Golden Peach → M12,
-> achievements/quests/daily/stats + leaderboard v2 → M13. The legacy modules stay
-> in the repo as a frozen archive (their unit tests remain green) only until the
-> one-time legacy import (below) has shipped.
+> CH loop. Do **not** test for it. Per the spec Gap-Checklist (§2.3) every feature
+> has since returned in CH form: skin/background choice **with buffs** (M11),
+> chests/Golden Peach (M12), achievements/quests/daily/stats + leaderboard v2 (M13).
+>
+> **N4 legacy cleanup (M14, §11 #7 — done).** Now that the one-time legacy import
+> (below) has shipped, the dead M0–M6 archive modules superseded by the CH
+> equivalents were removed: `game/events.ts`, `game/boss.ts` (+ its dead-only
+> importer `ui/boss.ts`) and `game/achievements.ts` (+ `ui/achievements.ts`,
+> superseded by `game/ch-achievements.ts`) — with their tests. All were provably
+> unreachable from the `main.ts` entry and every test; the game suite drops
+> **500 → 480** tests accordingly. The **live** legacy save layer (`save/store.ts`,
+> `save/migrate.ts`, `game/state.ts`) stays — the Erbe-Import still reads it.
 
 ## 1. Automated gates (run before every release)
 
 - [ ] `npm run lint` — ESLint clean
 - [ ] `npm run format:check` — Prettier clean
-- [ ] `npm test` — all unit tests green (game + API workspaces)
-- [ ] `npm run build` — type-checks and builds; bundle **< 5 MB** (currently ~652 KB JS / ~174 KB gzip; +~16 KB for the M13 📋 Ziele tab, 📊 stats, leaderboard wiring + season)
-- [ ] `npm run test:sim` — the `simulateEndless` gate (E1/E2/**E3**/E4 + **E4-with-gear** + §4.8 pacing + first-Himmelfahrt window) is green (also runs inside `npm test` + CI)
-- [ ] `npm run build:itch` — produces `apps/game/release/booty-clicker-itch.zip` with `index.html` at the archive root
+- [ ] `npm test` — all unit tests green (game + API workspaces). Current counts: **480** game (40 files) + **20** API. (Was 500 before the M14 N4 cleanup removed 20 legacy tests.)
+- [ ] `npm run build` — type-checks and builds; bundle **< 5 MB** — currently **652.3 KB JS** (gzip 174.5 KB) + 25.0 KB CSS + 6.1 KB HTML ≈ **0.68 MB** total `dist`
+- [ ] `npm run test:sim` — the full `simulateEndless` gate (E1/E2/**E3**/E4 + **E4-with-gear** + §4.8 pacing + first-Himmelfahrt window + **Float-Guard to Bühne 300**, full loot economy in the bot) is green — **39 tests** (also runs inside `npm test` + CI)
+- [ ] Feature-flag guard: `flags.test.ts` asserts `TRANSCEND_ENABLED === false` (the Transzendenz scaffold can never leak into a shipped build)
+- [ ] `npm run build:itch` — produces `apps/game/release/booty-clicker-itch.zip` (~178 KB) with `index.html` at the archive root
 
 ## 2. Browser matrix (manual smoke)
 
@@ -77,14 +88,42 @@ Run `npm run preview` (or serve the itch ZIP) and verify on each target:
       (`rebirths ≥ 1`), the first CH boot grants `7 · rebirths` Ruhm-Seelen once;
       a reload does **not** grant again.
 
-## 5. Performance (Lighthouse)
+## 5. Performance (M14 perf-pass — §9.6 budget)
 
-Target: **Performance ≥ 85** (mobile preset) on the production build.
+Target: **Performance ≥ 85** (Lighthouse mobile preset) on the production build.
+
+**On a machine with Chrome + a real GPU:**
 
 1. `npm run build && npm run preview`
 2. Chrome DevTools → Lighthouse → Performance, Mobile → analyze the preview URL.
 3. If below 85, try `Qualität: Niedrig` + `FPS-Limit: 30` in ⚙️ and re-measure; the
    low preset disables shadows and caps pixel ratio at 1.
+
+### 5.1 M14 measured numbers (headless, `scratchpad/perf.mjs`)
+
+Measured against `vite preview` with the preinstalled Chromium via playwright-core
+(`--enable-unsafe-swiftshader --use-gl=angle --use-angle=swiftshader --no-sandbox`).
+SwiftShader is a **software** GL — GPU frame times are **not** a valid 60-fps-laptop
+proxy, so we report the **hardware-independent** metrics (draw-call count, JS
+scripting cost, DOM node budget) rather than fake a Lighthouse score:
+
+| §9.6 budget                              | Result                                                                                                                                                                 | Verdict |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| Draw Calls **< 150**                     | **114 / frame** (counted by wrapping `drawArrays`/`drawElements`)                                                                                                      | ✅      |
+| Particles **< 1 ms/frame** (Mess-AC)     | **~0.002 ms/frame** at full 200-slot occupancy (flat float loop in `engine/particles.ts`)                                                                              | ✅      |
+| Popup-Pool **≤ 24 Nodes**                | **capped at exactly 24** during a 60-click burst, never exceeded (`POP_POOL_MAX`)                                                                                      | ✅      |
+| No `innerHTML` rebuild in click hot-path | **clean** — `ChHud.update` is change-detected (`setText`), `Pops` recycles pooled nodes via `textContent`/`style`; all `innerHTML` lives in on-demand tab renders only | ✅      |
+| Bundle **< 5 MB**                        | **0.68 MB** dist (652.3 KB JS / gzip 174.5 KB + 25 KB CSS + 6.1 KB HTML)                                                                                               | ✅      |
+
+**12-cps stress** (60 synthetic clicks over 5 s on `#app`): mean click hot-path time
+**~1.6 ms**, p50 **~1.3 ms**, one **~9–13 ms** outlier (coincides with the throttled
+0.25 s full-HUD tick) — all well inside both the ~83 ms inter-click and the 16.7 ms
+frame budgets. Zero console errors; gold advances. **Conclusion: hot-path is clean,
+no code change was needed** in the perf pass.
+
+**On real hardware, still verify by feel:** hold ~12 clicks/s with crits + particles
+on the reference laptop and confirm a steady 60 fps in DevTools Performance (§10 has
+the manual matrix).
 
 Notes:
 
@@ -360,3 +399,67 @@ Manual passes (real device / browser):
       skippable submit (validated nickname → rank), only once per record; „Top 50" lists rows.
 - [ ] **Season.** In October/December a banner + boot toast appears in the 📋 tab; no gameplay
       is gated behind the date.
+
+## 11. M14 — Endless-QA, Transzendenz-Gerüst & Release 2.0
+
+Automated (this milestone):
+
+- **`simulateEndless` full suite (CI gate, `npm run test:sim` — 39 tests).** Runtime
+  < 10 s, deterministic (same seed ⇒ identical run/economy). E1 no hard cap · E2
+  bounded soft wall · **E3** ≤ 90 min per +50 % power over 20 ascensions · **E4**
+  active ≥ 8 zones ahead of casual (and with best-in-slot **click** gear ≥ 8 ahead of
+  best-in-slot **idle** gear, + a catalog P1 guard) · §4.8 pacing table (±25 %) · first
+  Himmelfahrt in the 5–9 h ±25 % window · **Float-Guard to Bühne 300** (HP ~1e63; every
+  tracked magnitude finite & < 1e300, AC4). The full M12 loot economy runs inside the
+  bot (peach/keys/chests/tokens/shards→gear).
+- **Transzendenz scaffold (`transcend.test.ts` 12 + `flags.test.ts` 3).** Pure formulas:
+  `TE = ⌊log10 HPF_life⌋` (0 below the 100-HPF gate), `×3^TE` global mult (P1-neutral),
+  held-vs-spent accounting, `bankTranscendence` never double-grants. The flag guard
+  asserts `TRANSCEND_ENABLED === false` — the layer is **off** in every shipped build.
+- **N4 cleanup:** the removed legacy modules (events/boss/achievements + dead UI) are
+  gone; the remaining suite stays green at **480** game tests.
+
+### 11.1 CH-loop manual matrix (Bühnen · Bosse · Aszension · Himmelfahrt · Truhen · Mobile-Sheet · Meta)
+
+Run `npm run preview` (or serve the itch ZIP) and walk the full loop once end-to-end:
+
+| Surface                       | Manual check                                                                                                                                                                                                                                                                                          | ☐   |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| **Bühnen (zone progression)** | Kill 10 rivals → zone advances; HP scales up (`10·1.6^(z-1)`); zone/kill counter in HUD is correct; backdrop rotates every 10 zones (club→synth→beach→space)                                                                                                                                          | ☐   |
+| **Bühnen — Farmen/Reisen**    | `◀ Bühne ▶` farms cleared zones, `⏫ Front` returns to the frontier; you can never travel past your deepest zone; HUD shows „🌾 Farmen · Front: Bühne N" below the frontier                                                                                                                           | ☐   |
+| **Bosse (timer)**             | Every 5th zone is a boss with a 30 s timer; the timer bar turns **urgent** < ~34 %; a timeout does **not** soft-lock — farm the zone and re-challenge                                                                                                                                                 | ☐   |
+| **Bosse (finale/reward)**     | A boss kill toasts „Boss besiegt!" with a tier chest + **≥ 1 🔑** + 🧩; boss-kill shake + jingle fire; `bossStreak`/`maxBossStreak` count (📊 stats)                                                                                                                                                  | ☐   |
+| **Vergoldung 🏅**             | The **first** clear of each 10-zone gilds a seeded crew member (+25 % DPS, permanent); survives an ascension; fires the „Vergoldung" quest once                                                                                                                                                       | ☐   |
+| **Aszension ✨**              | At ≥ Bühne 10 the ✨-tab previews „+X Seelen"; ascending resets the run (zone→1, crew empty, gold 0) and banks Ruhm-Seelen (+10 %/held soul); held souls carry, spent-on-Ahnen stays spent                                                                                                            | ☐   |
+| **Ahnen 🌀**                  | Buying a Twerk-Ahne spends **held** souls and applies its perk; capped ancients show „Max erreicht"; % ancients are uncapped (the endless soul sink)                                                                                                                                                  | ☐   |
+| **Himmelfahrt 🌈**            | At ≥ 1 000 RS lifetime the 🌈-tab previews „+X HPF"; arm→confirm banks HPF and resets RS/Ahnen/tour; **Vergoldungen, HPF & Himmelsbaum survive**; HUD shows „🍑 X HPF" and the soul-% + global damage rise with HPF (compounding)                                                                     | ☐   |
+| **Himmelsbaum**               | Buying Twerk-Coach spawns an auto-clicker (1→4 cps @ 25 % click, idle **and** offline); Nachtschicht raises the offline cap (8→16→24 h)                                                                                                                                                               | ☐   |
+| **Gear 🎽**                   | Equipping a non-classic skin swaps the 3D figure **and** shifts DPS/Klick instantly; level (🧩) / star (🍬) buttons gate on balance & cap; a 🍬 ripens 1×/24 h (backwards clock never yields a negative timer); set bonuses list on a matching Skin×Kulisse                                           | ☐   |
+| **Truhen/Loot 🎁**            | Öffnen is enabled only with count ≥ 1 **and** enough 🔑 (Holz 0 / Gold 1 / Diamant 3 / Mythos 10); a skippable ~1.2 s animation → reward cards; keys/inventory/pity update; **drop tables show every weight as %**; header states „ausschließlich erspielbar — kein Kauf" (no `€`/`$`, no buy button) | ☐   |
+| **Golden Peach 🍑**           | A floating 🍑 appears every ~90–240 s (~8 s window); catching it gives ×3 income/60 s (HUD „×3 Boost" badge) + 25 % 🔑; on a narrow screen it **despawns** under the open bottom-sheet and stays **clamped** in the viewport after a resize/rotate                                                    | ☐   |
+| **Mobile-Sheet (B13a)**       | Under 640 px the shop is a bottom sheet (~55 vh) — figure + rival HP stay visible while shopping; the 🕺 toggle stays reachable above it; safe-area insets (B13b) leave nothing clipped by the notch                                                                                                  | ☐   |
+| **Retention/Meta 📋**         | Daily login streak (1–7) grants a chest each day (💎 + 2 🔑 on day 7); weekly Streak-Schutz catches one missed day; 3 date-seeded quests with progress + **Einlösen**; 1×/day **Neu würfeln**; achievement wall (locked/unlocked) survives ascension + Himmelfahrt; clock-rollback grants nothing     | ☐   |
+| **Bestenliste**               | With **no** `VITE_API_BASE`: „Eintragen" shows an offline note + disabled send, „Top 50" shows an offline message, nothing throws, the game is fully playable. With an API set: a **new best zone** offers a skippable submit once per record; „Top 50" lists rows                                    | ☐   |
+| **Save/offline**              | Autosave + reload restores progress (CH-save **v8**); offline-earnings dialog on boot after being away; tab-return grant (B5); Export/Import/Reset base64 round-trips                                                                                                                                 | ☐   |
+| **Transzendenz (flag OFF)**   | There is **no** Transzendenz tab/button/HUD in the shipped build — the layer is scaffold-only behind `TRANSCEND_ENABLED = false` (Diamant-Booty still reads „ab Transzendenz" as a locked hint only)                                                                                                  | ☐   |
+
+### 11.2 AC3 — documented playthrough (fresh save → 3 Aszensionen → 1 Himmelfahrt)
+
+Driven through the **real** economy (`simulateAscensionEra`) + the **real** prestige
+formulas (`soulsForMaxZone`, `hpfForRsLifetime`), seed 7 — these are observed numbers,
+not invented. (Repro: a throwaway vitest that calls `simulateAscensionEra` at
+`maxAscensions` 1/2/3 and reads `maxBestZone`; souls = `soulsForMaxZone(zone)`,
+HPF = `hpfForRsLifetime(RS)`.)
+
+| Step              | Bühne (best) | RS lifetime |   HPF | Notes                                                                                                                  |
+| ----------------- | -----------: | ----------: | ----: | ---------------------------------------------------------------------------------------------------------------------- |
+| Fresh save        |            1 |           0 |     0 | zone 1, no souls, no HPF                                                                                               |
+| **Aszension 1**   |           60 |         320 |     0 | first bank of Ruhm-Seelen                                                                                              |
+| **Aszension 2**   |           75 |       1 295 |     0 | crosses the 1 000-RS Himmelfahrt gate (first Himmelfahrt now possible, ~t=1145 s sim time)                             |
+| **Aszension 3**   |           80 |       2 074 |     0 | MaxPower ≈ 2.1e16 DPS — all magnitudes finite, far under the float ceiling                                             |
+| **Himmelfahrt 1** |    reset → 1 |   reset → 0 | **1** | `hpfForRsLifetime(2074)=⌊√2.074⌋=1`; L1 resets, HPF (+2 % global + soul amplifier), Vergoldungen & Himmelsbaum persist |
+
+Interpretation: souls compound with depth (`⌊z^1.6/40⌋+⌊1.10^z−1⌋`), each ascension
+reaches a deeper frontier, and the first Himmelfahrt banks its first HPF — the full
+Ascension → Himmelfahrt chain produces real, monotonic numbers. The counts are
+sim-driven (not wall-clock hours); AC3 is a functional demonstration of the chain.
