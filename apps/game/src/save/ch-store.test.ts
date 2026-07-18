@@ -12,6 +12,7 @@ import {
 } from '../game/ch-state';
 import { createGear } from '../game/gear';
 import { createMeta, dailyQuests } from '../game/quests';
+import { createTranscend } from '../game/transcend';
 import { monsterHp } from '../game/combat';
 import {
   CH_SAVE_KEY,
@@ -338,6 +339,133 @@ describe('ch-store — v5 migration & repair (M10)', () => {
     const s = deserializeCh(JSON.stringify(raw));
     expect(s!.heaven.hpf).toBe(10); // clamped to hpfLifetime
     expect(s!.heaven.tree).toEqual({ coach: 5 });
+  });
+});
+
+describe('ch-store — v9 migration & repair (M15)', () => {
+  // A full v8 blob (the pre-M15 shape) for the migration tests.
+  const v8Blob = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    v: 8,
+    lastSeen: 15000,
+    gold: 5000,
+    zone: 65,
+    killsThisZone: 2,
+    runMaxZone: 65,
+    crew: { boss: 30, legend: 6 },
+    souls: 200,
+    lifetimeMaxZone: 65,
+    totalClicks: 2000,
+    rng: { seed: 777, cursor: 300 },
+    stats: { ...createStats(), crits: 100, bossKills: 20 },
+    legacyImported: true,
+    ability: createAbility(),
+    combo: { stacks: 70 },
+    gilds: { boss: 8 },
+    rsLifetime: 200,
+    ancients: { twerkules: 12 },
+    heaven: { hpf: 5, hpfLifetime: 1000, ascensions2: 3, tree: { coach: 4 } },
+    gear: { ...createGear(), skin: 'disco', shards: 400 },
+    legacyTyrann: true,
+    chests: {
+      keys: 6,
+      inventory: { wood: 1, gold: 2, diamond: 1, mythic: 0 },
+      pity: { wood: 0, gold: 0, diamond: 0, mythic: 0 },
+      skins: [],
+    },
+    permTokens: { critDmg: 5 },
+    peach: createPeach(),
+    meta: createMeta(),
+    achievements: ['zone-10'],
+    ...over,
+  });
+
+  it('migrates a v8 blob losslessly into v9 (transcend default, all v8 fields intact)', () => {
+    const store = memStorage();
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v8Blob()));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    // v8 fields carried through losslessly.
+    expect(s.gold).toBe(5000);
+    expect(s.crew).toEqual({ boss: 30, legend: 6 });
+    expect(s.souls).toBe(200);
+    expect(s.heaven).toEqual({ hpf: 5, hpfLifetime: 1000, ascensions2: 3, tree: { coach: 4 } });
+    expect(s.meta).toEqual(createMeta());
+    expect(s.achievements).toEqual(['zone-10']);
+    // v9 default added — a fresh (never-transcended) L3 slice.
+    expect(s.transcend).toEqual(createTranscend());
+  });
+
+  it('round-trips a full transcend slice (te/teLifetime/transcendences/mythos)', () => {
+    const store = memStorage();
+    const s: ChState = {
+      ...createChState(),
+      transcend: { te: 4, teLifetime: 6, transcendences: 3, mythos: { diamantBooty: 2 } },
+    };
+    saveCh(s, 8000, store);
+    const loaded = loadCh(store);
+    expect(loaded!.state.transcend).toEqual({
+      te: 4,
+      teLifetime: 6,
+      transcendences: 3,
+      mythos: { diamantBooty: 2 },
+    });
+  });
+
+  it('repairs a wholly corrupt transcend slice to createTranscend() (never nukes progress)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.transcend = 'garbage';
+    // Real progress on OTHER slices must survive the transcend repair.
+    raw.souls = 55;
+    raw.crew = { boss: 8 };
+    let s: ChState | null = null;
+    expect(() => {
+      s = deserializeCh(JSON.stringify(raw));
+    }).not.toThrow();
+    expect(s).not.toBeNull();
+    expect(s!.transcend).toEqual(createTranscend());
+    expect(s!.souls).toBe(55);
+    expect(s!.crew).toEqual({ boss: 8 });
+  });
+
+  it('repairs corrupt transcend SUB-fields in isolation (held ≤ earned invariant restored)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.transcend = {
+      te: 5, // held above the (corrupt) lifetime ⇒ LIFT lifetime, never nuke held
+      teLifetime: 3,
+      transcendences: -2, // negative ⇒ 0
+      mythos: { good: 2, bad: -1, junk: 'x', frac: 1.5 }, // count-map: keep non-neg, floor
+    };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.transcend.te).toBe(5); // held preserved
+    expect(s!.transcend.teLifetime).toBe(5); // lifted to ≥ held (not clamped down to 3)
+    expect(s!.transcend.transcendences).toBe(0);
+    expect(s!.transcend.mythos).toEqual({ good: 2, frac: 1 }); // 1.5 floored, bad/junk dropped
+  });
+
+  it('migrates a v1 blob all the way through to v9 (transcend default present)', () => {
+    const store = memStorage();
+    const v1 = {
+      v: 1,
+      lastSeen: 5000,
+      gold: 500,
+      zone: 12,
+      killsThisZone: 3,
+      runMaxZone: 12,
+      crew: { boss: 5 },
+      souls: 3,
+      lifetimeMaxZone: 12,
+      totalClicks: 42,
+    };
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v1));
+    const s = loadCh(store)!.state;
+    expect(s.gold).toBe(500);
+    expect(s.gear).toEqual(createGear());
+    expect(s.chests).toEqual(createChests());
+    expect(s.meta).toEqual(createMeta());
+    expect(s.achievements).toEqual([]);
+    expect(s.transcend).toEqual(createTranscend());
   });
 });
 

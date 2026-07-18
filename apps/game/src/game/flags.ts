@@ -2,12 +2,13 @@
  * Build-time feature flags — one dependency-free place to gate *scaffolded* systems
  * out of live play until their milestone flips them on.
  *
- * M14 ships the **Transzendenz** layer (Schicht 3, spec §4.5.3) as a *scaffold*:
- * pure, tested formulas in `transcend.ts`, but the layer itself switched **off** —
- * no `ChState` slice, no save field, no UI. `TRANSCEND_ENABLED` is the single source
- * of truth; M15 turns it on once the L1/L2 live-data tuning (§11, open question #5)
- * is settled, WITHOUT reworking the math. The guard test asserts the constant is
- * `false`, so the half-built layer can never leak into a shipped build by accident.
+ * M14 shipped the **Transzendenz** layer (Schicht 3, spec §4.5.3) as a *scaffold*:
+ * pure, tested formulas in `transcend.ts` behind this flag. **M15 turns it on** — the
+ * layer is now LIVE: `ChState` carries the L3 slice, CH-save v9 persists it, the
+ * ×3^TE global mult folds into `dpsOf`/`clickDamageOf`, and part 2 adds the UI.
+ * `TRANSCEND_ENABLED` stays the single source of truth (now `true`); the guard test
+ * asserts it is enabled so a regression that switched the shipped layer back off is
+ * caught. The dev `VITE_TRANSCEND` override remains for forcing it off locally.
  *
  * This module deliberately imports nothing from the game so any layer (formulas,
  * glue, UI) can read a flag without risking an import cycle. Flags are compile-time
@@ -19,8 +20,8 @@
  * change a shipped build; today the module has no live importer at all.
  */
 
-/** Master switch for the Transzendenz layer (Schicht 3, §4.5.3). Ships OFF (M14). */
-export const TRANSCEND_ENABLED = false;
+/** Master switch for the Transzendenz layer (Schicht 3, §4.5.3). LIVE as of M15. */
+export const TRANSCEND_ENABLED = true;
 
 /** The typed flag registry — extend this as new scaffolds land behind a switch. */
 export interface FeatureFlags {
@@ -59,9 +60,9 @@ function resolveFlag(key: keyof FeatureFlags, envKey: string): boolean {
 }
 
 /**
- * Whether the Transzendenz layer (Schicht 3, §4.5.3) is active. `false` in every
- * shipped M14 build (see `TRANSCEND_ENABLED`); a dev may force it on with
- * `VITE_TRANSCEND=1`. M15's wiring gates all Transzendenz state/UI on this accessor.
+ * Whether the Transzendenz layer (Schicht 3, §4.5.3) is active. `true` in every
+ * shipped M15 build (see `TRANSCEND_ENABLED`); a dev may force it off with
+ * `VITE_TRANSCEND=0`. M15's wiring gates all Transzendenz state/UI on this accessor.
  */
 export function isTranscendEnabled(): boolean {
   return resolveFlag('transcend', 'TRANSCEND');

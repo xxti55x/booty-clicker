@@ -47,6 +47,12 @@ import {
 import { type CrewLevels, clickDamageRaw, createCrew, totalRawDps } from './heroes';
 import { incomeMultiplier } from './peach';
 import { type MetaState, createMeta } from './quests';
+import {
+  type TranscendState,
+  bankTranscendence,
+  createTranscend,
+  transcendGlobalMult,
+} from './transcend';
 import { createRngState, type RngState } from '../util/rng';
 
 /** Persisted combo slice (CH-save v3): only the stack count survives a reload. */
@@ -209,6 +215,12 @@ export interface ChState {
   meta: MetaState;
   /** Unlocked CH-achievement ids (CH-save v8, §7.3). Survives prestige. */
   achievements: string[];
+  /**
+   * Prestige layer 3 — Transzendente Essenz + Mythos ledger (CH-save v9, §4.5.3).
+   * The ×3^TE global mult folds into `dpsOf`/`clickDamageOf`; a Transzendenz resets
+   * all of L1 AND L2 but PRESERVES this slice (`transcendState`). Survives everything.
+   */
+  transcend: TranscendState;
 }
 
 /** A brand-new run/profile. */
@@ -238,25 +250,30 @@ export function createChState(): ChState {
     peach: createPeach(),
     meta: createMeta(),
     achievements: [],
+    transcend: createTranscend(),
   };
 }
 
 /**
- * The fields the derived combat numbers depend on. `gear` is optional so callers
- * (and older tests) that don't supply it still fold correctly — a missing gear
- * contributes the empty (×1) bonus, matching a fresh classic/club default.
+ * The fields the derived combat numbers depend on. `gear`/`permTokens`/`transcend`
+ * are optional so callers (and older tests) that don't supply them still fold
+ * correctly — a missing gear contributes the empty (×1) bonus and a missing
+ * `transcend` the neutral ×1 global mult, matching a fresh classic/club default.
  */
 type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'heaven'> & {
   gear?: GearState;
   permTokens?: PermTokens;
+  transcend?: TranscendState;
 };
 
 /**
  * Total crew DPS: raw crew (with gilds) × the held-soul multiplier (amplified by
- * held HPF) × Poposeidon's Ancient DPS mult × the +2 %/HPF global mult × the gear
- * DPS mult (§5) × the permanent-token crew-DPS mult (§6.2). Idle DPS never draws
- * crit/combo/beat/frenzy — active clicking stays king (P1). `permTokens` is
- * optional so callers/tests without a v7 slice fold the empty (×1) bonus.
+ * held HPF) × Poposeidon's Ancient DPS mult × the +2 %/HPF global mult × the
+ * Transzendenz ×3^TE global mult (§4.5.3, the same scalar applied to click — P1-
+ * neutral) × the gear DPS mult (§5) × the permanent-token crew-DPS mult (§6.2).
+ * Idle DPS never draws crit/combo/beat/frenzy — active clicking stays king (P1).
+ * `permTokens`/`transcend` are optional so callers/tests without those slices fold
+ * the empty (×1) bonus.
  */
 export function dpsOf(state: DerivedInput): number {
   const hpf = state.heaven.hpf;
@@ -265,6 +282,7 @@ export function dpsOf(state: DerivedInput): number {
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientDpsMult(state.ancients) *
     heavenGlobalMult(hpf) *
+    (state.transcend ? transcendGlobalMult(state.transcend.te) : 1) *
     (state.gear ? dpsGearMult(state.gear) : 1) *
     (state.permTokens ? permTokenDpsMult(state.permTokens) : 1)
   );
@@ -273,7 +291,9 @@ export function dpsOf(state: DerivedInput): number {
 /**
  * Click (shake) damage before crit/combo/beat/frenzy: raw click × held-soul mult
  * (HPF-amplified) × Twerkules' Ancient click mult × the +2 %/HPF global mult × the
- * gear click mult (§5 — the strongest gear buffs are click buffs, P1).
+ * Transzendenz ×3^TE global mult (§4.5.3, the SAME scalar `dpsOf` folds in, so the
+ * click:idle ratio is unchanged — P1-neutral) × the gear click mult (§5 — the
+ * strongest gear buffs are click buffs, P1). `transcend` optional ⇒ ×1 when absent.
  */
 export function clickDamageOf(state: DerivedInput): number {
   const hpf = state.heaven.hpf;
@@ -282,6 +302,7 @@ export function clickDamageOf(state: DerivedInput): number {
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientClickMult(state.ancients) *
     heavenGlobalMult(hpf) *
+    (state.transcend ? transcendGlobalMult(state.transcend.te) : 1) *
     (state.gear ? clickGearMult(state.gear) : 1)
   );
 }
@@ -384,18 +405,23 @@ export function bossFirstKillZones(
 /**
  * Build the pure gear-unlock context (§5.3) from the CH-state: zone gate from
  * `lifetimeMaxZone`, boss-first-kills from `bossFirstKillZones` (incl. the legacy
- * Tyrann claim), Himmelfahrten from the L2 count, and `crafted` from the gear slice's
- * craft latch (Neon-Ninja/Pfirsich-Pirat once a provisional 🧩-craft has run, §5.3).
- * `gear` is optional so older call sites (which never craft) still get an empty set.
+ * Tyrann claim), Himmelfahrten from the L2 count, `transcendences` from the L3 count
+ * (drives Diamant-Booty, §4.5.3), and `crafted` from the gear slice's craft latch
+ * (Neon-Ninja/Pfirsich-Pirat once a provisional 🧩-craft has run, §5.3). `gear`/
+ * `transcend` are optional so older call sites still get an empty set / 0 count.
  * Consumed by `skinUnlocked` in the glue and part 3's equip UI.
  */
 export function gearUnlockCtx(
-  state: Pick<ChState, 'lifetimeMaxZone' | 'legacyTyrann' | 'heaven'> & { gear?: GearState },
+  state: Pick<ChState, 'lifetimeMaxZone' | 'legacyTyrann' | 'heaven'> & {
+    gear?: GearState;
+    transcend?: TranscendState;
+  },
 ): UnlockCtx {
   return {
     lifetimeMaxZone: unlockZone(state), // floored by gear.zoneEver — survives Himmelfahrt
     bossFirstKills: bossFirstKillZones(state),
     himmelfahrten: state.heaven.ascensions2,
+    transcendences: state.transcend?.transcendences ?? 0,
     crafted: new Set<string>(state.gear?.crafted ?? []),
   };
 }
@@ -472,6 +498,49 @@ export function himmelfahrtState(state: ChState): ChState {
     permTokens: state.permTokens,
     peach: state.peach,
     // Retention meta (§7) survives a Himmelfahrt too (lifetime acquisitions).
+    meta: state.meta,
+    achievements: state.achievements,
+  };
+}
+
+/**
+ * Transzendenz (L3): bank TE from the lifetime-HPF total, then reset ALL of L1 **and**
+ * L2 per the §4.5.3 reset scope (the `transcend.ts` reset/preserve contract). The
+ * whole tour (gold/crew/zone/kills/lifetime record), RS (`souls` + `rsLifetime`),
+ * Twerk-Ahnen (`ancients`) AND the entire heaven state (HPF + Himmelsbaum) fall to
+ * fresh (`createChState()` seeds `createHeaven()`); **gilds, gear/skins, loot
+ * (chests/tokens/peach), retention meta, lifetime stats/totalClicks, the RNG, the
+ * legacy latches and — new here — the banked Transzendenz slice all survive.** The
+ * gate metric is lifetime HPF (`state.heaven.hpfLifetime`), NOT held HPF.
+ *
+ * Pure and safe at 0 gain: `bankTranscendence` banks Math.max(0, …) TE and just bumps
+ * the count, so calling this below the gate merely resets the tour for no TE. Part 2
+ * MUST gate the button on `canTranscend(state.transcend, state.heaven.hpfLifetime)`
+ * so the reset is never triggered without a real gain.
+ */
+export function transcendState(state: ChState): ChState {
+  const transcend = bankTranscendence(state.transcend, state.heaven.hpfLifetime);
+  return {
+    ...createChState(), // fresh L1 tour + fresh L2 heaven (createHeaven())
+    transcend, // the banked L3 slice survives (held TE + Mythos ledger carry over)
+    gilds: state.gilds, // Vergoldungen survive every reset
+    totalClicks: state.totalClicks,
+    rng: state.rng,
+    stats: state.stats,
+    legacyImported: state.legacyImported,
+    // Skins/levels/stars are permanent meta (§5) — survive Transzendenz. Latch the
+    // deepest zone ever reached BEFORE `lifetimeMaxZone` falls to 1, so zone/boss
+    // skin unlocks never re-lock (§5.3 one-way gates), exactly as a Himmelfahrt does.
+    gear: {
+      ...state.gear,
+      zoneEver: Math.max(state.gear.zoneEver, state.lifetimeMaxZone, state.runMaxZone),
+    },
+    legacyTyrann: state.legacyTyrann,
+    // Loot meta (§6) survives — keys/chests/pity/skins, permanent tokens, peach schedule.
+    chests: state.chests,
+    permTokens: state.permTokens,
+    peach: state.peach,
+    // Retention meta (§7) survives (lifetime acquisitions).
     meta: state.meta,
     achievements: state.achievements,
   };
