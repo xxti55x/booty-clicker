@@ -100,10 +100,15 @@ export interface TreeNodeConfig {
   readonly costs: readonly number[];
 }
 
+/** Key-drop bonus fraction the Truhen-Magnet node grants (spec §4.5.2: +25 %). */
+export const TRUHEN_MAGNET_KEYDROP = 0.25;
+
 /**
- * The active grundknoten (spec §4.5.2). The combat/loot nodes (Beat-Drop,
- * Pfirsichregen, Truhen-Magnet, Bühnen-Sprinter) are intentionally deferred to
- * M12 so no HPF is spent on a no-op; they'll be appended as data when they land.
+ * The active grundknoten (spec §4.5.2) plus the M12 loot node **Truhen-Magnet**.
+ * The remaining combat nodes (Beat-Drop, Pfirsichregen, Bühnen-Sprinter) stay
+ * deferred so no HPF is spent on a no-op; they'll be appended as data when they
+ * land. Truhen-Magnet lands now (M12) as a single 15-HPF node → +25 % key drops
+ * (its effect is consumed by `keyDropMult` in the loot glue, §6.1).
  */
 export const TREE_NODES: readonly TreeNodeConfig[] = [
   {
@@ -129,6 +134,12 @@ export const TREE_NODES: readonly TreeNodeConfig[] = [
     name: 'Ekstase-Ausdauer I–III',
     desc: 'Ekstase +3 s je Stufe',
     costs: [12, 30, 75],
+  },
+  {
+    id: 'truhenmagnet',
+    name: 'Truhen-Magnet',
+    desc: '+25 % Schlüssel-Drops',
+    costs: [15],
   },
 ];
 
@@ -206,4 +217,13 @@ export function fruhstarterFraction(heaven: HeavenState): number {
 /** Extra Ekstase duration in ms: +3 s per Ekstase-Ausdauer level. */
 export function ekstaseBonusMs(heaven: HeavenState): number {
   return treeLevel(heaven, 'ekstaseausdauer') * 3000;
+}
+
+/**
+ * Additive key-drop bonus fraction from the Truhen-Magnet node (spec §4.5.2/§6.1):
+ * a single-level node worth +25 % key drops (0 when unbought). Fed into the loot
+ * glue's `keyDropMult` so boss/peach/quest key drops scale up.
+ */
+export function truhenMagnetBonus(heaven: HeavenState): number {
+  return treeLevel(heaven, 'truhenmagnet') > 0 ? TRUHEN_MAGNET_KEYDROP : 0;
 }

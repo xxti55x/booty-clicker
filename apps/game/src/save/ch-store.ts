@@ -5,12 +5,23 @@
  */
 import { type AbilityState, ABILITY_CHARGE_MAX, createAbility } from '../game/ability';
 import { type AncientLevels, createAncients } from '../game/ancients';
+import {
+  CHEST_SKINS,
+  type ChestTier,
+  type PermTokens,
+  createPermTokens,
+  normalizePity,
+} from '../game/chests';
 import { goldFor, monsterHp } from '../game/combat';
 import {
   type ChStats,
   type ChState,
+  type ChestsState,
   type ComboSave,
+  type PeachState,
+  createChests,
   createComboSave,
+  createPeach,
   createStats,
 } from '../game/ch-state';
 import { type GearState, KULISSE_BUFFS, createGear } from '../game/gear';
@@ -22,7 +33,7 @@ import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 6;
+export const CH_SCHEMA = 7;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -52,7 +63,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (M11, v6): the live ChState + envelope. */
+/** The current persisted shape (M12, v7): the live ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -80,11 +91,12 @@ function isFiniteNumber(v: unknown): v is number {
  * Never-throw validation of a stored CH save (the v5 guard). The gameplay-
  * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
  * The meta/juice fields (rng/stats/legacyImported/ability/combo/gilds/rsLifetime/
- * ancients/heaven) are deliberately NOT gated here: they are runtime bookkeeping
- * and get repaired (fresh seed / zeroed stats / false flag / default ability+combo
- * / pruned gilds / clamped highwater / sanitised ancients+heaven) in `stateFromSave`
- * — the same "repair, don't nuke progress" spirit as the runMaxZone invariant.
- * Per-field type+range checks for them live in the `repair*` helpers below.
+ * ancients/heaven/gear/chests/permTokens/peach) are deliberately NOT gated here:
+ * they are runtime bookkeeping and get repaired (fresh seed / zeroed stats / false
+ * flag / default ability+combo / pruned gilds / clamped highwater / sanitised
+ * ancients+heaven+gear / defaulted loot slices) in `stateFromSave` — the same
+ * "repair, don't nuke progress" spirit as the runMaxZone invariant. Per-field
+ * type+range checks for them live in the `repair*` helpers below.
  */
 export function isChSave(raw: unknown): raw is ChSaveLatest {
   if (!isRecord(raw)) return false;
@@ -252,6 +264,66 @@ function repairGear(v: unknown): GearState {
   };
 }
 
+const CHEST_SKIN_IDS: ReadonlySet<string> = new Set(CHEST_SKINS.map((s) => s.id));
+
+/** Sanitise one chest/key count: a non-negative integer, else 0. */
+function repairCount(v: unknown): number {
+  return isFiniteNumber(v) && v >= 0 ? Math.floor(v) : 0;
+}
+
+/**
+ * Repair the persisted loot slice (v7, §6): 🔑 + per-tier chest counts are clamped
+ * to non-negative ints, the pity map is normalised (all four tiers ≥ 0 via
+ * `normalizePity`), and owned chest-skins are filtered to real catalog ids (deduped;
+ * junk/prototype keys dropped, mirroring `repairGear.crafted`). A wholly non-object
+ * (or absent) loot slice becomes a fresh `createChests()`. Never throws; a corrupt
+ * loot slice repairs to defaults and never nukes real progress on other slices.
+ */
+function repairChests(v: unknown): ChestsState {
+  const def = createChests();
+  if (!isRecord(v)) return def;
+  const invSrc = isRecord(v.inventory) ? v.inventory : {};
+  const inventory = {
+    wood: repairCount(invSrc.wood),
+    gold: repairCount(invSrc.gold),
+    diamond: repairCount(invSrc.diamond),
+    mythic: repairCount(invSrc.mythic),
+  } satisfies Record<ChestTier, number>;
+  const skins = Array.isArray(v.skins)
+    ? [
+        ...new Set(
+          v.skins.filter((id): id is string => typeof id === 'string' && CHEST_SKIN_IDS.has(id)),
+        ),
+      ]
+    : def.skins;
+  return {
+    keys: repairCount(v.keys),
+    inventory,
+    pity: normalizePity(isRecord(v.pity) ? v.pity : null),
+    skins,
+  };
+}
+
+/** Repair the permanent-token slice (v7, §6.2): keep only positive-int counts, else empty. */
+function repairPermTokens(v: unknown): PermTokens {
+  if (!isRecord(v)) return createPermTokens();
+  const out: PermTokens = {};
+  for (const [id, n] of Object.entries(v)) if (isNonNegInt(n) && n > 0) out[id] = n;
+  return out;
+}
+
+/**
+ * Repair the Golden-Peach slice (v7, §6.1): `nextPeachAt`/`boostUntil` must be
+ * finite and ≥ 0 (negative/NaN ⇒ 0). The absurd-future clamp (clock set forward,
+ * then back) is deferred to the boot glue, which re-rolls `nextPeachAt` and clears a
+ * stale `boostUntil` against `now` — exactly like the sugar timer (§9.2.2). Never throws.
+ */
+function repairPeach(v: unknown): PeachState {
+  if (!isRecord(v)) return createPeach();
+  const nn = (x: unknown): number => (isFiniteNumber(x) && x >= 0 ? x : 0);
+  return { nextPeachAt: nn(v.nextPeachAt), boostUntil: nn(v.boostUntil) };
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
 function stateFromSave(save: ChSaveLatest): ChState {
   const souls = save.souls;
@@ -279,6 +351,9 @@ function stateFromSave(save: ChSaveLatest): ChState {
     heaven: repairHeaven(save.heaven),
     gear: repairGear(save.gear),
     legacyTyrann: save.legacyTyrann === true,
+    chests: repairChests(save.chests),
+    permTokens: repairPermTokens(save.permTokens),
+    peach: repairPeach(save.peach),
   };
 }
 
@@ -353,12 +428,29 @@ function migrateChV5toV6(raw: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+/**
+ * v6 → v7: fill the M12 defaults — an empty loot inventory (no 🔑/chests, zeroed
+ * pity, no chest-skins), an empty permanent-token pool and an unseeded Golden-Peach
+ * slice (the glue seeds `rollNextPeachAt` on the first boot). No existing field is
+ * touched, so the migration is lossless.
+ */
+function migrateChV6toV7(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    v: 7,
+    chests: createChests(),
+    permTokens: createPermTokens(),
+    peach: createPeach(),
+  };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
   3: migrateChV3toV4,
   4: migrateChV4toV5,
   5: migrateChV5toV6,
+  6: migrateChV6toV7,
 };
 
 /**

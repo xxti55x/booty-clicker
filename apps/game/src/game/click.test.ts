@@ -83,6 +83,26 @@ describe('effectiveClick', () => {
     expect(effectiveClick({ baseClick: 10, combo: 0, crit: false, critMultBonus: 0.25 })).toBe(10);
   });
 
+  it('scales the WHOLE crit multiplier by critMultFactor (permanent crit-damage tokens)', () => {
+    // ×5 base crit × 1.1 token factor = ×5.5 on a crit; the factor multiplies the
+    // additive gear/tier bonus too (5.25 × 1.1 = 5.775).
+    expect(effectiveClick({ baseClick: 10, combo: 0, crit: true, critMultFactor: 1.1 })).toBe(55);
+    expect(
+      effectiveClick({
+        baseClick: 10,
+        combo: 0,
+        crit: true,
+        critMultBonus: 0.25,
+        critMultFactor: 1.1,
+      }),
+    ).toBeCloseTo(57.75, 6);
+    // No effect off a crit, and it defaults to 1.
+    expect(effectiveClick({ baseClick: 10, combo: 0, crit: false, critMultFactor: 5 })).toBe(10);
+    expect(effectiveClick({ baseClick: 10, combo: 0, crit: true })).toBe(
+      effectiveClick({ baseClick: 10, combo: 0, crit: true, critMultFactor: 1 }),
+    );
+  });
+
   it('has EV ≈ 1.8 per click over 100k seeded rolls (0.2·5 + 0.8·1)', () => {
     const rng = new Rng({ seed: 12345, cursor: 0 });
     const n = 100_000;

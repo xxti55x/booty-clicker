@@ -3,6 +3,59 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M12 — Pfirsich-Truhen & Loot (Teil 2: Save v7 + Ökonomie-Wiring)
+
+- **2026-07-18 — CH-Save v7: `chests { keys, inventory, pity, skins }` · `permTokens` ·
+  `peach { nextPeachAt, boostUntil }`.** Migration `v6→v7` verlustfrei (nur Defaults),
+  Validator-Muster wie gehabt: Kern streng geprüft, Loot-Slices in `stateFromSave`
+  feld-isoliert repariert (Counts = non-neg-Ints, Pity via `normalizePity`, Tokens =
+  positive Ints, Peach-Timestamps finite ≥ 0). Ein korruptes Loot-Teilobjekt fällt auf
+  Default, nie auf Fresh-Start — echter Fortschritt anderer Slices bleibt.
+
+- **2026-07-18 — Truhen-Skins als Kollektiv-Set in `chests.skins`, KEINE 3D-Rigs.**
+  §9.2.1 listet für v7 nur `chests {keys,inventory,pity}`; der Duplikat-Schutz (§6.3.2)
+  braucht aber einen persistenten Besitz-Set. Statt eines neuen Top-Level-Felds erweitert
+  `chests` um `skins: string[]` (Collectibles) — Duplikat → 🧩 via `resolveDuplicate`
+  gegen `ownedChestSkins()`. Bewusst kein neues Rig (Scope-Vermeidung).
+
+- **2026-07-18 — Ein einziges ×3-Einkommensfenster (Peach); Truhen-Boosts stacken DAUER.**
+  Der State hält nur `peach.boostUntil` (kein Multiplikator-Feld). Der Chest-`boost`-Reward
+  (×2) verlängert dieses Fenster (`base = max(boostUntil, now); boostUntil = base + durMs`),
+  vereinheitlicht auf den Peach-×3 — die spec-Regel „stackt Dauer, nicht Faktor" (§6.2)
+  wörtlich. Der Boost multipliziert das GOLD pro Kill (in `onKillProgress`, einmal), also
+  alle Einkommensströme (Klick + Idle + Coach) gleichmäßig; NICHT den Roh-DPS-Schaden
+  (keine HP-Wall-/Boss-Pacing-Verzerrung). Offline lässt den 60-s-Boost bewusst weg
+  (irrelevant über Stunden, stale `boostUntil` wäre falsch).
+
+- **2026-07-18 — Permanent-Tokens folden an denselben Sites wie Ahnen/Gear, genau einmal.**
+  `permTokenDpsMult` in `dpsOf` (empty ⇒ ×1, Sim unberührt); `permTokenGoldMult` in den
+  aggregierten `goldMult(state)` (Kills + Offline); `permTokenCritChance` in die Krit-Chance
+  (nach der 40 %-Kappe summiert); der Krit-Schaden-Token als neuer `critMultFactor` in
+  `effectiveClick` (skaliert den GANZEN Krit-Multiplikator, additiv-rückwärtskompatibel).
+
+- **2026-07-18 — Truhen-Luck & Key-Drop-Quellen als pure `ch-state`-Helfer.** `chestLuck`
+  (Gear-Chest-Luck inkl. Tyrann-Sterne + Truhilda) → `ctx.luck` für `openChest`;
+  `keyDropMult = 1 + Gear-keyDrop + Truhen-Magnet`. Der Truhen-Magnet-Knoten (§4.5.2) landet
+  jetzt in `heaven.ts` (15 HPF, +25 % Key-Drops, `truhenMagnetBonus`). Boss-Key nutzt
+  `keyDropAmount(1, keyDropMult, rng)`: ganzer Teil garantiert („1 garantiert"), Bruchteil =
+  geseedete Bonus-Chance ⇒ Truhen-Magnet hebt die Drops messbar.
+
+- **2026-07-18 — Drop-Hooks an den bestehenden Kill/Combo/Session-Sites in `main.ts`.**
+  Boss-Kill: +1 🔑 (× keyDropMult) + Truhe `chestTierForBoss(bossZone)`; der provisorische
+  🧩-Faucet (M11) bleibt als sanfte Frühgame-Brücke bestehen. Rivalen-Kill: `rivalChestChance(
+chestLuck)` (3 % × Luck) → Holztruhe. Combo-Tier 3: 1 🔑, einmal pro Run (Laufzeit-Flag,
+  Reset bei Aszension/Himmelfahrt/Import). Session-Drip: alle ~500 Klicks 1 Holztruhe,
+  ~3/Tag via leichtem In-Session-Day-Stamp (Laufzeit; das volle Daily ist M13, §7.1) —
+  ein Reload setzt Drip/Combo-Flag zurück (dokumentiert, marginal).
+
+- **2026-07-18 — Golden-Peach kehrt als Event zurück; Schedule/Boost persistiert.** Boot
+  seedet/klemmt `nextPeachAt` (unseeded/absurde Zukunft ⇒ re-roll, wie der Sugar-Timer);
+  die Loop despawnt/reschedult via `updatePeachSchedule`. `catchPeach()` (Glue für Teil 3)
+  aktiviert ×3/60 s + `peachKeyRoll` (25 % → 🔑). `openChestFromInventory(tier)` (Glue für
+  Teil 3) konsumiert 🔑 + Truhe, öffnet über das pure `openChest`, duplikat-schützt Jackpots,
+  creditet jeden Reward, schreibt Pity + RNG-Cursor zurück und persistiert (save-scum-fest).
+  Beides plus ein `snapshot()` liegt unter `window.chLoot` für das 🎁-UI (Teil 3) + Smoke.
+
 ## M11 — Skins als Gear
 
 - **2026-07-18 (Review) — Katalog-Rebalance: Klick-Gear IST das stärkste Gear (P1),

@@ -3,19 +3,29 @@ import { describe, expect, it } from 'vitest';
 import { createAbility } from './ability';
 import { soulsForMaxZone } from './ascension';
 import {
+  RIVAL_CHEST_CHANCE,
   ascendState,
   bossFirstKillZones,
+  chestLuck,
   clickDamageOf,
   createChState,
+  createChests,
   createComboSave,
+  createPeach,
   dpsOf,
   gearUnlockCtx,
+  goldMult,
   himmelfahrtState,
+  keyDropAmount,
+  keyDropMult,
+  peachIncomeMult,
+  rivalChestChance,
 } from './ch-state';
 import { createAncients } from './ancients';
 import { createGear, skinUnlocked } from './gear';
 import { createHeaven } from './heaven';
 import { clickDamageRaw, totalRawDps } from './heroes';
+import { PEACH_BOOST } from './peach';
 
 describe('ch-state', () => {
   it('fresh state starts at zone 1 with nothing', () => {
@@ -218,6 +228,93 @@ describe('ch-state', () => {
     expect(skinUnlocked('lava', after)).toBe(true);
     expect(skinUnlocked('gyrator', after)).toBe(true); // 1 Himmelfahrt banked
     expect(skinUnlocked('diamond', after)).toBe(false); // still Transzendenz-locked
+  });
+});
+
+// M12 (§6): the loot economy folds into the ch-state derived layer — permanent
+// tokens into crit/gold/dps, Truhen-Luck + key-drop sources, and the loot meta
+// slices survive both resets.
+describe('ch-state — loot threading (§6)', () => {
+  it('fresh state seeds empty loot / token / peach slices', () => {
+    const s = createChState();
+    expect(s.chests).toEqual(createChests());
+    expect(s.permTokens).toEqual({});
+    expect(s.peach).toEqual(createPeach());
+    expect(s.chests.inventory).toEqual({ wood: 0, gold: 0, diamond: 0, mythic: 0 });
+  });
+
+  it('permanent dps-tokens fold into dpsOf (empty ⇒ ×1, so old callers unaffected)', () => {
+    const base = { ...createChState(), crew: { boss: 20 } };
+    expect(dpsOf(base)).toBeCloseTo(totalRawDps({ boss: 20 }), 6); // empty tokens ⇒ ×1
+    const withTokens = { ...base, permTokens: { dpsPct: 10 } }; // +1 %·10 = ×1.1
+    expect(dpsOf(withTokens)).toBeCloseTo(totalRawDps({ boss: 20 }) * 1.1, 6);
+  });
+
+  it('goldMult multiplies Peachiel × gold-gear × permanent gold-tokens (no peach boost)', () => {
+    const s = { ...createChState(), ancients: { peachiel: 2 }, permTokens: { goldPct: 5 } };
+    // (1 + 0.10·2) × 1 (classic gear) × (1 + 0.01·5) = 1.2 × 1.05.
+    expect(goldMult(s)).toBeCloseTo(1.2 * 1.05, 6);
+    expect(goldMult(createChState())).toBe(1); // neutral by default
+  });
+
+  it('chestLuck sums gear chest-luck + Truhilda (fed to openChest as ctx.luck)', () => {
+    expect(chestLuck(createChState())).toBe(0); // classic gear, no Truhilda
+    const s = { ...createChState(), ancients: { truhilda: 3 } }; // +2 %·3 = 0.06
+    expect(chestLuck(s)).toBeCloseTo(0.06, 6);
+  });
+
+  it('keyDropMult adds the Truhen-Magnet node (+25 %) — raises key drops', () => {
+    expect(keyDropMult(createChState())).toBe(1);
+    const magnet = { ...createChState(), heaven: { ...createHeaven(), tree: { truhenmagnet: 1 } } };
+    expect(keyDropMult(magnet)).toBeCloseTo(1.25, 6);
+    expect(keyDropMult(magnet)).toBeGreaterThan(keyDropMult(createChState()));
+  });
+
+  it('rivalChestChance is the 3 % base scaled by Truhen-Luck (monotone)', () => {
+    expect(rivalChestChance(0)).toBeCloseTo(RIVAL_CHEST_CHANCE, 6);
+    expect(rivalChestChance(1)).toBeCloseTo(RIVAL_CHEST_CHANCE * 2, 6);
+    expect(rivalChestChance(0.5)).toBeGreaterThan(rivalChestChance(0));
+  });
+
+  it('keyDropAmount guarantees the whole part and rolls the fractional bonus key', () => {
+    expect(keyDropAmount(1, 1, 0.5)).toBe(1); // no fractional part ⇒ always 1
+    expect(keyDropAmount(1, 1.25, 0.1)).toBe(2); // 0.1 < 0.25 ⇒ bonus key
+    expect(keyDropAmount(1, 1.25, 0.9)).toBe(1); // 0.9 ≥ 0.25 ⇒ no bonus
+    expect(keyDropAmount(2, 1, 0.99)).toBe(2); // base ≥ 1 always guaranteed
+  });
+
+  it('peachIncomeMult is ×3 while a caught boost is live, else ×1', () => {
+    const now = 1_000_000;
+    const active = { ...createChState(), peach: { nextPeachAt: 0, boostUntil: now + 30_000 } };
+    expect(peachIncomeMult(active, now)).toBe(PEACH_BOOST); // ×3
+    expect(peachIncomeMult(active, now + 40_000)).toBe(1); // expired
+    expect(peachIncomeMult(createChState(), now)).toBe(1);
+  });
+
+  it('loot meta (chests/tokens/peach) survive ascension and Himmelfahrt', () => {
+    const s = {
+      ...createChState(),
+      zone: 60,
+      runMaxZone: 60,
+      lifetimeMaxZone: 60,
+      rsLifetime: 1_000_000,
+      chests: {
+        keys: 7,
+        inventory: { wood: 2, gold: 1, diamond: 0, mythic: 0 },
+        pity: { wood: 0, gold: 5, diamond: 1, mythic: 0 },
+        skins: ['gold-royal'],
+      },
+      permTokens: { critDmg: 4, goldPct: 2 },
+      peach: { nextPeachAt: 5_000, boostUntil: 9_000 },
+    };
+    const asc = ascendState(s);
+    expect(asc.chests).toEqual(s.chests);
+    expect(asc.permTokens).toEqual(s.permTokens);
+    expect(asc.peach).toEqual(s.peach);
+    const hf = himmelfahrtState(s);
+    expect(hf.chests).toEqual(s.chests);
+    expect(hf.permTokens).toEqual(s.permTokens);
+    expect(hf.peach).toEqual(s.peach);
   });
 });
 

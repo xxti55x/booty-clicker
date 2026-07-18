@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { SOUL_BONUS, soulMult } from './ascension';
 import {
+  TREE_NODES,
+  TRUHEN_MAGNET_KEYDROP,
   bankHimmelfahrt,
   buyTreeNode,
+  canBuyTreeNode,
   canHimmelfahrt,
   coachCps,
   coachDps,
@@ -16,6 +19,8 @@ import {
   offlineCapS,
   soulBonusEff,
   treeLevel,
+  treeNodeCost,
+  truhenMagnetBonus,
 } from './heaven';
 
 describe('heaven — HPF formula (§4.5.2, M10-AC3)', () => {
@@ -99,6 +104,30 @@ describe('heaven — Himmelsbaum (spent HPF, permanent)', () => {
       6,
     );
     expect(ekstaseBonusMs({ ...createHeaven(), tree: { ekstaseausdauer: 3 } })).toBe(9000);
+  });
+});
+
+// M12 (§4.5.2/§6.1): the Truhen-Magnet Himmelsbaum node lands as a 15-HPF, +25 %
+// key-drop node — data present, buyable, effect exposed via `truhenMagnetBonus`.
+describe('heaven — Truhen-Magnet (§4.5.2/§6.1)', () => {
+  it('is a single-level 15-HPF node in the catalog', () => {
+    const node = TREE_NODES.find((n) => n.id === 'truhenmagnet');
+    expect(node).toBeDefined();
+    expect(node!.costs).toEqual([15]);
+    expect(treeNodeCost('truhenmagnet', 0)).toBe(15);
+    expect(treeNodeCost('truhenmagnet', 1)).toBeNull(); // capped at one level
+  });
+
+  it('grants +25 % key drops once bought (0 when unbought)', () => {
+    expect(truhenMagnetBonus(createHeaven())).toBe(0);
+    const h = { ...createHeaven(), hpf: 20, hpfLifetime: 20 };
+    expect(canBuyTreeNode(h, 'truhenmagnet')).toBe(true);
+    const bought = buyTreeNode(h, 'truhenmagnet');
+    expect(bought.bought).toBe(true);
+    expect(bought.heaven.hpf).toBe(5); // 20 − 15
+    expect(treeLevel(bought.heaven, 'truhenmagnet')).toBe(1);
+    expect(truhenMagnetBonus(bought.heaven)).toBeCloseTo(TRUHEN_MAGNET_KEYDROP, 6);
+    expect(TRUHEN_MAGNET_KEYDROP).toBe(0.25);
   });
 });
 

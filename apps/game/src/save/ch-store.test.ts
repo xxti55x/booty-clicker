@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import { ABILITY_CHARGE_MAX, createAbility } from '../game/ability';
 import { pendingSouls, soulsForMaxZone } from '../game/ascension';
-import { type ChState, createChState, createComboSave, createStats } from '../game/ch-state';
+import {
+  type ChState,
+  createChState,
+  createChests,
+  createComboSave,
+  createPeach,
+  createStats,
+} from '../game/ch-state';
 import { createGear } from '../game/gear';
 import { monsterHp } from '../game/combat';
 import {
@@ -330,6 +337,141 @@ describe('ch-store — v5 migration & repair (M10)', () => {
     const s = deserializeCh(JSON.stringify(raw));
     expect(s!.heaven.hpf).toBe(10); // clamped to hpfLifetime
     expect(s!.heaven.tree).toEqual({ coach: 5 });
+  });
+});
+
+describe('ch-store — v7 migration & repair (M12)', () => {
+  // A full v6 blob (the pre-M12 shape) for the migration tests.
+  const v6Blob = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    v: 6,
+    lastSeen: 13000,
+    gold: 4000,
+    zone: 55,
+    killsThisZone: 3,
+    runMaxZone: 55,
+    crew: { boss: 25, legend: 4 },
+    souls: 130,
+    lifetimeMaxZone: 55,
+    totalClicks: 1200,
+    rng: { seed: 555, cursor: 123 },
+    stats: { ...createStats(), crits: 44 },
+    legacyImported: true,
+    ability: createAbility(),
+    combo: { stacks: 55 },
+    gilds: { boss: 6 },
+    rsLifetime: 130,
+    ancients: { twerkules: 9 },
+    heaven: { hpf: 3, hpfLifetime: 7, ascensions2: 1, tree: { coach: 4 } },
+    gear: { ...createGear(), skin: 'disco', shards: 200 },
+    legacyTyrann: true,
+    ...over,
+  });
+
+  it('migrates a v6 blob losslessly into v7 (loot/token/peach defaults, all v6 fields intact)', () => {
+    const store = memStorage();
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v6Blob()));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    // v6 fields carried through losslessly.
+    expect(s.gold).toBe(4000);
+    expect(s.crew).toEqual({ boss: 25, legend: 4 });
+    expect(s.souls).toBe(130);
+    expect(s.ancients).toEqual({ twerkules: 9 });
+    expect(s.heaven).toEqual({ hpf: 3, hpfLifetime: 7, ascensions2: 1, tree: { coach: 4 } });
+    expect(s.gear.skin).toBe('disco');
+    expect(s.gear.shards).toBe(200);
+    expect(s.legacyTyrann).toBe(true);
+    // v7 defaults added.
+    expect(s.chests).toEqual(createChests());
+    expect(s.permTokens).toEqual({});
+    expect(s.peach).toEqual(createPeach());
+  });
+
+  it('round-trips a full loot slice (keys/inventory/pity/skins), tokens and peach', () => {
+    const store = memStorage();
+    const s: ChState = {
+      ...createChState(),
+      zone: 30,
+      runMaxZone: 30,
+      lifetimeMaxZone: 30,
+      chests: {
+        keys: 9,
+        inventory: { wood: 3, gold: 2, diamond: 1, mythic: 0 },
+        pity: { wood: 0, gold: 7, diamond: 2, mythic: 1 },
+        skins: ['gold-royal', 'diamond-frost'],
+      },
+      permTokens: { critDmg: 12, critChance: 3, goldPct: 5, dpsPct: 8 },
+      peach: { nextPeachAt: 1_800_000_500_000, boostUntil: 1_800_000_100_000 },
+    };
+    saveCh(s, 6000, store);
+    const loaded = loadCh(store);
+    expect(loaded!.state.chests).toEqual(s.chests);
+    expect(loaded!.state.permTokens).toEqual(s.permTokens);
+    expect(loaded!.state.peach).toEqual(s.peach);
+  });
+
+  it('repairs wholly corrupt loot/token/peach slices to defaults (never nukes progress)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.chests = 'garbage';
+    raw.permTokens = 42;
+    raw.peach = null;
+    // Real progress on OTHER slices must survive the loot repair.
+    raw.souls = 77;
+    raw.crew = { boss: 9 };
+    let s: ChState | null = null;
+    expect(() => {
+      s = deserializeCh(JSON.stringify(raw));
+    }).not.toThrow();
+    expect(s).not.toBeNull();
+    expect(s!.chests).toEqual(createChests());
+    expect(s!.permTokens).toEqual({});
+    expect(s!.peach).toEqual(createPeach());
+    expect(s!.souls).toBe(77);
+    expect(s!.crew).toEqual({ boss: 9 });
+  });
+
+  it('repairs corrupt loot SUB-fields in isolation (valid counts preserved)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.chests = {
+      keys: -3, // negative ⇒ 0
+      inventory: { wood: 2.9, gold: -1, diamond: 'x', mythic: 4 }, // floor/drop junk
+      pity: { gold: -5, diamond: 3, junk: 'x' }, // normalizePity ⇒ all four ≥ 0
+      skins: ['gold-royal', 'not-a-skin', 42, 'gold-royal'], // keep real ids, dedupe
+    };
+    raw.permTokens = { critDmg: 6, bad: -2, junk: 'x', frac: 1.5 }; // keep positive ints only
+    raw.peach = { nextPeachAt: -10, boostUntil: Number.NaN }; // ⇒ 0/0
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.chests.keys).toBe(0);
+    expect(s!.chests.inventory).toEqual({ wood: 2, gold: 0, diamond: 0, mythic: 4 });
+    expect(s!.chests.pity).toEqual({ wood: 0, gold: 0, diamond: 3, mythic: 0 });
+    expect(s!.chests.skins).toEqual(['gold-royal']);
+    expect(s!.permTokens).toEqual({ critDmg: 6 });
+    expect(s!.peach).toEqual({ nextPeachAt: 0, boostUntil: 0 });
+  });
+
+  it('migrates a v1 blob all the way through to v7 (loot defaults present)', () => {
+    const store = memStorage();
+    const v1 = {
+      v: 1,
+      lastSeen: 5000,
+      gold: 500,
+      zone: 12,
+      killsThisZone: 3,
+      runMaxZone: 12,
+      crew: { boss: 5 },
+      souls: 3,
+      lifetimeMaxZone: 12,
+      totalClicks: 42,
+    };
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v1));
+    const s = loadCh(store)!.state;
+    expect(s.gold).toBe(500);
+    expect(s.gear).toEqual(createGear());
+    expect(s.chests).toEqual(createChests());
+    expect(s.permTokens).toEqual({});
+    expect(s.peach).toEqual(createPeach());
   });
 });
 

@@ -119,6 +119,13 @@ export interface ClickCtx {
    */
   critMultBonus?: number;
   /**
+   * Multiplicative scale on the WHOLE crit multiplier (only applied when `crit`).
+   * The permanent „+1 % Krit-Schaden" token pool (§6.2) folds in here as
+   * `permTokenCritMult(tokens)` — an endless multiplier on crit damage, distinct
+   * from the additive `critMultBonus` gear/tier perks. Defaults to 1.
+   */
+  critMultFactor?: number;
+  /**
    * Product of every remaining multiplicative factor (beat, frenzy, gear, event…).
    * Defaults to 1; M8+ multiplies its own factors in here without touching callers.
    */
@@ -127,7 +134,7 @@ export interface ClickCtx {
 
 /** The effective damage of one click. */
 export function effectiveClick(ctx: ClickCtx): number {
-  const { baseClick, combo, crit, critMultBonus = 0, extraMult = 1 } = ctx;
-  const cm = crit ? critMult(critMultBonus) : 1;
+  const { baseClick, combo, crit, critMultBonus = 0, critMultFactor = 1, extraMult = 1 } = ctx;
+  const cm = crit ? critMult(critMultBonus) * Math.max(0, critMultFactor) : 1;
   return baseClick * comboMult(combo) * cm * extraMult;
 }

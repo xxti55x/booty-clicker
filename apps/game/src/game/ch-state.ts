@@ -8,8 +8,33 @@
  */
 import { type AbilityState, createAbility } from './ability';
 import { applyAscension, soulMult } from './ascension';
-import { type AncientLevels, ancientClickMult, ancientDpsMult, createAncients } from './ancients';
-import { type GearState, type UnlockCtx, clickGearMult, createGear, dpsGearMult } from './gear';
+import {
+  type AncientLevels,
+  ancientChestLuckBonus,
+  ancientClickMult,
+  ancientDpsMult,
+  ancientGoldMult,
+  createAncients,
+} from './ancients';
+import {
+  type ChestTier,
+  type PermTokens,
+  type PityState,
+  createPermTokens,
+  createPity,
+  permTokenDpsMult,
+  permTokenGoldMult,
+} from './chests';
+import {
+  type GearState,
+  type UnlockCtx,
+  chestLuckBonus,
+  clickGearMult,
+  createGear,
+  dpsGearMult,
+  goldGearMult,
+  keyDropBonus,
+} from './gear';
 import { type Gilds, createGilds } from './gild';
 import {
   type HeavenState,
@@ -17,8 +42,10 @@ import {
   createHeaven,
   heavenGlobalMult,
   soulBonusEff,
+  truhenMagnetBonus,
 } from './heaven';
 import { type CrewLevels, clickDamageRaw, createCrew, totalRawDps } from './heroes';
+import { incomeMultiplier } from './peach';
 import { createRngState, type RngState } from '../util/rng';
 
 /** Persisted combo slice (CH-save v3): only the stack count survives a reload. */
@@ -29,6 +56,47 @@ export interface ComboSave {
 /** A zeroed combo slice. */
 export function createComboSave(): ComboSave {
   return { stacks: 0 };
+}
+
+/**
+ * Pfirsich-Truhen inventory slice (CH-save v7, §6). `keys` are 🔑 (spent opening
+ * chests); `inventory` counts unopened chests per tier; `pity` holds the per-tier
+ * pity counters (§6.3.1, persisted); `skins` is the collectible set of owned
+ * jackpot chest-skin ids (§6.3.2 — a duplicate jackpot converts to 🧩). These are
+ * meta loot: they survive both ascension and Himmelfahrt.
+ */
+export interface ChestsState {
+  keys: number;
+  inventory: Record<ChestTier, number>;
+  pity: PityState;
+  /** Owned jackpot chest-skin ids (collectibles, not 3D rigs — §6.3.2). */
+  skins: string[];
+}
+
+/** A fresh, empty loot inventory (no keys, no chests, zeroed pity, no skins). */
+export function createChests(): ChestsState {
+  return {
+    keys: 0,
+    inventory: { wood: 0, gold: 0, diamond: 0, mythic: 0 },
+    pity: createPity(),
+    skins: [],
+  };
+}
+
+/**
+ * Golden-Peach event slice (CH-save v7, §6.1). `nextPeachAt` is the epoch-ms the
+ * next peach spawns (0 = unseeded ⇒ the glue seeds `rollNextPeachAt` on boot);
+ * `boostUntil` is the epoch-ms the active ×3 income boost runs until. The event
+ * schedule is real-time, so both survive ascension and Himmelfahrt.
+ */
+export interface PeachState {
+  nextPeachAt: number;
+  boostUntil: number;
+}
+
+/** A fresh (unseeded) Golden-Peach slice. */
+export function createPeach(): PeachState {
+  return { nextPeachAt: 0, boostUntil: 0 };
 }
 
 /** Lifetime bookkeeping counters (spec §9.2, CH-save v2). All non-negative. */
@@ -107,6 +175,12 @@ export interface ChState {
    * the boss-first-kill unlock context; set once at boot, survives everything.
    */
   legacyTyrann: boolean;
+  /** Pfirsich-Truhen: 🔑 + chest inventory + pity + owned skins (CH-save v7, §6). */
+  chests: ChestsState;
+  /** Permanent tokens: the endless crit/gold/dps buff pool (CH-save v7, §6.2). */
+  permTokens: PermTokens;
+  /** Golden-Peach event schedule + active ×3 boost window (CH-save v7, §6.1). */
+  peach: PeachState;
 }
 
 /** A brand-new run/profile. */
@@ -131,6 +205,9 @@ export function createChState(): ChState {
     heaven: createHeaven(),
     gear: createGear(),
     legacyTyrann: false,
+    chests: createChests(),
+    permTokens: createPermTokens(),
+    peach: createPeach(),
   };
 }
 
@@ -141,13 +218,15 @@ export function createChState(): ChState {
  */
 type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'heaven'> & {
   gear?: GearState;
+  permTokens?: PermTokens;
 };
 
 /**
  * Total crew DPS: raw crew (with gilds) × the held-soul multiplier (amplified by
  * held HPF) × Poposeidon's Ancient DPS mult × the +2 %/HPF global mult × the gear
- * DPS mult (§5). Idle DPS never draws crit/combo/beat/frenzy — active clicking
- * stays king (P1).
+ * DPS mult (§5) × the permanent-token crew-DPS mult (§6.2). Idle DPS never draws
+ * crit/combo/beat/frenzy — active clicking stays king (P1). `permTokens` is
+ * optional so callers/tests without a v7 slice fold the empty (×1) bonus.
  */
 export function dpsOf(state: DerivedInput): number {
   const hpf = state.heaven.hpf;
@@ -156,7 +235,8 @@ export function dpsOf(state: DerivedInput): number {
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientDpsMult(state.ancients) *
     heavenGlobalMult(hpf) *
-    (state.gear ? dpsGearMult(state.gear) : 1)
+    (state.gear ? dpsGearMult(state.gear) : 1) *
+    (state.permTokens ? permTokenDpsMult(state.permTokens) : 1)
   );
 }
 
@@ -174,6 +254,73 @@ export function clickDamageOf(state: DerivedInput): number {
     heavenGlobalMult(hpf) *
     (state.gear ? clickGearMult(state.gear) : 1)
   );
+}
+
+/**
+ * Full BP (gold) multiplier from the persistent meta stack (§4.6/§5/§6.2):
+ * Peachiel (Ancient) × gold-gear (§5) × the permanent gold-token pool. Does NOT
+ * include the transient Golden-Peach ×3 income boost — the glue folds that in
+ * live via `peach.incomeMultiplier` (kills) while offline accrual uses this alone.
+ */
+export function goldMult(
+  state: Pick<ChState, 'ancients' | 'gear'> & { permTokens?: PermTokens },
+): number {
+  return (
+    ancientGoldMult(state.ancients) *
+    goldGearMult(state.gear) *
+    (state.permTokens ? permTokenGoldMult(state.permTokens) : 1)
+  );
+}
+
+/**
+ * Summed Truhen-Luck fraction fed to `openChest` as `ctx.luck` (§6.3.4): the gear
+ * chest-luck total (which already folds Tyrann-skin stars) + Truhilda's Ancient
+ * chest-luck. Pure over `(gear, ancients)`; `applyLuck` clamps it to `LUCK_MAX_SHIFT`.
+ */
+export function chestLuck(state: Pick<ChState, 'gear' | 'ancients'>): number {
+  return chestLuckBonus(state.gear) + ancientChestLuckBonus(state.ancients);
+}
+
+/**
+ * Multiplier applied to key-drop chances (§6.1): `1 + gear keyDrop + Truhen-Magnet`
+ * (the Himmelsbaum node, +25 %). Pure over `(gear, heaven)`.
+ */
+export function keyDropMult(state: Pick<ChState, 'gear' | 'heaven'>): number {
+  return 1 + keyDropBonus(state.gear) + truhenMagnetBonus(state.heaven);
+}
+
+/**
+ * Realize an integer key count from a `base` guaranteed drop scaled by `mult`
+ * (`keyDropMult`): the whole part is guaranteed, the fractional part is a single
+ * seeded chance for one more 🔑. So a boss's `keyDropAmount(1, 1.25, …)` is always
+ * ≥ 1 („1 garantiert", §6.1) and pays a 25 %-chance bonus key with Truhen-Magnet.
+ * Pure over `(base, mult, rngFloat)`.
+ */
+export function keyDropAmount(base: number, mult: number, rngFloat: number): number {
+  const scaled = Math.max(0, base) * Math.max(0, mult);
+  const whole = Math.floor(scaled);
+  return whole + (rngFloat < scaled - whole ? 1 : 0);
+}
+
+/** Base chance a rival kill drops a Holztruhe (spec §6.1: 3 %). */
+export const RIVAL_CHEST_CHANCE = 0.03;
+
+/**
+ * Chance a rival kill drops a Holztruhe (spec §6.1): the 3 % base scaled by
+ * Truhen-Luck (`1 + luck`), so Truhilda/Tyrann-stars/Truhen-Magnet make wood
+ * chests rain a little harder. Pure over `luck`; the glue rolls it against the RNG.
+ */
+export function rivalChestChance(luck: number): number {
+  return RIVAL_CHEST_CHANCE * (1 + Math.max(0, luck));
+}
+
+/**
+ * Multiplier on the transient Golden-Peach ×3 income boost at `now` (§6.1). A thin
+ * re-export seam over `peach.incomeMultiplier` so the glue folds the live boost
+ * into kill gold through the ch-state derived layer (keeps `main.ts` imports tidy).
+ */
+export function peachIncomeMult(state: Pick<ChState, 'peach'>, now: number): number {
+  return incomeMultiplier(state.peach.boostUntil, now);
 }
 
 /**
@@ -253,6 +400,11 @@ export function ascendState(state: ChState): ChState {
     // zone ever reached so unlocks stay one-way through every later reset.
     gear: { ...state.gear, zoneEver: Math.max(state.gear.zoneEver, lifetimeMaxZone) },
     legacyTyrann: state.legacyTyrann,
+    // Loot is meta (§6): keys/chests/pity/skins, permanent tokens and the real-time
+    // peach schedule all survive an L1 ascension untouched.
+    chests: state.chests,
+    permTokens: state.permTokens,
+    peach: state.peach,
   };
 }
 
@@ -280,5 +432,10 @@ export function himmelfahrtState(state: ChState): ChState {
       zoneEver: Math.max(state.gear.zoneEver, state.lifetimeMaxZone, state.runMaxZone),
     },
     legacyTyrann: state.legacyTyrann,
+    // Loot meta (§6) survives a Himmelfahrt too — keys/chests/pity/skins, the
+    // permanent tokens and the real-time peach schedule all carry over.
+    chests: state.chests,
+    permTokens: state.permTokens,
+    peach: state.peach,
   };
 }

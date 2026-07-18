@@ -29,15 +29,40 @@ import {
   ancientComboWindowBonus,
   ancientCritChanceBonus,
   ancientEkstaseChargeReduction,
-  ancientGoldMult,
 } from './game/ancients';
 import {
   ascendState,
+  chestLuck,
   clickDamageOf,
   createChState,
   dpsOf,
+  goldMult,
   himmelfahrtState,
+  keyDropAmount,
+  keyDropMult,
+  peachIncomeMult,
+  rivalChestChance,
 } from './game/ch-state';
+import {
+  CHEST_TIERS,
+  type ChestTier,
+  type Reward,
+  KEY_COST,
+  addToken,
+  chestTierForBoss,
+  openChest,
+  permTokenCritChance,
+  permTokenCritMult,
+  resolveDuplicate,
+} from './game/chests';
+import {
+  PEACH_BOOST_S,
+  PEACH_MAX_S,
+  PEACH_VISIBLE_S,
+  activateBoost,
+  peachKeyRoll,
+  rollNextPeachAt,
+} from './game/peach';
 import {
   beatBonus,
   beatWindowMs,
@@ -57,7 +82,15 @@ import {
   tierCritChanceBonus,
   tierCritMultBonus,
 } from './game/combo';
-import { type CombatState, hit, spawnFor, tickBoss, travelTo } from './game/combat';
+import {
+  type CombatState,
+  goldFor,
+  hit,
+  monsterHp,
+  spawnFor,
+  tickBoss,
+  travelTo,
+} from './game/combat';
 import {
   accrueSugar,
   beatWindowBonus,
@@ -72,7 +105,6 @@ import {
   frenzyChargeReduction,
   frenzyDurBonus,
   frenzyDurSecBonus,
-  goldGearMult,
   offlineCapBonus,
   offlineRateBonus,
   onBeatMultBonus,
@@ -171,9 +203,22 @@ if (legacySave?.bossDefeated === true) state.legacyTyrann = true;
 // or fresh gear slice arrives with `nextSugarAt: 0` (unseeded).
 if (state.gear.nextSugarAt === 0) state.gear.nextSugarAt = Date.now() + SUGAR_PERIOD_MS;
 
-// Seedable RNG for all gameplay rolls (crit now; loot/quests later). Resumes the
-// persisted stream so save-scumming a crit is impossible.
+// Seedable RNG for all gameplay rolls (crit, loot, peach schedule). Resumes the
+// persisted stream so save-scumming a crit or a chest open is impossible.
 let rng = new Rng(state.rng);
+
+// Seed / repair the Golden-Peach schedule (§6.1). A fresh or migrated slice arrives
+// unseeded (`nextPeachAt: 0`); an absurd-future timestamp (clock set forward, then
+// back) is re-rolled — the same clamp spirit as the sugar timer (§9.2.2). A stale
+// far-future boost is cleared. A recent-past `nextPeachAt` is left as-is: the loop's
+// despawn check reschedules it on the first frame.
+{
+  const bootNow = Date.now();
+  if (state.peach.nextPeachAt <= 0 || state.peach.nextPeachAt > bootNow + PEACH_MAX_S * 1000) {
+    state.peach.nextPeachAt = rollNextPeachAt(bootNow, rng);
+  }
+  if (state.peach.boostUntil > bootNow + PEACH_BOOST_S * 1000) state.peach.boostUntil = 0;
+}
 
 let combat: CombatState = spawnFor(state.zone, state.killsThisZone, state.runMaxZone);
 
@@ -220,7 +265,10 @@ function offlineOpts(): {
     clickDmg,
     coachCps: coachCps(state.heaven) + coachCpsBonus(state.gear),
     capS: offlineCapS(state.heaven) + offlineCapBonus(state.gear),
-    goldMult: ancientGoldMult(state.ancients) * goldGearMult(state.gear),
+    // Peachiel × gold-gear × permanent gold-tokens (§6.2). The transient peach ×3
+    // boost is a 60-s live event — immaterial to multi-hour offline accrual and a
+    // stale boostUntil would be wrong — so it is deliberately excluded here.
+    goldMult: goldMult(state),
     rateBonus: offlineRateBonus(state.gear),
   };
 }
@@ -367,6 +415,7 @@ const prestige = new Prestige({
     applyFruhstarter(prevCrew);
     combat = withBossTimerBonus(spawnFor(1, 0, 1));
     comboState = createCombo(state.combo.stacks); // run-scoped juice resets
+    comboT3KeyAwardedThisRun = false; // the combo-Tier-3 key is once per run (§6.1)
     recompute();
     updateBackground(true);
     crew.render();
@@ -399,6 +448,7 @@ const heaven = new Heaven({
     Object.assign(state, himmelfahrtState(state)); // mutate in place
     combat = withBossTimerBonus(spawnFor(1, 0, 1));
     comboState = createCombo(state.combo.stacks);
+    comboT3KeyAwardedThisRun = false; // once per run (§6.1)
     recompute();
     updateBackground(true);
     crew.render();
@@ -433,6 +483,7 @@ new ChSettings({
     rng = new Rng(state.rng); // resume the imported save's RNG stream
     combat = withBossTimerBonus(spawnFor(state.zone, state.killsThisZone, state.runMaxZone));
     comboState = createCombo(state.combo.stacks);
+    comboT3KeyAwardedThisRun = false; // fresh run context for the imported save (§6.1)
     char = buildCharacter(scene, SKINS[state.gear.skin], char); // rig follows the imported skin
     recompute();
     updateBackground(true);
@@ -549,6 +600,13 @@ document
 const particleTmp = new THREE.Vector3();
 let shakeMag = 0;
 
+// 🎁 chest-tier emoji lookup (from the pure catalog) for drop toasts.
+const CHEST_EMOJI = Object.fromEntries(CHEST_TIERS.map((c) => [c.tier, c.emoji])) as Record<
+  ChestTier,
+  string
+>;
+const chestEmoji = (tier: ChestTier): string => CHEST_EMOJI[tier];
+
 function onKillProgress(
   r: ReturnType<typeof hit>,
   fromClick: boolean,
@@ -556,11 +614,19 @@ function onKillProgress(
   x?: number,
   y?: number,
 ): void {
-  // Peachiel (§4.6) + gold-gear (§5) multiply kill gold.
-  const gold = Math.floor(r.gold * ancientGoldMult(state.ancients) * goldGearMult(state.gear));
+  // Peachiel (§4.6) × gold-gear (§5) × permanent gold-tokens (§6.2) × the live
+  // Golden-Peach ×3 income boost (§6.1) multiply kill gold — the boost thus lifts
+  // ALL income (click + idle + coach kills) uniformly for its 60-s window.
+  const now = Date.now();
+  const gold = Math.floor(r.gold * goldMult(state) * peachIncomeMult(state, now));
   state.gold += gold;
   state.stats.goldLifetime += gold;
-  if (wasBoss) state.stats.bossKills += 1;
+  if (wasBoss) {
+    state.stats.bossKills += 1;
+  } else if (r.killed) {
+    // Rival kill (§6.1): a 3 % base chance — scaled by Truhen-Luck — drops a Holztruhe.
+    if (rng.next() < rivalChestChance(chestLuck(state))) state.chests.inventory.wood += 1;
+  }
   if (r.bossSpawned) {
     toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
     audio.unlockJingle();
@@ -588,11 +654,24 @@ function onKillProgress(
     // was the kill a boss? (advanced from a boss target)
     updateBackground();
     if (combat.zone % 5 === 1 && combat.zone > 1) {
-      // Provisional pre-M12 🧩 faucet (§5.4): a boss kill grants a few Splitter,
-      // scaling gently with the cleared boss zone. M12's Truhen supply the real source.
-      const shards = bossShardReward(combat.zone - 1);
+      const bossZone = combat.zone - 1;
+      // §6.1: a boss kill guarantees 1 🔑 (whole part guaranteed, the Truhen-Magnet/
+      // gear key-drop bonus adds a seeded probabilistic extra) + a tier-appropriate
+      // chest (§6.2) into the inventory.
+      const keys = keyDropAmount(1, keyDropMult(state), rng.next());
+      state.chests.keys += keys;
+      const tier = chestTierForBoss(bossZone);
+      state.chests.inventory[tier] += 1;
+      // Provisional pre-M12 🧩 faucet (§5.4): a boss kill still grants a few Splitter,
+      // scaling gently with the cleared boss zone. M12's Truhen are the real 🧩 source
+      // (opened chests); the direct trickle stays as a gentle early-game bridge.
+      const shards = bossShardReward(bossZone);
       state.gear.shards += shards;
-      toasts.show('🏆', `Boss besiegt!`, `Bühne ${combat.zone} erreicht · +${shards} 🧩`);
+      toasts.show(
+        '🏆',
+        `Boss besiegt!`,
+        `${chestEmoji(tier)} · +${keys} 🔑 · +${shards} 🧩 (Bühne ${combat.zone})`,
+      );
       audio.bossWin();
       if (effects.screenShake) shakeMag = Math.max(shakeMag, SHAKE_BOSS_KILL);
       haptics.boss(effects.haptics);
@@ -647,13 +726,15 @@ function doShake(x?: number, y?: number): void {
   drive = Math.min(drive + 1.2, 6);
 
   const tier = comboTier(comboState.stacks);
-  // Cheeksana (§4.6) + Disco gear (§5) add crit chance on top of the combo-tier bonus (40 % cap).
+  // Cheeksana (§4.6) + Disco gear (§5) + permanent crit-chance tokens (§6.2) add crit
+  // chance on top of the combo-tier bonus (still 40 % cap after summing them all).
   const crit = rollCrit(
     rng.next(),
     critChance(
       tierCritChanceBonus(tier) +
         ancientCritChanceBonus(state.ancients) +
-        critChanceBonus(state.gear),
+        critChanceBonus(state.gear) +
+        permTokenCritChance(state.permTokens),
     ),
   );
   if (crit) state.stats.crits += 1;
@@ -668,12 +749,15 @@ function doShake(x?: number, y?: number): void {
     crit,
     // Combo-tier + Disco/Lava gear (§5) crit-mult; Neon-Ninja gear widens on-beat ×.
     critMultBonus: tierCritMultBonus(tier) + critMultBonus(state.gear),
+    // Permanent „+1 % Krit-Schaden" tokens scale the whole crit multiplier (§6.2).
+    critMultFactor: permTokenCritMult(state.permTokens),
     extraMult: beatBonus(onBeat, onBeatMultBonus(state.gear)) * frenzyMult(state.ability, now),
   });
   const px = x ?? window.innerWidth / 2;
   const py = y ?? window.innerHeight / 2;
 
   applyHit(dmg, true, px, py);
+  lootFromClick(now);
 
   char.cheeks.forEach((c) => {
     c.vy += (Math.random() * 2 - 1) * 2.6;
@@ -752,6 +836,191 @@ let comboState = createCombo(state.combo.stacks);
 let drive = 0;
 let clicksSinceSwitch = 0;
 
+// ---------- loot drip bookkeeping (runtime, §6.1) ----------
+// The combo-Tier-3 key is once per run (reset on ascension/Himmelfahrt/import). The
+// session drip caps at ~3 Holztruhen/day via a lightweight in-session day-stamp; a
+// reload resets these — the full persistent Daily lands in M13 (spec §7.1).
+const SESSION_DRIP_CLICKS = 500;
+const SESSION_DRIP_CAP = 3;
+const dayStamp = (ms: number): number => Math.floor(ms / 86_400_000);
+let comboT3KeyAwardedThisRun = false;
+let clicksSinceDrip = 0;
+let sessionDripDay = dayStamp(Date.now());
+let sessionDripsToday = 0;
+
+/** Per-click loot drips (§6.1): the first combo-Tier-3 key of the run + the session drip. */
+function lootFromClick(now: number): void {
+  const tier = comboTier(comboState.stacks);
+  if (tier >= 3 && !comboT3KeyAwardedThisRun) {
+    comboT3KeyAwardedThisRun = true;
+    state.chests.keys += 1;
+    toasts.show('🔑', 'Combo-Feuer!', 'Combo-Tier 3 · +1 Schlüssel');
+  }
+  if (++clicksSinceDrip >= SESSION_DRIP_CLICKS) {
+    clicksSinceDrip = 0;
+    const day = dayStamp(now);
+    if (day !== sessionDripDay) {
+      sessionDripDay = day;
+      sessionDripsToday = 0;
+    }
+    if (sessionDripsToday < SESSION_DRIP_CAP) {
+      sessionDripsToday += 1;
+      state.chests.inventory.wood += 1;
+      toasts.show(
+        '🪵',
+        'Session-Bonus',
+        `Holztruhe (${sessionDripsToday}/${SESSION_DRIP_CAP} heute)`,
+      );
+    }
+  }
+}
+
+// ---------- Golden-Peach event glue (§6.1) ----------
+/** Whether a spawned Golden Peach is currently on-screen (clickable) at `now`. */
+function peachVisible(now: number): boolean {
+  const at = state.peach.nextPeachAt;
+  return at > 0 && now >= at && now < at + PEACH_VISIBLE_S * 1000;
+}
+
+/**
+ * Each frame: (re)schedule the next peach when the schedule is unseeded (`≤ 0`, e.g.
+ * an imported pre-v7 save) or the current peach has despawned uncaught. A caught
+ * peach reschedules itself in `catchPeach`.
+ */
+function updatePeachSchedule(now: number): void {
+  const at = state.peach.nextPeachAt;
+  if (at <= 0 || now >= at + PEACH_VISIBLE_S * 1000) {
+    state.peach.nextPeachAt = rollNextPeachAt(now, rng);
+  }
+}
+
+/**
+ * Catch the on-screen Golden Peach (spec §6.1): activates the ×3 income boost for
+ * 60 s and rolls a 25 % → 1 🔑 drop, then schedules the next spawn. Part 3 renders
+ * the button and calls this; returns the outcome (or null if no peach is catchable).
+ * Persists the peach schedule + boost + the advanced RNG cursor.
+ */
+function catchPeach(): { keys: number; boostUntil: number } | null {
+  const now = Date.now();
+  if (!peachVisible(now)) return null;
+  state.peach.boostUntil = activateBoost(now); // fresh ×3 60-s window
+  const keys = peachKeyRoll(rng);
+  state.chests.keys += keys;
+  state.peach.nextPeachAt = rollNextPeachAt(now, rng);
+  toasts.show(
+    '🍑',
+    'Goldener Pfirsich!',
+    keys > 0 ? '×3 Einkommen 60 s · +1 🔑' : '×3 Einkommen 60 s',
+  );
+  hud.update(state, combat, dps, clickDmg);
+  persist();
+  return { keys, boostUntil: state.peach.boostUntil };
+}
+
+// ---------- chest-skin collectibles (§6.3.2) ----------
+const ownedChestSkins = (): ReadonlySet<string> => new Set(state.chests.skins);
+function ownChestSkin(id: string): void {
+  if (id && !state.chests.skins.includes(id)) state.chests.skins.push(id);
+}
+
+/** Current idle income per second (BP/s) — drives chest BP rewards (§6.2, „15 min Einkommen"). */
+function currentIncomePerSec(now: number): number {
+  const hp = monsterHp(combat.zone);
+  if (!(hp > 0) || !(dps > 0)) return 0;
+  return (dps / hp) * goldFor(combat.zone, false) * goldMult(state) * peachIncomeMult(state, now);
+}
+
+/** Credit one resolved reward into the live state (§6.2 reward union). */
+function creditReward(reward: Reward): void {
+  switch (reward.kind) {
+    case 'bp':
+      state.gold += reward.bp;
+      state.stats.goldLifetime += reward.bp;
+      break;
+    case 'shards':
+      state.gear.shards += reward.shards;
+      break;
+    case 'keys':
+      state.chests.keys += reward.keys;
+      break;
+    case 'sugar':
+      state.gear.sugarPeaches += reward.sugar;
+      break;
+    case 'boost': {
+      // Stack DURATION onto the active income-boost window (§6.2 „stackt Dauer, nicht
+      // Faktor"): the single ×3 peach window is extended by the reward's duration.
+      const base = Math.max(state.peach.boostUntil, Date.now());
+      state.peach.boostUntil = base + reward.boost.durMs;
+      break;
+    }
+    case 'token':
+      state.permTokens = addToken(state.permTokens, reward.token);
+      break;
+    case 'jackpot':
+      ownChestSkin(reward.jackpot.skin); // duplicates were already resolved to 🧩
+      break;
+  }
+}
+
+/**
+ * Open a chest from the inventory (spec §6, the glue part 3 calls). Requires
+ * `inventory[tier] ≥ 1` and `keys ≥ KEY_COST[tier]`; consumes both, opens via the
+ * pure `openChest` (deterministic over the persisted RNG), duplicate-protects
+ * jackpots against the owned chest-skin set, credits every reward, writes back the
+ * advanced pity + RNG cursor, and persists. Returns the credited rewards (so part 3
+ * can animate them) or null when it can't open.
+ */
+function openChestFromInventory(tier: ChestTier): readonly Reward[] | null {
+  const cost = KEY_COST[tier];
+  if (state.chests.inventory[tier] < 1 || state.chests.keys < cost) return null;
+  state.chests.inventory[tier] -= 1;
+  state.chests.keys -= cost;
+  const now = Date.now();
+  const res = openChest(
+    tier,
+    { incomePerSec: currentIncomePerSec(now), luck: chestLuck(state), pity: state.chests.pity },
+    rng,
+  );
+  state.chests.pity = res.pity;
+  const credited: Reward[] = [];
+  for (const raw of res.rewards) {
+    const reward = raw.kind === 'jackpot' ? resolveDuplicate(raw, ownedChestSkins()) : raw;
+    creditReward(reward);
+    credited.push(reward);
+  }
+  recompute(); // tokens/boost may have shifted dps/gold
+  hud.update(state, combat, dps, clickDmg);
+  persist(); // folds the advanced RNG cursor into the save (resumable, save-scum-proof)
+  return credited;
+}
+
+// Expose the loot glue for part 3's 🎁 UI (and the headless smoke). A tiny surface:
+// snapshot the loot state, open a chest, catch a peach, query peach visibility.
+interface LootGlue {
+  snapshot(): {
+    keys: number;
+    inventory: Record<ChestTier, number>;
+    skins: string[];
+    boostUntil: number;
+    nextPeachAt: number;
+  };
+  open(tier: ChestTier): readonly Reward[] | null;
+  catchPeach(): { keys: number; boostUntil: number } | null;
+  peachVisible(): boolean;
+}
+(window as unknown as { chLoot: LootGlue }).chLoot = {
+  snapshot: () => ({
+    keys: state.chests.keys,
+    inventory: { ...state.chests.inventory },
+    skins: [...state.chests.skins],
+    boostUntil: state.peach.boostUntil,
+    nextPeachAt: state.peach.nextPeachAt,
+  }),
+  open: (tier) => openChestFromInventory(tier),
+  catchPeach,
+  peachVisible: () => peachVisible(Date.now()),
+};
+
 // ---------- resize ----------
 function resize(): void {
   const w = window.innerWidth;
@@ -812,6 +1081,9 @@ function loop(nowMs: number): void {
   // (music/ability bar), each frame.
   comboState = comboStep(comboState, dt, comboDecayReduction(state.gear));
   const epochMs = Date.now();
+  // Golden-Peach schedule (§6.1): despawn/reschedule the event (part 3 draws the
+  // clickable button from `peachVisible` + `chLoot.catchPeach`).
+  updatePeachSchedule(epochMs);
   const tier = comboTier(comboState.stacks);
   const frenzy = isFrenzyActive(state.ability, epochMs);
   hud.setCombo(comboState.stacks, tier);
