@@ -19,11 +19,22 @@ export const SOUL_BONUS = 0.1;
 
 const SOUL_SCALE = 40;
 const SOUL_EXP = 1.6;
+/**
+ * Base of the exponential "Legendäre Auftritte" term added in RS_v2 (spec §4.5.1,
+ * the M9 anti-plateau retune, N1). The polynomial term alone (`⌊z^1.6/40⌋`) is too
+ * flat and the bank plateaus around 13 souls / zone ~50; adding `⌊1.10^z − 1⌋` makes
+ * every new best-zone *multiply* the bank instead of incrementing it. Purely
+ * additive, so it never nerfs: combined with the `applyAscension` bank-never-shrinks
+ * guard the retune is migration-free (existing banks stay, only grow).
+ */
+const SOUL_EXP_BASE = 1.1;
 
 /** Souls corresponding to a lifetime-deepest `zone` (monotonic, 0 below the gate). */
 export function soulsForMaxZone(zone: number): number {
   if (zone < ASCEND_MIN_ZONE) return 0;
-  return Math.floor(Math.pow(zone, SOUL_EXP) / SOUL_SCALE);
+  const poly = Math.floor(Math.pow(zone, SOUL_EXP) / SOUL_SCALE);
+  const legendary = Math.floor(Math.pow(SOUL_EXP_BASE, zone) - 1);
+  return poly + legendary;
 }
 
 /** Global damage multiplier from `souls` banked (+10 % each). */
