@@ -267,7 +267,9 @@ export function activeQuests(meta: MetaState): QuestDef[] {
 
 /**
  * Advance every active quest tracking `metric` by `amount` (clamped at its
- * target). Pure — returns the same object when nothing matches or `amount <= 0`.
+ * target). Pure — returns the same object when nothing matches, `amount <= 0`,
+ * or every matching quest is already at its target (so per-click callers like
+ * the „Shakes"-quest hook stay allocation-free once the quest is complete).
  */
 export function advanceQuests(
   progress: QuestProgress,
@@ -278,11 +280,16 @@ export function advanceQuests(
   if (!(amount > 0)) return progress;
   const matches = active.filter((q) => q.metric === metric);
   if (matches.length === 0) return progress;
-  const next: QuestProgress = { ...progress };
+  let next: QuestProgress | null = null;
   for (const q of matches) {
-    next[q.id] = Math.min(q.target, (next[q.id] ?? 0) + amount);
+    const cur = progress[q.id] ?? 0;
+    const val = Math.min(q.target, cur + amount);
+    if (val !== cur) {
+      next ??= { ...progress };
+      next[q.id] = val;
+    }
   }
-  return next;
+  return next ?? progress;
 }
 
 /** Whether a quest's progress has reached its target. */
@@ -332,6 +339,26 @@ export function claimInMeta(
   const { reward, claimed } = claimQuest(quest, meta.questProgress, meta.questsClaimed);
   if (reward === null) return { meta, reward: null };
   return { meta: { ...meta, questsClaimed: claimed }, reward };
+}
+
+/**
+ * Forward-clock repair (spec §9.2.2, same spirit as the sugar/peach timer clamps):
+ * clamp high-water days that lie in the FUTURE back down to `day`. A save stamped
+ * while the clock was set far ahead (then corrected) must not freeze dailies,
+ * quests and logins until the wall clock catches up — without this, a single boot
+ * under a wrong BIOS/system clock could silence the retention loop for years.
+ * Clamping to TODAY stays neutral: nothing is re-granted today (the clamped
+ * `lastLoginDay` still blocks today's login, the clamped `day` blocks a re-roll)
+ * and everything resumes normally tomorrow. Returns the same slice when nothing
+ * is in the future. The glue calls this before {@link rollDay}/{@link dailyLogin}.
+ */
+export function repairFutureDays(meta: MetaState, day: number): MetaState {
+  if (meta.day <= day && meta.lastLoginDay <= day) return meta;
+  return {
+    ...meta,
+    day: Math.min(meta.day, day),
+    lastLoginDay: Math.min(meta.lastLoginDay, day),
+  };
 }
 
 /**

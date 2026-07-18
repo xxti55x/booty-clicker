@@ -17,6 +17,7 @@ import {
   isQuestComplete,
   isQuestId,
   questById,
+  repairFutureDays,
   reroll,
   rollDay,
   weekNumber,
@@ -70,6 +71,16 @@ describe('quest progress + claim reducers', () => {
     // A metric no active quest tracks is a no-op (same object).
     expect(advanceQuests(p, active, 'gild', 1)).toBe(p);
     expect(advanceQuests(p, active, 'bossKills', 0)).toBe(p);
+  });
+
+  it('is a true no-op (same object) once every matching quest is at its target', () => {
+    const active = [questById('clicks-1500')!];
+    const done = { 'clicks-1500': 1500 };
+    // The per-click „Shakes" hook must not allocate after the clamp.
+    expect(advanceQuests(done, active, 'clicks', 1)).toBe(done);
+    const meta = { ...rollDay(createMeta(), 100).meta, questIds: ['clicks-1500'] };
+    const clamped = advanceMeta(meta, 'clicks', 1500);
+    expect(advanceMeta(clamped, 'clicks')).toBe(clamped);
   });
 
   it('isQuestComplete + claimQuest gate + are idempotent', () => {
@@ -208,6 +219,43 @@ describe('dailyLogin — streak, day-7 bonus, weekly protect (AC2)', () => {
     const r = dailyLogin(meta, 103); // gap 3
     expect(r.reward!.streak).toBe(1);
     expect(r.reward!.protectUsed).toBe(false);
+  });
+});
+
+describe('repairFutureDays — forward-clock repair (§9.2.2)', () => {
+  it('returns the same slice when nothing is in the future', () => {
+    const meta = { ...rollDay(createMeta(), 100).meta, lastLoginDay: 100 };
+    expect(repairFutureDays(meta, 100)).toBe(meta);
+    expect(repairFutureDays(meta, 250)).toBe(meta);
+    const fresh = createMeta();
+    expect(repairFutureDays(fresh, 0)).toBe(fresh); // day/lastLoginDay -1 are fine
+  });
+
+  it('clamps future high-waters to today so dailies are not frozen for years', () => {
+    // Save stamped under a clock set ~1 year ahead, then corrected.
+    const warped = { ...rollDay(createMeta(), 465).meta, lastLoginDay: 465 };
+    const today = 100;
+    const fixed = repairFutureDays(warped, today);
+    expect(fixed.day).toBe(today);
+    expect(fixed.lastLoginDay).toBe(today);
+    // Neutral today: no re-roll, no login re-grant …
+    expect(rollDay(fixed, today).changed).toBe(false);
+    expect(dailyLogin(fixed, today).reward).toBeNull();
+    // … and everything resumes normally tomorrow.
+    expect(rollDay(fixed, today + 1).changed).toBe(true);
+    expect(dailyLogin(fixed, today + 1).reward).not.toBeNull();
+  });
+
+  it('clamps each high-water independently (quests kept, claims preserved)', () => {
+    let meta = rollDay(createMeta(), 465).meta; // quests rolled "in the future"
+    const q = activeQuests(meta)[0];
+    meta = advanceMeta(meta, q.metric, q.target);
+    meta = claimInMeta(meta, q.id).meta;
+    const fixed = repairFutureDays({ ...meta, lastLoginDay: 465 }, 100);
+    // The rolled quest set + claim stay (no progress nuked) — only the days clamp.
+    expect(fixed.questIds).toEqual(meta.questIds);
+    expect(fixed.questsClaimed).toContain(q.id);
+    expect(claimInMeta(fixed, q.id).reward).toBeNull(); // still not re-claimable
   });
 });
 

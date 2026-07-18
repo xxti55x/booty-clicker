@@ -128,6 +128,7 @@ import {
   claimInMeta,
   dailyLogin,
   dayNumber,
+  repairFutureDays,
   reroll as rerollQuests,
   rollDay,
 } from './game/quests';
@@ -1224,6 +1225,12 @@ function grantLoginReward(reward: LoginReward): void {
  */
 function maybeNewDay(): void {
   const day = dayNumber(Date.now());
+  // Forward-clock repair (§9.2.2): a save stamped under a far-future clock must
+  // not freeze dailies until reality catches up — clamp the high-waters to today
+  // (neutral: nothing is re-granted today, everything resumes tomorrow).
+  const repaired = repairFutureDays(state.meta, day);
+  const wasRepaired = repaired !== state.meta;
+  state.meta = repaired;
   const rolled = rollDay(state.meta, day);
   if (rolled.changed) state.meta = rolled.meta;
   const login = dailyLogin(state.meta, day);
@@ -1231,7 +1238,7 @@ function maybeNewDay(): void {
     state.meta = login.meta;
     grantLoginReward(login.reward);
   }
-  if (rolled.changed || login.reward) {
+  if (rolled.changed || login.reward || wasRepaired) {
     metaPanel.render();
     checkAchievements();
     hud.update(state, combat, dps, clickDmg);

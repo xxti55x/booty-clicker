@@ -3,6 +3,36 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M13 — Review-Fixes (Meta & Retention)
+
+- **2026-07-18 (Review) — Zukunfts-Tage werden beim Boot GEKLEMMT (`repairFutureDays`),
+  analog zu Peach/Sugar (§9.2.2).** `meta.day`/`meta.lastLoginDay` sind monotone
+  High-Water-Marks — ein Save, der unter einer weit vorgestellten Uhr geschrieben wurde
+  (BIOS-Reset, Test, Cheese), fror damit Dailies/Quests/Logins ein, bis die echte Uhr
+  aufholt (im Extremfall Jahre). Neu: pure `repairFutureDays(meta, day)` (quests.ts,
+  getestet) klemmt beide Marks in `maybeNewDay` auf HEUTE — neutral (heute wird nichts
+  erneut gewährt oder neu gerollt, morgen läuft alles normal weiter). Kein neuer Exploit:
+  Vorstell-Farming war laut AC1-Entscheid schon immer möglich („Vorstellen advanced nur
+  den Tag") und bleibt davon unberührt.
+
+- **2026-07-18 (Review) — `advanceQuests` ist jetzt auch NACH dem Clamp ein echter No-op.**
+  Vorher allozierte jeder Shake zwei Objekte, sobald eine passende Quest ihr Ziel erreicht
+  hatte (`min(target, target+1)` schrieb denselben Wert in eine neue Kopie) — die
+  DECISIONS-Begründung „no-op-günstig pro Shake" galt also nur bis zur Zielerreichung.
+  Jetzt wird erst kopiert, wenn sich mindestens ein Wert wirklich ändert (Referenz-Test in
+  quests.test.ts), womit `advanceMeta('clicks')` im Klick-Hot-Path dauerhaft allokationsfrei
+  bleibt.
+
+- **2026-07-18 (Review) — AKZEPTIERT: die 5-RS-Quest-Belohnung wird bei Nicht-Ausgebern
+  von der nächsten Aszension „zurückverrechnet".** `syncMaxZones` hält `rsLifetime ≥ souls`
+  (Highwater), und `applyAscension` zahlt `soulsForMaxZone(deepest) − rsLifetime` aus — wer
+  seine Seelen nie in Ahnen steckt (souls == rsLifetime), bekommt die +5 also faktisch nur
+  als Vorschuss auf die nächste Aszension; wer je ≥ 5 RS ausgegeben hat (praktisch jeder ab
+  dem ersten Ahnen), erhält sie voll. Bewusst NICHT „gefixt": die saubere Trennung
+  (Zonen-Gutschrift vs. Lifetime-Einnahmen) bräuchte ein neues Save-Feld (v8 ist
+  eingefroren) und Umbauten an der M9/M10-Aszensionsmathematik — für ±5 RS gegenüber
+  `1,10^z`-Wachstum unverhältnismäßig. Fehlerrichtung ist deflationär (P1-sicher).
+
 ## M13 — Meta, Retention & Leaderboard v2 (Teil 2: UI + Wiring + Docs)
 
 - **2026-07-18 — Event-Increments zentral über einen `earnKeys(n)`-Helfer.** Jeder

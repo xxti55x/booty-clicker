@@ -29,6 +29,7 @@ import { type Gilds, createGilds } from '../game/gild';
 import { COACH_CLICK_SHARE, type HeavenState, createHeaven } from '../game/heaven';
 import type { CrewLevels } from '../game/heroes';
 import {
+  DAILY_QUEST_SLOTS,
   MAX_REROLLS,
   STREAK_MAX,
   type MetaState,
@@ -356,7 +357,7 @@ function repairMeta(v: unknown): MetaState {
   const int = (x: unknown, fallback: number): number =>
     isFiniteNumber(x) && Number.isInteger(x) ? x : fallback;
   const questIds = Array.isArray(v.questIds)
-    ? [...new Set(v.questIds.filter(isQuestId))].slice(0, 3)
+    ? [...new Set(v.questIds.filter(isQuestId))].slice(0, DAILY_QUEST_SLOTS)
     : def.questIds;
   const questProgress: QuestProgress = {};
   if (isRecord(v.questProgress)) {
