@@ -33,14 +33,16 @@ CPU-Preview-Renders (Cycles) sind möglich, aber langsam.
 | Skript              | Zweck                                                           |
 | ------------------- | --------------------------------------------------------------- |
 | `export_all.cjs`    | Exportiert ALLE Spielmodelle → `models/*.glb` (vite + headless) |
+| `refine_models.py`  | Blender-Refine: Weld/Normals/Smooth, Bühnen-Dioramen, Renders   |
 | `verify_models.py`  | Blender-Import-Roundtrip über `models/**/*.glb` (bpy)           |
 | `export_example.py` | Minimalbeispiel: Modell in bpy bauen → .glb                     |
 
-## Benutzung
+## Benutzung (Pipeline-Reihenfolge)
 
 ```sh
-node tools/blender/export_all.cjs        # models/-Ordner neu generieren
-python3 tools/blender/verify_models.py   # in Blender gegenprüfen
+node tools/blender/export_all.cjs        # 1. Roh-Export aus den Spiel-Buildern
+python3 tools/blender/refine_models.py   # 2. Blender-Veredelung + models/renders/*.jpg
+python3 tools/blender/verify_models.py   # 3. in Blender gegenprüfen
 python3 tools/blender/export_example.py out/model.glb
 ```
 

@@ -4,14 +4,26 @@ Der komplette 3D-Cast des Spiels als Standard-glTF-2.0-Binaries — direkt in
 Blender, jedem DCC-Tool oder einem glTF-Viewer zu öffnen.
 
 **Generierte Artefakte, keine Quelle.** Das Spiel baut alle Modelle prozedural
-zur Laufzeit (Three.js); dieser Ordner ist der Export dieser Builder. Quelle
-bleibt der Code (`apps/game/src/character/*`, `world/backgrounds.ts`) — nach
-Modell-Änderungen neu exportieren:
+zur Laufzeit (Three.js); dieser Ordner ist der Export dieser Builder, danach in
+**Blender verfeinert** (deterministischer Refine-Pass). Quelle bleibt der Code
+(`apps/game/src/character/*`, `world/backgrounds.ts`) — nach Modell-Änderungen
+die volle Kette neu laufen lassen:
 
 ```sh
-node tools/blender/export_all.cjs   # vite dev + headless Chromium → models/*.glb
-python3 tools/blender/verify_models.py   # Blender-Import-Roundtrip (bpy)
+node tools/blender/export_all.cjs        # 1. vite dev + headless Chromium → Roh-.glb
+python3 tools/blender/refine_models.py   # 2. Blender: Refine + Dioramen + Renders
+python3 tools/blender/verify_models.py   # 3. Blender-Import-Roundtrip (bpy)
 ```
+
+**Blender-Refine (Schritt 2)** macht die Dateien fertig — keine Nacharbeit
+nötig: Nähte verschweißt (Merge-by-Distance), Normals konsistent,
+Shade-Smooth-by-Angle 60°, mattes Cartoon-Material-Finish, und **jede Bühne
+wird ein Diorama**: Club-Parkett (glossy-dunkel), Synth-Violett-Boden (das
+In-Game-Grid ist Linien-Geometrie), Sand-Insel im glänzenden Ozean mit
+leuchtender Horizont-Sonne, Weltraum-Asphalt (das 111-Einheiten-Sternfeld —
+Himmel, kein Diorama-Inhalt — entfernt). `renders/` enthält den
+Cycles-Render-Nachweis jedes Modells (Studio-Rig, 3-Punkt-Licht, OIDN-Denoise,
+Auto-Framing über die Prop-Kern-BBox).
 
 ## Inhalt (22 Modelle)
 
