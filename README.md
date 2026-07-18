@@ -20,6 +20,11 @@ Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 M
 - **Twerken = Schaden.** Klick auf die Figur oder drück die Leertaste — jeder Shake
   macht Schaden am aktuellen Rivalen. Aktives Klicken ist der Kern: **Crits** (×5) und
   ein **Combo-Multiplikator** belohnen schnelles Twerken.
+- **Klick-Juice 2.0.** Combo baut **Tiers** auf (Warm → Heiß → Feuer → Inferno) mit
+  Extra-Perks (mehr Crit, breiteres Beat-Fenster) und **zerfällt weich** statt hart auf 0.
+  Triff **im Takt** (♪) für ×1,5-Klicks, und lade die **Twerk-Ekstase** auf — Taste `F`
+  bzw. der Balken unten: **12 Sekunden ×10 Klick-Schaden**. Mehr Combo = mehr Partikel,
+  Screen-Shake, Musik-Layer und Vibration (alles einzeln im ⚙️-Tab abschaltbar).
 - **Bühnen (Zonen).** Besiege 10 Rivalen, um eine Bühne zu räumen. Die Ausdauer (HP)
   der Rivalen wächst exponentiell — es geht **endlos** weiter.
 - **Crew = Idle-DPS.** Heuere im 🕺-Tab Tänzer:innen an (Booty-Boss → Twerk-Legende)
@@ -37,8 +42,10 @@ Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 M
 ## Steuerung
 
 - Klick auf Figur / Leertaste = Twerken (Schaden)
+- **Taste `F`** / Ekstase-Balken = Twerk-Ekstase zünden (wenn voll geladen)
 - Maus ziehen = Kamera drehen, Scrollen = Zoom
 - 🕺-Button (links oben) blendet das Panel ein/aus · 🔊 = Ton an/aus
+- Auf dem Handy ist der Shop ein **Bottom-Sheet** — Figur & Rivale bleiben sichtbar
 - Tabs: **🕺 Crew** · **✨ Ruhm** (Ascension + Statistik) · **⚙️** (Grafik, Effekte,
   Save-Export/Import/Reset)
 

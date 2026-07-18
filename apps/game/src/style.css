@@ -904,9 +904,153 @@ body {
 }
 .pop.crit {
   color: #ffd24d;
-  font-size: 26px;
-  text-shadow: 0 2px 10px rgba(255, 138, 77, 0.7);
+  font-size: 32px; /* ×1.6 of the base 20px (spec §8.2) */
+  text-shadow: 0 2px 12px rgba(255, 138, 77, 0.8);
+  animation-name: riseCrit; /* golden + rotated variant */
+}
+@keyframes riseCrit {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(0.8) rotate(-8deg);
+  }
+  20% {
+    transform: translate(-50%, -16px) scale(1.25) rotate(-8deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -74px) scale(1.05) rotate(-8deg);
+  }
 }
 .pop.gold {
   color: #a8e831;
+}
+.pop.onbeat {
+  color: #ffd24d;
+  text-shadow: 0 0 10px rgba(255, 210, 77, 0.85);
+}
+
+/* ---- M8: combo tiers, ability bar, crew milestone bars ---- */
+.combo.tier1 {
+  color: #ffb84d;
+}
+.combo.tier2 {
+  color: #ff8a4d;
+}
+.combo.tier3 {
+  color: #ff5252;
+  text-shadow: 0 0 10px rgba(255, 82, 82, 0.5);
+}
+.combo.tier4 {
+  color: #ffd24d;
+  text-shadow: 0 0 14px rgba(255, 210, 77, 0.75);
+  animation: peachpulse 0.5s ease-in-out infinite;
+}
+
+.abilitybar {
+  position: fixed;
+  left: 50%;
+  bottom: 44px;
+  bottom: calc(44px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 16;
+  pointer-events: none;
+}
+.ability-btn {
+  position: relative;
+  width: min(280px, 72vw);
+  height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 20px;
+  background: rgba(18, 18, 28, 0.72);
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+  cursor: pointer;
+  pointer-events: auto;
+  padding: 0;
+}
+.ability-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0%;
+  background: linear-gradient(90deg, #ff4d8d, #ffd24d);
+  transition: width 0.1s linear;
+  z-index: 0;
+}
+.ability-label {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+}
+.ability-btn.ready {
+  border-color: #ffd24d;
+  animation: ekready 0.9s ease-in-out infinite;
+}
+.ability-btn.active {
+  border-color: #ff6b8d;
+}
+.ability-btn.active .ability-fill {
+  background: linear-gradient(90deg, #ffd24d, #ff6b8d);
+}
+@keyframes ekready {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 210, 77, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 16px 4px rgba(255, 210, 77, 0.35);
+  }
+}
+
+.ms-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin-top: 8px;
+}
+.ms-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #8b5cf6, #a8e831);
+  transition: width 0.15s ease-out;
+}
+.ms-txt {
+  font-size: 10px;
+  color: #8b9bff;
+  margin-top: 3px;
+  font-weight: 600;
+}
+.ms-txt.done {
+  color: #a8e831;
+}
+
+/* B13a: on phones the shop is a bottom sheet (~55 % height) so the figure +
+   rival stay visible while shopping. */
+@media (max-width: 640px) {
+  .shop {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-width: 100%;
+    height: 55vh;
+    border-left: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 18px 18px 0 0;
+    padding-top: 0;
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.5);
+  }
+  .shop.hidden {
+    transform: translateY(100%);
+  }
 }

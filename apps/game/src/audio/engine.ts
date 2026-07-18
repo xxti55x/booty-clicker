@@ -17,6 +17,8 @@ class MusicPlayer {
   private nextNoteTime = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private playing = false;
+  /** Combo-driven intensity 0..3 (spec §8.10): +percussion / +lead-arp / +sweep. */
+  private intensity = 0;
 
   constructor(
     private readonly ctx: AudioContext,
@@ -25,6 +27,10 @@ class MusicPlayer {
 
   setTrack(bg: BackgroundKey): void {
     this.track = MUSIC_TRACKS[bg];
+  }
+
+  setIntensity(level: number): void {
+    this.intensity = Math.max(0, Math.min(3, Math.floor(level)));
   }
 
   start(): void {
@@ -61,6 +67,47 @@ class MusicPlayer {
     const oct = step % 8 >= 4 ? 2 : 1; // lift the arp an octave in the 2nd half
     this.voice(rootHz * oct * Math.pow(2, deg / 12), time, 0.16, wave, 0.06); // arp
     if (step % 2 === 1) this.hat(time);
+
+    // Additive combo-intensity layers (spec §8.10) — muteable (all under `out`),
+    // lazy (only while the loop plays), never autoplaying.
+    if (this.intensity >= 1 && step % 4 === 2) this.kick(time); // Tier 2: percussion
+    if (this.intensity >= 2) {
+      this.voice(rootHz * 2 * oct * Math.pow(2, deg / 12), time, 0.12, wave, 0.045); // Tier 3: lead +1 oct
+    }
+    if (this.intensity >= 3 && step % 8 === 0) this.sweep(time); // Ekstase: filter-sweep
+  }
+
+  /** A short pitched kick for the Tier-2 percussion layer. */
+  private kick(time: number): void {
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(150, time);
+    osc.frequency.exponentialRampToValueAtTime(50, time + 0.14);
+    g.gain.setValueAtTime(0.16, time);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + 0.18);
+    osc.connect(g);
+    g.connect(this.out);
+    osc.start(time);
+    osc.stop(time + 0.2);
+  }
+
+  /** A rising filter-sweep accent for the Ekstase layer. */
+  private sweep(time: number): void {
+    const src = this.ctx.createBufferSource();
+    src.buffer = getNoiseBuffer(this.ctx);
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(400, time);
+    lp.frequency.exponentialRampToValueAtTime(7000, time + 0.42);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.05, time);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + 0.45);
+    src.connect(lp);
+    lp.connect(g);
+    g.connect(this.out);
+    src.start(time);
+    src.stop(time + 0.47);
   }
 
   private voice(freq: number, time: number, dur: number, wave: OscillatorType, gain: number): void {
@@ -171,6 +218,11 @@ export class AudioEngine {
   setBackground(bg: BackgroundKey): void {
     this.currentBg = bg;
     this.music?.setTrack(bg);
+  }
+
+  /** Combo-tier music intensity 0..3 (spec §8.10); safe before the ctx exists. */
+  setIntensity(level: number): void {
+    this.music?.setIntensity(level);
   }
 
   // ---------- SFX ----------

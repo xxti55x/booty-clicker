@@ -15,6 +15,8 @@ export const FPS_CAPS: readonly number[] = [0, 30, 60];
 export interface GameSettings {
   screenShake: boolean;
   particles: boolean;
+  /** Click/crit/boss haptics (spec §8.8) — feature-detected, iOS is a no-op. */
+  haptics: boolean;
   /** Graphics preset: pixel ratio + shadows. */
   quality: Quality;
   /** Frame-rate cap (0 = uncapped). */
@@ -29,7 +31,14 @@ export interface SettingsStorage {
 }
 
 export function defaultSettings(): GameSettings {
-  return { screenShake: true, particles: true, quality: 'high', fpsCap: 0, onboarded: false };
+  return {
+    screenShake: true,
+    particles: true,
+    haptics: true,
+    quality: 'high',
+    fpsCap: 0,
+    onboarded: false,
+  };
 }
 
 function defaultStorage(): SettingsStorage | null {
@@ -71,6 +80,7 @@ export function loadSettings(storage: SettingsStorage | null = defaultStorage())
   return {
     screenShake: typeof p.screenShake === 'boolean' ? p.screenShake : d.screenShake,
     particles: typeof p.particles === 'boolean' ? p.particles : d.particles,
+    haptics: typeof p.haptics === 'boolean' ? p.haptics : d.haptics,
     quality: asQuality(p.quality, d.quality),
     fpsCap: asFpsCap(p.fpsCap, d.fpsCap),
     onboarded: typeof p.onboarded === 'boolean' ? p.onboarded : d.onboarded,

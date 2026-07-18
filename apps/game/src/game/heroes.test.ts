@@ -12,6 +12,7 @@ import {
   maxAffordable,
   milestoneMult,
   nextLevelCost,
+  nextMilestone,
   totalRawDps,
 } from './heroes';
 
@@ -39,6 +40,15 @@ describe('heroes — DPS & milestones', () => {
   it('sums DPS across the crew', () => {
     const levels = { boss: 10, hype: 4 };
     expect(totalRawDps(levels)).toBe(heroDps(CREW[0], 10) + heroDps(CREW[1], 4));
+  });
+
+  it('reports the next ×2 milestone bracket ("noch n Level bis ×2")', () => {
+    expect(nextMilestone(0)).toEqual({ next: 10, prev: 0, remaining: 10 });
+    expect(nextMilestone(7)).toEqual({ next: 10, prev: 0, remaining: 3 });
+    expect(nextMilestone(10)).toEqual({ next: 25, prev: 10, remaining: 15 });
+    expect(nextMilestone(799)).toEqual({ next: 800, prev: 400, remaining: 1 });
+    expect(nextMilestone(800)).toBeNull(); // all milestones passed
+    expect(nextMilestone(5000)).toBeNull();
   });
 });
 

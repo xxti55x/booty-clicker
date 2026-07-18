@@ -13,18 +13,40 @@ import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
 import { effectivePixelRatio, qualityPreset } from './engine/quality';
 import { createScene } from './engine/scene';
+import { abilityOnClick, activate, canActivate, frenzyMult, isFrenzyActive } from './game/ability';
 import { ascendState, clickDamageOf, createChState, dpsOf } from './game/ch-state';
-import { COMBO_WINDOW_S, effectiveClick, rollCrit } from './game/click';
+import {
+  beatBonus,
+  beatWindowMs,
+  critChance,
+  effectiveClick,
+  isOnBeat,
+  phaseVelocity,
+  rollCrit,
+} from './game/click';
+import {
+  createCombo,
+  comboOnClick,
+  comboStep,
+  comboTier,
+  tierBeatWindowBonusMs,
+  tierCritChanceBonus,
+  tierCritMultBonus,
+} from './game/combo';
 import { type CombatState, hit, spawnFor, tickBoss } from './game/combat';
 import { shouldShakeOnKey } from './game/input';
+import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
 import { applyLegacyInheritance } from './game/legacy-import';
 import { loadSettings, type Quality, saveSettings } from './game/settings';
 import { loadCh, offlineGold, resetCh, saveCh } from './save/ch-store';
 import { loadGame } from './save/store';
 import { Rng } from './util/rng';
-import { ChHud, spawnPop } from './ui/ch-hud';
+import { AbilityBar } from './ui/ability-bar';
+import { ChHud } from './ui/ch-hud';
 import { ChSettings } from './ui/ch-settings';
 import { Crew } from './ui/crew';
+import { Haptics } from './ui/haptics';
+import { Pops } from './ui/pops';
 import { fmt, titleFor } from './ui/format';
 import { Onboarding } from './ui/onboarding';
 import { Prestige } from './ui/prestige';
@@ -116,6 +138,18 @@ choreo.setMove(0);
 const hud = new ChHud();
 const toasts = new Toasts();
 const particles = new ParticleSystem(scene);
+const pops = new Pops();
+const haptics = new Haptics();
+const abilityBar = new AbilityBar({ onActivate: () => activateEkstase() });
+
+// Combo-tier → music intensity 0..3 (spec §8.10): T2 percussion, T3 lead-arp,
+// T4/Ekstase full + filter-sweep. Called each frame + per click.
+function intensityFor(tier: number, frenzy: boolean): number {
+  if (frenzy || tier >= 4) return 3;
+  if (tier === 3) return 2;
+  if (tier === 2) return 1;
+  return 0;
+}
 
 // ---------- persistence ----------
 let suppressSave = false;
@@ -125,6 +159,7 @@ function syncMaxZones(): void {
   state.runMaxZone = Math.max(state.runMaxZone, combat.maxZone);
   state.lifetimeMaxZone = Math.max(state.lifetimeMaxZone, state.runMaxZone);
   state.rng = rng.toState(); // fold the live RNG cursor back into the save
+  state.combo = { stacks: comboState.stacks }; // ability is mutated on state in place
 }
 const persist = (): void => {
   if (suppressSave) return;
@@ -174,10 +209,12 @@ const prestige = new Prestige({
     syncMaxZones();
     Object.assign(state, ascendState(state)); // mutate in place — panels hold this ref
     combat = spawnFor(1, 0, 1);
+    comboState = createCombo(state.combo.stacks); // run-scoped juice resets
     recompute();
     updateBackground(true);
     crew.render();
     hud.update(state, combat, dps, clickDmg);
+    abilityBar.update(state.ability, Date.now());
     toasts.show('✨', 'Ruhm eingeheimst!', `Jetzt ${fmt(state.souls)} Seelen`);
     audio.unlockJingle();
     persist();
@@ -193,11 +230,13 @@ new ChSettings({
     Object.assign(state, imported); // mutate in place — panels hold this ref
     rng = new Rng(state.rng); // resume the imported save's RNG stream
     combat = spawnFor(state.zone, state.killsThisZone, state.runMaxZone);
+    comboState = createCombo(state.combo.stacks);
     recompute();
     updateBackground(true);
     crew.render();
     prestige.refresh();
     hud.update(state, combat, dps, clickDmg);
+    abilityBar.update(state.ability, Date.now());
     persist();
   },
   reset: () => {
@@ -285,12 +324,14 @@ function onKillProgress(
   }
   if (r.advancedZone) {
     if (combat.zone > state.runMaxZone) state.runMaxZone = combat.zone;
-    if (fromClick && x !== undefined) spawnPop(`+${fmt(r.gold)}`, x, y ?? 0, 'gold');
+    if (fromClick && x !== undefined) pops.gold(r.gold, x, y ?? 0);
     // was the kill a boss? (advanced from a boss target)
     updateBackground();
     if (combat.zone % 5 === 1 && combat.zone > 1) {
       toasts.show('🏆', `Boss besiegt!`, `Bühne ${combat.zone} erreicht`);
       audio.bossWin();
+      if (effects.screenShake) shakeMag = Math.max(shakeMag, SHAKE_BOSS_KILL);
+      haptics.boss(effects.haptics);
     }
   }
   syncMaxZones();
@@ -314,13 +355,35 @@ let downT = 0;
 
 function doShake(x?: number, y?: number): void {
   state.totalClicks += 1;
-  combo += 1;
-  comboTimer = COMBO_WINDOW_S;
+  const now = Date.now();
+
+  // On-beat is judged against the CURRENT tier's (possibly widened) window,
+  // before this click bumps the combo.
+  const curTier = comboTier(comboState.stacks);
+  const onBeat = isOnBeat(
+    choreo.phase,
+    phaseVelocity(drive),
+    beatWindowMs(tierBeatWindowBonusMs(curTier)),
+  );
+
+  comboState = comboOnClick(comboState, onBeat);
   drive = Math.min(drive + 1.2, 6);
 
-  const crit = rollCrit(rng.next());
+  const tier = comboTier(comboState.stacks);
+  const crit = rollCrit(rng.next(), critChance(tierCritChanceBonus(tier)));
   if (crit) state.stats.crits += 1;
-  const dmg = effectiveClick({ baseClick: clickDmg, combo, crit });
+  if (onBeat) state.stats.onBeatClicks += 1;
+
+  // Charge the Ekstase meter (+1, or +2 on-beat) and fold the ×10 frenzy + on-beat
+  // ×1.5 into the pure click pipeline. Idle DPS never gets any of this (P1).
+  state.ability = abilityOnClick(state.ability, onBeat);
+  const dmg = effectiveClick({
+    baseClick: clickDmg,
+    combo: comboState.stacks,
+    crit,
+    critMultBonus: tierCritMultBonus(tier),
+    extraMult: beatBonus(onBeat) * frenzyMult(state.ability, now),
+  });
   const px = x ?? window.innerWidth / 2;
   const py = y ?? window.innerHeight / 2;
 
@@ -332,17 +395,42 @@ function doShake(x?: number, y?: number): void {
   });
   if (effects.particles) {
     char.rig.pelvis.getWorldPosition(particleTmp);
-    particles.burst(particleTmp.x, particleTmp.y, particleTmp.z);
+    particles.burst(particleTmp.x, particleTmp.y, particleTmp.z, burstCount(tier));
   }
-  if (effects.screenShake && (crit || (combo > 0 && combo % 25 === 0))) shakeMag = crit ? 0.5 : 0.3;
+  if (effects.screenShake) {
+    let mag = shakeForTier(tier);
+    if (crit) mag = Math.max(mag, SHAKE_CRIT);
+    if (isFrenzyActive(state.ability, now)) mag = Math.max(mag, SHAKE_FRENZY);
+    if (mag > 0) shakeMag = Math.max(shakeMag, mag);
+  }
+  haptics.pulse(now, effects.haptics, crit);
   if (++clicksSinceSwitch >= MOVE_SWITCH_CLICKS) {
     clicksSinceSwitch = 0;
     choreo.setMove(choreo.moveIdx + 1);
   }
-  spawnPop(`${crit ? 'CRIT ' : ''}-${fmt(dmg)}`, px, py, crit ? 'crit' : '');
+  pops.damage({ value: dmg, crit, onBeat, x: px, y: py }, now);
   audio.click();
-  if (combo > 2 && combo % 5 === 0) audio.combo(combo);
+  const stacks = Math.floor(comboState.stacks);
+  if (stacks > 2 && stacks % 5 === 0) audio.combo(stacks);
+  audio.setIntensity(intensityFor(tier, isFrenzyActive(state.ability, now)));
   hud.update(state, combat, dps, clickDmg);
+  hud.setCombo(comboState.stacks, tier);
+  abilityBar.update(state.ability, now);
+}
+
+/** Fire Twerk-Ekstase (spec §4.2.4): 12 s of ×10 click damage when the meter's full. */
+function activateEkstase(): void {
+  audio.unlock();
+  const now = Date.now();
+  if (!canActivate(state.ability)) return;
+  state.ability = activate(state.ability, now);
+  audio.unlockJingle();
+  audio.setIntensity(3);
+  toasts.show('🍑', 'TWERK-EKSTASE!', '×10 Klick-Schaden für 12 Sekunden!');
+  if (effects.screenShake) shakeMag = Math.max(shakeMag, SHAKE_FRENZY);
+  haptics.boss(effects.haptics);
+  abilityBar.update(state.ability, now);
+  persist();
 }
 
 canvas.addEventListener('pointerdown', (e) => {
@@ -360,11 +448,11 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') e.preventDefault();
   // shouldShakeOnKey guards B4: a held (auto-repeating) space is not an autoclicker.
   if (shouldShakeOnKey(e.code, e.repeat)) doShake();
+  if (e.code === 'KeyF' && !e.repeat) activateEkstase();
 });
 
 // ---------- runtime signals ----------
-let combo = 0;
-let comboTimer = 0;
+let comboState = createCombo(state.combo.stacks);
 let drive = 0;
 let clicksSinceSwitch = 0;
 
@@ -420,11 +508,15 @@ function loop(nowMs: number): void {
     }
   }
 
-  if (comboTimer > 0) {
-    comboTimer -= dt;
-    if (comboTimer <= 0) combo = 0;
-  }
-  hud.setCombo(combo);
+  // Combo soft-decay (§4.2.2) + tier-driven juice (music/ability bar), each frame.
+  comboState = comboStep(comboState, dt);
+  const epochMs = Date.now();
+  const tier = comboTier(comboState.stacks);
+  const frenzy = isFrenzyActive(state.ability, epochMs);
+  hud.setCombo(comboState.stacks, tier);
+  audio.setIntensity(intensityFor(tier, frenzy));
+  abilityBar.update(state.ability, epochMs);
+  pops.frame(epochMs); // flush any trailing damage batch (B7)
 
   // physics
   acc += dt;
@@ -440,12 +532,15 @@ function loop(nowMs: number): void {
   if (beatTracker.update(choreo.phase)) audio.beat(0.5 + drive * 0.08);
   world.anims.forEach((a) => a(t0, beatV));
 
-  hud.update(state, combat, dps, clickDmg);
+  // HUD-throttle (B7): the moving HP bar / boss timer refresh cheaply per frame;
+  // the full text HUD only rebuilds on the 0.25 s tick (or discrete events).
+  hud.frame(combat);
 
   uiTimer -= dt;
   if (uiTimer <= 0) {
-    uiTimer = 0.4;
+    uiTimer = 0.25;
     document.title = titleFor(state.gold);
+    hud.update(state, combat, dps, clickDmg);
     // keep crew affordability + prestige fresh while idling
     const active = document.querySelector('.tab.active') as HTMLElement | null;
     if (active?.dataset.t === 'crew') crew.render();

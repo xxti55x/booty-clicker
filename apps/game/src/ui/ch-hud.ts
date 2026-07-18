@@ -1,6 +1,7 @@
 import type { ChState } from '../game/ch-state';
 import { type CombatState, bossTimeFraction, hpFraction, isBossZone } from '../game/combat';
 import { MONSTERS_PER_ZONE } from '../game/combat';
+import { comboTierName } from '../game/combo';
 import { SOUL_BONUS } from '../game/ascension';
 import { fmt } from './format';
 
@@ -34,7 +35,12 @@ function rivalName(zone: number, boss: boolean): string {
   return RIVALS[zone % RIVALS.length];
 }
 
-/** Live HUD + rival/boss panel for the CH mode. */
+/**
+ * Live HUD + rival/boss panel for the CH mode. HUD-throttle (spec §8.10, B7):
+ * text/soul writes are cached and only touched on a real value change, so the
+ * click hot-path and the per-frame loop never rebuild DOM needlessly. The moving
+ * HP bar + boss timer are refreshed cheaply per frame via `frame()`.
+ */
 export class ChHud {
   private readonly zone = byId('zone');
   private readonly zoneKind = byId('zoneKind');
@@ -48,49 +54,87 @@ export class ChHud {
   private readonly prog = byId('zoneProgress');
   private readonly timer = byId('rivalTimer');
 
+  // Cached last-written values (change-detection, no DOM churn).
+  private cZone = '';
+  private cKind = '';
+  private cGold = '';
+  private cStats = '';
+  private cSouls = '';
+  private cRival = '';
+  private cHpText = '';
+  private cHpPct = -1;
+  private cProg = '';
+  private cTimer = '';
+  private cBoss: boolean | null = null;
+  private cCombo = '';
+
+  private setText(el: HTMLElement, next: string, cache: string): string {
+    if (next !== cache) el.textContent = next;
+    return next;
+  }
+
+  /** Full HUD refresh (call on discrete events + the 0.25 s tick). */
   update(state: ChState, combat: CombatState, dps: number, clickDmg: number): void {
-    this.zone.textContent = String(combat.zone);
-    this.zoneKind.textContent = combat.boss ? '👑 BOSS' : isBossZone(combat.zone) ? '⚔️' : '';
-    this.gold.textContent = fmt(state.gold);
-    this.stats.textContent = `DPS ${fmt(dps)} · Klick ${fmt(clickDmg)}`;
+    this.cZone = this.setText(this.zone, String(combat.zone), this.cZone);
+    const kind = combat.boss ? '👑 BOSS' : isBossZone(combat.zone) ? '⚔️' : '';
+    this.cKind = this.setText(this.zoneKind, kind, this.cKind);
+    this.cGold = this.setText(this.gold, fmt(state.gold), this.cGold);
+    this.cStats = this.setText(this.stats, `DPS ${fmt(dps)} · Klick ${fmt(clickDmg)}`, this.cStats);
 
-    if (state.souls > 0) {
-      this.soulsEl.classList.remove('hidden');
-      this.soulsEl.textContent = `✨ ${fmt(state.souls)} Seelen · +${Math.round(state.souls * SOUL_BONUS * 100)}% Schaden`;
-    } else {
-      this.soulsEl.classList.add('hidden');
+    const soulsTxt =
+      state.souls > 0
+        ? `✨ ${fmt(state.souls)} Seelen · +${Math.round(state.souls * SOUL_BONUS * 100)}% Schaden`
+        : '';
+    if (soulsTxt !== this.cSouls) {
+      this.cSouls = soulsTxt;
+      this.soulsEl.classList.toggle('hidden', soulsTxt === '');
+      if (soulsTxt) this.soulsEl.textContent = soulsTxt;
     }
 
-    this.rivalNameEl.textContent = rivalName(combat.zone, combat.boss);
-    this.hpFill.style.width = `${hpFraction(combat) * 100}%`;
-    this.hpText.textContent = `${fmt(combat.hp)} / ${fmt(combat.hpMax)}`;
+    this.cRival = this.setText(this.rivalNameEl, rivalName(combat.zone, combat.boss), this.cRival);
+    this.frame(combat);
+  }
 
+  /** Cheap per-frame refresh of the moving bits (HP bar + boss timer/progress). */
+  frame(combat: CombatState): void {
+    const pct = Math.round(hpFraction(combat) * 1000) / 10; // 0.1 % granularity
+    if (pct !== this.cHpPct) {
+      this.cHpPct = pct;
+      this.hpFill.style.width = `${pct}%`;
+    }
+    this.cHpText = this.setText(
+      this.hpText,
+      `${fmt(combat.hp)} / ${fmt(combat.hpMax)}`,
+      this.cHpText,
+    );
+
+    if (this.cBoss !== combat.boss) {
+      this.cBoss = combat.boss;
+      this.prog.classList.toggle('hidden', combat.boss);
+      this.timer.classList.toggle('hidden', !combat.boss);
+      this.hpFill.classList.toggle('boss', combat.boss);
+    }
     if (combat.boss) {
-      this.prog.classList.add('hidden');
-      this.timer.classList.remove('hidden');
-      this.timer.textContent = `⏱ ${Math.ceil(combat.bossTimer)}s`;
+      this.cTimer = this.setText(this.timer, `⏱ ${Math.ceil(combat.bossTimer)}s`, this.cTimer);
       this.timer.classList.toggle('urgent', bossTimeFraction(combat) < 0.34);
-      this.hpFill.classList.add('boss');
     } else {
-      this.prog.classList.remove('hidden');
-      this.timer.classList.add('hidden');
-      this.prog.textContent = `${combat.killsThisZone} / ${MONSTERS_PER_ZONE}`;
-      this.hpFill.classList.remove('boss');
+      this.cProg = this.setText(
+        this.prog,
+        `${combat.killsThisZone} / ${MONSTERS_PER_ZONE}`,
+        this.cProg,
+      );
     }
   }
 
-  setCombo(combo: number): void {
-    this.comboEl.textContent = combo > 1 ? `Combo ×${combo}` : '';
+  /** Combo readout with the tier name (e.g. "Combo ×27 · Heiß"). */
+  setCombo(stacks: number, tier: number): void {
+    const n = Math.floor(stacks);
+    const name = comboTierName(tier);
+    const txt = n > 1 ? `Combo ×${n}${name ? ` · ${name}` : ''}` : '';
+    if (txt !== this.cCombo) {
+      this.cCombo = txt;
+      this.comboEl.textContent = txt;
+      this.comboEl.className = tier > 0 ? `combo tier${tier}` : 'combo';
+    }
   }
-}
-
-/** Floating "+gold" / "-dmg" / "CRIT!" popup at a screen position. */
-export function spawnPop(text: string, x: number, y: number, cls = ''): void {
-  const el = document.createElement('div');
-  el.className = `pop ${cls}`.trim();
-  el.textContent = text;
-  el.style.left = `${x}px`;
-  el.style.top = `${y}px`;
-  document.body.appendChild(el);
-  window.setTimeout(() => el.remove(), 900);
 }

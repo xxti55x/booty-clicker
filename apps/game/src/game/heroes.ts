@@ -92,6 +92,23 @@ export function milestoneMult(level: number): number {
   return m;
 }
 
+/**
+ * Levels remaining until this member's next ×2 milestone (spec §4.3.2, the AdCap
+ * "noch n Level bis ×2" bar), plus the [prev, next] milestone bracket for a
+ * progress fraction. Returns null once every milestone is passed. Pure UI helper.
+ */
+export function nextMilestone(
+  level: number,
+): { next: number; prev: number; remaining: number } | null {
+  for (let i = 0; i < MILESTONES.length; i++) {
+    if (level < MILESTONES[i]) {
+      const prev = i === 0 ? 0 : MILESTONES[i - 1];
+      return { next: MILESTONES[i], prev, remaining: MILESTONES[i] - level };
+    }
+  }
+  return null;
+}
+
 /** A single member's DPS at `level` (0 when un-recruited). */
 export function heroDps(cfg: HeroConfig, level: number): number {
   if (level <= 0) return 0;

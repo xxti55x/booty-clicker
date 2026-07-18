@@ -19,35 +19,35 @@ CI (real browsers, touch input, performance).
 - [ ] `npm run lint` — ESLint clean
 - [ ] `npm run format:check` — Prettier clean
 - [ ] `npm test` — all unit tests green (game + API workspaces)
-- [ ] `npm run build` — type-checks and builds; bundle **< 5 MB** (currently ~566 KB JS / ~147 KB gzip)
+- [ ] `npm run build` — type-checks and builds; bundle **< 5 MB** (currently ~580 KB JS / ~152 KB gzip; +~9 KB for M8 juice)
 - [ ] `npm run build:itch` — produces `apps/game/release/booty-clicker-itch.zip` with `index.html` at the archive root
 
 ## 2. Browser matrix (manual smoke)
 
 Run `npm run preview` (or serve the itch ZIP) and verify on each target:
 
-| Check                                                                      | Chrome (desktop) | Firefox (desktop) | Android (Chrome) |
-| -------------------------------------------------------------------------- | ---------------- | ----------------- | ---------------- |
-| Loads to first frame; loading screen fades out                             | ☐                | ☐                 | ☐                |
-| Onboarding coach marks appear on first run, then never again               | ☐                | ☐                 | ☐                |
-| Click / tap the figure = twerk → rival HP drops (damage popup)             | ☐                | ☐                 | ☐                |
-| Spacebar twerks; **held** spacebar does NOT autofire (one shake)           | ☐                | ☐                 | n/a              |
-| Camera orbit (drag) does **not** register as a shake                       | ☐                | ☐                 | ☐                |
-| Crits (~20 %) show a bigger "CRIT" popup + stronger screen-shake           | ☐                | ☐                 | ☐                |
-| Combo multiplier climbs while clicking fast, resets after ~1.5 s idle      | ☐                | ☐                 | ☐                |
-| Crew shop (🕺): recruit/level members ×1 / ×10 / Max; DPS ticks rivals     | ☐                | ☐                 | ☐                |
-| Clearing 10 rivals advances the zone; HP scales up (endless)               | ☐                | ☐                 | ☐                |
-| Every 5th zone = boss with a 30 s timer; timeout → farm & retry (no lock)  | ☐                | ☐                 | ☐                |
-| Backdrop rotates every 10 zones (club → synth → beach → space)             | ☐                | ☐                 | ☐                |
-| Ascend (✨ Ruhm): resets the run, banks Ruhm-Seelen, +10 %/soul            | ☐                | ☐                 | ☐                |
-| Ascension preview shows "+X Seelen" before the reset                       | ☐                | ☐                 | ☐                |
-| Audio starts after first gesture; mute button persists                     | ☐                | ☐                 | ☐                |
-| Autosave + reload restores progress                                        | ☐                | ☐                 | ☐                |
-| Offline earnings dialog on boot after being away                           | ☐                | ☐                 | ☐                |
-| Tab-return grant: switch tab ~1 min, return → BP credited (B5)             | ☐                | ☐                 | ☐                |
-| Settings (⚙️): graphics quality + FPS cap apply & persist; effects toggles | ☐                | ☐                 | ☐                |
-| `document.title` shows live BP                                             | ☐                | ☐                 | ☐                |
-| Export / Import / Reset save (base64 code round-trips)                     | ☐                | ☐                 | ☐                |
+| Check                                                                                                   | Chrome (desktop) | Firefox (desktop) | Android (Chrome) |
+| ------------------------------------------------------------------------------------------------------- | ---------------- | ----------------- | ---------------- |
+| Loads to first frame; loading screen fades out                                                          | ☐                | ☐                 | ☐                |
+| Onboarding coach marks appear on first run, then never again                                            | ☐                | ☐                 | ☐                |
+| Click / tap the figure = twerk → rival HP drops (damage popup)                                          | ☐                | ☐                 | ☐                |
+| Spacebar twerks; **held** spacebar does NOT autofire (one shake)                                        | ☐                | ☐                 | n/a              |
+| Camera orbit (drag) does **not** register as a shake                                                    | ☐                | ☐                 | ☐                |
+| Crits (~20 %) show a bigger, golden, rotated "CRIT" popup + stronger shake                              | ☐                | ☐                 | ☐                |
+| Combo climbs + names tiers (Warm/Heiß/Feuer/Inferno); **soft-decays** after ~1.5 s idle (no reset to 0) | ☐                | ☐                 | ☐                |
+| Crew shop (🕺): recruit/level members ×1 / ×10 / Max; DPS ticks rivals                                  | ☐                | ☐                 | ☐                |
+| Clearing 10 rivals advances the zone; HP scales up (endless)                                            | ☐                | ☐                 | ☐                |
+| Every 5th zone = boss with a 30 s timer; timeout → farm & retry (no lock)                               | ☐                | ☐                 | ☐                |
+| Backdrop rotates every 10 zones (club → synth → beach → space)                                          | ☐                | ☐                 | ☐                |
+| Ascend (✨ Ruhm): resets the run, banks Ruhm-Seelen, +10 %/soul                                         | ☐                | ☐                 | ☐                |
+| Ascension preview shows "+X Seelen" before the reset                                                    | ☐                | ☐                 | ☐                |
+| Audio starts after first gesture; mute button persists                                                  | ☐                | ☐                 | ☐                |
+| Autosave + reload restores progress                                                                     | ☐                | ☐                 | ☐                |
+| Offline earnings dialog on boot after being away                                                        | ☐                | ☐                 | ☐                |
+| Tab-return grant: switch tab ~1 min, return → BP credited (B5)                                          | ☐                | ☐                 | ☐                |
+| Settings (⚙️): graphics quality + FPS cap apply & persist; effects toggles                              | ☐                | ☐                 | ☐                |
+| `document.title` shows live BP                                                                          | ☐                | ☐                 | ☐                |
+| Export / Import / Reset save (base64 code round-trips)                                                  | ☐                | ☐                 | ☐                |
 
 ## 3. Mobile / touch specifics
 
@@ -57,8 +57,9 @@ Run `npm run preview` (or serve the itch ZIP) and verify on each target:
 - [ ] **Safe area (B13b):** on a notched phone (or a simulated device with insets),
       the HUD, 🕺/🔊 buttons, hintbar, rival widget and shop panel are **not**
       clipped by the notch / rounded corners / home indicator (`viewport-fit=cover` + `env(safe-area-inset-*)`).
-- [ ] Shop is full-width under 640 px (figure hidden while shopping is a known debt,
-      B13a — bottom-sheet returns in M8).
+- [ ] **Bottom-sheet (B13a, M8):** under 640 px the shop is a bottom sheet (~55 vh) —
+      the figure + rival HP widget stay visible while shopping (verified headlessly,
+      see §8; screenshot `m8-bottomsheet.png`). The 🕺 toggle stays reachable above it.
 
 ## 4. Determinism / save integrity (spot checks)
 
@@ -114,3 +115,37 @@ via `simulateEndless` from **M9**; until then, sanity-check by feel:
       cleanly otherwise).
 - [ ] Worker (leaderboard, optional, wired in M13): `cd apps/api && npx wrangler deploy`
       after provisioning the D1 database and KV namespace from `wrangler.toml`.
+
+## 9. M8 — Klick-Juice 2.0
+
+Automated (unit): combo tiers + soft-decay (`combo.test.ts`: `decay(100,1)=80`,
+never resets to 0), Tier-2 `+3 %` crit chance (seeded), on-beat window ±100 ms via
+phase injection (`click.test.ts`), Ekstase charge/×10/12 s + v3 reload round-trip
+(`ability.test.ts`, `ch-store.test.ts`), popup pool ≤ 24 nodes + 1-pop/80 ms batcher
+(`pops.test.ts`), haptics ≤ 10×/s throttle (`haptics.test.ts`), shake/particle data
+(`juice.test.ts`). Headless smoke: `scratchpad/smoke-m8.mjs` (fresh boot, no errors,
+click earns BP, ability meter fills, combo reaches a tier, bottom-sheet layout).
+
+Manual passes (real device / browser):
+
+- [ ] **Combo tiers.** Fast clicking lights up Warm → Heiß → Feuer → Inferno with
+      colour/pulse; stopping bleeds stacks down gradually (not instantly to 0).
+- [ ] **On-beat.** Clicking on the clap (♪ popup + golden flash) hits harder; the
+      tempo rises with the drive so the rhythm speeds up as you click faster.
+- [ ] **Twerk-Ekstase.** The bottom meter fills with clicks (faster on-beat); `F` or
+      the button at full fires 12 s of ×10 damage with its own music/shake; reload
+      **mid-frenzy** keeps the remaining window.
+- [ ] **Popup pool ≤ 24 nodes.** During a 12-cps burst, `document.querySelectorAll('.pop').length`
+      never exceeds 24; damage pops batch into "-… ×n" instead of one-per-click.
+- [ ] **12-cps stress @ 60 fps.** Hold ~12 clicks/s with crits + particles on the
+      reference laptop; DevTools Performance shows a steady 60 fps and particle work
+      < 1 ms/frame (burst = 8 + tier·6 ≤ 32, well inside the 200-particle pool; no
+      pool growth needed). No `innerHTML` rebuild in the click hot-path (HUD is
+      change-detected; the crew tab only re-renders on the 0.25 s tick).
+- [ ] **Haptics toggle.** On a device with a vibration motor, clicks buzz (8 ms,
+      throttled ≤ 10×/s), crits 35 ms, boss-kills the `[20,30,60]` pattern; the ⚙️
+      "Vibration" toggle silences it; iOS is a silent no-op (no error).
+- [ ] **Effects-off = MVP look.** Turning Screen-Shake / Partikel / Vibration off in
+      ⚙️ removes each effect independently; music intensity follows mute.
+- [ ] **Bottom-sheet (§3).** On a phone width the shop is a bottom sheet; the figure
+      and rival stay visible while shopping.

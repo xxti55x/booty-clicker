@@ -6,6 +6,7 @@ import {
   heroDps,
   maxAffordable,
   nextLevelCost,
+  nextMilestone,
 } from '../game/heroes';
 import { soulMult } from '../game/ascension';
 import { fmt } from './format';
@@ -87,6 +88,16 @@ export class Crew {
       const affordable = count > 0 && cost <= this.deps.state.gold;
       const dps = heroDps(cfg, level) * mult;
       const label = level === 0 ? 'Anheuern' : `+${count === 0 ? 1 : count}`;
+      // Milestone progress bar (§4.3.2): "noch n Level bis ×2" once recruited.
+      const ms = level > 0 ? nextMilestone(level) : null;
+      const msRow = ms
+        ? `<div class="ms-bar" title="noch ${ms.remaining} bis ×2 DPS">
+            <div class="ms-fill" style="width:${Math.round(((level - ms.prev) / (ms.next - ms.prev)) * 100)}%"></div>
+          </div>
+          <div class="ms-txt">noch ${ms.remaining} bis ×2 (Lv ${ms.next})</div>`
+        : level > 0
+          ? `<div class="ms-txt done">alle Meilensteine erreicht</div>`
+          : '';
       rows.push(
         `<div class="item ${affordable ? '' : 'locked'}" data-id="${cfg.id}">
           <div class="nm">${cfg.name}<span class="lv">Lv ${level}</span></div>
@@ -95,6 +106,7 @@ export class Crew {
             <span class="cost ${affordable ? '' : 'bad'}">${label} · ${fmt(cost)} BP</span>
             <span class="dps">${level > 0 ? `${fmt(dps)} DPS` : '—'}</span>
           </div>
+          ${msRow}
         </div>`,
       );
     });

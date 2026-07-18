@@ -3,6 +3,74 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M8 — Klick-Juice 2.0 (der Star zuerst)
+
+- **2026-07-18 — Combo-Tiers als absolute (nicht kumulative) Daten-Perks.** Die
+  Tier-Tabelle (§4.2.2) listet pro Tier einen „Zusatz-Perk"; implementiert sind die
+  Perks als **absolute Werte am jeweiligen Tier**: `tierCritChanceBonus(2)=0.03`,
+  `(3)=0.06`, Tier 4 behält +6 % Chance und ergänzt +25 % Crit-Mult & +40 ms
+  Beat-Fenster. So bleibt `critChance(CRIT_CHANCE + bonus)` (hart bei 40 % gedeckelt)
+  eine einzige, deterministisch testbare Faltung; der rohe Combo-Mult bleibt bei
+  ×2-Cap (die §4.8-Balance steht darauf). Tier-Config lebt in `game/combo.ts` als Daten.
+
+- **2026-07-18 — Soft-Decay kontinuierlich modelliert (frame-rate-unabhängig).**
+  Statt „−20 % pro diskreter Sekunde" ist `decay(stacks, seconds)` als
+  stückweise geschlossene Lösung implementiert: exponentiell mit Basis `1−0.2 = 0.8`
+  solange der 20-%-Verlust über dem Boden liegt (Stacks > 5), darunter linear −1/s,
+  Boden bei 0. `decay(100,1)=80`, `decay(100,2)=64` exakt; nie ein Hard-Reset (N6).
+  Das transiente Fenster (`window`) lebt in `ComboState` als Runtime-Feld — nur
+  `stacks` wird persistiert (CH-Save v3).
+
+- **2026-07-18 — On-Beat rein über Phase-Injektion, ohne game→audio-Kern-Kopplung.**
+  `isOnBeat(phase, phasePerSecond, windowMs)` rechnet die Zeit-Distanz zum nächsten
+  Beat-Onset (Onsets = ganzzahlige Vielfache von `BEAT_PERIOD_PHASE = 1/CLAPS_PER_PHASE`)
+  und vergleicht mit ±100 ms (Tier 4: +40 ms). Die Phasen-Geschwindigkeit
+  (`phaseVelocity(drive)`) spiegelt `physics.stepPhysics` als benannte Daten, damit
+  Beat-Timing eine einzige Quelle hat. `CLAPS_PER_PHASE` wird aus `audio/beat.ts`
+  importiert (pures, DOM-freies Modul) — eine numerische Konstante, kein Glue.
+
+- **2026-07-18 — Ekstase-Fenster als Epoch-ms, nicht als Countdown.** `activate`
+  setzt `frenzyUntil = now + 12 000`; `frenzyMult(state, now)` = 10 solange
+  `now < frenzyUntil`, sonst 1. Damit überlebt ein laufendes Fenster einen Reload
+  ohne Tick-Buchführung (CH-Save v3 speichert `charge/frenzyUntil/cooldowns`).
+  `cooldowns` ist leer, aber jetzt schon im Schema, damit Beat-Drop/Pfirsichregen
+  (M10) keinen weiteren Bump brauchen.
+
+- **2026-07-18 — CH-Save v3: Guard streng auf Kern, Repair auf Juice.** `ability`
+  und `combo` werden — wie schon `rng/stats` (M7) — **nicht** in `isChSave` gegatet,
+  sondern in `stateFromSave` repariert (`repairAbility` klemmt Charge 0..100, wirft
+  nicht-numerische Cooldowns weg; `repairCombo` ⇒ `stacks ≥ 0`). Korruptes Teilobjekt
+  ⇒ Default, nie Crash und nie Fortschrittsverlust. `migrateChV2toV3` füllt die
+  M8-Defaults; v2→v3 ist verlustfrei getestet.
+
+- **2026-07-18 — Popup-Pool + Batcher als pure, node-testbare Kerne.** `ui/pops.ts`
+  trennt die pure Logik (`PopBatcher` = 1 Pop/80 ms + `+Σ ×n`-Aggregat; `NodePool` =
+  Ringpuffer mit ≤ 24 nie überschrittenen Nodes) vom dünnen DOM-Renderer (`Pops`).
+  So ist die ≤-24-Invariante (§8-AC2) eine reine Zähler-Eigenschaft ohne jsdom
+  (Vitest läuft im node-Env). Recycelte Nodes starten die CSS-`rise`-Animation via
+  `animation:none` → reflow → `''` neu.
+
+- **2026-07-18 — HUD-Drossel per Change-Detection, nicht per Blockade.** `ChHud`
+  cached jeden geschriebenen Wert und fasst das DOM nur bei echter Änderung an;
+  bewegliche Teile (HP-Balken, Boss-Timer) laufen über das leichte `frame()` pro
+  Frame, der volle Text-Refresh nur auf dem 0,25-s-Tick + diskreten Events. Kein
+  `innerHTML` im Klick-Hot-Path.
+
+- **2026-07-18 — Shake-/Partikel-Tuning als Daten (`game/juice.ts`).** Shake-Tiers
+  (T2 0,2 · T3 0,35 · T4/Ekstase 0,5 · Boss-Kill 0,6) und die Burst-Formel
+  `8 + Tier·6` sind exportierte, getestete Konstanten statt Inline-Literale im Glue.
+  Burst(4)=32 bleibt weit unter dem 200er-Partikel-Pool — keine Pool-Vergrößerung nötig.
+
+- **2026-07-18 — Musik-Intensität additiv 0..3, lazy & muteable.**
+  `AudioEngine.setIntensity` schaltet im 16-Step-Loop zusätzliche Voices frei
+  (T2 Kick-Perkussion, T3 Lead-Arp +1 Oktave, Ekstase Filter-Sweep), alle unter dem
+  Music-Bus/Master — Mute und „kein Autoplay" gelten unverändert.
+
+- **2026-07-18 — Mobile Bottom-Sheet rein per CSS.** Unter 640 px wird `#shop` zum
+  Bottom-Sheet (55 vh, Slide über `translateY`); Figur + Rivale bleiben im oberen
+  Drittel sichtbar (headless per Screenshot verifiziert, §8-AC5). Der Shop-Toggle
+  (oben links, z-index 25) bleibt über dem Sheet erreichbar.
+
 ## M7 — MVP-Härtung & Kern-Hygiene
 
 - **2026-07-17 — Klick-Mathe zieht in ein pures `game/click.ts` (N2).** Die
