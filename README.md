@@ -91,6 +91,26 @@ Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 M
   (~8 s klickbar). Fang ihn für **×3 Einkommen für 60 s** (HUD-Badge „×3 Boost") plus **25 %
   Chance auf 1 🔑**. Auf dem Handy wird er **im Viewport gehalten** (auch beim Drehen) und
   **verschwindet unter dem geöffneten Bottom-Sheet**, damit er nie darunter feststeckt.
+- **Ziele, Dailies & Bestenliste (📋).** Der **📋-Tab** bündelt die Retention-Meta —
+  komplett **offline, ohne Server, ohne Account**:
+  - **Täglicher Login-Streak** (1–7): jeder Tag eine **🥇 Goldtruhe**, an **Tag 7** eine
+    **💎 Diamanttruhe + 2 🔑**; ein **Streak-Schutz** (1×/Woche gratis) fängt einen
+    verpassten Tag ab, kein FOMO. Die Belohnung kommt automatisch beim ersten Boot des Tages.
+  - **3 Tages-Quests**, deterministisch aus dem Datum gewürfelt (gleiches Datum ⇒ gleiche
+    Quests), mit Fortschrittsbalken + **Einlösen**-Knopf; **1× pro Tag** kannst du **neu
+    würfeln**. Beispiele: „Combo-Tier 3" (2 🔑) · „4 Bosse besiegen" (🥇) · „500 On-Beat-Klicks"
+    (💎) · „Neue Bestzone" (5 ✨) · „Aszendiere" (20 🧩). Uhr-zurückstellen bringt nichts
+    (Tage sind monotone High-Water-Marken).
+  - **Erfolge**: ein CH-natives Set (Bühnen-Meilensteine, Boss-Serien ohne Timeout,
+    Combo-Tiers, Krit-Zähler, Aszensionen, Himmelfahrten, Vergoldungen, Truhen …) mit
+    freigeschaltet/gesperrt-Ansicht; überleben Ascension **und** Himmelfahrt.
+  - **Bestenliste v2 (optional)**: Metrik ist die **Bestzone** (`maxZone`) + Anzeige von
+    Seelen/Aszensionen. **Fail-silent & standardmäßig aus** — ohne `VITE_API_BASE` ist alles
+    voll spielbar, der Eintrag zeigt nur einen **Offline-Hinweis**. Ist eine API konfiguriert,
+    fragt das Spiel **nur bei einer neuen Bestzone** (überspringbar) nach dem Eintrag; ein
+    **Top-50** ist jederzeit über den 📋-Tab abrufbar.
+  - **Saison-Flavor (📆)**: rein datumsbasiert, **Oktober „Spooky Booty" 🎃** und
+    **Dezember „Frost-Twerk" ❄️** — ein Banner im 📋-Tab + Boot-Hinweis, **kein** Gameplay-Hardlock.
 
 ## Steuerung
 
@@ -100,11 +120,13 @@ Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 M
 - Maus ziehen = Kamera drehen, Scrollen = Zoom
 - 🕺-Button (links oben) blendet das Panel ein/aus · 🔊 = Ton an/aus
 - Auf dem Handy ist der Shop ein **Bottom-Sheet** — Figur & Rivale bleiben sichtbar
-- Tabs (Emoji-only, Titel per Hover, damit alle **sieben** passen): **🕺 Crew** ·
+- Tabs (Emoji-only, Titel per Hover; die Tab-Leiste **scrollt horizontal**, falls die
+  **acht** Tabs auf einem schmalen Panel nicht in eine Zeile passen): **🕺 Crew** ·
   **🎽 Gear** (Skins/Kulisse/Set-Boni) · **🌀 Ahnen** (Seelen-Sink) · **✨ Ruhm**
   (Ascension + Statistik) · **🌈 Himmel** (Himmelfahrt + Himmelsbaum) · **🎁 Truhen**
-  (🔑/Truhen öffnen, Token & Skins, transparente Drop-Chancen) · **⚙️** (Grafik,
-  Effekte, Save-Export/Import/Reset)
+  (🔑/Truhen öffnen, Token & Skins, transparente Drop-Chancen) · **📋 Ziele** (Daily,
+  Quests, Erfolge, Bestenliste, Saison) · **⚙️** (**📊 Statistik** — lifetime vs. Lauf —,
+  Grafik, Effekte, Save-Export/Import/Reset)
 
 ## Architektur
 

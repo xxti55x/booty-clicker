@@ -120,6 +120,18 @@ import {
   offlineCapS,
 } from './game/heaven';
 import { CREW, type CrewLevels } from './game/heroes';
+import { buildAchievementCtx, newlyUnlocked } from './game/ch-achievements';
+import {
+  type LoginReward,
+  type QuestReward,
+  advanceMeta,
+  claimInMeta,
+  dailyLogin,
+  dayNumber,
+  reroll as rerollQuests,
+  rollDay,
+} from './game/quests';
+import { type Season, seasonFor } from './game/season';
 import { shouldShakeOnKey } from './game/input';
 import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
 import { applyLegacyInheritance } from './game/legacy-import';
@@ -136,6 +148,8 @@ import { Crew } from './ui/crew';
 import { Gear } from './ui/gear-panel';
 import { Heaven } from './ui/heaven-panel';
 import { Haptics } from './ui/haptics';
+import { Leaderboard } from './ui/leaderboard';
+import { Meta } from './ui/meta-panel';
 import { Pops } from './ui/pops';
 import { fmt, titleFor } from './ui/format';
 import { Onboarding } from './ui/onboarding';
@@ -239,6 +253,24 @@ function recompute(): void {
   clickDmg = clickDamageOf(state);
 }
 recompute();
+
+// The active seasonal banner (§7.5) — a purely cosmetic, date-based flavor read
+// once on boot (a session rarely crosses a month boundary; the meta panel re-reads
+// it on each day roll anyway).
+const currentSeason: Season | null = seasonFor(new Date());
+
+/**
+ * Credit earned 🔑 (§7.5 stat): bumps the spendable key balance AND the lifetime
+ * `keysEarned` counter together, so every faucet (boss kills, combo-tier-3, peach,
+ * chest rewards, daily-login + quest rewards) is counted exactly once. Spending keys
+ * (opening chests) never touches the lifetime counter.
+ */
+function earnKeys(n: number): void {
+  if (n > 0) {
+    state.chests.keys += n;
+    state.stats.keysEarned += n;
+  }
+}
 
 /**
  * Effective Ekstase charge threshold, lowered by Ekstasius (§4.6) + Gyrator gear
@@ -413,21 +445,28 @@ const prestige = new Prestige({
   getRunMaxZone: () => Math.max(state.runMaxZone, combat.maxZone),
   onAscend: () => {
     syncMaxZones();
+    // §7.5 stat + §7.2 „Aszendiere" quest — bumped BEFORE the reset so `ascendState`
+    // carries the incremented stats + advanced quest progress forward untouched.
+    state.stats.ascensions += 1;
+    state.meta = advanceMeta(state.meta, 'ascend');
     const prevCrew = { ...state.crew };
     Object.assign(state, ascendState(state)); // mutate in place — panels hold this ref
     applyFruhstarter(prevCrew);
     combat = withBossTimerBonus(spawnFor(1, 0, 1));
     comboState = createCombo(state.combo.stacks); // run-scoped juice resets
     comboT3KeyAwardedThisRun = false; // the combo-Tier-3 key is once per run (§6.1)
+    lastShakeTier = 0;
     recompute();
     updateBackground(true);
     crew.render();
     ancients.render();
     heaven.refresh();
     gearPanel.render();
+    metaPanel.render();
     hud.update(state, combat, dps, clickDmg);
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     toasts.show('✨', 'Ruhm eingeheimst!', `Jetzt ${fmt(state.souls)} Seelen`);
+    checkAchievements(); // ascension / soul milestones (§7.3)
     audio.unlockJingle();
     persist();
   },
@@ -452,15 +491,18 @@ const heaven = new Heaven({
     combat = withBossTimerBonus(spawnFor(1, 0, 1));
     comboState = createCombo(state.combo.stacks);
     comboT3KeyAwardedThisRun = false; // once per run (§6.1)
+    lastShakeTier = 0;
     recompute();
     updateBackground(true);
     crew.render();
     ancients.render();
     prestige.refresh();
     gearPanel.render();
+    metaPanel.render();
     hud.update(state, combat, dps, clickDmg);
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     toasts.show('🌈', 'Himmelfahrt!', `${fmt(state.heaven.hpf)} Himmelspfirsiche`);
+    checkAchievements(); // Himmelfahrt / HPF milestones (§7.3)
     audio.unlockJingle();
     persist();
   },
@@ -485,7 +527,7 @@ const chestPanel = new Chests({
   open: (tier) => openChestFromInventory(tier),
 });
 
-new ChSettings({
+const chSettings = new ChSettings({
   getState: () => {
     syncMaxZones();
     return state;
@@ -496,6 +538,7 @@ new ChSettings({
     combat = withBossTimerBonus(spawnFor(state.zone, state.killsThisZone, state.runMaxZone));
     comboState = createCombo(state.combo.stacks);
     comboT3KeyAwardedThisRun = false; // fresh run context for the imported save (§6.1)
+    lastShakeTier = 0;
     char = buildCharacter(scene, SKINS[state.gear.skin], char); // rig follows the imported skin
     recompute();
     updateBackground(true);
@@ -504,8 +547,10 @@ new ChSettings({
     prestige.refresh();
     heaven.refresh();
     gearPanel.render();
+    metaPanel.render(true);
     hud.update(state, combat, dps, clickDmg);
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
+    checkAchievements(); // an imported save may already satisfy fresh achievements
     persist();
   },
   reset: () => {
@@ -544,6 +589,7 @@ const tabBodies: Record<string, string> = {
   pr: 'tabPr',
   heaven: 'tabHeaven',
   chest: 'tabChest',
+  meta: 'tabMeta',
   set: 'tabSet',
 };
 function renderActiveTab(key: string): void {
@@ -553,6 +599,8 @@ function renderActiveTab(key: string): void {
   else if (key === 'pr') prestige.refresh();
   else if (key === 'heaven') heaven.refresh();
   else if (key === 'chest') chestPanel.render();
+  else if (key === 'meta') metaPanel.render();
+  else if (key === 'set') chSettings.render();
 }
 for (const tab of Array.from(document.querySelectorAll<HTMLElement>('.tab'))) {
   tab.addEventListener('click', () => {
@@ -636,7 +684,12 @@ function onKillProgress(
   state.gold += gold;
   state.stats.goldLifetime += gold;
   if (wasBoss) {
+    // Boss defeated (§7.3/§7.5): lifetime kill count, the no-timeout streak (reset on
+    // a boss timeout in the loop) + its highwater, and the quest metric.
     state.stats.bossKills += 1;
+    state.stats.bossStreak += 1;
+    state.stats.maxBossStreak = Math.max(state.stats.maxBossStreak, state.stats.bossStreak);
+    state.meta = advanceMeta(state.meta, 'bossKills');
   } else if (r.killed) {
     // Rival kill (§6.1): a 3 % base chance — scaled by Truhen-Luck — drops a Holztruhe.
     if (rng.next() < rivalChestChance(chestLuck(state))) state.chests.inventory.wood += 1;
@@ -651,16 +704,23 @@ function onKillProgress(
     // a seeded-random member. `lifetimeMaxZone` is the highwater, so a re-clear after
     // ascension never double-awards. Gilds survive ascension (anti-plateau, P3).
     const clearedZone = combat.zone - 1;
-    if (combat.zone > state.lifetimeMaxZone && isGildZone(clearedZone)) {
-      const before = state.gilds;
-      state.gilds = awardGildOnZone(before, clearedZone, false, rng);
-      if (state.gilds !== before) {
-        recompute();
-        const gildedId = Object.keys(state.gilds).find(
-          (id) => (state.gilds[id] ?? 0) > (before[id] ?? 0),
-        );
-        const name = CREW.find((c) => c.id === gildedId)?.name ?? 'Crew';
-        toasts.show('🏅', 'Vergoldung!', `${name} +25% DPS (Bühne ${clearedZone})`);
+    // Reaching a NEW lifetime-best zone (§7.2 quest metric): the deepest we've ever
+    // been is `state.lifetimeMaxZone` (synced at the end of this fn), so advancing
+    // past it is a genuine record — fires the „neue Bestzone" quest once.
+    if (combat.zone > state.lifetimeMaxZone) {
+      state.meta = advanceMeta(state.meta, 'newBestZone');
+      if (isGildZone(clearedZone)) {
+        const before = state.gilds;
+        state.gilds = awardGildOnZone(before, clearedZone, false, rng);
+        if (state.gilds !== before) {
+          recompute();
+          state.meta = advanceMeta(state.meta, 'gild'); // §7.2 „Vergoldung" quest
+          const gildedId = Object.keys(state.gilds).find(
+            (id) => (state.gilds[id] ?? 0) > (before[id] ?? 0),
+          );
+          const name = CREW.find((c) => c.id === gildedId)?.name ?? 'Crew';
+          toasts.show('🏅', 'Vergoldung!', `${name} +25% DPS (Bühne ${clearedZone})`);
+        }
       }
     }
     if (combat.zone > state.runMaxZone) state.runMaxZone = combat.zone;
@@ -673,7 +733,7 @@ function onKillProgress(
       // gear key-drop bonus adds a seeded probabilistic extra) + a tier-appropriate
       // chest (§6.2) into the inventory.
       const keys = keyDropAmount(1, keyDropMult(state), rng.next());
-      state.chests.keys += keys;
+      earnKeys(keys);
       const tier = chestTierForBoss(bossZone);
       state.chests.inventory[tier] += 1;
       // Provisional pre-M12 🧩 faucet (§5.4): a boss kill still grants a few Splitter,
@@ -715,6 +775,7 @@ let downT = 0;
 
 function doShake(x?: number, y?: number): void {
   state.totalClicks += 1;
+  state.meta = advanceMeta(state.meta, 'clicks'); // §7.2 „Shakes" quest (no-op if inactive)
   const now = Date.now();
 
   // On-beat is judged against the CURRENT tier's (possibly widened) window,
@@ -751,8 +812,19 @@ function doShake(x?: number, y?: number): void {
         permTokenCritChance(state.permTokens),
     ),
   );
-  if (crit) state.stats.crits += 1;
-  if (onBeat) state.stats.onBeatClicks += 1;
+  if (crit) {
+    state.stats.crits += 1;
+    state.meta = advanceMeta(state.meta, 'crits');
+  }
+  if (onBeat) {
+    state.stats.onBeatClicks += 1;
+    state.meta = advanceMeta(state.meta, 'onBeatClicks');
+  }
+  // Combo metrics (§7.2/§7.3): the highest stacks ever reached, plus the „Combo-Tier
+  // 3" quest fired on the rising edge only (avoids per-click churn while sustained).
+  if (comboState.stacks > state.stats.maxCombo) state.stats.maxCombo = comboState.stacks;
+  if (tier >= 3 && lastShakeTier < 3) state.meta = advanceMeta(state.meta, 'comboTier3');
+  lastShakeTier = tier;
 
   // Charge the Ekstase meter (+1, or +2 on-beat) and fold the ×10 frenzy + on-beat
   // ×1.5 into the pure click pipeline. Idle DPS never gets any of this (P1).
@@ -849,6 +921,8 @@ window.addEventListener('keydown', (e) => {
 let comboState = createCombo(state.combo.stacks);
 let drive = 0;
 let clicksSinceSwitch = 0;
+// Previous shake's combo tier — drives the rising-edge „reached tier 3" quest.
+let lastShakeTier = 0;
 
 // ---------- loot drip bookkeeping (runtime, §6.1) ----------
 // The combo-Tier-3 key is once per run (reset on ascension/Himmelfahrt/import). The
@@ -867,7 +941,7 @@ function lootFromClick(now: number): void {
   const tier = comboTier(comboState.stacks);
   if (tier >= 3 && !comboT3KeyAwardedThisRun) {
     comboT3KeyAwardedThisRun = true;
-    state.chests.keys += 1;
+    earnKeys(1);
     toasts.show('🔑', 'Combo-Feuer!', 'Combo-Tier 3 · +1 Schlüssel');
   }
   if (++clicksSinceDrip >= SESSION_DRIP_CLICKS) {
@@ -919,7 +993,7 @@ function catchPeach(): { keys: number; boostUntil: number } | null {
   if (!peachVisible(now)) return null;
   state.peach.boostUntil = activateBoost(now); // fresh ×3 60-s window
   const keys = peachKeyRoll(rng);
-  state.chests.keys += keys;
+  earnKeys(keys);
   state.peach.nextPeachAt = rollNextPeachAt(now, rng);
   toasts.show(
     '🍑',
@@ -955,7 +1029,7 @@ function creditReward(reward: Reward): void {
       state.gear.shards += reward.shards;
       break;
     case 'keys':
-      state.chests.keys += reward.keys;
+      earnKeys(reward.keys);
       break;
     case 'sugar':
       state.gear.sugarPeaches += reward.sugar;
@@ -992,6 +1066,8 @@ function openChestFromInventory(tier: ChestTier): readonly Reward[] | null {
   if (state.chests.inventory[tier] < 1 || state.chests.keys < cost) return null;
   state.chests.inventory[tier] -= 1;
   state.chests.keys -= cost;
+  state.stats.chestsOpened += 1; // §7.5 stat + §7.2 „Truhen öffnen" quest
+  state.meta = advanceMeta(state.meta, 'chestsOpened');
   const now = Date.now();
   const res = openChest(
     tier,
@@ -1006,6 +1082,7 @@ function openChestFromInventory(tier: ChestTier): readonly Reward[] | null {
     credited.push(reward);
   }
   recompute(); // tokens/boost may have shifted dps/gold
+  checkAchievements(); // chests-opened / keys-earned milestones (§7.3)
   hud.update(state, combat, dps, clickDmg);
   persist(); // folds the advanced RNG cursor into the save (resumable, save-scum-proof)
   return credited;
@@ -1037,6 +1114,156 @@ interface LootGlue {
   catchPeach,
   peachVisible: () => peachVisible(Date.now()),
 };
+
+// ---------- M13: leaderboard + retention meta (§7) ----------
+
+// Leaderboard v2 (§7.4) — fail-silent & default-off. With no `VITE_API_BASE` every
+// call is a no-op and no submit modal ever auto-pops (the game stays fully playable).
+const leaderboard = new Leaderboard();
+
+// Best-zone submit throttle: remember the deepest zone we've already offered to
+// submit (localStorage, NOT the CH save — v8 schema is frozen) so the prompt fires
+// at most once per new record and a skip is remembered until an even deeper zone.
+const LB_KEY = 'bootyclicker.lb';
+function lbPromptedZone(): number {
+  try {
+    const raw = localStorage.getItem(LB_KEY);
+    if (raw) return Number((JSON.parse(raw) as { prompted?: number }).prompted) || 0;
+  } catch {
+    /* corrupt/blocked storage ⇒ treat as never prompted */
+  }
+  return 0;
+}
+function setLbPromptedZone(z: number): void {
+  try {
+    localStorage.setItem(LB_KEY, JSON.stringify({ prompted: z }));
+  } catch {
+    /* storage blocked ⇒ prompt may re-show; harmless */
+  }
+}
+function lbPayload(): { maxZone: number; souls: number; ascensions: number } {
+  return {
+    maxZone: Math.max(state.lifetimeMaxZone, combat.maxZone),
+    souls: state.souls,
+    ascensions: state.stats.ascensions,
+  };
+}
+/**
+ * Offer the submit dialog when a NEW best zone passes the last-prompted value (§7.4
+ * AC4). No-op when disabled (default-off), so a headless build never pops a modal;
+ * throttled to once per record and skipped while the dialog is already open. Called
+ * from the throttled tick, never the click hot-path.
+ */
+function maybeLeaderboardPrompt(): void {
+  if (!leaderboard.enabled) return;
+  const z = Math.max(state.lifetimeMaxZone, combat.maxZone);
+  if (z <= lbPromptedZone()) return;
+  const submitOpen = document.getElementById('lbSubmit');
+  if (submitOpen && !submitOpen.classList.contains('hidden')) return; // already showing
+  setLbPromptedZone(z);
+  leaderboard.promptSubmit(lbPayload());
+}
+
+/**
+ * Union the newly-satisfied CH achievements (§7.3) into the persisted set + toast
+ * each. Cheap (≈ 30 pure predicates) so it can run on the throttled tick + discrete
+ * events; only persists + repaints the 📋 panel when something actually unlocked.
+ */
+function checkAchievements(): void {
+  const fresh = newlyUnlocked(buildAchievementCtx(state), new Set(state.achievements));
+  if (fresh.length === 0) return;
+  for (const a of fresh) {
+    state.achievements.push(a.id);
+    toasts.show(a.icon, 'Erfolg freigeschaltet!', a.name);
+  }
+  metaPanel.render();
+  persist();
+}
+
+/** Credit one claimed quest reward into the live state (§7.2). */
+function creditQuestReward(reward: QuestReward): void {
+  switch (reward.kind) {
+    case 'keys':
+      earnKeys(reward.keys);
+      toasts.show('🔑', 'Quest-Belohnung', `+${reward.keys} Schlüssel`);
+      break;
+    case 'chest':
+      state.chests.inventory[reward.tier] += 1;
+      toasts.show(chestEmoji(reward.tier), 'Quest-Belohnung', 'Eine Truhe erhalten');
+      break;
+    case 'shards':
+      state.gear.shards += reward.shards;
+      toasts.show('🧩', 'Quest-Belohnung', `+${reward.shards} Splitter`);
+      break;
+    case 'souls':
+      state.souls += reward.souls;
+      recompute(); // held souls raise the damage mult immediately
+      toasts.show('✨', 'Quest-Belohnung', `+${reward.souls} Seelen`);
+      break;
+  }
+}
+
+/** Grant a daily-login reward (§7.1): chest into the inventory + bonus keys, toasted. */
+function grantLoginReward(reward: LoginReward): void {
+  state.chests.inventory[reward.chest] += 1;
+  earnKeys(reward.keys);
+  const extra = reward.keys > 0 ? ` · +${reward.keys} 🔑` : '';
+  const protect = reward.protectUsed ? ' (Serie gerettet 🛡)' : '';
+  toasts.show(
+    reward.chest === 'diamond' ? '💎' : '🎁',
+    'Täglicher Login!',
+    `${chestEmoji(reward.chest)} Truhe${extra} · Serie ${reward.streak}/7${protect}`,
+  );
+}
+
+/**
+ * Roll the daily quests + process the login for the current day (§7.1/§7.2). Called
+ * on boot and each tick, so a session that crosses UTC midnight rolls fresh quests
+ * and grants the next login without a reload. Clock-neutral (part 1): a backward
+ * clock never re-grants or re-rolls.
+ */
+function maybeNewDay(): void {
+  const day = dayNumber(Date.now());
+  const rolled = rollDay(state.meta, day);
+  if (rolled.changed) state.meta = rolled.meta;
+  const login = dailyLogin(state.meta, day);
+  if (login.reward) {
+    state.meta = login.meta;
+    grantLoginReward(login.reward);
+  }
+  if (rolled.changed || login.reward) {
+    metaPanel.render();
+    checkAchievements();
+    hud.update(state, combat, dps, clickDmg);
+    persist();
+  }
+}
+
+// 📋 „Ziele" panel (§7.1–7.3 + §7.5 banner). Claim/reroll go through the pure meta
+// reducers; the leaderboard buttons open the fail-silent v2 overlays.
+const metaPanel = new Meta({
+  state,
+  claim: (questId) => {
+    const { meta, reward } = claimInMeta(state.meta, questId);
+    if (!reward) return;
+    state.meta = meta;
+    creditQuestReward(reward);
+    recompute();
+    metaPanel.render(true);
+    hud.update(state, combat, dps, clickDmg);
+    persist();
+  },
+  reroll: () => {
+    const r = rerollQuests(state.meta, dayNumber(Date.now()));
+    if (!r.ok) return;
+    state.meta = r.meta;
+    metaPanel.render(true);
+    persist();
+  },
+  openTop: () => void leaderboard.openTop(),
+  openSubmit: () => leaderboard.openSubmit(lbPayload()),
+  season: () => currentSeason,
+});
 
 // ---------- Golden-Peach on-screen button + ×3-boost badge (§6.1, B13c) ----------
 const peachBtn = document.getElementById('peachBtn') as HTMLButtonElement;
@@ -1131,6 +1358,15 @@ const onboarding = new Onboarding(() => {
 
 hud.update(state, combat, dps, clickDmg);
 
+// Retention meta on boot (§7.1/§7.2): roll today's quests + process the daily login
+// (grants the streak reward on a fresh day). Then evaluate achievements against the
+// loaded save so anything already earned shows unlocked immediately (§7.3).
+maybeNewDay();
+checkAchievements();
+if (currentSeason) {
+  toasts.show(currentSeason.emoji, `Saison: ${currentSeason.name}`, currentSeason.hint);
+}
+
 // Persist once at boot so the legacy import (souls + legacyImported) and any
 // offline grant are locked in even if the tab closes before the first autosave.
 persist();
@@ -1162,6 +1398,7 @@ function loop(nowMs: number): void {
     combat = bt.state;
     if (bt.failed) {
       state.stats.bossTimeouts += 1;
+      state.stats.bossStreak = 0; // a timeout breaks the no-timeout boss streak (§7.3)
       toasts.show('⏱', 'Zeit um!', 'Farm die Bühne & fordere den Boss erneut.');
       audio.bossLose();
     }
@@ -1217,6 +1454,12 @@ function loop(nowMs: number): void {
       );
     }
     document.title = titleFor(state.gold);
+    // Retention meta on the throttled tick (§7): roll a new day at UTC midnight,
+    // fold in freshly-earned achievements, and offer the best-zone submit on a new
+    // record (all no-ops when nothing changed / the leaderboard is off).
+    maybeNewDay();
+    checkAchievements();
+    maybeLeaderboardPrompt();
     hud.update(state, combat, dps, clickDmg);
     // keep the open shop tab's affordability/previews fresh while idling
     const active = document.querySelector('.tab.active') as HTMLElement | null;

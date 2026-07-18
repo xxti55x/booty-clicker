@@ -19,7 +19,7 @@ CI (real browsers, touch input, performance).
 - [ ] `npm run lint` — ESLint clean
 - [ ] `npm run format:check` — Prettier clean
 - [ ] `npm test` — all unit tests green (game + API workspaces)
-- [ ] `npm run build` — type-checks and builds; bundle **< 5 MB** (currently ~631 KB JS / ~168 KB gzip; +~7 KB for the M12 🎁 Truhen tab + 🍑 button)
+- [ ] `npm run build` — type-checks and builds; bundle **< 5 MB** (currently ~652 KB JS / ~174 KB gzip; +~16 KB for the M13 📋 Ziele tab, 📊 stats, leaderboard wiring + season)
 - [ ] `npm run test:sim` — the `simulateEndless` gate (E1/E2/**E3**/E4 + **E4-with-gear** + §4.8 pacing + first-Himmelfahrt window) is green (also runs inside `npm test` + CI)
 - [ ] `npm run build:itch` — produces `apps/game/release/booty-clicker-itch.zip` with `index.html` at the archive root
 
@@ -90,8 +90,10 @@ Notes:
 
 - No external requests (Three.js is bundled, audio is procedural, favicon is a
   data-URI) — first load is a single HTML + CSS + JS bundle.
-- The leaderboard client is not wired in the CH MVP (returns in M13); there are no
-  blocking network calls on boot.
+- The leaderboard client (v2, `maxZone`) is wired in M13 but **fail-silent & default-off**:
+  with no `VITE_API_BASE` there are **no** network calls at all on boot, the submit dialog
+  shows an offline note, and the game is fully playable. A submit is offered only on a new
+  best zone (skippable/remembered).
 
 ## 6. Balancing / pacing (informal for M7)
 
@@ -308,3 +310,53 @@ Manual passes (real device / browser):
 - [ ] **Header & collection.** The 🎁 header shows the 🔑 balance, owned permanent tokens (with
       their +Krit/+Gold/+DPS effect) and the collected Truhen-Skins (n/11); a duplicate jackpot
       pays 🧩 instead.
+
+### M13 — Meta, Retention & Leaderboard v2
+
+Automated (unit + headless smoke `smoke-m13.mjs`, save v8):
+
+- Quests/Daily (`quests.test.ts`): **AC1** — `dailyQuests(day)` deterministic (same date ⇒
+  same 3 distinct quests), reroll shifts the seed, `reroll` refused past `MAX_REROLLS`;
+  clock-manipulation neutral (backward day never re-rolls, re-grants a login, or re-claims a
+  quest). **AC2** — streak-protect covers exactly a gap-2 day, once per calendar week; gap ≥ 3
+  breaks; day-7 pays diamond + 2 🔑, then wraps to 1.
+- Achievements (`ch-achievements.test.ts`): `newlyUnlocked` fires each predicate once;
+  zone gate reads the Himmelfahrt-safe deepest zone (`gear.zoneEver`) so a Himmelfahrt never
+  un-earns a milestone.
+- Stats view (`stats-view.test.ts`): **AC5** — lifetime bucket monotonic across ascension +
+  Himmelfahrt; run bucket resets with the tour; on-beat quote in [0, 1].
+- Season (`season.test.ts`): October ⇒ Spooky Booty, December ⇒ Frost-Twerk, else null; total.
+- Leaderboard client (`leaderboard-client.test.ts`): fail-silent (`null` on error/timeout/
+  non-2xx/invalid nick/disabled); disabled ⇒ **no** fetch; upsert payload shape.
+- Worker v2 (`apps/api/src/index.test.ts`): **AC3** — upsert per nickname replaces only on a
+  larger `maxZone`; rate-limit enforced (in-memory fakes).
+- Headless glue (`smoke-m13.mjs`): fresh boot rolls **3 quests**, grants the **daily login**
+  (gold chest, streak 1/7), renders the achievement wall; a near-complete „clicks" quest
+  **advances on one shake** and is **claimable** (claim credits the reward + records it); the
+  ⚙️ **📊 Statistik** renders both lifetime and run rows (Bestzone, On-Beat-Quote, Spielzeit,
+  Aktuelle Bühne); **all 8 tabs** are clickable and reveal their body; **AC4** — with no
+  `VITE_API_BASE` the „Eintragen" dialog shows an **offline note** + disabled send, and Top-50
+  shows an offline message. **Zero page errors.**
+
+Manual passes (real device / browser):
+
+- [ ] **📋 tab — Daily.** The streak shows n/7 with a day-7 💎 indicator; the first boot of a
+      new (UTC) day grants a chest (💎 + 2 🔑 on day 7) via a toast; a missed single day is
+      caught by the weekly Streak-Schutz (toast „Serie gerettet 🛡").
+- [ ] **📋 tab — Quests.** Three quests each show a description, reward, and a progress bar;
+      completing one reveals **Einlösen** (credits the reward, then „Eingelöst ✓"); **Neu
+      würfeln** works once, then disables („Reroll heute verbraucht").
+- [ ] **📋 tab — Erfolge.** The wall shows locked (🔒) / unlocked cards with a count; a new
+      unlock toasts „Erfolg freigeschaltet!" and flips the card.
+- [ ] **📊 Statistik (⚙️).** Lifetime totals (BP, Shakes, Krits, On-Beat-Quote, höchste Combo,
+      Boss-Kills/-Timeouts, Bestzone, Aszensionen/Himmelfahrten, RS/HPF, Truhen, Spielzeit) are
+      separate from the current-run rows and correct across a prestige.
+- [ ] **8-tab layout.** All eight emoji tabs (🕺 🎽 🌀 ✨ 🌈 🎁 📋 ⚙️) stay reachable at 320 px
+      (the row scrolls horizontally if needed); none shrinks out of reach.
+- [ ] **Leaderboard (off).** With no `VITE_API_BASE`, „Eintragen" shows the offline note and a
+      disabled send; „Top 50" shows the offline message; nothing throws; the game is fully
+      playable.
+- [ ] **Leaderboard (on).** With `VITE_API_BASE` set, reaching a **new best zone** offers a
+      skippable submit (validated nickname → rank), only once per record; „Top 50" lists rows.
+- [ ] **Season.** In October/December a banner + boot toast appears in the 📋 tab; no gameplay
+      is gated behind the date.

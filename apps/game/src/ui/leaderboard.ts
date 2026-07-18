@@ -52,14 +52,39 @@ export class Leaderboard {
     return isLeaderboardEnabled();
   }
 
-  /** Offer to submit a best-zone score (skippable). No-op if no leaderboard is configured. */
+  /**
+   * Auto-prompt to submit a best-zone score (skippable). No-op when no leaderboard
+   * is configured, so a default-off (headless) build never pops a modal mid-climb.
+   */
   promptSubmit(score: ScorePayload): void {
     if (!this.enabled) return;
+    this.showSubmit(score);
+  }
+
+  /**
+   * Manually open the submit dialog (📋 tab „Eintragen"). Always shows the overlay;
+   * when no API is configured it pre-fills the offline note and disables the send
+   * button, so the player gets clear feedback instead of a dead button (§7.4 AC4).
+   */
+  openSubmit(score: ScorePayload): void {
+    this.showSubmit(score);
+  }
+
+  /** Populate + show the submit overlay; mark offline when disabled. */
+  private showSubmit(score: ScorePayload): void {
     this.pending = score;
     this.submitText.textContent = `Deine Bestzone: Bühne ${score.maxZone} (${score.souls} Seelen). Trag dich in die Bestenliste ein!`;
-    this.submitMsg.textContent = '';
-    this.submitMsg.className = 'msg';
     this.nick.value = '';
+    const btn = document.getElementById('lbSubmitBtn') as HTMLButtonElement | null;
+    if (this.enabled) {
+      this.submitMsg.textContent = '';
+      this.submitMsg.className = 'msg';
+      if (btn) btn.disabled = false;
+    } else {
+      this.submitMsg.textContent = 'Bestenliste offline — keine API konfiguriert.';
+      this.submitMsg.className = 'msg bad';
+      if (btn) btn.disabled = true;
+    }
     this.submitOverlay.classList.remove('hidden');
   }
 

@@ -3,6 +3,71 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M13 — Meta, Retention & Leaderboard v2 (Teil 2: UI + Wiring + Docs)
+
+- **2026-07-18 — Event-Increments zentral über einen `earnKeys(n)`-Helfer.** Jeder
+  🔑-Faucet (Boss-Kill, Combo-Tier-3, Goldener Pfirsich, Truhen-Reward, Daily-Login,
+  Quest-Reward) läuft über eine einzige Funktion, die `chests.keys` **und** den Lifetime-Zähler
+  `stats.keysEarned` gemeinsam hochzählt — so wird kein Faucet doppelt oder gar nicht gezählt.
+  Schlüssel **ausgeben** (Truhe öffnen) berührt den Lifetime-Zähler nie. Analog werden
+  `stats.bossKills` (bereits vorhanden) NICHT verdoppelt — Teil 2 ergänzt nur die fehlenden
+  `bossStreak`/`maxBossStreak` + `advanceMeta`-Aufrufe an denselben Sites.
+
+- **2026-07-18 — Achievement- & Tageswechsel-Checks laufen auf dem gedrosselten 0,25-s-Tick,
+  nicht im Klick-Hot-Path.** `checkAchievements` (≈ 30 reine Prädikate) und `maybeNewDay`
+  (Tag-Roll + Login) sind billig und werden pro Tick + bei diskreten Events (Ascension,
+  Himmelfahrt, Truhe öffnen, Boot) aufgerufen. So erscheinen Toasts binnen ≤ 250 ms, ohne pro
+  Klick zu allozieren. `advanceMeta` selbst ist no-op-günstig: ohne passende aktive Quest gibt
+  `advanceQuests` dieselbe Referenz zurück (keine Allokation) — daher darf `advanceMeta('clicks')`
+  pro Shake laufen.
+
+- **2026-07-18 — Combo-Tier-3-Quest auf der steigenden Flanke.** `comboTier3` wird nur
+  gefeuert, wenn der Tier von < 3 auf ≥ 3 wechselt (`lastShakeTier`-Tracker), statt bei jedem
+  Klick auf Tier ≥ 3 — vermeidet Dauer-Allokation bei gehaltenem Feuer. `maxCombo` wird per
+  billiger `Math.max`-Zuweisung jeden Klick aktualisiert (keine Allokation).
+
+- **2026-07-18 — Submit-Prompt-Throttle in separatem `localStorage`-Key, nicht im CH-Save.**
+  Die zuletzt angebotene Bestzone liegt unter `bootyclicker.lb` (`{ prompted }`), damit das
+  **v8-Save-Schema unverändert** bleibt (Teil 1 hat v8 committet). Der Prompt erscheint **nur
+  bei einer neuen Bestzone > prompted** (überspringen bleibt gemerkt) und ausschließlich vom
+  Tick — nie aus dem Klick-Pfad, nie erneut, während der Dialog offen ist. Ohne
+  `VITE_API_BASE` ist `leaderboard.enabled` falsch ⇒ der Auto-Prompt ist ein No-op (kein Modal
+  im Headless-/Offline-Fall, AC4).
+
+- **2026-07-18 — `promptSubmit` (Auto) vs. `openSubmit` (manuell) getrennt.** Der Auto-Pfad
+  (neue Bestzone) zeigt den Dialog **nur bei aktiver API** (kein störendes Modal offline). Der
+  manuelle 📋-Knopf „Eintragen" zeigt den Dialog **immer** und blendet offline einen
+  Offline-Hinweis ein + deaktiviert „Absenden" — so gibt es klares Feedback statt eines toten
+  Buttons (AC4). Beide teilen `showSubmit`.
+
+- **2026-07-18 — 8-Tab-Leiste: horizontales Scrollen statt Umbruch.** Mit der neuen 📋-Ziele-
+  Tab sind es acht Emoji-Tabs. `.tabs` bekommt `overflow-x: auto` (Scrollbar versteckt) und
+  jede `.tab` eine **Mindest-Touchbreite** (`flex: 1 0 auto; min-width: 38px`): bei ≥ 320 px
+  passen alle acht in eine Zeile, darunter scrollt die Leiste — keine Tab schrumpft unter eine
+  klickbare Größe. (Umbruch auf zwei Zeilen wäre die Alternative gewesen; Scrollen hält die
+  Kopfhöhe konstant und stört das Bottom-Sheet-Layout nicht.)
+
+- **2026-07-18 — Meta-Panel change-detected wie die anderen Panels; Claim per Event-Delegation.**
+  `ui/meta-panel.ts` baut ein stabiles Skelett einmal und rendert die dynamischen Abschnitte
+  (Season/Daily/Quests/Erfolge) nur bei geänderter Signatur neu (Tick + Tab-Open, **nie** im
+  Klick-Hot-Path). Claim-Klicks laufen über **einen** delegierten Listener auf `#metaQuests`,
+  damit ein Rebuild nie einen Handler verliert; Reroll/Leaderboard-Buttons liegen im stabilen
+  Skelett (einmal verdrahtet).
+
+- **2026-07-18 — 📊 Statistik im ⚙️-Tab, gerendert vom Tick (nicht im Konstruktor).** Der
+  `ChSettings.render()`-Aufruf läuft über `renderActiveTab('set')`, weil `getState()` in
+  `main.ts` `syncMaxZones()` triggert, das die erst später deklarierte `comboState`/`rng`
+  referenziert — ein Konstruktor-Aufruf liefe in die temporale Todeszone. Zur Laufzeit (Tab
+  offen) sind alle Bindungen initialisiert. On-Beat-Quote wird als %, Spielzeit als h/min/s
+  formatiert, alles andere über `ui/format.ts`.
+
+- **2026-07-18 — Saison-Events als winziges reines `game/season.ts` (datumsbasiert).**
+  `seasonFor(date)` mappt Monat → optionalen Banner (Oktober „Spooky Booty" 🎃, Dezember
+  „Frost-Twerk" ❄️), sonst `null`. Total, DOM-frei, unit-getestet (P6). Wirkung: nur ein
+  Banner im 📋-Tab + ein Boot-Toast — **kein** Gameplay-Hardlock, kein Server, Monat in
+  **Lokalzeit** gelesen (kosmetisch, daher unabhängig von der UTC-Quest-Uhr; §11.10 akzeptiert
+  Zeitzonen-/Datum-Cheese).
+
 ## M13 — Meta, Retention & Leaderboard v2 (Teil 1: pure Logik + CH-Save v8 + Client)
 
 - **2026-07-18 — CH-Achievements liegen in `game/ch-achievements.ts`, nicht in

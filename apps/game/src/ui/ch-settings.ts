@@ -1,6 +1,8 @@
 import type { ChState } from '../game/ch-state';
 import { FPS_CAPS, type GameSettings, type Quality, saveSettings } from '../game/settings';
+import { type StatRow, statsView } from '../game/stats-view';
 import { exportCh, importCh } from '../save/ch-store';
+import { fmt } from './format';
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -11,6 +13,31 @@ function byId(id: string): HTMLElement {
 const QUALITY_LABEL: Record<Quality, string> = { low: 'Niedrig', medium: 'Mittel', high: 'Hoch' };
 const QUALITY_CYCLE: readonly Quality[] = ['low', 'medium', 'high'];
 const RESET_ARM_MS = 4000;
+
+/** Seconds → a compact German duration (playtime stat). */
+function fmtDuration(totalS: number): string {
+  const s = Math.max(0, Math.floor(totalS));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (h > 0) return `${h} h ${m} min`;
+  if (m > 0) return `${m} min ${ss} s`;
+  return `${ss} s`;
+}
+
+/** Format one stat row's value, special-casing the on-beat quote (%) and playtime. */
+function fmtStat(row: StatRow): string {
+  if (row.key === 'onBeatQuote') return `${Math.round(row.value * 100)} %`;
+  if (row.key === 'playTimeS') return fmtDuration(row.value);
+  return fmt(row.value);
+}
+
+/** Render an array of stat rows into a `.stat-grid` block. */
+function statGrid(rows: readonly StatRow[]): string {
+  return rows
+    .map((r) => `<div class="stat"><span>${r.label}</span><b>${fmtStat(r)}</b></div>`)
+    .join('');
+}
 
 export interface ChSettingsDeps {
   getState: () => ChState;
@@ -27,6 +54,14 @@ export class ChSettings {
 
   constructor(private readonly deps: ChSettingsDeps) {
     byId('tabSet').innerHTML = `
+      <div class="settings-section">
+        <h3>📊 Statistik — gesamt</h3>
+        <div class="stat-grid" id="statLife"></div>
+      </div>
+      <div class="settings-section">
+        <h3>📊 Statistik — aktueller Lauf</h3>
+        <div class="stat-grid" id="statRun"></div>
+      </div>
       <div class="settings-section">
         <h3>Grafik</h3>
         <button class="btn toggle" id="gfxQuality" type="button"></button>
@@ -58,6 +93,17 @@ export class ChSettings {
     this.wireEffects();
     this.wireSaveIo();
     this.wireReset();
+  }
+
+  /**
+   * Refresh the 📊 Statistik grids (§7.5) from `statsView`. Called on ⚙️-tab open +
+   * the throttled tick so the lifetime/run totals stay live. Lifetime rows are
+   * monotonic across prestige; run rows reset with the tour (the §7-AC5 split).
+   */
+  render(): void {
+    const { lifetime, run } = statsView(this.deps.getState());
+    byId('statLife').innerHTML = statGrid(lifetime);
+    byId('statRun').innerHTML = statGrid(run);
   }
 
   private wireGraphics(): void {
