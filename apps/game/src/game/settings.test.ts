@@ -28,6 +28,7 @@ describe('game settings', () => {
     expect(defaultSettings()).toEqual({
       screenShake: true,
       particles: true,
+      haptics: true,
       quality: 'high',
       fpsCap: 0,
       onboarded: false,
@@ -39,6 +40,7 @@ describe('game settings', () => {
     const s: GameSettings = {
       screenShake: false,
       particles: false,
+      haptics: false,
       quality: 'low',
       fpsCap: 30,
       onboarded: true,

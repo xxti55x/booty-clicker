@@ -6,8 +6,12 @@ import {
   heroDps,
   maxAffordable,
   nextLevelCost,
+  nextMilestone,
 } from '../game/heroes';
 import { soulMult } from '../game/ascension';
+import { ancientDpsMult } from '../game/ancients';
+import { dpsGearMult } from '../game/gear';
+import { heavenGlobalMult, soulBonusEff } from '../game/heaven';
 import { fmt } from './format';
 
 function byId(id: string): HTMLElement {
@@ -77,7 +81,12 @@ export class Crew {
 
   render(): void {
     const list = byId('crewList');
-    const mult = soulMult(this.deps.state.souls);
+    const s = this.deps.state;
+    const mult =
+      soulMult(s.souls, soulBonusEff(s.heaven.hpf)) *
+      ancientDpsMult(s.ancients) *
+      heavenGlobalMult(s.heaven.hpf) *
+      dpsGearMult(s.gear); // keep the per-hero display in lockstep with dpsOf (§5)
     const rows: string[] = [];
     CREW.forEach((cfg, i) => {
       if (!this.revealed(i)) return;
@@ -85,16 +94,29 @@ export class Crew {
       const count = this.countFor(cfg, level);
       const cost = count > 0 ? bulkCost(cfg, level, count) : nextLevelCost(cfg, level);
       const affordable = count > 0 && cost <= this.deps.state.gold;
-      const dps = heroDps(cfg, level) * mult;
+      const gild = this.deps.state.gilds[cfg.id] ?? 0;
+      const dps = heroDps(cfg, level, gild) * mult;
+      const gildBadge =
+        gild > 0 ? `<span class="gild" title="×1.25 pro Vergoldung">🏅${gild}</span>` : '';
       const label = level === 0 ? 'Anheuern' : `+${count === 0 ? 1 : count}`;
+      // Milestone progress bar (§4.3.2): "noch n Level bis ×2" once recruited.
+      // Milestones are endless (§4.3.3), so there is always a next bracket.
+      const ms = level > 0 ? nextMilestone(level) : null;
+      const msRow = ms
+        ? `<div class="ms-bar" title="noch ${ms.remaining} bis ×2 DPS">
+            <div class="ms-fill" style="width:${Math.round(((level - ms.prev) / (ms.next - ms.prev)) * 100)}%"></div>
+          </div>
+          <div class="ms-txt">noch ${ms.remaining} bis ×2 (Lv ${ms.next})</div>`
+        : '';
       rows.push(
         `<div class="item ${affordable ? '' : 'locked'}" data-id="${cfg.id}">
-          <div class="nm">${cfg.name}<span class="lv">Lv ${level}</span></div>
+          <div class="nm">${cfg.name}${gildBadge}<span class="lv">Lv ${level}</span></div>
           <div class="ds">${cfg.ds}</div>
           <div class="crew-foot">
             <span class="cost ${affordable ? '' : 'bad'}">${label} · ${fmt(cost)} BP</span>
             <span class="dps">${level > 0 ? `${fmt(dps)} DPS` : '—'}</span>
           </div>
+          ${msRow}
         </div>`,
       );
     });

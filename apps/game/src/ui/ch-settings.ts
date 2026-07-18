@@ -36,6 +36,7 @@ export class ChSettings {
         <h3>Effekte</h3>
         <button class="btn toggle" id="fxShake" type="button"></button>
         <button class="btn toggle" id="fxParticles" type="button"></button>
+        <button class="btn toggle" id="fxHaptics" type="button"></button>
       </div>
       <div class="settings-section">
         <h3>Save exportieren</h3>
@@ -86,9 +87,11 @@ export class ChSettings {
   private wireEffects(): void {
     const shake = byId('fxShake') as HTMLButtonElement;
     const parts = byId('fxParticles') as HTMLButtonElement;
+    const haptics = byId('fxHaptics') as HTMLButtonElement;
     const paint = (): void => {
       shake.textContent = `Screen-Shake: ${this.deps.effects.screenShake ? 'An' : 'Aus'}`;
       parts.textContent = `Partikel: ${this.deps.effects.particles ? 'An' : 'Aus'}`;
+      haptics.textContent = `Vibration: ${this.deps.effects.haptics ? 'An' : 'Aus'}`;
     };
     shake.addEventListener('click', () => {
       this.deps.effects.screenShake = !this.deps.effects.screenShake;
@@ -97,6 +100,11 @@ export class ChSettings {
     });
     parts.addEventListener('click', () => {
       this.deps.effects.particles = !this.deps.effects.particles;
+      saveSettings(this.deps.effects);
+      paint();
+    });
+    haptics.addEventListener('click', () => {
+      this.deps.effects.haptics = !this.deps.effects.haptics;
       saveSettings(this.deps.effects);
       paint();
     });

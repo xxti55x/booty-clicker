@@ -12,6 +12,7 @@ import {
   maxAffordable,
   milestoneMult,
   nextLevelCost,
+  nextMilestone,
   totalRawDps,
 } from './heroes';
 
@@ -36,9 +37,29 @@ describe('heroes — DPS & milestones', () => {
     expect(heroDps(cid, 10)).toBe(10 * 2); // 1·10·2
   });
 
+  it('milestones are endless past 800 (each further doubling = another ×2)', () => {
+    expect(milestoneMult(800)).toBe(2 ** 7); // 7 fixed thresholds
+    expect(milestoneMult(1599)).toBe(2 ** 7); // still under 1600
+    expect(milestoneMult(1600)).toBe(2 ** 8);
+    expect(milestoneMult(3200)).toBe(2 ** 9);
+    expect(milestoneMult(6400)).toBe(2 ** 10);
+    expect(milestoneMult(12800)).toBe(2 ** 11);
+  });
+
   it('sums DPS across the crew', () => {
     const levels = { boss: 10, hype: 4 };
     expect(totalRawDps(levels)).toBe(heroDps(CREW[0], 10) + heroDps(CREW[1], 4));
+  });
+
+  it('reports the next ×2 milestone bracket ("noch n Level bis ×2"), endless', () => {
+    expect(nextMilestone(0)).toEqual({ next: 10, prev: 0, remaining: 10 });
+    expect(nextMilestone(7)).toEqual({ next: 10, prev: 0, remaining: 3 });
+    expect(nextMilestone(10)).toEqual({ next: 25, prev: 10, remaining: 15 });
+    expect(nextMilestone(799)).toEqual({ next: 800, prev: 400, remaining: 1 });
+    // Never null now — endless doublings past the last fixed milestone.
+    expect(nextMilestone(800)).toEqual({ next: 1600, prev: 800, remaining: 800 });
+    expect(nextMilestone(1600)).toEqual({ next: 3200, prev: 1600, remaining: 1600 });
+    expect(nextMilestone(5000)).toEqual({ next: 6400, prev: 3200, remaining: 1400 });
   });
 });
 
@@ -61,6 +82,24 @@ describe('heroes — costs', () => {
     expect(bulkCost(cid, 0, n)).toBeLessThanOrEqual(gold);
     expect(bulkCost(cid, 0, n + 1)).toBeGreaterThan(gold);
     expect(maxAffordable(cid, 0, 1)).toBe(0); // baseCost is 5
+  });
+
+  // The new M9 crew tiers (large baseCost) must keep the closed-form bulk/max math
+  // exact against an iterative sum (spec §4.3.3 / M9-AC2).
+  it('bulkCost + maxAffordable stay exact for the new endless tiers', () => {
+    const newTiers = CREW.slice(10); // viral … cosmic
+    expect(newTiers.length).toBe(5);
+    for (const cfg of newTiers) {
+      const from = 7; // arbitrary owned level within the milestone range
+      let manual = 0;
+      for (let l = from; l < from + 12; l++) manual += cfg.baseCost * Math.pow(HERO_COST_GROWTH, l);
+      expect(bulkCost(cfg, from, 12)).toBe(Math.floor(manual));
+
+      const gold = cfg.baseCost * 5000;
+      const n = maxAffordable(cfg, from, gold);
+      expect(bulkCost(cfg, from, n)).toBeLessThanOrEqual(gold);
+      expect(bulkCost(cfg, from, n + 1)).toBeGreaterThan(gold);
+    }
   });
 });
 

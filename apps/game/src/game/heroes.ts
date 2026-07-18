@@ -25,8 +25,20 @@ export interface HeroConfig {
 /** Cost multiplier per owned level (Clicker Heroes uses ~1.07). */
 export const HERO_COST_GROWTH = 1.07;
 
-/** Levels at which a crew member's output doubles (×2 each threshold passed). */
+/**
+ * Fixed milestone levels at which a crew member's output doubles (×2 each passed).
+ * Beyond the last one, milestones become **endless**: every further doubling of
+ * the last fixed threshold (1600, 3200, 6400, …) is also a ×2 gate (spec §4.3.3),
+ * so long-run DPS(level) grows ~quadratically instead of linearly and the crew
+ * never saturates hard (M9 anti-plateau, cost-side).
+ */
 export const MILESTONES: readonly number[] = [10, 25, 50, 100, 200, 400, 800];
+
+/** The last fixed milestone; endless doublings (×2, ×4, …) continue past it. */
+export const MILESTONE_ENDLESS_BASE = MILESTONES[MILESTONES.length - 1];
+
+/** Permanent per-gild DPS multiplier for a crew member (×1.25 each, spec §4.3.4). */
+export const GILD_DPS_MULT = 1.25;
 
 /** Share of total raw DPS delivered by a single click (before global/crit mult). */
 export const CLICK_DPS_SHARE = 0.2;
@@ -75,6 +87,42 @@ export const CREW: readonly HeroConfig[] = [
     baseCost: 20000000,
     baseDps: 700000,
   },
+  // M9 crew expansion (spec §4.3.3): +5 endless tiers, ~×6–8 cost / ~×6–7 DPS each.
+  {
+    id: 'viral',
+    name: 'Viral-Video-Team',
+    ds: 'Dreht jeden Move zum Meme.',
+    baseCost: 150000000,
+    baseDps: 4500000,
+  },
+  {
+    id: 'hologram',
+    name: 'Hologramm-Double',
+    ds: 'Tanzt an zwei Orten zugleich.',
+    baseCost: 1200000000,
+    baseDps: 30000000,
+  },
+  {
+    id: 'aicluster',
+    name: 'KI-Choreo-Cluster',
+    ds: 'Rechnet die perfekte Routine.',
+    baseCost: 10000000000,
+    baseDps: 220000000,
+  },
+  {
+    id: 'orbital',
+    name: 'Orbitale Tanz-Station',
+    ds: 'Twerkt in der Umlaufbahn.',
+    baseCost: 80000000000,
+    baseDps: 1600000000,
+  },
+  {
+    id: 'cosmic',
+    name: 'Kosmische Twerk-Entität',
+    ds: 'Der Beat des Universums.',
+    baseCost: 650000000000,
+    baseDps: 12000000000,
+  },
 ];
 
 /** Crew levels keyed by hero id (absent = level 0). */
@@ -85,17 +133,55 @@ export function createCrew(): CrewLevels {
   return {};
 }
 
-/** ×2 for each milestone level reached (10 → ×2, 25 → ×4, …). */
-export function milestoneMult(level: number): number {
-  let m = 1;
-  for (const t of MILESTONES) if (level >= t) m *= 2;
-  return m;
+/**
+ * How many ×2 milestone thresholds `level` has passed — the fixed list plus the
+ * endless doublings (1600, 3200, …) beyond `MILESTONE_ENDLESS_BASE`. Integer
+ * doubling stays exact (≤ 2^53), so this is float-safe at any level.
+ */
+export function milestoneCount(level: number): number {
+  let count = 0;
+  for (const t of MILESTONES) if (level >= t) count++;
+  for (let t = MILESTONE_ENDLESS_BASE * 2; level >= t; t *= 2) count++;
+  return count;
 }
 
-/** A single member's DPS at `level` (0 when un-recruited). */
-export function heroDps(cfg: HeroConfig, level: number): number {
+/** ×2 for each milestone level reached (10 → ×2, 25 → ×4, … 1600 → ×2⁸, endless). */
+export function milestoneMult(level: number): number {
+  return Math.pow(2, milestoneCount(level));
+}
+
+/**
+ * Levels remaining until this member's next ×2 milestone (spec §4.3.2, the AdCap
+ * "noch n Level bis ×2" bar), plus the [prev, next] milestone bracket for a
+ * progress fraction. Milestones are endless (§4.3.3), so there is always a next
+ * bracket — never null. Pure UI helper.
+ */
+export function nextMilestone(level: number): { next: number; prev: number; remaining: number } {
+  for (let i = 0; i < MILESTONES.length; i++) {
+    if (level < MILESTONES[i]) {
+      const prev = i === 0 ? 0 : MILESTONES[i - 1];
+      return { next: MILESTONES[i], prev, remaining: MILESTONES[i] - level };
+    }
+  }
+  // Endless doublings past the last fixed milestone.
+  let prev = MILESTONE_ENDLESS_BASE;
+  let next = MILESTONE_ENDLESS_BASE * 2;
+  while (level >= next) {
+    prev = next;
+    next *= 2;
+  }
+  return { next, prev, remaining: next - level };
+}
+
+/** Permanent DPS multiplier from `gildCount` gilds on a member (×1.25 each, §4.3.4). */
+export function gildMult(gildCount: number): number {
+  return Math.pow(GILD_DPS_MULT, Math.max(0, gildCount));
+}
+
+/** A single member's DPS at `level` (0 when un-recruited), scaled by its gilds. */
+export function heroDps(cfg: HeroConfig, level: number, gildCount = 0): number {
   if (level <= 0) return 0;
-  return cfg.baseDps * level * milestoneMult(level);
+  return cfg.baseDps * level * milestoneMult(level) * gildMult(gildCount);
 }
 
 /** Cost to buy the NEXT level from `level`: floor(baseCost · growth^level). */
@@ -125,10 +211,13 @@ export function maxAffordable(cfg: HeroConfig, fromLevel: number, gold: number):
   return count;
 }
 
-/** Total raw crew DPS (before global/soul/frenzy multipliers). */
-export function totalRawDps(levels: CrewLevels): number {
+/** Per-hero gild counts (absent = 0), mirrors `CrewLevels`. */
+export type CrewGilds = Record<string, number>;
+
+/** Total raw crew DPS (before global/soul/frenzy multipliers), folding in gilds. */
+export function totalRawDps(levels: CrewLevels, gilds: CrewGilds = {}): number {
   let dps = 0;
-  for (const cfg of CREW) dps += heroDps(cfg, levels[cfg.id] ?? 0);
+  for (const cfg of CREW) dps += heroDps(cfg, levels[cfg.id] ?? 0, gilds[cfg.id] ?? 0);
   return dps;
 }
 
@@ -137,6 +226,6 @@ export function totalRawDps(levels: CrewLevels): number {
  * whole crew's DPS, so a shake always out-hits a single DPS tick and active play
  * stays worthwhile.
  */
-export function clickDamageRaw(levels: CrewLevels): number {
-  return CLICK_BASE + CLICK_DPS_SHARE * totalRawDps(levels);
+export function clickDamageRaw(levels: CrewLevels, gilds: CrewGilds = {}): number {
+  return CLICK_BASE + CLICK_DPS_SHARE * totalRawDps(levels, gilds);
 }

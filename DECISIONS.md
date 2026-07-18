@@ -3,6 +3,496 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M12 — Review-Fixes (Pfirsich-Truhen & Loot)
+
+- **2026-07-18 (Review) — Boost-Fenster wird beim Boot GEKLEMMT, nie gelöscht
+  (`clampBoostUntil`, 24-h-Decke).** Der alte Boot-Guard löschte jedes
+  `peach.boostUntil > now + 60 s` — aber Truhen-`boost`-Rewards verlängern das Fenster
+  legitim um 10–160 min (§6.2 „stackt Dauer"), d. h. ein Reload nach einer Boost-Truhe
+  vernichtete den bereits gutgeschriebenen Reward. Jetzt: pure `clampBoostUntil(until, now)`
+  (`peach.ts`, `BOOST_MAX_AHEAD_MS = 24 h`) klemmt beim Boot UND beim Gutschreiben
+  (`creditReward`), sodass (a) jedes legitime Stack-Fenster den Reload überlebt und (b) der
+  Vor-Uhr-Stellen-Exploit weiter auf ≤ 24 h ×3 begrenzt bleibt. Duration-Stacking hat damit
+  eine dokumentierte 24-h-Fenster-Decke. Tests in `peach.test.ts`.
+
+- **2026-07-18 (Review) — Boost-Zeilen werben mit dem GELIEFERTEN Faktor: `boostMult: 3`.**
+  Die Tabellen deklarierten ×2, aber die Glue schreibt nur DAUER auf das eine
+  ×3-Einkommensfenster (Peach) gut — geliefert wurde also immer ×3. Statt einer zweiten
+  Multiplikator-Verwaltung (Architektur) wurden die Daten auf die Wahrheit gezogen
+  (`boostMult: 3`, alle vier Tiers; Null-Verhaltensänderung — `creditReward` liest `mult`
+  nicht). Loot-Viewer, Reward-Caption und „×3 Boost"-Badge sagen jetzt dasselbe wie die
+  Auszahlung (§6.3.5 Transparenz); Test erzwingt `boostMult === PEACH_BOOST`. Zudem
+  Kommentar-Fix: Truhen-Magnet ist laut §4.5.2-Knotentabelle der **Key-Drop**-Knoten
+  (+25 %, `keyDropMult`), nicht Teil der Luck-Fraktion — die §6.3.4-Aufzählung im Spec ist
+  dort inkonsistent; implementiert ist die konkrete Knotendefinition.
+
+## M12 — Pfirsich-Truhen & Loot (Teil 3: 🎁 Truhen-Tab + 🍑-Button + Doku)
+
+- **2026-07-18 — 🎁 als 7. Emoji-Tab; Tab-Reihe auf `font-size: 15.5px` verengt.** Die
+  Tab-Zeile hat jetzt sieben Tabs (🕺 🎽 🌀 ✨ 🌈 🎁 ⚙️). Statt eines Umbruchs bleiben sie
+  einreihig (`flex: 1`, Emoji-only, Titel per Hover) — die M11-Regel wurde von 17 px auf
+  15,5 px + `min-width: 0` gezogen, damit alle sieben auch bei 320 px Panel-Breite passen.
+
+- **2026-07-18 — Öffnen-Animation im Panel gescopt, nicht Vollbild — bewusst.** Der
+  `.chest-anim`-Overlay ist `position: fixed; inset: 0`, aber `.shop` trägt `backdrop-filter`,
+  das für fixed-Nachfahren einen **Containing-Block** bildet ⇒ der Overlay deckt das Shop-Panel
+  (nicht den ganzen Viewport). Das ist gewollt: die ~1,2-s-Animation (wackeln → aufspringen →
+  Reward-Cards) stört die Spielszene links nicht und wirkt als sauberes Modal im Panel. Sie ist
+  **per Tipp überspringbar** (erster Tipp → sofort Reward-Cards, zweiter → schließen; AC3).
+
+- **2026-07-18 — Overlay als stabiles Kind, Change-Detection via `sig`-Guard.** `#chestAnim`
+  liegt als **fixes** Kind neben den neu-gerenderten `#chestHead`/`#chestInv`, damit ein
+  0,25-s-Tick-`render()` die laufende Animation nicht wegreißt. `render()` baut die Loot-Tabellen
+  **einmal** und rebaut Header+Inventar nur, wenn ein getrackter Wert (Keys, Inventar, Token,
+  Skins, Pity) sich ändert — kein `innerHTML`-Rebuild im Klick-Hot-Path (P6/B7).
+
+- **2026-07-18 — Kein Kauf-Pfad: harte Review-Garantie (§6.3.3/P5).** Das 🎁-Panel enthält
+  **nichts**, was 🔑/Truhen für Geld kauft oder das impliziert — nur Öffnen (kostet 🔑, die man
+  erspielt). Ein Header-Hinweis „ausschließlich erspielbar — kein Kauf, nie" macht es explizit;
+  der Headless-Smoke asserted zusätzlich, dass **keine** Kauf-/Echtgeld-Wörter im Tab-Text
+  vorkommen. Es gibt spielweit keinen Netzwerk-/Echtgeld-Loot-Pfad (Bestenliste ist die einzige
+  optionale Netz-Funktion und trägt kein Loot).
+
+- **2026-07-18 — 🍑-Spawn-Position via `Math.random` (Kosmetik), Clamp/Despawn im Loop (B13c).**
+  Der Pfirsich-**Zeitplan** + 🔑-Roll sind seedbar (Teil 1/2); die reine **Bildschirm-Position**
+  ist Kosmetik ohne Gameplay-Relevanz und darf `Math.random` nutzen. Der Button wird pro Spawn
+  einmal zufällig, aber **geklemmt** platziert (Rand 16 px, Top-Safe 76 px unter HUD/Notch) und
+  bei `resize` in den Viewport zurückgeklemmt. Auf schmalen Screens (≤ 640 px) wird er
+  **despawnt, solange das Bottom-Sheet offen ist** (`isNarrow && shopOpen`), damit er nie
+  darunter feststeckt. Position wird per Loop/`resize`-Handler in `main.ts` gesetzt (kein neuer
+  State — der 8-s-Sicht-Zustand leitet sich aus `peach.nextPeachAt` ab).
+
+- **2026-07-18 — Panel liest den geteilten `state`-Ref; Öffnen geht durch die Teil-2-Glue.**
+  `Chests` bekommt nur `{ state, open }`. `open` ist `openChestFromInventory` (Teil 2), das schon
+  Keys+Truhe abzieht, Rewards gutschreibt, `recompute`/HUD/`persist` macht — das Panel rendert
+  danach neu aus dem (in-place mutierten) `state`. Kein Doppel-Buchen, keine UI-eigene Ökonomie.
+
+## M12 — Pfirsich-Truhen & Loot (Teil 2: Save v7 + Ökonomie-Wiring)
+
+- **2026-07-18 — CH-Save v7: `chests { keys, inventory, pity, skins }` · `permTokens` ·
+  `peach { nextPeachAt, boostUntil }`.** Migration `v6→v7` verlustfrei (nur Defaults),
+  Validator-Muster wie gehabt: Kern streng geprüft, Loot-Slices in `stateFromSave`
+  feld-isoliert repariert (Counts = non-neg-Ints, Pity via `normalizePity`, Tokens =
+  positive Ints, Peach-Timestamps finite ≥ 0). Ein korruptes Loot-Teilobjekt fällt auf
+  Default, nie auf Fresh-Start — echter Fortschritt anderer Slices bleibt.
+
+- **2026-07-18 — Truhen-Skins als Kollektiv-Set in `chests.skins`, KEINE 3D-Rigs.**
+  §9.2.1 listet für v7 nur `chests {keys,inventory,pity}`; der Duplikat-Schutz (§6.3.2)
+  braucht aber einen persistenten Besitz-Set. Statt eines neuen Top-Level-Felds erweitert
+  `chests` um `skins: string[]` (Collectibles) — Duplikat → 🧩 via `resolveDuplicate`
+  gegen `ownedChestSkins()`. Bewusst kein neues Rig (Scope-Vermeidung).
+
+- **2026-07-18 — Ein einziges ×3-Einkommensfenster (Peach); Truhen-Boosts stacken DAUER.**
+  Der State hält nur `peach.boostUntil` (kein Multiplikator-Feld). Der Chest-`boost`-Reward
+  (×2) verlängert dieses Fenster (`base = max(boostUntil, now); boostUntil = base + durMs`),
+  vereinheitlicht auf den Peach-×3 — die spec-Regel „stackt Dauer, nicht Faktor" (§6.2)
+  wörtlich. Der Boost multipliziert das GOLD pro Kill (in `onKillProgress`, einmal), also
+  alle Einkommensströme (Klick + Idle + Coach) gleichmäßig; NICHT den Roh-DPS-Schaden
+  (keine HP-Wall-/Boss-Pacing-Verzerrung). Offline lässt den 60-s-Boost bewusst weg
+  (irrelevant über Stunden, stale `boostUntil` wäre falsch).
+
+- **2026-07-18 — Permanent-Tokens folden an denselben Sites wie Ahnen/Gear, genau einmal.**
+  `permTokenDpsMult` in `dpsOf` (empty ⇒ ×1, Sim unberührt); `permTokenGoldMult` in den
+  aggregierten `goldMult(state)` (Kills + Offline); `permTokenCritChance` in die Krit-Chance
+  (nach der 40 %-Kappe summiert); der Krit-Schaden-Token als neuer `critMultFactor` in
+  `effectiveClick` (skaliert den GANZEN Krit-Multiplikator, additiv-rückwärtskompatibel).
+
+- **2026-07-18 — Truhen-Luck & Key-Drop-Quellen als pure `ch-state`-Helfer.** `chestLuck`
+  (Gear-Chest-Luck inkl. Tyrann-Sterne + Truhilda) → `ctx.luck` für `openChest`;
+  `keyDropMult = 1 + Gear-keyDrop + Truhen-Magnet`. Der Truhen-Magnet-Knoten (§4.5.2) landet
+  jetzt in `heaven.ts` (15 HPF, +25 % Key-Drops, `truhenMagnetBonus`). Boss-Key nutzt
+  `keyDropAmount(1, keyDropMult, rng)`: ganzer Teil garantiert („1 garantiert"), Bruchteil =
+  geseedete Bonus-Chance ⇒ Truhen-Magnet hebt die Drops messbar.
+
+- **2026-07-18 — Drop-Hooks an den bestehenden Kill/Combo/Session-Sites in `main.ts`.**
+  Boss-Kill: +1 🔑 (× keyDropMult) + Truhe `chestTierForBoss(bossZone)`; der provisorische
+  🧩-Faucet (M11) bleibt als sanfte Frühgame-Brücke bestehen. Rivalen-Kill: `rivalChestChance(
+chestLuck)` (3 % × Luck) → Holztruhe. Combo-Tier 3: 1 🔑, einmal pro Run (Laufzeit-Flag,
+  Reset bei Aszension/Himmelfahrt/Import). Session-Drip: alle ~500 Klicks 1 Holztruhe,
+  ~3/Tag via leichtem In-Session-Day-Stamp (Laufzeit; das volle Daily ist M13, §7.1) —
+  ein Reload setzt Drip/Combo-Flag zurück (dokumentiert, marginal).
+
+- **2026-07-18 — Golden-Peach kehrt als Event zurück; Schedule/Boost persistiert.** Boot
+  seedet/klemmt `nextPeachAt` (unseeded/absurde Zukunft ⇒ re-roll, wie der Sugar-Timer);
+  die Loop despawnt/reschedult via `updatePeachSchedule`. `catchPeach()` (Glue für Teil 3)
+  aktiviert ×3/60 s + `peachKeyRoll` (25 % → 🔑). `openChestFromInventory(tier)` (Glue für
+  Teil 3) konsumiert 🔑 + Truhe, öffnet über das pure `openChest`, duplikat-schützt Jackpots,
+  creditet jeden Reward, schreibt Pity + RNG-Cursor zurück und persistiert (save-scum-fest).
+  Beides plus ein `snapshot()` liegt unter `window.chLoot` für das 🎁-UI (Teil 3) + Smoke.
+
+## M11 — Skins als Gear
+
+- **2026-07-18 (Review) — Katalog-Rebalance: Klick-Gear IST das stärkste Gear (P1),
+  per Daten erzwungen.** Die §5.3-Tabelle (Klassiker +4 %/Lv Klick, Robo-Twerk +8 %/Lv
+  Crew-DPS) widersprach §5.1 („die stärksten Buffs sind Klick-Buffs"): ein maxed
+  Idle-Skin (×5) überholte den maxed Klick-Skin (×3,5). Der Review löst den
+  Spec-internen Konflikt zugunsten des Prinzips (P1 ist Design-Pfeiler §1.2, die
+  Tabelle nur Balancing-Daten): **Klassiker +8 %/Lv** (Lv 50 + 5★ ⇒ ×5,5 Klick — der
+  stärkste Multiplikator im Katalog), **Robo-Twerk +6 %/Lv** (Lv 50 + Space ⇒ ×4,05 —
+  stark, aber strikt darunter). Reine `SKINS`-Datenänderung. Der AC5-Sim leitet die
+  Best-in-Slot-Multiplikatoren jetzt **aus dem Live-Katalog ab** (jeder Skin × jede
+  Kulisse bei Max-Level/Sternen durch den echten `gearBonus`-Fold) und asserted
+  zusätzlich den Katalog-P1-Guard `maxKlick > maxIdle` — ein künftiger Daten-Flip
+  fällt in CI durch. Beobachteter E4-mit-Gear-Gap ≈ 22 Zonen (vorher ≈ 10). Die
+  wörtliche Lesart „nackter Aktiver ≥ 8 vor Idle-Gear-Casual" bleibt unerreichbar
+  (Gap ≈ −3 selbst nach dem Rebalance), ohne Idle-Gear komplett zu entkernen — die
+  ehrliche, geschützte Invariante ist „beide Seiten mit ihrem besten Gear".
+  (Level bleiben 0-basiert gespeichert: 50 Käufe à `shardCost(0..49)`, Max-Buff =
+  perLevel·50 wie im Katalog; ein frisch ausgerüsteter Skin wirkt ab dem ersten
+  Level-Kauf.)
+
+- **2026-07-18 (Review) — `gear.zoneEver`: Skin-Unlocks sind Einbahnstraßen, auch
+  über eine Himmelfahrt.** Die Himmelfahrt setzt `lifetimeMaxZone` bewusst auf 1
+  (RS-Buchhaltung, M10) — dadurch verriegelten sich Zonen-/Boss-Skins
+  (Robo/Showmaster/Tyrann/Lava) wieder, obwohl §5.3 „Bühne X erreicht" und
+  „Erst-Kill" einmalige Erwerbe sind (und investierte 🧩/🍬 unbedienbar wurden).
+  Fix: das Gear-Slice (überlebt jede Prestige-Schicht) trägt ein nie-resetendes
+  `zoneEver`-Hochwasser; `gearUnlockCtx`/`bossFirstKillZones` gaten auf
+  `max(lifetimeMaxZone, zoneEver)`. Gelatcht in `ascendState`/`himmelfahrtState`
+  (pur) + `syncMaxZones` (Glue). Wie `crafted[]` ein Reparatur-beim-Laden-Feld
+  **innerhalb** v6 (fehlend ⇒ 1; der Kontext-Floor macht Alt-Saves verlustfrei) —
+  kein Schema-Bump.
+
+- **2026-07-18 (Review) — Live-Coach zählt Gear-cps mit.** Die Robo-Sterne
+  (+0,2 cps/⭐) flossen nur in die Offline-Akkrual (`offlineOpts`), nicht in den
+  Live-Loop — der Coach klickte online langsamer als offline. Der Loop nutzt jetzt
+  dieselbe Summe `coachCps(heaven) + coachCpsBonus(gear)` wie der Offline-Pfad.
+
+- **2026-07-18 — Skins sind Gear, kein Kostüm: ein einziger puren `GearBonus`-Fold.**
+  Der aktive Skin (Buff·Level + Stern·Sterne), der Kulissen-Mini-Buff und die aktiven
+  Set-Boni falten in `game/gear.ts` zu **einem** `GearBonus` (eine Summe je `BuffStat`).
+  Diamant-Bootys „+X % ALLES" (`allPct`) wird am Ende über **jede** Prozent-Statistik
+  verteilt, die Absolut-Stats (Fenster in s/ms, Offline-Cap-Sekunden, Coach-cps, flat
+  Ekstase-Sekunden) bleiben unberührt. Kleine Helfer (`clickGearMult`/`dpsGearMult`/…)
+  spiegeln das Ahnen-/Heaven-Muster: `dpsOf`/`clickDamageOf` multiplizieren Klick-/DPS-Mult
+  direkt ein, der Rest (Krit/Gold/Boss/Combo-/Beat-Fenster/Ekstase/Offline) reicht der Glue
+  an genau **einer** Stelle je Faktor durch. Balancing liegt komplett in Daten (`SKINS`-
+  Katalog + `KULISSE_BUFFS` + `SET_BONUSES`), nie im Code. **P1:** die stärksten Buffs sind
+  Klick-Buffs — deshalb ist der Start-Skin (Klassiker) ein Klick-Skin.
+
+- **2026-07-18 — CH-Save v6: `gear`-Slice + `legacyTyrann`-Latch, feld-isolierte Reparatur.**
+  `repairGear` validiert jedes Unterfeld **einzeln** und fällt bei Korruption auf den
+  `createGear`-Default zurück — ein kaputter `skin`/`bg`/`crafted`-Key (mit `Object.hasOwn`-
+  Disziplin, damit `"toString"` nicht durchrutscht), ein Nicht-Boolean `bgAuto`, Junk-Level/
+  Stern-Maps oder ein NaN-`nextSugarAt` reparieren sich **isoliert**, sodass echter
+  Fortschritt (gültige Level/Sterne) nie mit-genukt wird. Die v5→v6-Migration füllt nur ein
+  frisches `createGear()`; `legacyTyrann` ist ein von `stateFromSave` defaulteter Meta-Bool
+  (kein eigener Migrationsschritt). Das später ergänzte `crafted[]` ist ein **Reparatur-beim-
+  Laden**-Feld _innerhalb_ v6 (rückwärtskompatibel: ein v6-Save ohne `crafted` wird zu `[]`),
+  also kein neuer Schema-Bump.
+
+- **2026-07-18 — Kulissen-Wahl kehrt zurück; „Auto (Tour)" bleibt Default; `gear.bg` = die
+  sichtbare Kulisse.** `gearBonus` ist rein über `gear` allein, liest also `gear.bg` für den
+  Kulissen-Mini-Buff + die Set-Erkennung. Damit Buff und Bild immer übereinstimmen, ist
+  `gear.bg` **stets die auf dem Schirm aktive Kulisse**: im Tour-Modus (`bgAuto`) synct die
+  Haupt-Loop `gear.bg` bei jedem Zonen-Tier-Wechsel auf die Rotation (+`recompute`, sodass
+  z. B. Space +5 % Crew-DPS mitzieht); bei manueller Wahl rotiert die Loop **nie** von der
+  fixen Kulisse weg. So bleibt der Fold deterministisch, ohne dass die Buffs von einem
+  UI-Zustand außerhalb `gear` abhängen.
+
+- **2026-07-18 — Provisorischer 🧩-Faucet + `crafted[]`-Latch schon vor M12.** Splitter
+  fallen vorläufig aus Boss-Kills (`bossShardReward`), bis M12 die Pfirsich-Truhen als echte
+  Quelle liefert — sonst wäre die Level-Ökonomie unspielbar. Damit die Deliverable-Craft-
+  Buttons (Neon-Ninja/Pfirsich-Pirat) auch **wirken**, latcht `craftSkin` die gecrafteten
+  IDs in ein persistiertes `gear.crafted[]`; `gearUnlockCtx` fädelt das in das (in Teil 2
+  noch leere) `crafted`-Set von `skinUnlocked` ein. `gearUnlockCtx` bekam dafür ein
+  **optionales** `gear`-Argument, damit ältere Aufrufer (Tests) weiter ein leeres Set sehen.
+
+- **2026-07-18 — E4-mit-Gear misst Klick-Gear vs. Idle-Gear, NICHT „nackt vs. Idle-Gear".**
+  Erste, naive Lesart von AC5: der nackte Aktiv-Bot bleibt ≥ 8 Zonen vor einem Casual mit
+  Best-in-Slot-Idle-Gear. Der Sim widerlegt das **hart**: ein maxed `dpsPct`-Skin (Robo-Twerk
+  Lv 50 ⇒ ×5 Crew-DPS) **dreht** die Reihenfolge im Fresh-Single-Run-Modell (Idler überholt,
+  Gap ≈ −10). Das ist kein Bug, sondern die reale Balance: starkes Idle-Gear allein kippt P1.
+  Die Invariante, die das Gear-System tatsächlich garantiert (§5.1: die stärksten Buffs sind
+  Klick-Buffs), ist deshalb: der **aktive Twerker mit Best-in-Slot-Klick-Gear** (Klassiker
+  Lv 50 + 5★ ⇒ ×3,5 Klick) bleibt ≥ 8 Zonen vor dem **Idler mit Best-in-Slot-Idle-Gear**
+  (×5). Dafür bekam `SimConfig` je einen `clickGearMult`/`idleGearMult` (nur Klick- bzw.
+  nur Idle-Term). Beobachteter Gap ≈ 10 über alle Seeds — P1 intakt, weil Klick-Gear das
+  stärkste Gear ist und der aktive Spieler es trägt. (Der 🍬-Reifungstest + die ≥ 2-Set-Tests
+  aus Teil 1 bleiben unverändert grün.) **Superseded (Review, oben):** die Zahlen
+  (×3,5 vs ×5) verletzten §5.1 wörtlich; der Katalog wurde auf ×5,5 Klick vs ×4,05 Idle
+  rebalanciert und der Sim leitet die Multiplikatoren seither aus dem Katalog ab.
+
+## M10 — Ahnen & Ruhmes-Himmelfahrt (Schicht 2)
+
+- **2026-07-18 — Seelen: held-balance + additive-earn statt lifetime-gepinnt.** Vor
+  M10 war `souls` eine an die tiefste Bühne gepinnte Bank (`max(current,
+soulsForMaxZone)`). Da Ahnen jetzt Seelen **ausgeben**, darf die Aszension das
+  Ausgegebene nicht zurückerstatten. Neues Modell: `rsLifetime` = jemals **verdiente**
+  Seelen (monoton), `souls` = **gehaltener** Saldo = `rsLifetime − Σ(Ahnen-Ausgaben)`.
+  `applyAscension(runMax, lifetime, souls, rsLifetime)` bankt nur den **neuen** Gewinn
+  (`max(0, soulsForMaxZone(deepest) − rsLifetime)`) auf den gehaltenen Saldo; gehaltene
+  Seelen überleben die Aszension (nur eine Himmelfahrt setzt sie zurück). Eine erste
+  Aszension „from scratch" ergibt exakt die alten Zahlen (Bühne 50 ⇒ 129), sodass die
+  §4.8-Pacing-Tabellen stehen bleiben. `pendingSouls`/`canAscend` gaten gegen
+  `rsLifetime` (Ausgegebenes ist nie re-farmbar). `soulMult(souls, bonusPerSoul)` nimmt
+  den Per-Seele-Bonus als Argument, damit der HPF-Verstärker am Call-Site einfließt und
+  `ascension.ts` frei von jedem L2-Import bleibt.
+
+- **2026-07-18 — v4→v5-Migration setzt verdiente RS = gebankte Seelen (NICHT
+  zonen-basiert).** Naheliegend wäre, `rsLifetime` auf `soulsForMaxZone(lifetimeMaxZone)`
+  zu heben. Das ist falsch: `lifetimeMaxZone` wächst live beim Erreichen neuer Tiefen,
+  aber verdient (gebankt) wird erst bei der Aszension. Ein Pre-M10-Spieler, der Bühne 60
+  erreicht, aber bei Bühne 50 aszendiert hat, hat 129 Seelen (nicht 320). Ein Lift auf
+  `soulsForMaxZone(60)` würde die noch **ausstehenden** Seelen (191) beim Laden löschen.
+  Pre-M10 wurde nichts ausgegeben ⇒ verdient == gehalten == `souls`, also
+  `rsLifetime = souls`. `stateFromSave` hebt danach nur noch `rsLifetime ≥ souls` (kein
+  Zonen-Lift), damit auch v5-Saves mit Ausgaben ihren Saldo/Preview behalten.
+
+- **2026-07-18 — Ahnen als Daten; Effekte als pure Aggregat-Modifikatoren.** `ancients.ts`
+  hält die 10 Ahnen als Config (id/Name/Flavor/`effect`/`perLevel`/`cap`/`label`); Kosten
+  `level+1` RS (Summe n(n+1)/2). `buyAncient` ist rein und durch Seelen **und** Cap
+  gegated; Caps nur wo Unbegrenztheit degeneriert (Krit-Chance/Fenster/Timer), die
+  Prozent-Ahnen bleiben uncapped (endloser Sink). Die Wirkung fließt über kleine
+  Aggregatoren (`ancientClickMult`, `ancientDpsMult`, `ancientCritChanceBonus`, …) in die
+  abgeleiteten Pipelines — `dpsOf`/`clickDamageOf` falten Click-/DPS-Mult direkt ein, der
+  Rest (Krit/Gold/Boss-Schaden/Boss-Timer/Combo-/Beat-Fenster/Ekstase-Ladebedarf) wird im
+  Glue (`main.ts`) an genau einer Stelle je Faktor durchgereicht. So bleibt Balancing
+  reine Datenänderung.
+
+- **2026-07-18 — HPF: gleiches held-balance-Modell; Doppelwirkung MULTIPLIZIERT.**
+  `hpfForRsLifetime = ⌊√(RS_life/1000)⌋` (erste Himmelfahrt bei 1 000 RS; `HPF(1e6)=31`).
+  `heaven = { hpf (gehalten), hpfLifetime (verdient), ascensions2, tree }`. Gehaltene HPF
+  wirken doppelt: `heavenGlobalMult = 1 + 0,02·HPF` **und** der Seelen-Verstärker
+  `soulBonusEff = 0,10 + 0,002·HPF`. Beide fließen multiplikativ in `dpsOf`/`clickDamageOf`
+  — L1 (mehr Seelen) und L2 (fettere Seelen) compounden, statt sich zu addieren.
+
+- **2026-07-18 — Himmelfahrts-Reset-Scope nach AC2 (Vergoldungen bleiben).** Die §4.5-
+  Tabelle listet Vergoldungen nicht explizit in L2-„Bleibt", aber das M10-AC2 (Spec §10 +
+  Auftrag) sagt ausdrücklich: **RS (souls + rsLifetime) und Ahnen fallen; Vergoldungen,
+  HPF, Himmelsbaum und Lifetime-Stats bleiben.** `himmelfahrtState` implementiert das als
+  puren Reducer (`{...createChState(), heaven: bankHimmelfahrt(...), gilds, totalClicks,
+rng, stats, legacyImported}`) mit exaktem Snapshot-Test. `lifetimeMaxZone` fällt bewusst
+  auf 1 (sonst wäre der RS-Reset via pending sofort wieder verdient).
+
+- **2026-07-18 — Himmelsbaum: nur die aktiven Grundknoten, Kampf-/Loot-Knoten nach M12.**
+  `TREE_NODES` enthält Coach I–IV, Frühstarter, Nachtschicht I–II, Ekstase-Ausdauer I–III
+  (Kosten-Listen pro Level, HPF ausgegeben = permanent). Beat-Drop/Pfirsichregen/
+  Truhen-Magnet/Bühnen-Sprinter sind **weggelassen** (statt gekauft-aber-wirkungslos),
+  bis M11/M12 ihre Effekte liefern — kein HPF-Verschwendungs-Fallstrick.
+
+- **2026-07-18 — Coach als geglätteter Idle-Schaden + Offline-Anteil.** Der Twerk-Coach
+  „klickt 1×/s mit 25 % Klickwert" ist im Loop als `coachDps(clickDmg, cps)·dt`
+  (wie Idle-DPS, ohne Krit/Beat, P1) modelliert — deterministisch und identisch zur
+  Offline-Formel. `offlineGold` bekommt optionale `{clickDmg, coachCps, capS}`: der
+  effektive Durchsatz ist `dps + coachCps·0,25·clickDmg`, gedeckelt per Nachtschicht.
+  Reine Klick-/Crew-lose Builds verdienen so offline (Rest von B11). Alte 3-Arg-Aufrufe
+  bleiben grün (Opts default leer).
+
+- **2026-07-18 — Sim E3: robustes Kriterium + realistischer Himmelfahrts-Pace.**
+  `simulateAscensionEra` (adaptive Aszension, ROI-greedy Crew, power-greedy Ahnen-Kauf
+  nach jeder Aszension, held-balance) misst zwei Dinge: **E3** = „+50 % Gesamtmacht
+  (effektive DPS+Klick) höchstens alle 90 min über die ersten 20 Aszensionen" (aktiver
+  Bot, beobachtet ~6 min ≪ 90 min), und die **erste Himmelfahrt** (RS_life ≥ 1000) im
+  Fenster **5–9 h ±25 %** = [3,75 h; 11,25 h]. Wichtig: der optimale 3-cps-Juice-Bot
+  erreicht 1 000 RS in ~0,6–1 h — dieselbe Optimal-vs-Real-Lücke, die schon die
+  M9-Pacing-Tabelle dokumentiert. Der Himmelfahrts-Pace wird darum mit einem
+  **realistischen Spielermodell** (0,7 cps, ohne Juice, ~45-min-Runs) gemessen und landet
+  reproduzierbar bei ~5,4–5,7 h. Ein Bug im Era-Bot (Stall-Timer nur bei neuem Lifetime-
+  Rekord statt bei jedem Frontier-Vorstoß) hätte ihn bei Bühne 35 plateauen lassen —
+  behoben, indem der Timer beim Re-Climb jeder geräumten Bühne zurückgesetzt wird.
+
+## M9 — Endless-Skalierung (Anti-Plateau)
+
+- **2026-07-18 — RS_v2 ist rein additiv, deshalb migrationsfrei.** `soulsForMaxZone`
+  bekommt den „Legendäre Auftritte"-Term: `⌊z^1.6/40⌋ + ⌊1.10^z − 1⌋` (§4.5.1). Der
+  bestehende `applyAscension`-`Math.max`-Boden (Bank schrumpft nie) macht den Retune
+  **ohne Save-Migration** sicher — eine bestehende Bank wird nie kleiner, nur die neue,
+  steilere Kurve gilt ab dem nächsten Rekord. Der exponentielle Term (Basis 1,10)
+  sorgt dafür, dass jede neue Bestzone die Bank **vervielfacht** statt inkrementiert
+  (Tabelle §4.5.1 exakt getroffen: z40→53, z50→129, z100→13818); Property-Test:
+  +5 Bestzone ⇒ ≥ ×1,3 für z ≥ 40.
+
+- **2026-07-18 — Endlose Meilensteine per Integer-Verdopplung (float-sicher).**
+  `milestoneCount(level)` zählt die 7 festen Schwellen plus jede weitere Verdopplung
+  ab 1600 in einer Integer-Schleife (`t *= 2`, exakt bis 2^53) statt via `log2` — so
+  gibt es keine Rundungskante an einer Schwelle. `milestoneMult(1600)=2⁸`,
+  `(3200)=2⁹`. `nextMilestone` liefert dadurch **immer** eine nächste Klammer (nie
+  mehr `null`), was die Crew-Fortschrittsbalken endlos macht (der tote
+  „alle Meilensteine erreicht"-Zweig entfällt).
+
+- **2026-07-18 — Gild-Multiplikator lebt in `heroes.ts`, Bookkeeping in `gild.ts`
+  (keine Zirkularität).** `gild.ts` braucht `CREW` (Ziel-Wahl) → importiert aus
+  `heroes.ts`. Die ×1,25-DPS-Faltung (`gildMult`/`heroDps(cfg,level,gild)`) liegt
+  dagegen in `heroes.ts`, damit die DPS **eine** Quelle hat und `heroes` nicht auf
+  `gild` zeigt. `totalRawDps`/`clickDamageRaw` nehmen ein optionales `gilds`-Argument
+  (Default `{}`) — alte Aufrufer/Tests bleiben unverändert grün.
+
+- **2026-07-18 — Gild-Award über einen Lifetime-Highwater, nicht pro Zone-Flag.**
+  `awardGildOnZone(gilds, zone, alreadyGilded, rng)` vergibt genau dann, wenn `zone`
+  eine 10er-Bühne ist und noch nicht vergoldet. Der Glue (`main.ts`) leitet
+  `alreadyGilded` aus `lifetimeMaxZone` ab: die geräumte 10er-Bühne (`combat.zone−1`)
+  bekommt ihr Gild nur, wenn die Front einen **neuen Lifetime-Rekord** setzt — ein
+  Re-Clear nach Ascension vergoldet also nie doppelt, und Migration (`gilds={}`) gibt
+  keine rückwirkenden Gilds. Ziel-Wahl über den seedbaren RNG ⇒ deterministisch &
+  save-scum-fest; das ×1,25 ist permanent und überlebt die Ascension (`ascendState`
+  trägt `gilds` mit — Anti-Plateau P3: auch ein „+0-Seelen-Run" hinterlässt Macht).
+
+- **2026-07-18 — CH-Save v4: Guard streng auf Kern, Repair auf `gilds`/`rsLifetime`.**
+  Wie schon rng/stats/ability/combo werden die neuen Felder **nicht** in `isChSave`
+  gegatet, sondern in `stateFromSave` repariert (`repairGilds` verwirft Nicht-
+  Ganzzahl-/Negativ-Einträge, `repairRsLifetime` klemmt auf ≥ 0). `migrateChV3toV4`
+  füllt `gilds={}` und seedt `rsLifetime` aus den aktuellen Seelen; die
+  Invarianten-Reparatur hebt `rsLifetime` zusätzlich auf `soulsForMaxZone(lifetime)`.
+  `rsLifetime` ist der nie schrumpfende Lifetime-RS-Highwater für das spätere
+  Himmelfahrts-Gate (§4.5.2), schon jetzt verdrahtet.
+
+- **2026-07-18 — Travel-UI treibt das pure `travelTo`; Klick-Hot-Path bleibt sauber.**
+  Der Stepper (`◀ Bühne ▶` + `⏫ Front`) ruft nur `travelTo(state, zone)` (clamped
+  1..maxZone) und rendert danach einmalig; die Button-Disabled-Zustände + der
+  Farm-Indikator laufen über die change-detected `hud.update`, nie pro Frame. Farmen
+  unter der Front lässt `maxZone` (die Frontier) unangetastet — nichts geht verloren.
+
+- **2026-07-18 — `simulateEndless` ersetzt `simulatePlaythrough` als Balancing-Gate.**
+  Deterministischer Bot über die echten Module (combat/heroes/ascension/click/gild),
+  1-s-Schritte, EV-basiertes Klicken (Combo ×2 + Krit-EV ×1,8 aktiv; nichts casual),
+  ROI-greedy-Crew, Boss-Whittling über den Timer, adaptive/fixe Ascension. Reproduziert
+  §4.8 Messung 3 (Bank 53→810→2074, Plateau ~Bühne 80). **E2 als „weiche Wand" über
+  einen Running-Max robustifiziert:** kein +5-Schritt darf mehr als das Doppelte des
+  bisher schlechtesten Schritts kosten (der rohe Nachbarschafts-Quotient ist fragil,
+  weil Sub-Sekunden-Re-Climb-Bursts winzige Nenner erzeugen). Beobachtet ≈ 1,9 < 2
+  über alle Seeds und ~16 Verbesserungen — die vollen „ersten 30" landen mit den
+  compoundenden Ahnen/HPF aus M10 (die den linearen-Mult-Plateau ~Bühne 80 anheben);
+  bis dahin sind die erreichbaren Verbesserungen die ehrliche Decke. Läuft in CI als
+  eigener Schritt (`npm run test:sim`) und ist Teil von `npm test`.
+
+## M8 — Klick-Juice 2.0 (der Star zuerst)
+
+- **2026-07-18 — Combo-Tiers als absolute (nicht kumulative) Daten-Perks.** Die
+  Tier-Tabelle (§4.2.2) listet pro Tier einen „Zusatz-Perk"; implementiert sind die
+  Perks als **absolute Werte am jeweiligen Tier**: `tierCritChanceBonus(2)=0.03`,
+  `(3)=0.06`, Tier 4 behält +6 % Chance und ergänzt +25 % Crit-Mult & +40 ms
+  Beat-Fenster. So bleibt `critChance(CRIT_CHANCE + bonus)` (hart bei 40 % gedeckelt)
+  eine einzige, deterministisch testbare Faltung; der rohe Combo-Mult bleibt bei
+  ×2-Cap (die §4.8-Balance steht darauf). Tier-Config lebt in `game/combo.ts` als Daten.
+
+- **2026-07-18 — Soft-Decay kontinuierlich modelliert (frame-rate-unabhängig).**
+  Statt „−20 % pro diskreter Sekunde" ist `decay(stacks, seconds)` als
+  stückweise geschlossene Lösung implementiert: exponentiell mit Basis `1−0.2 = 0.8`
+  solange der 20-%-Verlust über dem Boden liegt (Stacks > 5), darunter linear −1/s,
+  Boden bei 0. `decay(100,1)=80`, `decay(100,2)=64` exakt; nie ein Hard-Reset (N6).
+  Das transiente Fenster (`window`) lebt in `ComboState` als Runtime-Feld — nur
+  `stacks` wird persistiert (CH-Save v3).
+
+- **2026-07-18 — On-Beat rein über Phase-Injektion, ohne game→audio-Kern-Kopplung.**
+  `isOnBeat(phase, phasePerSecond, windowMs)` rechnet die Zeit-Distanz zum nächsten
+  Beat-Onset (Onsets = ganzzahlige Vielfache von `BEAT_PERIOD_PHASE = 1/CLAPS_PER_PHASE`)
+  und vergleicht mit ±100 ms (Tier 4: +40 ms). Die Phasen-Geschwindigkeit
+  (`phaseVelocity(drive)`) spiegelt `physics.stepPhysics` als benannte Daten, damit
+  Beat-Timing eine einzige Quelle hat. `CLAPS_PER_PHASE` wird aus `audio/beat.ts`
+  importiert (pures, DOM-freies Modul) — eine numerische Konstante, kein Glue.
+
+- **2026-07-18 — Ekstase-Fenster als Epoch-ms, nicht als Countdown.** `activate`
+  setzt `frenzyUntil = now + 12 000`; `frenzyMult(state, now)` = 10 solange
+  `now < frenzyUntil`, sonst 1. Damit überlebt ein laufendes Fenster einen Reload
+  ohne Tick-Buchführung (CH-Save v3 speichert `charge/frenzyUntil/cooldowns`).
+  `cooldowns` ist leer, aber jetzt schon im Schema, damit Beat-Drop/Pfirsichregen
+  (M10) keinen weiteren Bump brauchen.
+
+- **2026-07-18 — CH-Save v3: Guard streng auf Kern, Repair auf Juice.** `ability`
+  und `combo` werden — wie schon `rng/stats` (M7) — **nicht** in `isChSave` gegatet,
+  sondern in `stateFromSave` repariert (`repairAbility` klemmt Charge 0..100, wirft
+  nicht-numerische Cooldowns weg; `repairCombo` ⇒ `stacks ≥ 0`). Korruptes Teilobjekt
+  ⇒ Default, nie Crash und nie Fortschrittsverlust. `migrateChV2toV3` füllt die
+  M8-Defaults; v2→v3 ist verlustfrei getestet.
+
+- **2026-07-18 — Popup-Pool + Batcher als pure, node-testbare Kerne.** `ui/pops.ts`
+  trennt die pure Logik (`PopBatcher` = 1 Pop/80 ms + `+Σ ×n`-Aggregat; `NodePool` =
+  Ringpuffer mit ≤ 24 nie überschrittenen Nodes) vom dünnen DOM-Renderer (`Pops`).
+  So ist die ≤-24-Invariante (§8-AC2) eine reine Zähler-Eigenschaft ohne jsdom
+  (Vitest läuft im node-Env). Recycelte Nodes starten die CSS-`rise`-Animation via
+  `animation:none` → reflow → `''` neu.
+
+- **2026-07-18 — HUD-Drossel per Change-Detection, nicht per Blockade.** `ChHud`
+  cached jeden geschriebenen Wert und fasst das DOM nur bei echter Änderung an;
+  bewegliche Teile (HP-Balken, Boss-Timer) laufen über das leichte `frame()` pro
+  Frame, der volle Text-Refresh nur auf dem 0,25-s-Tick + diskreten Events. Kein
+  `innerHTML` im Klick-Hot-Path.
+
+- **2026-07-18 — Shake-/Partikel-Tuning als Daten (`game/juice.ts`).** Shake-Tiers
+  (T2 0,2 · T3 0,35 · T4/Ekstase 0,5 · Boss-Kill 0,6) und die Burst-Formel
+  `8 + Tier·6` sind exportierte, getestete Konstanten statt Inline-Literale im Glue.
+  Burst(4)=32 bleibt weit unter dem 200er-Partikel-Pool — keine Pool-Vergrößerung nötig.
+
+- **2026-07-18 — Musik-Intensität additiv 0..3, lazy & muteable.**
+  `AudioEngine.setIntensity` schaltet im 16-Step-Loop zusätzliche Voices frei
+  (T2 Kick-Perkussion, T3 Lead-Arp +1 Oktave, Ekstase Filter-Sweep), alle unter dem
+  Music-Bus/Master — Mute und „kein Autoplay" gelten unverändert.
+
+- **2026-07-18 — Mobile Bottom-Sheet rein per CSS.** Unter 640 px wird `#shop` zum
+  Bottom-Sheet (55 vh, Slide über `translateY`); Figur + Rivale bleiben im oberen
+  Drittel sichtbar (headless per Screenshot verifiziert, §8-AC5). Der Shop-Toggle
+  (oben links, z-index 25) bleibt über dem Sheet erreichbar.
+
+## M7 — MVP-Härtung & Kern-Hygiene
+
+- **2026-07-17 — Klick-Mathe zieht in ein pures `game/click.ts` (N2).** Die
+  Krit-/Combo-Konstanten (`CRIT_CHANCE=0.2`, `CRIT_MULT=5`, `COMBO_STEP=0.02`,
+  `COMBO_CAP=50`, `COMBO_WINDOW_S=1.5`) und die Funktionen `comboMult`,
+  `rollCrit`, `effectiveClick` sind jetzt Daten + reine Funktionen mit Tests;
+  `main.ts` ruft nur noch auf. `effectiveClick({baseClick,combo,crit,extraMult=1})`
+  ist bewusst als erweiterbare Pipeline geschnitten — Beat/Frenzy/Gear/Event
+  (M8/M11/M12) multiplizieren später über `extraMult` ein, ohne die Call-Site zu
+  ändern. Die Werte 20 %/×5 (EV ×1,8) sind die Spec-Baseline (§4.2.1); die
+  Pacing-Tabellen (§4.8) sind darauf kalibriert, deshalb unverändert übernommen.
+
+- **2026-07-17 — Seedbarer RNG: splitmix32 counter-based statt mulberry32.** Die
+  Spec (§9.4) skizziert mulberry32; gewählt wurde stattdessen ein
+  **counter-basierter splitmix32-Finalizer**: die n-te Ziehung ist
+  `hash32((seed + cursor) | 0)`, danach `cursor++`. Grund: aus dem persistierten
+  `{seed, cursor}` lässt sich der Strom in **O(1)** exakt fortsetzen — kein
+  Replay-Loop über `cursor` Schritte (den mulberry32 als stateful Generator
+  bräuchte). splitmix ist genau für gut verteilte Ausgaben aufeinanderfolgender
+  Counter-Werte gebaut, also ideal für diesen Zugriff. `Math.random`/`Date.now`
+  sind nur in `randomSeed()` erlaubt (Seed-Erzeugung = einzige Nicht-Determinik);
+  alle spielrelevanten Rolls (Krit jetzt, Loot/Quests später) ziehen aus `Rng`.
+  Kosmetik (Partikel, Kamera-Shake) darf weiter `Math.random` nutzen.
+
+- **2026-07-17 — CH-Save v2 (`bootyclicker.ch`).** Neue Felder auf `ChState`
+  (Runtime-State, nicht abgeleitet): `rng: {seed,cursor}`,
+  `stats: {crits,onBeatClicks,bossKills,bossTimeouts,goldLifetime,playTimeS}`,
+  `legacyImported: boolean`. `onBeatClicks` bleibt bis M8 bei 0. Migration
+  `migrateChV1toV2` nach dem Registry-Muster von `save/migrate.ts` (never-throw,
+  Zukunfts-/Unsinns-Version ⇒ null ⇒ Fresh-Start): füllt frischen RNG-Seed,
+  genullte Stats, `legacyImported=false`. Abgeleitete Kampfwerte werden wie
+  gehabt **nicht** persistiert.
+
+- **2026-07-17 — Guard streng auf Kern, Repair auf Meta.** `isChSave` (v2-Guard)
+  prüft die spielkritischen Felder strikt (korrupt ⇒ Save verworfen ⇒
+  Fresh-Start). Die Meta-Felder (`rng`/`stats`/`legacyImported`) werden **nicht**
+  vom Guard verworfen, sondern in `stateFromSave` repariert (korruptes/fehlendes
+  `rng` ⇒ frischer Seed; negative/fehlende Stats ⇒ 0) — gleiche „reparieren statt
+  Fortschritt vernichten"-Haltung wie die `runMaxZone`-Invariante. Ein kaputtes
+  RNG-Feld kostet also nie die Crew/Bühne des Spielers.
+
+- **2026-07-17 — „Erbe der alten Tour" (§9.2.3, einmalig, idempotent).**
+  `applyLegacyInheritance(ch, loadGame())` gewährt beim ersten CH-Boot mit
+  vorhandenem Legacy-Save `souls += 7 · rebirths` und setzt danach **immer**
+  `legacyImported=true` (kein Doppel-Bonus, kein Re-Check ohne Legacy-Save). Boot
+  persistiert sofort, damit ein Reload vor dem ersten Autosave nicht erneut
+  gewährt. Der Legacy-Key (`bootyclicker.save`) wird **nicht** gelöscht (Archiv).
+  Die §9.2.3-Vormerkungen **Tyrann-Skin** (`bossDefeated`) und **Goldtruhe**
+  (`maxBp ≥ 50 000`) zielen auf die M11/M12-Systeme (Gear/Truhen), die es noch
+  nicht gibt — bewusst **keine** spekulativen Save-Felder dafür; sie werden mit
+  M11/M12 verdrahtet. In M7-Scope liegen nur der RS-Grant + das Idempotenz-Flag.
+
+- **2026-07-17 — Tab-Rückkehr-Grant (B5).** `visibilitychange → hidden` merkt
+  sich `Date.now()`; bei `→ visible` wird die Weg-Zeit über dieselbe pure
+  `offlineGold(dps, zone, elapsed)` gutgeschrieben (Welcome-Back-Dialog erst ab
+  mehr als 60 s Abwesenheit), dann persistiert. So verdient auch ein pausierter
+  Tab, dessen rAF-Loop stand, seine Idle-Zeit — der 0,05-s-`dt`-Clamp schluckte
+  die Wegzeit vorher.
+
+- **2026-07-17 — B4 als pure Predicate testbar.** `shouldShakeOnKey(code,repeat)`
+  (`= code==='Space' && !repeat`) kapselt die Leertaste-Repeat-Sperre, damit
+  „gehaltene Leertaste = genau 1 Shake" ohne DOM unit-getestet ist.
+
+- **2026-07-17 — Safe-Area (B13b).** `viewport-fit=cover` war gesetzt; jetzt
+  bekommen alle fixed-Elemente (`.hud`/`.toggleShop`/`.muteBtn`/`.shop`/
+  `.hintbar`/`.rival`) `env(safe-area-inset-*)`-Offsets mit `0px`-Fallback per
+  Progressive-Enhancement (Basis-Regel bleibt als Fallback stehen, `calc(...+env)`
+  überschreibt in unterstützenden Browsern).
+
 ## CH-MVP — Umbau auf Clicker-Heroes-Loop (endlos)
 
 - **2026-07-17 — Produkt-Pivot auf einen Clicker-Heroes-Kern.** Auf Wunsch

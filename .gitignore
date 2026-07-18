@@ -87,3 +87,6 @@ Desktop.ini
 *.pid
 *.seed
 *.pid.lock
+
+# ---- Claude Code (agent worktrees + local session state) ----
+.claude/

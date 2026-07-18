@@ -43,6 +43,13 @@ const SKIN_KEYS: Record<SkinKey, true> = {
   robo: true,
   host: true,
   boss: true,
+  // M11 skin keys — kept in this legacy allow-list only so the shared SkinKey
+  // union stays exhaustive; real legacy (v1–v4) saves never carry these.
+  neon: true,
+  pirate: true,
+  lava: true,
+  gyrator: true,
+  diamond: true,
 };
 const BG_KEYS: Record<BackgroundKey, true> = {
   club: true,

@@ -1,6 +1,23 @@
 import type { SkinConfig, SkinKey } from '../types';
 
-/** The five character skins, values identical to the prototype (spec §4.3, §4.5: no real people). */
+/**
+ * The ten character skins — procedural visual configs (materials/colours for the
+ * rig) plus **gear metadata** (rarity + per-level buff + per-star bonus, spec §5.3).
+ *
+ * Skins are gear, not cosmetics (M11): the active skin's buff feeds the pure
+ * `game/gear.ts` fold. Visual fields (`style`/`skin`/`shorts`/`hair`) are unchanged
+ * for the five originals and every new skin reuses an existing `style` so the rig
+ * (`character/rig.ts`) still builds all ten. `cost`/`revealAt` are the old M0–M6
+ * BP-shop fields (kept for the archived shop); M11 gating lives in `game/gear.ts`
+ * (`skinUnlocked`), never here. No real people (spec §4.3/§4.5).
+ *
+ * P1 balance (review, DECISIONS.md): the strongest buff in the catalog MUST be a
+ * click buff (§5.1) — Klassiker leads at +8 %/lv click (×5 at Lv 50, ×5.5 with 5★),
+ * Robo-Twerk follows at +6 %/lv crew-DPS (×4 max). This deliberately deviates from
+ * the §5.3 table (4 %/8 %), which contradicted §5.1 by letting the idle skin
+ * out-scale the click skin; the sim gate (`sim.test.ts`, M11-AC5) derives its
+ * best-in-slot multipliers from THIS data, so a future flip fails CI.
+ */
 export const SKINS: Record<SkinKey, SkinConfig> = {
   classic: {
     icon: '🕺',
@@ -11,6 +28,9 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     shorts: 0xa8e831,
     hair: 0x241608,
     revealAt: 0,
+    rarity: 'common',
+    buff: { stat: 'clickPct', perLevel: 0.08 }, // strongest buff = click (P1, §5.1)
+    star: { stat: 'clickPct', perStar: 0.1 },
   },
   disco: {
     icon: '🪩',
@@ -21,6 +41,9 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     shorts: 0xffd24d,
     hair: 0x120c06,
     revealAt: 0,
+    rarity: 'rare',
+    buff: { stat: 'critChance', perLevel: 0.004 },
+    star: { stat: 'critMult', perStar: 0.05 },
   },
   robo: {
     icon: '🤖',
@@ -31,6 +54,9 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     shorts: 0x38bdf8,
     hair: 0x333333,
     revealAt: 300,
+    rarity: 'rare',
+    buff: { stat: 'dpsPct', perLevel: 0.06 }, // strictly below the click skin (P1)
+    star: { stat: 'coachCps', perStar: 0.2 },
   },
   host: {
     icon: '🎤',
@@ -41,6 +67,9 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     shorts: 0x14141f,
     hair: 0x1a1208,
     revealAt: 4000,
+    rarity: 'epic',
+    buff: { stat: 'comboWindow', perLevel: 0.06 },
+    star: { stat: 'comboDecay', perStar: 0.04 },
   },
   boss: {
     icon: '👑',
@@ -51,5 +80,74 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     shorts: 0x30180a,
     hair: 0x000000,
     revealAt: 40000,
+    rarity: 'legendary',
+    buff: { stat: 'bossDmg', perLevel: 0.12 },
+    star: { stat: 'chestLuck', perStar: 0.02 },
+  },
+  // ---- M11 new skins (spec §5.3): each reuses an existing rig style. ----
+  neon: {
+    icon: '🥷',
+    name: 'Neon-Ninja',
+    cost: 0,
+    style: 'human',
+    skin: 0x1a1a2e,
+    shorts: 0x39ff14,
+    hair: 0x0a0a12,
+    revealAt: 0,
+    rarity: 'epic',
+    buff: { stat: 'beatWindow', perLevel: 8 },
+    star: { stat: 'onBeatMult', perStar: 0.1 },
+  },
+  pirate: {
+    icon: '🏴‍☠️',
+    name: 'Pfirsich-Pirat',
+    cost: 0,
+    style: 'human',
+    skin: 0xffb07c,
+    shorts: 0xd83a3a,
+    hair: 0x2a1810,
+    revealAt: 0,
+    rarity: 'rare',
+    buff: { stat: 'keyDrop', perLevel: 0.06 },
+    star: { stat: 'goldPct', perStar: 0.05 },
+  },
+  lava: {
+    icon: '🌋',
+    name: 'Lava-Twerker',
+    cost: 0,
+    style: 'human',
+    skin: 0x2b1a17,
+    shorts: 0xff5714,
+    hair: 0x140a08,
+    revealAt: 0,
+    rarity: 'epic',
+    buff: { stat: 'critMult', perLevel: 0.06 },
+    star: { stat: 'frenzyDurSec', perStar: 1 },
+  },
+  gyrator: {
+    icon: '🛸',
+    name: 'Galaktischer Gyrator',
+    cost: 0,
+    style: 'robot',
+    skin: 0x6b4fa0,
+    shorts: 0x22d3ee,
+    hair: 0x1b1030,
+    revealAt: 0,
+    rarity: 'legendary',
+    buff: { stat: 'frenzyDur', perLevel: 0.1 },
+    star: { stat: 'frenzyCharge', perStar: 0.08 },
+  },
+  diamond: {
+    icon: '💎',
+    name: 'Diamant-Booty',
+    cost: 0,
+    style: 'boss',
+    skin: 0xd6f0ff,
+    shorts: 0x67e8f9,
+    hair: 0xbfe9ff,
+    revealAt: 0,
+    rarity: 'mythic',
+    buff: { stat: 'allPct', perLevel: 0.02 },
+    star: { stat: 'allPct', perStar: 0.03 },
   },
 };
