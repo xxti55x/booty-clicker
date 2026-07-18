@@ -131,6 +131,7 @@ import { AbilityBar } from './ui/ability-bar';
 import { Ancients } from './ui/ancients';
 import { ChHud } from './ui/ch-hud';
 import { ChSettings } from './ui/ch-settings';
+import { Chests } from './ui/chest-panel';
 import { Crew } from './ui/crew';
 import { Gear } from './ui/gear-panel';
 import { Heaven } from './ui/heaven-panel';
@@ -473,6 +474,15 @@ const heaven = new Heaven({
   },
 });
 
+// 🎁 Truhen (§6): open chests via the pure loot glue (`openChestFromInventory`
+// already consumes keys + chest, credits rewards, recomputes, refreshes the HUD and
+// persists). The panel only reads the shared `state` ref and plays the skippable
+// open animation. There is NO purchase path — keys/chests are earned only (§6.3.3).
+const chestPanel = new Chests({
+  state,
+  open: (tier) => openChestFromInventory(tier),
+});
+
 new ChSettings({
   getState: () => {
     syncMaxZones();
@@ -531,6 +541,7 @@ const tabBodies: Record<string, string> = {
   anc: 'tabAnc',
   pr: 'tabPr',
   heaven: 'tabHeaven',
+  chest: 'tabChest',
   set: 'tabSet',
 };
 function renderActiveTab(key: string): void {
@@ -539,6 +550,7 @@ function renderActiveTab(key: string): void {
   else if (key === 'anc') ancients.render();
   else if (key === 'pr') prestige.refresh();
   else if (key === 'heaven') heaven.refresh();
+  else if (key === 'chest') chestPanel.render();
 }
 for (const tab of Array.from(document.querySelectorAll<HTMLElement>('.tab'))) {
   tab.addEventListener('click', () => {
@@ -1021,6 +1033,76 @@ interface LootGlue {
   peachVisible: () => peachVisible(Date.now()),
 };
 
+// ---------- Golden-Peach on-screen button + ×3-boost badge (§6.1, B13c) ----------
+const peachBtn = document.getElementById('peachBtn') as HTMLButtonElement;
+const boostBadge = document.getElementById('boostBadge') as HTMLElement;
+// Peach footprint (matches `.peachBtn` in style.css) + safe margins so a spawn never
+// lands off-screen or under the notch/HUD (B13c clamp).
+const PEACH_SIZE = 72;
+const PEACH_MARGIN = 16;
+const PEACH_TOP_SAFE = 76;
+let peachSpawnId = 0; // the `nextPeachAt` the current on-screen position belongs to
+const peachPos = { x: PEACH_MARGIN, y: PEACH_TOP_SAFE };
+
+/** Narrow (phone) layout — the shop is a full-width bottom sheet (B13a). */
+const isNarrow = (): boolean => window.innerWidth <= 640;
+const shopOpen = (): boolean => !shop.classList.contains('hidden');
+
+/** Clamp bounds for the peach's top-left in the current viewport (B13c). */
+function peachBounds(): { minX: number; maxX: number; minY: number; maxY: number } {
+  return {
+    minX: PEACH_MARGIN,
+    maxX: Math.max(PEACH_MARGIN, window.innerWidth - PEACH_SIZE - PEACH_MARGIN),
+    minY: PEACH_TOP_SAFE,
+    maxY: Math.max(PEACH_TOP_SAFE, window.innerHeight - PEACH_SIZE - PEACH_MARGIN),
+  };
+}
+
+/** Pick a fresh random spawn position for a new peach, already clamped (B13c). */
+function pickPeachPos(): void {
+  const b = peachBounds();
+  peachPos.x = b.minX + Math.random() * (b.maxX - b.minX);
+  peachPos.y = b.minY + Math.random() * (b.maxY - b.minY);
+}
+
+/** Re-clamp the stored position into the (possibly resized) viewport (B13c). */
+function clampPeachPos(): void {
+  const b = peachBounds();
+  peachPos.x = Math.min(Math.max(b.minX, peachPos.x), b.maxX);
+  peachPos.y = Math.min(Math.max(b.minY, peachPos.y), b.maxY);
+}
+
+function applyPeachPos(): void {
+  peachBtn.style.left = `${Math.round(peachPos.x)}px`;
+  peachBtn.style.top = `${Math.round(peachPos.y)}px`;
+}
+
+/**
+ * Per-frame peach/boost HUD sync (§6.1, B13c). Shows the floating 🍑 while a peach is
+ * on-screen — but DESPAWNS it under the bottom-sheet on narrow screens so it can't sit
+ * under the sheet. A fresh spawn (`nextPeachAt` changed) is repositioned once. The
+ * „×3 Boost" badge shows while the boost window runs.
+ */
+function updatePeachButton(now: number): void {
+  const spawned = peachVisible(now);
+  const show = spawned && !(isNarrow() && shopOpen());
+  if (spawned && state.peach.nextPeachAt !== peachSpawnId) {
+    peachSpawnId = state.peach.nextPeachAt;
+    pickPeachPos();
+    applyPeachPos();
+  }
+  peachBtn.classList.toggle('hidden', !show);
+  boostBadge.classList.toggle('hidden', !(state.peach.boostUntil > now));
+}
+
+peachBtn.addEventListener('click', () => {
+  if (catchPeach()) {
+    peachBtn.classList.add('hidden'); // caught — hide until the next spawn
+    if (effects.screenShake) shakeMag = Math.max(shakeMag, SHAKE_CRIT);
+    haptics.boss(effects.haptics);
+  }
+});
+
 // ---------- resize ----------
 function resize(): void {
   const w = window.innerWidth;
@@ -1028,6 +1110,9 @@ function resize(): void {
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  // Keep the peach on-screen when the viewport changes (B13c: never off-screen).
+  clampPeachPos();
+  applyPeachPos();
 }
 window.addEventListener('resize', resize);
 resize();
@@ -1081,9 +1166,10 @@ function loop(nowMs: number): void {
   // (music/ability bar), each frame.
   comboState = comboStep(comboState, dt, comboDecayReduction(state.gear));
   const epochMs = Date.now();
-  // Golden-Peach schedule (§6.1): despawn/reschedule the event (part 3 draws the
-  // clickable button from `peachVisible` + `chLoot.catchPeach`).
+  // Golden-Peach schedule (§6.1): despawn/reschedule the event, then sync the
+  // on-screen 🍑 button + ×3-boost badge (clamped/despawned per B13c).
   updatePeachSchedule(epochMs);
+  updatePeachButton(epochMs);
   const tier = comboTier(comboState.stacks);
   const frenzy = isFrenzyActive(state.ability, epochMs);
   hud.setCombo(comboState.stacks, tier);

@@ -3,6 +3,47 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## M12 — Pfirsich-Truhen & Loot (Teil 3: 🎁 Truhen-Tab + 🍑-Button + Doku)
+
+- **2026-07-18 — 🎁 als 7. Emoji-Tab; Tab-Reihe auf `font-size: 15.5px` verengt.** Die
+  Tab-Zeile hat jetzt sieben Tabs (🕺 🎽 🌀 ✨ 🌈 🎁 ⚙️). Statt eines Umbruchs bleiben sie
+  einreihig (`flex: 1`, Emoji-only, Titel per Hover) — die M11-Regel wurde von 17 px auf
+  15,5 px + `min-width: 0` gezogen, damit alle sieben auch bei 320 px Panel-Breite passen.
+
+- **2026-07-18 — Öffnen-Animation im Panel gescopt, nicht Vollbild — bewusst.** Der
+  `.chest-anim`-Overlay ist `position: fixed; inset: 0`, aber `.shop` trägt `backdrop-filter`,
+  das für fixed-Nachfahren einen **Containing-Block** bildet ⇒ der Overlay deckt das Shop-Panel
+  (nicht den ganzen Viewport). Das ist gewollt: die ~1,2-s-Animation (wackeln → aufspringen →
+  Reward-Cards) stört die Spielszene links nicht und wirkt als sauberes Modal im Panel. Sie ist
+  **per Tipp überspringbar** (erster Tipp → sofort Reward-Cards, zweiter → schließen; AC3).
+
+- **2026-07-18 — Overlay als stabiles Kind, Change-Detection via `sig`-Guard.** `#chestAnim`
+  liegt als **fixes** Kind neben den neu-gerenderten `#chestHead`/`#chestInv`, damit ein
+  0,25-s-Tick-`render()` die laufende Animation nicht wegreißt. `render()` baut die Loot-Tabellen
+  **einmal** und rebaut Header+Inventar nur, wenn ein getrackter Wert (Keys, Inventar, Token,
+  Skins, Pity) sich ändert — kein `innerHTML`-Rebuild im Klick-Hot-Path (P6/B7).
+
+- **2026-07-18 — Kein Kauf-Pfad: harte Review-Garantie (§6.3.3/P5).** Das 🎁-Panel enthält
+  **nichts**, was 🔑/Truhen für Geld kauft oder das impliziert — nur Öffnen (kostet 🔑, die man
+  erspielt). Ein Header-Hinweis „ausschließlich erspielbar — kein Kauf, nie" macht es explizit;
+  der Headless-Smoke asserted zusätzlich, dass **keine** Kauf-/Echtgeld-Wörter im Tab-Text
+  vorkommen. Es gibt spielweit keinen Netzwerk-/Echtgeld-Loot-Pfad (Bestenliste ist die einzige
+  optionale Netz-Funktion und trägt kein Loot).
+
+- **2026-07-18 — 🍑-Spawn-Position via `Math.random` (Kosmetik), Clamp/Despawn im Loop (B13c).**
+  Der Pfirsich-**Zeitplan** + 🔑-Roll sind seedbar (Teil 1/2); die reine **Bildschirm-Position**
+  ist Kosmetik ohne Gameplay-Relevanz und darf `Math.random` nutzen. Der Button wird pro Spawn
+  einmal zufällig, aber **geklemmt** platziert (Rand 16 px, Top-Safe 76 px unter HUD/Notch) und
+  bei `resize` in den Viewport zurückgeklemmt. Auf schmalen Screens (≤ 640 px) wird er
+  **despawnt, solange das Bottom-Sheet offen ist** (`isNarrow && shopOpen`), damit er nie
+  darunter feststeckt. Position wird per Loop/`resize`-Handler in `main.ts` gesetzt (kein neuer
+  State — der 8-s-Sicht-Zustand leitet sich aus `peach.nextPeachAt` ab).
+
+- **2026-07-18 — Panel liest den geteilten `state`-Ref; Öffnen geht durch die Teil-2-Glue.**
+  `Chests` bekommt nur `{ state, open }`. `open` ist `openChestFromInventory` (Teil 2), das schon
+  Keys+Truhe abzieht, Rewards gutschreibt, `recompute`/HUD/`persist` macht — das Panel rendert
+  danach neu aus dem (in-place mutierten) `state`. Kein Doppel-Buchen, keine UI-eigene Ökonomie.
+
 ## M12 — Pfirsich-Truhen & Loot (Teil 2: Save v7 + Ökonomie-Wiring)
 
 - **2026-07-18 — CH-Save v7: `chests { keys, inventory, pity, skins }` · `permTokens` ·

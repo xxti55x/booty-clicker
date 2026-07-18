@@ -75,17 +75,35 @@ Weitere Skripte: `npm run build` (Produktions-Build nach `apps/game/dist`, < 5 M
   frei (z. B. Disco-King + Club = „Studio 54"). Neon-Ninja & Pfirsich-Pirat lassen sich
   mit 🧩 **craften**; der Goldene Twerk-Tyrann wird per Boss-Erst-Kill (Bühne 10) **oder
   Erbe der alten Tour** frei, Diamant-Booty erst ab Transzendenz.
+- **Pfirsich-Truhen & Loot (🎁).** Sammle **Schlüssel 🔑** und **Truhen** rein durchs
+  Spielen — **alles erspielbar, kein Kauf, nie.** Quellen: **Boss-Kills** (1 🔑 garantiert +
+  eine bühnenabhängige Truhe), **Rivalen-Kills** (3 % Chance Holztruhe, skaliert mit
+  Truhen-Luck), **Combo-Tier 3** (1 🔑, 1×/Run) und der **Goldene Pfirsich**. Vier Tiers
+  (**🪵 Holz** gratis · **🥇 Gold** 1 🔑 · **💠 Diamant** 3 🔑 · **🌌 Mythos** 10 🔑);
+  Öffnen spielt eine kurze, **per Tipp überspringbare** Animation und dropt **BP**, **🧩
+  Splitter**, **🍬 Zuckerpfirsiche**, **Einkommens-Boosts**, weitere **🔑**, **Permanent-Token**
+  (endlose +Krit-/Gold-/DPS-Buffs) und seltene **Truhen-Skins** (Jackpot; Duplikat → 🧩).
+  Fair by design: **Pity** (spätestens jede 12. Gold-/4. Diamanttruhe garantiert das
+  🧩-Maximum oder einen Jackpot), **Duplikat-Schutz** (nie „nichts") und **transparente
+  Drop-Tabellen** (alle Gewichte als % im Tab einsehbar, §6.3.5). Alle Rolls laufen über den
+  seedbaren RNG — Save-Scumming vor einer Truhe bringt nichts.
+- **Goldener Pfirsich (🍑).** Alle 90–240 s taucht ein **schwebender 🍑-Button** auf
+  (~8 s klickbar). Fang ihn für **×3 Einkommen für 60 s** (HUD-Badge „×3 Boost") plus **25 %
+  Chance auf 1 🔑**. Auf dem Handy wird er **im Viewport gehalten** (auch beim Drehen) und
+  **verschwindet unter dem geöffneten Bottom-Sheet**, damit er nie darunter feststeckt.
 
 ## Steuerung
 
 - Klick auf Figur / Leertaste = Twerken (Schaden)
 - **Taste `F`** / Ekstase-Balken = Twerk-Ekstase zünden (wenn voll geladen)
+- **🍑-Button** (schwebt auf, wenn ein Goldener Pfirsich erscheint) = fangen → ×3-Boost + 🔑-Chance
 - Maus ziehen = Kamera drehen, Scrollen = Zoom
 - 🕺-Button (links oben) blendet das Panel ein/aus · 🔊 = Ton an/aus
 - Auf dem Handy ist der Shop ein **Bottom-Sheet** — Figur & Rivale bleiben sichtbar
-- Tabs (jetzt Emoji-only, Titel per Hover, damit alle **sechs** passen): **🕺 Crew** ·
+- Tabs (Emoji-only, Titel per Hover, damit alle **sieben** passen): **🕺 Crew** ·
   **🎽 Gear** (Skins/Kulisse/Set-Boni) · **🌀 Ahnen** (Seelen-Sink) · **✨ Ruhm**
-  (Ascension + Statistik) · **🌈 Himmel** (Himmelfahrt + Himmelsbaum) · **⚙️** (Grafik,
+  (Ascension + Statistik) · **🌈 Himmel** (Himmelfahrt + Himmelsbaum) · **🎁 Truhen**
+  (🔑/Truhen öffnen, Token & Skins, transparente Drop-Chancen) · **⚙️** (Grafik,
   Effekte, Save-Export/Import/Reset)
 
 ## Architektur
@@ -114,12 +132,19 @@ npm-Workspaces-Monorepo:
     Module; Endlos-Kriterien E1/E2/**E3**/E4 (inkl. **E4-mit-Gear**: Best-in-Slot-Klick-Gear
     schlägt Best-in-Slot-Idle-Gear ≥ 8 Zonen) + Pacing + erste-Himmelfahrt als CI-Gate
     (`npm run test:sim`).
-  - `game/ch-state.ts` + `save/ch-store.ts` — CH-State (Save **v6**: `gear` + `legacyTyrann`),
-    eigener versionierter Save-Key (`bootyclicker.ch`), Offline-Gold (inkl. Coach + Gear-Bonus),
-    Base64-Export/Import (never-throw, injizierbar).
+  - `game/chests.ts` — reine Loot-Engine: Truhen-Tiers, gewichtete Loot-Tabellen,
+    deterministisches `openChest` (seedbarer RNG), per-Tier **Pity**, **Luck**-Umgewichtung,
+    Duplikat-Schutz und der Permanent-Token-Katalog (alles Daten + reine Funktionen).
+  - `game/peach.ts` — Goldener-Pfirsich-Logik: `rollNextPeachAt` (seedbares Spawn-Fenster),
+    ×3-Einkommens-Boost + der 25 %-🔑-Roll — deterministisch/save-scum-fest.
+  - `game/ch-state.ts` + `save/ch-store.ts` — CH-State (Save **v7**: `chests {keys, inventory,
+pity, skins}` · `permTokens` · `peach {nextPeachAt, boostUntil}`), eigener versionierter
+    Save-Key (`bootyclicker.ch`), Offline-Gold (inkl. Coach + Gear-Bonus), Base64-Export/Import
+    (never-throw, injizierbar).
   - `ui/*` — HUD/Rival + Travel-Stepper, Crew, **Gear/Skins**, **Ahnen**, Prestige,
-    **Himmel**, Settings; `main.ts` verdrahtet alles (Skin-Wechsel baut die 3D-Figur neu,
-    Kulissen-Wahl gated die Auto-Rotation).
+    **Himmel**, **Truhen** (🎁: Öffnen-Animation + transparente Drop-Tabellen), Settings;
+    `main.ts` verdrahtet alles (Skin-Wechsel baut die 3D-Figur neu, Kulissen-Wahl gated die
+    Auto-Rotation, der schwebende 🍑-Button wird geclampt/despawnt).
 - `apps/api` — optionaler Cloudflare-Worker (Hono + D1 + KV) als Bestenlisten-Backend.
 
 Audio ist komplett **prozedural** (Web Audio, keine Dateien). Three.js kommt als

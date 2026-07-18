@@ -64,6 +64,12 @@
     <button class="toggleShop" id="toggleShop">🕺 Crew</button>
     <button class="muteBtn" id="muteBtn" title="Ton an/aus">🔊</button>
 
+    <!-- Golden-Peach on-screen button (§6.1) + ×3-boost HUD badge (B13c). -->
+    <button class="peachBtn hidden" id="peachBtn" type="button" title="Goldenen Pfirsich fangen!">
+      🍑
+    </button>
+    <div class="boostBadge hidden" id="boostBadge">🍑 ×3 Boost</div>
+
     <div class="abilitybar" id="abilityBar">
       <button class="ability-btn" id="ekstaseBtn" type="button" title="Twerk-Ekstase (Taste F)">
         <span class="ability-fill" id="ekstaseFill"></span>
@@ -89,6 +95,7 @@
         <div class="tab" data-t="anc" title="Ahnen">🌀</div>
         <div class="tab" data-t="pr" title="Ruhm">✨</div>
         <div class="tab" data-t="heaven" title="Himmel">🌈</div>
+        <div class="tab" data-t="chest" title="Truhen">🎁</div>
         <div class="tab" data-t="set" title="Einstellungen">⚙️</div>
       </div>
       <div class="tabbody" id="tabCrew"></div>
@@ -96,6 +103,7 @@
       <div class="tabbody" id="tabAnc" style="display: none"></div>
       <div class="tabbody" id="tabPr" style="display: none"></div>
       <div class="tabbody" id="tabHeaven" style="display: none"></div>
+      <div class="tabbody" id="tabChest" style="display: none"></div>
       <div class="tabbody" id="tabSet" style="display: none"></div>
     </div>
 

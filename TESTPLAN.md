@@ -19,7 +19,7 @@ CI (real browsers, touch input, performance).
 - [ ] `npm run lint` — ESLint clean
 - [ ] `npm run format:check` — Prettier clean
 - [ ] `npm test` — all unit tests green (game + API workspaces)
-- [ ] `npm run build` — type-checks and builds; bundle **< 5 MB** (currently ~614 KB JS / ~162 KB gzip; +~13 KB for the M11 🎽 Gear tab)
+- [ ] `npm run build` — type-checks and builds; bundle **< 5 MB** (currently ~631 KB JS / ~168 KB gzip; +~7 KB for the M12 🎁 Truhen tab + 🍑 button)
 - [ ] `npm run test:sim` — the `simulateEndless` gate (E1/E2/**E3**/E4 + **E4-with-gear** + §4.8 pacing + first-Himmelfahrt window) is green (also runs inside `npm test` + CI)
 - [ ] `npm run build:itch` — produces `apps/game/release/booty-clicker-itch.zip` with `index.html` at the archive root
 
@@ -259,3 +259,52 @@ Manual passes (real device / browser):
 - [ ] **Locked / craft states.** Zone/boss/Himmelfahrt-gated skins show their unlock hint;
       Neon-Ninja / Pfirsich-Pirat show a **Craft (🧩)** button (spending shards unlocks them);
       Diamant-Booty stays „ab Transzendenz". Every card still shows rarity/buff/level/cost.
+
+### M12 — Pfirsich-Truhen & Loot
+
+Automated (unit + headless smoke `smoke-ch-m12.mjs` (glue) + `smoke-ch-m12ui.mjs` (UI), v7):
+
+- Loot engine (`chests.test.ts`): **AC1** — `openChest` deterministic (same seed ⇒ same loot)
+  - χ²-tolerance distribution over 10 000 draws; **AC2** — pity edge exact (11 misses ⇒ the
+    12th Gold hits) + Luck monotonicity (row 0 strictly down, others up); duplicate protection
+    (jackpot dupe → fixed 🧩, never „nothing").
+- Peach (`peach.test.ts`): seeded `rollNextPeachAt` window, ×3 boost / 60 s, 25 % → 1 🔑.
+- Save v7 (`ch-store.test.ts`): **AC4** — v6→v7 lossless (fresh loot/token/peach defaults);
+  `chests {keys,inventory,pity,skins}` + `permTokens` + `peach` round-trip; corrupt loot
+  sub-fields repair in isolation (never a fresh-start).
+- Headless glue (`smoke-ch-m12.mjs`): loot glue exposed; a boss kill grants ≥ 1 🔑 + a
+  tier-appropriate chest (persisted); `chLoot.open` returns a reward, consumes the chest,
+  credits + persists; open with no key/chest is a no-op; catching a peach activates the ×3
+  boost + reschedules. Zero page errors.
+- Headless UI (`smoke-ch-m12ui.mjs`): **AC3** — the 🎁 tab shows the transparent loot tables
+  (≥ 20 weighted rows, **all as %**); opening a chest plays the animation overlay and a **tap
+  skips** straight to the reward cards (which carry captions); the chest is consumed. **No
+  purchase/real-money words** anywhere in the tab (§6.3.3). **AC4/B13c** — at 390 px the 🍑
+  **despawns** while the bottom-sheet is open and reappears when it closes; after a resize the
+  peach position stays **clamped inside the viewport**; clicking the on-screen 🍑 activates the
+  ×3 boost and shows the „×3 Boost" HUD badge. Zero page errors.
+- **AC5 — no real-money / network loot path.** Verified: keys/chests are earned only (boss/
+  rival/combo/peach faucets in `main.ts`); the 🎁 tab has open-only actions (no buy button, no
+  price, no `€`/`$`); `openChest`/`peach` roll purely from the seeded RNG. The only network
+  feature in the whole app is the optional, fail-silent leaderboard (maxZone) — it carries no
+  loot. The UI smoke asserts the tab text contains no purchase words.
+
+Manual passes (real device / browser):
+
+- [ ] **Open a chest.** In the 🎁 tab, an **Öffnen** button is enabled only when the tier's
+      count ≥ 1 **and** you hold enough 🔑 (cost shown: Holz gratis / Gold 1 / Diamant 3 /
+      Mythos 10). Opening plays a ~1.2 s wackeln → aufspringen → reward-card animation.
+- [ ] **Skip the animation.** A tap/click on the animation jumps straight to the reward cards;
+      a second tap closes it. Keys/inventory/pity update afterwards.
+- [ ] **Transparent odds.** Each tier has a collapsible drop-table listing every reward row
+      with its **% weight** (Gold sums 30/25/22/10/8/3/2); the token pool is named per tier.
+- [ ] **No purchase path.** Nothing in the tab buys 🔑/chests for money or implies it; the
+      header states „ausschließlich erspielbar — kein Kauf".
+- [ ] **Golden Peach.** A floating 🍑 appears every ~90–240 s (~8 s window); catching it grants
+      ×3 income for 60 s (HUD „×3 Boost" badge) + a 25 % 🔑 chance.
+- [ ] **Peach on mobile (B13c).** The 🍑 stays fully on-screen on spawn **and** after rotating /
+      resizing (never under the notch); it **disappears** while the shop bottom-sheet is open on
+      a narrow screen, and returns when the sheet closes.
+- [ ] **Header & collection.** The 🎁 header shows the 🔑 balance, owned permanent tokens (with
+      their +Krit/+Gold/+DPS effect) and the collected Truhen-Skins (n/11); a duplicate jackpot
+      pays 🧩 instead.
