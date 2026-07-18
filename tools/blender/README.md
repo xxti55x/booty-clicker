@@ -1,9 +1,10 @@
 # Blender-Pipeline (headless) — authored 3D-Modelle fürs Web
 
 Das Spiel rendert heute **alles prozedural** in Three.js (Primitives + `toonMat`
-+ Ink-Outlines, siehe `apps/game/src/engine/materials.ts`). Das bleibt der
-Default: 0 KB Assets, perfekt diffbar, und der Cartoon-Look lebt ohnehin vom
-Cel-Shading im Engine-Code.
+
+- Ink-Outlines, siehe `apps/game/src/engine/materials.ts`). Das bleibt der
+  Default: 0 KB Assets, perfekt diffbar, und der Cartoon-Look lebt ohnehin vom
+  Cel-Shading im Engine-Code.
 
 Diese Pipeline ergänzt den prozeduralen Weg, wenn eine Form zu organisch für
 Primitives wird (skulptierte Charaktere, komplexe Props, Trophäen):
@@ -62,11 +63,11 @@ scene.add(gltf.scene);
 
 ## Wann prozedural, wann authored?
 
-| Prozedural (Status quo)               | Authored (diese Pipeline)                |
-| ------------------------------------- | ---------------------------------------- |
-| Rigs mit Physik-Kontrakt (Cheeks!)    | Statische Hero-Props, Trophäen           |
-| Alles, was aus Primitives lesbar ist  | Organische Silhouetten, Sculpt-Formen    |
-| Per-Theme-Recolor via Code (`hue()`)  | Einmalige Showpieces (Boss-Intro o. Ä.)  |
+| Prozedural (Status quo)              | Authored (diese Pipeline)               |
+| ------------------------------------ | --------------------------------------- |
+| Rigs mit Physik-Kontrakt (Cheeks!)   | Statische Hero-Props, Trophäen          |
+| Alles, was aus Primitives lesbar ist | Organische Silhouetten, Sculpt-Formen   |
+| Per-Theme-Recolor via Code (`hue()`) | Einmalige Showpieces (Boss-Intro o. Ä.) |
 
 Der Charakter-Rig bleibt prozedural: `stepPhysics`/`renderCheeks` schreiben
 direkt auf benannte Bones — ein authored Rig müsste diesen Kontrakt exakt
