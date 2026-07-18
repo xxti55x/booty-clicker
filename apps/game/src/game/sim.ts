@@ -2,9 +2,9 @@
  * `simulateEndless` — a deterministic balancing bot over the REAL game modules
  * (combat / heroes / ascension / click / gild / ancients / heaven / gear / chests /
  * peach), the CI gate that replaces the old `simulatePlaythrough`. **M14 Vollausbau**
- * (§9.5): the bot now folds *every* power-affecting system, not a subset, so the
- * asserted pacing (§4.8) and endless criteria (E1–E4) reflect the real endgame
- * economy.
+ * (§9.5): the bot now folds the crew/gild/soul/ancient/heaven/gear/loot terms; see
+ * exclusions below. The asserted pacing (§4.8) and endless criteria (E1–E4) reflect
+ * the real endgame economy.
  *
  * The bot plays in 1-second steps: it clicks at a fixed `clickRate` with the §4.8
  * juice assumptions (sustained combo ×2 + crit EV ×1.8 when `juice`), lets idle crew
@@ -30,6 +30,14 @@
  *  · Daily-Login / Quest faucets (§7.1/§7.2): they *do* drip 🔑/🧩, but only on a
  *    real-time daily cadence (≤ a handful per in-game day) — dwarfed by the per-boss
  *    faucet the bot already models, so they are omitted rather than approximated.
+ *  · **The heaven layer (L2) is inert in the bot**: no driver banks a Himmelfahrt, so
+ *    `sim.heaven` stays at hpf 0 and every heaven-derived factor folds as ×1 — the
+ *    +2 %/HPF global mult (`heavenGlobalMult`), the HPF soul-amplifier (`soulBonusEff`),
+ *    the Truhen-Magnet key-drop (`truhenMagnetBonus`) and the Twerk-Coach idle tick.
+ *    Likewise Twerk-Ekstase (§4.3), the boss-damage mults, the Chronilla timer and
+ *    `travelTo` re-farming of cleared zones are not modeled. Every one of these can
+ *    only ADD power / speed the bot, so leaving them out keeps E1–E4 honest *lower*
+ *    bounds (the real game is at least this fast), never optimistic ones.
  */
 import { applyAscension, soulMult, soulsForMaxZone } from './ascension';
 import {
@@ -59,7 +67,7 @@ import {
   permTokenGoldMult,
 } from './chests';
 import { keyDropAmount, rivalChestChance } from './ch-state';
-import { CRIT_CHANCE, CRIT_MULT, COMBO_CAP, comboMult } from './click';
+import { CRIT_CHANCE, CRIT_CHANCE_CAP, CRIT_MULT, COMBO_CAP, comboMult } from './click';
 import {
   type CombatState,
   MONSTERS_PER_ZONE,
@@ -276,7 +284,12 @@ function comboFactor(config: SimConfig): number {
 function critFactor(config: SimConfig, permTokens: PermTokens): number {
   if (!config.juice) return 1;
   const econ = econOn(config);
-  const chance = CRIT_CHANCE + (econ ? permTokenCritChance(permTokens) : 0);
+  // Crit chance is hard-capped at 40 % in the real click pipeline (`click.critChance`,
+  // §4.2.1); mirror the cap here so a fat token pool can't lift the EV past the game.
+  const chance = Math.min(
+    CRIT_CHANCE_CAP,
+    CRIT_CHANCE + (econ ? permTokenCritChance(permTokens) : 0),
+  );
   const mult = CRIT_MULT * (econ ? permTokenCritMult(permTokens) : 1);
   return 1 + chance * (mult - 1);
 }
@@ -471,8 +484,11 @@ function openChestsGreedy(sim: Sim, incomePerSec: number, nowMs: number): void {
 /**
  * Apply one second of damage to the combat state, banking gold (×`goldMult`),
  * advancing zones, gilding fresh 10-zones, and dropping loot (§6.1): every boss kill
- * yields a 🔑 (`keyMult`-scaled) + a tier-scaled Truhe, and every rival kill has a
- * `luck`-scaled 3 % Holztruhe chance. Excess damage carries across targets (unlike the
+ * on the frontier yields a 🔑 (`keyMult`-scaled) + a tier-scaled Truhe, and a rival
+ * advance onto a **new frontier zone** rolls the `luck`-scaled 3 % Holztruhe chance.
+ * Loot is deliberately **frontier-gated** (~1 roll per new lifetime-deepest zone, not
+ * one per rival kill) — see the drop block below for why the 1-second-step model makes
+ * per-kill rolls unsound. Excess damage carries across targets (unlike the
  * in-game one-hit-per-frame model, which is fine at 60 fps but too coarse here). Boss
  * HP persists across seconds; the timer ticks once and a timeout drops to farming the
  * zone's rivals (never a soft-lock).
@@ -945,6 +961,13 @@ export interface FloatGuardResult {
   allFinite: boolean;
   /** Whether every tracked magnitude stayed under `FLOAT_CEIL`. */
   belowCeiling: boolean;
+  /**
+   * Smallest relevant additive gain ratio seen across the sweep — the min of
+   * (gold earned / total gold) and (damage dealt / current target HP-max). §9.3
+   * assert #3: this must stay above `wert · 2^-50` (≈ float epsilon) so the smallest
+   * per-tick gain never underflows the accumulator it is added to (the stall guard).
+   */
+  minGainRatio: number;
 }
 
 /**
@@ -969,6 +992,7 @@ export function simulateFloatGuard(config: SimConfig, opts: FloatGuardOptions): 
   let maxMagnitude = 0;
   let allFinite = true;
   let belowCeiling = true;
+  let minGainRatio = Number.POSITIVE_INFINITY;
   const audit = (v: number): void => {
     if (!Number.isFinite(v)) allFinite = false;
     const a = Math.abs(v);
@@ -992,6 +1016,11 @@ export function simulateFloatGuard(config: SimConfig, opts: FloatGuardOptions): 
     const goldBefore = sim.gold;
     combat = stepSecond(sim, combat, dmg, goldMult, luck, keyMult, econOn(config));
     const earned = sim.gold - goldBefore;
+    // §9.3 stall guard: track the smallest relevant additive gain ratio — the gold
+    // increment vs the gold total, and the per-second damage vs the current target's
+    // HP-max. Both must stay well above float epsilon (2^-50) or an add would vanish.
+    if (earned > 0 && sim.gold > 0) minGainRatio = Math.min(minGainRatio, earned / sim.gold);
+    if (combat.hpMax > 0) minGainRatio = Math.min(minGainRatio, dmg / combat.hpMax);
     sim.incomePerSec = INCOME_EMA_ALPHA * earned + (1 - INCOME_EMA_ALPHA) * sim.incomePerSec;
     buyCrewGreedy(sim);
     openChestsGreedy(sim, sim.incomePerSec, nowMs);
@@ -1026,5 +1055,5 @@ export function simulateFloatGuard(config: SimConfig, opts: FloatGuardOptions): 
     audit(power);
   }
 
-  return { maxZone: combat.maxZone, maxMagnitude, allFinite, belowCeiling };
+  return { maxZone: combat.maxZone, maxMagnitude, allFinite, belowCeiling, minGainRatio };
 }

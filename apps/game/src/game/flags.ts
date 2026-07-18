@@ -12,7 +12,11 @@
  * This module deliberately imports nothing from the game so any layer (formulas,
  * glue, UI) can read a flag without risking an import cycle. Flags are compile-time
  * constants; an optional, defensive `VITE_<FLAG>` env override exists for local dev
- * only and never throws — production builds inline the constants below.
+ * only and never throws. Note the override reads `import.meta.env` by a **computed**
+ * key (`import.meta.env[`VITE_${key}`]`), which Vite does **not** statically replace —
+ * so it resolves at runtime (to `undefined` in a production build, where no such vars
+ * exist), leaving the compile-time `FLAGS` default as the shipped value. It can never
+ * change a shipped build; today the module has no live importer at all.
  */
 
 /** Master switch for the Transzendenz layer (Schicht 3, §4.5.3). Ships OFF (M14). */

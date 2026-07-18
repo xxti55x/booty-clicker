@@ -5,9 +5,62 @@ here (spec §7).
 
 ## M14 — Endless-QA, Transzendenz-Gerüst & Release 2.0
 
+- **2026-07-18 (Review) — Review-Pass-Fixes (Ehrlichkeit & billige Korrektheit).**
+  - **Nicht-endliches TE-Gate:** `teForHpfLifetime(Infinity)` gab `Infinity` zurück,
+    obwohl der JSDoc „Non-finite ⇒ 0" versprach. Guard auf
+    `!Number.isFinite(hpfLifetime) || hpfLifetime < TRANSCEND_MIN_HPF_LIFETIME` gezogen
+    (Threshold-Semantik unverändert), Test `teForHpfLifetime(+∞) === 0` ergänzt.
+  - **§9.3 Präzisions-Assert (§9.5 Assert #3, Teil AC4):** `simulateFloatGuard` trackt
+    jetzt `minGainRatio` = min(Gold-Zuwachs/Gold-Total, Schaden/Ziel-HP-Max) und der
+    AC4-Test asserted `> 2^-50` (additiver Stall-Guard — kein Per-Tick-Zuwachs
+    unterläuft seinen Akkumulator). `FloatGuardResult` um das Feld erweitert.
+  - **Ehrliche Sim-Kommentare:** die §4.8-„weit früher/optimal-vs-real"-Zitate (ein Satz
+    ohne Spec-Entsprechung) in beiden Bühne-80/Himmelfahrt-Blöcken auf eine ehrliche
+    Modellierungs-Begründung umformuliert (player-facing Tabelle vs. realistischer Bot),
+    ohne Logikänderung. Modul-Header von `sim.ts` entschärft: statt „folds _every_
+    power-affecting system" jetzt „folds the crew/gild/soul/ancient/heaven/gear/loot
+    terms; see exclusions below" + explizite Ausschlussliste (**Heaven-Layer inert** —
+    kein Treiber bankt eine Himmelfahrt, also `sim.heaven` hpf 0 und alle
+    Heaven/Truhen-Magnet/Coach-Mults ×1 — plus Twerk-Ekstase, Boss-Schadens-Mults,
+    Chronilla-Timer, `travelTo`-Farming; jeder nur beschleunigend ⇒ E1–E4 bleiben
+    ehrliche Untergrenzen). `stepSecond`-Doc auf die tatsächliche Frontier-Gatung des
+    Rival-Truhen-Rolls korrigiert (nicht „jeder Rival-Kill").
+  - **Krit-Chance im Sim gedeckelt:** `critFactor` deckelt die Chance jetzt auf
+    `CRIT_CHANCE_CAP` (0,4) wie die echte Klick-Pipeline (`click.critChance`), damit ein
+    fetter Token-Pool die EV nicht über das Spiel hebt.
+  - **Schärfere Sim-Asserts:** E1 prüft wieder run2 ≥ run1 (nicht-strikt, Loot-RNG darf
+    gleichziehen); der Float-Guard-Tiefen-Assert von `> 1e40` auf `> 1e58` gezogen
+    (reale `bossHp(300)` ≈ 1,3e63) und der stale „~1e58"-Kommentar auf ~1e63 korrigiert.
+  - **N4-Nachzug:** `ui/hud.ts`, `ui/settings.ts`, `ui/shop.ts` entfernt (0 Importeure,
+    repo-weit gegrept inkl. Tests) — beweisbar tot nach N4s eigenem Kriterium. Kein Test
+    betraf sie ⇒ Game-Testzahl bleibt 480; Bundle unverändert (nie im Entry-Graph). Der
+    frühere N4-Eintrag (falsche Erbe-Pfad-Begründung) ist oben korrigiert.
+  - **`flags.ts`-Kommentar:** „production builds inline the constants" war irreführend —
+    der `import.meta.env[`VITE_${key}`]`-Zugriff per **berechnetem** Key wird von Vite
+    **nicht** statisch ersetzt; Kommentar auf „Laufzeit-Auflösung, in Prod `undefined`,
+    FLAGS-Default gewinnt" korrigiert (null Laufzeitrisiko: kein Live-Importeur).
+  - **`TESTPLAN.md` §5.1:** die Referenz auf `scratchpad/perf.mjs` (nicht im Repo)
+    als Wegwerf-Messskript markiert — analog zum AC3-Capture, damit kein Doc auf eine
+    nicht-existente Repo-Datei verweist.
+
+- **M15-TODO (im Review-Pass bewusst NICHT gefixt, für M15 vorgemerkt):**
+  - **F7 — E2 durch eine Ära-Sim mit Ahnen + Himmelfahrt** fahren (näher an den
+    „ersten 30" Verbesserungen); aktuell validiert E2 unter der Kalibrier-Baseline mit
+    ~12–16 Verbesserungen als ehrliche Decke.
+  - **F10(a) — `gear.ts` (~Z. 485) `case 'transcend': return false`** ist eine ZWEITE
+    Wahrheitsquelle unabhängig von `flags.ts`. M15 muss das umlegen (oder `gear.ts` das
+    Flag lesen lassen), wenn `TRANSCEND_ENABLED` gekippt wird.
+  - **F10(b) — `transcendGlobalMult`:** festzurren, ob der Faktor gehaltenes `te` oder
+    `teLifetime` liest (aktuell held `te`, spending-empfindlich) — Design-Entscheid M15.
+  - **F10(c) — echter P1-Neutralitäts-Beweis:** ein expliziter M15-Akzeptanztest, dass
+    der `×3^TE`-Mult **identisch** in `clickDamageOf` UND `dpsOf` gefaltet wird und das
+    Klick:Idle-Verhältnis invariant bleibt (heute nur im `transcend.test.ts` an
+    entkoppelten Basiswerten gezeigt, nicht an den realen Pipelines).
+
 - **2026-07-18 — Performance-Pass: gemessen, nicht geschätzt; Hot-Path unverändert
   (AC2 + §9.6).** Headless über `vite preview` + das vorinstallierte Chromium
-  (SwiftShader/ANGLE) gemessen (Skript in `scratchpad/perf.mjs`): **Draw Calls
+  (SwiftShader/ANGLE) gemessen (Wegwerf-Messskript, **nicht committet** — wie das
+  AC3-Capture): **Draw Calls
   114/Frame** (< 150 ✓, per Wrapping von `drawArrays`/`drawElements` gezählt — die
   Zahl ist renderer-getrieben und damit hardware-unabhängig), **Partikel-Integration
   ~0,002 ms/Frame** bei voller 200-Slot-Belegung (Mess-AC „< 1 ms" ✓, der flache
@@ -51,10 +104,17 @@ here (spec §7).
   (sonst bricht `tsc --noEmit` über den ganzen Baum). **Nicht** angefasst: alles,
   was der CH-Modus lebt (combat/economy/state/ability/settings/heroes/gild/ancients/
   ascension/heaven/gear/chests/peach/quests/season/ch-\* …) und der legacy Save-Layer
-  (`save/store.ts`, `save/migrate.ts`) samt `game/state.ts`/`ui/hud.ts` — Letztere
-  bleiben, weil `legacy-import.ts` und der Erbe-Pfad sie noch lesen. Netto:
-  **8 Dateien**, Game-Testzahl **500 → 480** (−20 Tests / −3 Testdateien), erwartet;
-  Suite bleibt grün, **keine** Verhaltensänderung an bleibendem Legacy-Code.
+  (`save/store.ts`, `save/migrate.ts`, `save/schema.ts`) samt `game/state.ts` — der lebt,
+  weil die aktive Erbe/Lese-Kette `main.ts → save/store.ts → save/migrate.ts →
+save/schema.ts` ihn (über `save/store.ts`, das `createGameState`/`GameState` importiert)
+  noch konstruiert und liest. **Korrektur eines früheren Fehl-Eintrags:** die alte
+  Begründung nannte `ui/hud.ts` als von „`legacy-import.ts` / dem Erbe-Pfad" gelesen —
+  das ist falsch. `legacy-import.ts` importiert nur `ch-state`/`save/schema`, und **kein**
+  Modul importiert `ui/hud.ts`, `ui/settings.ts` oder `ui/shop.ts` (repo-weit gegrept,
+  Tests inklusive). Diese drei sind nach N4s eigenem Kriterium beweisbar tot und wurden im
+  Review-Pass unten mit-entfernt. Netto (ursprüngliche N4-Löschung): **8 Dateien**,
+  Game-Testzahl **500 → 480** (−20 Tests / −3 Testdateien), erwartet; Suite bleibt grün,
+  **keine** Verhaltensänderung an bleibendem Legacy-Code.
 
 - **2026-07-18 — AC3 dokumentierter Playthrough (frischer Save → 3 Aszensionen → 1
   Himmelfahrt) mit ECHTEN Zahlen aus den echten Modulen.** Getrieben durch

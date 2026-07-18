@@ -18,9 +18,10 @@ describe('transcend — TE earn formula (§4.5.3, gate 100 HPF lifetime)', () =>
     expect(teForHpfLifetime(0)).toBe(0);
     expect(teForHpfLifetime(99)).toBe(0);
     expect(teForHpfLifetime(TRANSCEND_MIN_HPF_LIFETIME - 1)).toBe(0);
-    // Defensive: negative / NaN input ⇒ 0 (never NaN, never negative).
+    // Defensive: negative / non-finite input ⇒ 0 (never NaN, never Infinity).
     expect(teForHpfLifetime(-5)).toBe(0);
     expect(teForHpfLifetime(Number.NaN)).toBe(0);
+    expect(teForHpfLifetime(Number.POSITIVE_INFINITY)).toBe(0);
   });
 
   it('the first Transzendenz at the gate banks ⌊log10(100)⌋ = 2 TE (a ×9 boot)', () => {

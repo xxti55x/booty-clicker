@@ -93,7 +93,7 @@ export function createTranscend(): TranscendState {
  * Non-finite / negative input ⇒ 0.
  */
 export function teForHpfLifetime(hpfLifetime: number): number {
-  if (!(hpfLifetime >= TRANSCEND_MIN_HPF_LIFETIME)) return 0;
+  if (!Number.isFinite(hpfLifetime) || hpfLifetime < TRANSCEND_MIN_HPF_LIFETIME) return 0;
   return Math.floor(Math.log10(hpfLifetime));
 }
 

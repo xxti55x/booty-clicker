@@ -99,9 +99,11 @@ Target: **Performance ≥ 85** (Lighthouse mobile preset) on the production buil
 3. If below 85, try `Qualität: Niedrig` + `FPS-Limit: 30` in ⚙️ and re-measure; the
    low preset disables shadows and caps pixel ratio at 1.
 
-### 5.1 M14 measured numbers (headless, `scratchpad/perf.mjs`)
+### 5.1 M14 measured numbers (headless, throwaway measurement script)
 
-Measured against `vite preview` with the preinstalled Chromium via playwright-core
+Measured with a **throwaway** Node/playwright-core harness (run once, **not committed** —
+same convention as the AC3 capture in DECISIONS.md; it is a measurement, not a
+reproducible repo gate) against `vite preview` with the preinstalled Chromium
 (`--enable-unsafe-swiftshader --use-gl=angle --use-angle=swiftshader --no-sandbox`).
 SwiftShader is a **software** GL — GPU frame times are **not** a valid 60-fps-laptop
 proxy, so we report the **hardware-independent** metrics (draw-call count, JS

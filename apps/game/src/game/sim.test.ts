@@ -99,9 +99,11 @@ describe('simulateEndless — §4.8 pacing target table (±25 %)', () => {
     });
 
     it(`seed ${seed}: Bühne 80 kumuliert in 3–5 h (±25 %, realistischer Spieler)`, () => {
-      // The §4.8 "kumuliert" targets are player-facing; the optimal juiced bot reaches
-      // them "weit früher" (§4.8, the documented optimal-vs-real gap), so — as the
-      // first-Himmelfahrt window does — this uses a realistic-pace bot (1 cps, no juice).
+      // The §4.8 "kumuliert" table is player-facing ("Meilenstein der Spielerin"); the
+      // juiced 3-cps bot reaches the cumulative Bühne-80 rows below the lower window
+      // bound, so — mirroring the established M10 first-Himmelfahrt convention — the
+      // cumulative rows validate under a realistic-pace bot (1 cps, no juice). This is a
+      // modeling decision, not a §4.8 measurement.
       const chain = simulateRunChain(
         { clickRate: 1, juice: false, economy: false, seed },
         10,
@@ -130,6 +132,9 @@ describe('simulateEndless — E1 (no hard cap)', () => {
     expect(chain.maxBestZone).toBeGreaterThanOrEqual(chain.runs[0].bestZone + 5);
     // Best zone improves run-over-run while productive (not an immediate hard cap).
     expect(chain.runs[1].bestZone).toBeGreaterThan(chain.runs[0].bestZone);
+    // …and the frontier does not regress into the next run (non-strict — loot RNG can
+    // tie a run's best zone, but it must never fall back).
+    expect(chain.runs[2].bestZone).toBeGreaterThanOrEqual(chain.runs[1].bestZone);
   });
 });
 
@@ -278,10 +283,11 @@ describe('simulateEndless — E4 with best-in-slot gear (M11-AC5, P1 intact)', (
 // M10-AC4: the first Ruhmes-Himmelfahrt (RS lifetime ≥ 1000) lands in the 5–9 h
 // cumulative window (±25 % ⇒ [3.75 h, 11.25 h]). Measured with a realistic-pace
 // player (sub-3 cps, ~45-min runs) under the §4.8 calibration conditions
-// (`economy: false`), since the optimal juiced bot — and the full loot economy — reach
-// it far sooner (the same optimal-vs-real / no-loot-baseline gap the §4.8 table
-// documents; the full-economy bot lands ~3 h, asserted deeper via the economy suite).
-// Observed ≈ 5.4–5.7 h across seeds. Its power gaps also stay < 90 min (bonus E3).
+// (`economy: false`): the optimal juiced bot — and the full loot economy — reach it
+// far sooner, so the player-facing cumulative window validates under a realistic-pace
+// bot, mirroring the §4.8 Bühne-80 block above. This is a modeling decision, not a
+// §4.8 measurement (the full-economy bot lands ~3 h, asserted deeper via the economy
+// suite). Observed ≈ 5.4–5.7 h across seeds. Its power gaps also stay < 90 min (bonus E3).
 describe('simulateEndless — first Himmelfahrt pacing (M10-AC4)', () => {
   for (const seed of SEEDS_HEAVY) {
     it(`seed ${seed}: first Himmelfahrt lands in the 5–9 h ±25 % window`, () => {
@@ -360,11 +366,15 @@ describe('simulateEndless — float-guard to zone 300 (M14-AC4, §9.3)', () => {
       expect(g.maxZone).toBeGreaterThanOrEqual(300);
       expect(g.allFinite).toBe(true);
       expect(g.belowCeiling).toBe(true);
-      // The audit genuinely reached the ~1e58+ HP regime (not a shallow early-out) …
-      expect(g.maxMagnitude).toBeGreaterThan(1e40);
+      // The audit genuinely reached the ~1e63 HP regime (not a shallow early-out) —
+      // real bossHp(300) ≈ 1.3e63, so this passes …
+      expect(g.maxMagnitude).toBeGreaterThan(1e58);
       // … and never approached the double ceiling.
       expect(g.maxMagnitude).toBeLessThan(1e300);
       expect(Number.isFinite(g.maxMagnitude)).toBe(true);
+      // §9.3 assert #3: the smallest relevant additive gain stays above `wert · 2^-50`
+      // (the additive-precision stall guard) — no per-tick gain underflows its total.
+      expect(g.minGainRatio).toBeGreaterThan(2 ** -50);
     });
   }
 });
