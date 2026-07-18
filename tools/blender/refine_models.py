@@ -33,6 +33,9 @@ import sys
 import bpy
 from mathutils import Vector
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import enrich  # noqa: E402 — Cartoon-Prop-Kits + Mesh-Detail-Pass
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 MODELS = os.path.join(ROOT, "models")
 RENDERS = os.path.join(MODELS, "renders")
@@ -41,6 +44,10 @@ SMOOTH_ANGLE = math.radians(60.0)
 MERGE_DIST = 1e-4
 
 # Thematischer Dioramen-Boden je Bühne: (Farbe RGBA, Roughness, Metallic, Emission-Stärke)
+# Insel-/Boden-Radiusfaktor je Bühne (beach: große Insel — Platz für Details).
+STAGE_RADIUS = {"stage-beach": 0.95}
+STAGE_RADIUS_DEFAULT = 0.55
+
 STAGE_FLOORS = {
     "stage-club": ((0.045, 0.035, 0.06, 1.0), 0.25, 0.0, 0.0),
     # synth: das In-Game-Grid ist LINIEN-Geometrie (renderlos dünn) — der Disc trägt.
@@ -84,6 +91,8 @@ def core_objects():
             continue  # Backdrop-Megaplane
         if dims.y < 0.06 * max(dims.x, dims.z, 0.001) and max(dims.x, dims.z) >= 3:
             continue  # Sky-Billboard (Sonne/Mond) — Hintergrund, nicht Prop-Kern
+        if span < 0.12:
+            continue  # Streu-Details (Sterne/Muscheln) sollen die Kamera nicht ziehen
         core.append(o)
     return core or objs
 
@@ -132,14 +141,15 @@ def polish_materials():
 
 def add_stage_floor(stem):
     """Dioramen-Boden unter die Prop-Wolke einer Bühne (Teil des Assets)."""
-    cfg = STAGE_FLOORS.get(stem)
-    if cfg is None:
-        return
-    color, rough, metal, emit = cfg
     # Blender importiert glTF nach Z-up: Boden liegt in der XY-Ebene unter min-Z.
     lo, hi = scene_bbox(core_objects())
     center = (lo + hi) / 2
-    radius = max(hi.x - lo.x, hi.y - lo.y) * 0.55 + 1.5
+    factor = STAGE_RADIUS.get(stem, STAGE_RADIUS_DEFAULT)
+    radius = max(hi.x - lo.x, hi.y - lo.y) * factor + 1.5
+    cfg = STAGE_FLOORS.get(stem)
+    if cfg is None:
+        return (center.x, center.y), radius, lo.z
+    color, rough, metal, emit = cfg
     bpy.ops.mesh.primitive_cylinder_add(
         vertices=64,
         radius=radius,
@@ -176,6 +186,7 @@ def add_stage_floor(stem):
         sb.inputs["Roughness"].default_value = 0.12
         sea.data.materials.append(smat)
         bpy.ops.object.shade_smooth()
+    return (center.x, center.y), radius, lo.z
 
 
 def stage_surgery(stem):
@@ -212,14 +223,6 @@ def stage_surgery(stem):
             warm = col if max(col) > 0.3 else (1.0, 0.55, 0.2)
             b.inputs["Emission Color"].default_value = (*warm, 1.0)
             b.inputs["Emission Strength"].default_value = 2.5
-            if stem == "stage-beach":
-                # Sonne an den Horizont des Insel-Dioramas (hinter die Props).
-                r = max(core_hi.x - core_lo.x, core_hi.y - core_lo.y) * 0.55 + 1.5
-                o.location = (
-                    (core_lo.x + core_hi.x) / 2 - 2.0,
-                    core_hi.y + r * 0.55,
-                    core_lo.z + 2.2,
-                )
             continue
 
         if span <= total * 0.55:
@@ -302,10 +305,14 @@ def process(path, do_render):
     bpy.ops.import_scene.gltf(filepath=path)
 
     refine_meshes()
+    enrich.detail_meshes()  # Bevel + selektiver Subsurf — alle Modelle feiner
     polish_materials()
     if is_stage:
         stage_surgery(stem)
-        add_stage_floor(stem)
+        floor = add_stage_floor(stem)
+        if floor is not None:
+            (fx, fy), fradius, flo = floor
+            enrich.enrich_stage(stem, (fx, fy), fradius, flo)
 
     # Export ZUERST (nur Modell-Inhalt), dann das Studio-Rig fürs Render obendrauf.
     bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", export_yup=True)
