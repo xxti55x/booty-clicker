@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import { createAbility } from './ability';
 import { soulsForMaxZone } from './ascension';
-import { ascendState, clickDamageOf, createChState, dpsOf } from './ch-state';
+import { ascendState, clickDamageOf, createChState, createComboSave, dpsOf } from './ch-state';
 import { clickDamageRaw, totalRawDps } from './heroes';
 
 describe('ch-state', () => {
@@ -12,6 +13,8 @@ describe('ch-state', () => {
     expect(s.souls).toBe(0);
     expect(dpsOf(s)).toBe(0);
     expect(clickDamageOf(s)).toBe(clickDamageRaw({}));
+    expect(s.ability).toEqual(createAbility());
+    expect(s.combo).toEqual(createComboSave());
   });
 
   it('dps/click include the soul multiplier', () => {
@@ -28,6 +31,8 @@ describe('ch-state', () => {
       crew: { boss: 30 },
       gold: 999,
       totalClicks: 123,
+      ability: { charge: 80, frenzyUntil: 5000, cooldowns: {} },
+      combo: { stacks: 60 },
     };
     const after = ascendState(s);
     expect(after.souls).toBe(soulsForMaxZone(50));
@@ -36,5 +41,8 @@ describe('ch-state', () => {
     expect(after.gold).toBe(0);
     expect(after.crew).toEqual({});
     expect(after.totalClicks).toBe(123); // stat preserved
+    // Run-scoped juice resets with the run.
+    expect(after.ability).toEqual(createAbility());
+    expect(after.combo).toEqual(createComboSave());
   });
 });

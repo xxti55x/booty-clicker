@@ -6,10 +6,21 @@
  * green while the new loop drives the game. Derived combat numbers (DPS, click
  * damage) are NEVER persisted — they're recomputed from crew levels + souls.
  */
+import { type AbilityState, createAbility } from './ability';
 import { applyAscension } from './ascension';
 import { soulMult } from './ascension';
 import { type CrewLevels, clickDamageRaw, createCrew, totalRawDps } from './heroes';
 import { createRngState, type RngState } from '../util/rng';
+
+/** Persisted combo slice (CH-save v3): only the stack count survives a reload. */
+export interface ComboSave {
+  stacks: number;
+}
+
+/** A zeroed combo slice. */
+export function createComboSave(): ComboSave {
+  return { stacks: 0 };
+}
 
 /** Lifetime bookkeeping counters (spec §9.2, CH-save v2). All non-negative. */
 export interface ChStats {
@@ -63,6 +74,10 @@ export interface ChState {
   stats: ChStats;
   /** True once the one-time legacy-save inheritance has run (§9.2.3). */
   legacyImported: boolean;
+  /** Twerk-Ekstase ability meter + active window (CH-save v3, §4.2.4). */
+  ability: AbilityState;
+  /** Combo stacks carried across a reload (CH-save v3, §4.2.2). */
+  combo: ComboSave;
 }
 
 /** A brand-new run/profile. */
@@ -79,6 +94,8 @@ export function createChState(): ChState {
     rng: createRngState(),
     stats: createStats(),
     legacyImported: false,
+    ability: createAbility(),
+    combo: createComboSave(),
   };
 }
 

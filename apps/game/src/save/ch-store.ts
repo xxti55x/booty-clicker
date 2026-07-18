@@ -3,13 +3,20 @@
  * behind its own localStorage key so the legacy save layer (and its tests) stays
  * untouched. Never throws; injectable storage for node unit tests.
  */
+import { type AbilityState, ABILITY_CHARGE_MAX, createAbility } from '../game/ability';
 import { goldFor, monsterHp } from '../game/combat';
-import { type ChStats, type ChState, createStats } from '../game/ch-state';
+import {
+  type ChStats,
+  type ChState,
+  type ComboSave,
+  createComboSave,
+  createStats,
+} from '../game/ch-state';
 import type { CrewLevels } from '../game/heroes';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 2;
+export const CH_SCHEMA = 3;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -39,9 +46,9 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The v2 persisted shape (M7): the current ChState + envelope. */
-interface ChSaveV2 extends ChState {
-  v: 2;
+/** The v3 persisted shape (M8): the current ChState + envelope. */
+interface ChSaveV3 extends ChState {
+  v: 3;
   lastSeen: number;
 }
 
@@ -64,15 +71,15 @@ function isFiniteNumber(v: unknown): v is number {
 }
 
 /**
- * Never-throw validation of a stored CH save (the v2 guard). The gameplay-
+ * Never-throw validation of a stored CH save (the v3 guard). The gameplay-
  * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
- * The v2 meta fields (rng/stats/legacyImported) are deliberately NOT gated here:
- * they are runtime bookkeeping and get repaired (fresh seed / zeroed stats /
- * false flag) in `stateFromSave` — the same "repair, don't nuke progress" spirit
- * as the runMaxZone invariant. Per-field type+range checks for them live in
- * `repairRng`/`repairStats`.
+ * The meta/juice fields (rng/stats/legacyImported/ability/combo) are deliberately
+ * NOT gated here: they are runtime bookkeeping and get repaired (fresh seed /
+ * zeroed stats / false flag / default ability+combo) in `stateFromSave` — the
+ * same "repair, don't nuke progress" spirit as the runMaxZone invariant.
+ * Per-field type+range checks for them live in the `repair*` helpers below.
  */
-export function isChSave(raw: unknown): raw is ChSaveV2 {
+export function isChSave(raw: unknown): raw is ChSaveV3 {
   if (!isRecord(raw)) return false;
   if (raw.v !== CH_SCHEMA) return false;
   if (!isFiniteNumber(raw.gold) || raw.gold < 0) return false;
@@ -90,7 +97,7 @@ export function isChSave(raw: unknown): raw is ChSaveV2 {
 
 /** Serialize state + timestamp to a JSON string. */
 export function serializeCh(state: ChState, now: number): string {
-  const save: ChSaveV2 = { v: CH_SCHEMA, lastSeen: now, ...state };
+  const save: ChSaveV3 = { v: CH_SCHEMA, lastSeen: now, ...state };
   return JSON.stringify(save);
 }
 
@@ -116,8 +123,31 @@ function repairStats(v: unknown): ChStats {
   };
 }
 
+/** Repair the persisted ability slice: corrupt/absent ⇒ a fresh (empty) ability. */
+function repairAbility(v: unknown): AbilityState {
+  if (isRecord(v) && isFiniteNumber(v.charge) && isFiniteNumber(v.frenzyUntil)) {
+    const cooldowns: Record<string, number> = {};
+    if (isRecord(v.cooldowns)) {
+      for (const [k, val] of Object.entries(v.cooldowns))
+        if (isFiniteNumber(val)) cooldowns[k] = val;
+    }
+    return {
+      charge: Math.max(0, Math.min(ABILITY_CHARGE_MAX, v.charge)),
+      frenzyUntil: v.frenzyUntil >= 0 ? v.frenzyUntil : 0,
+      cooldowns,
+    };
+  }
+  return createAbility();
+}
+
+/** Repair the persisted combo slice: corrupt/absent/negative stacks ⇒ 0. */
+function repairCombo(v: unknown): ComboSave {
+  if (isRecord(v) && isFiniteNumber(v.stacks) && v.stacks >= 0) return { stacks: v.stacks };
+  return createComboSave();
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
-function stateFromSave(save: ChSaveV2): ChState {
+function stateFromSave(save: ChSaveV3): ChState {
   return {
     gold: save.gold,
     zone: save.zone,
@@ -130,6 +160,8 @@ function stateFromSave(save: ChSaveV2): ChState {
     rng: repairRng(save.rng),
     stats: repairStats(save.stats),
     legacyImported: save.legacyImported === true,
+    ability: repairAbility(save.ability),
+    combo: repairCombo(save.combo),
   };
 }
 
@@ -146,8 +178,19 @@ function migrateChV1toV2(raw: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+/** v2 → v3: fill the M8 defaults (empty Ekstase ability + zeroed combo stacks). */
+function migrateChV2toV3(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    v: 3,
+    ability: createAbility(),
+    combo: createComboSave(),
+  };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
+  2: migrateChV2toV3,
 };
 
 /**
@@ -155,7 +198,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
  * Never throws; unknown/future/corrupt data ⇒ null ⇒ clean fresh start.
  * (Registry pattern mirrors `save/migrate.ts`.)
  */
-function migrateCh(raw: unknown): ChSaveV2 | null {
+function migrateCh(raw: unknown): ChSaveV3 | null {
   if (!isRecord(raw)) return null;
   let version = raw.v;
   if (typeof version !== 'number' || !Number.isInteger(version)) return null;

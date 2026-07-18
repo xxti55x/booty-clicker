@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { type ChState, createChState, createStats } from '../game/ch-state';
+import { ABILITY_CHARGE_MAX, createAbility } from '../game/ability';
+import { type ChState, createChState, createComboSave, createStats } from '../game/ch-state';
 import { monsterHp } from '../game/combat';
 import {
   CH_SAVE_KEY,
@@ -169,11 +170,85 @@ describe('ch-store — v2 migration & repair', () => {
 
   it('rejects unknown / future versions to a clean fresh start', () => {
     const store = memStorage();
-    store.setItem(CH_SAVE_KEY, JSON.stringify({ v: 3, gold: 0 }));
+    store.setItem(CH_SAVE_KEY, JSON.stringify({ v: 4, gold: 0 }));
     expect(loadCh(store)).toBeNull();
     store.setItem(CH_SAVE_KEY, JSON.stringify({ v: 0, gold: 0 }));
     expect(loadCh(store)).toBeNull();
     expect(() => loadCh(store)).not.toThrow();
+  });
+});
+
+describe('ch-store — v3 migration & repair (M8)', () => {
+  it('migrates a v2 blob losslessly into v3 with default ability + combo', () => {
+    const store = memStorage();
+    const v2 = {
+      v: 2,
+      lastSeen: 8000,
+      gold: 750,
+      zone: 20,
+      killsThisZone: 4,
+      runMaxZone: 20,
+      crew: { boss: 8, dj: 3 },
+      souls: 6,
+      lifetimeMaxZone: 22,
+      totalClicks: 314,
+      rng: { seed: 111, cursor: 55 },
+      stats: { ...createStats(), crits: 7, goldLifetime: 999 },
+      legacyImported: true,
+    };
+    store.setItem(CH_SAVE_KEY, JSON.stringify(v2));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    // v2 fields carried through losslessly
+    expect(s.gold).toBe(750);
+    expect(s.zone).toBe(20);
+    expect(s.crew).toEqual({ boss: 8, dj: 3 });
+    expect(s.rng).toEqual({ seed: 111, cursor: 55 });
+    expect(s.stats.crits).toBe(7);
+    expect(s.legacyImported).toBe(true);
+    // v3 defaults added
+    expect(s.ability).toEqual(createAbility());
+    expect(s.combo).toEqual(createComboSave());
+  });
+
+  it('repairs a corrupt ability / combo slice to defaults without throwing', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.ability = 'garbage';
+    raw.combo = { stacks: -9 };
+    let s: ChState | null = null;
+    expect(() => {
+      s = deserializeCh(JSON.stringify(raw));
+    }).not.toThrow();
+    expect(s).not.toBeNull();
+    expect(s!.ability).toEqual(createAbility());
+    expect(s!.combo).toEqual({ stacks: 0 });
+  });
+
+  it('clamps an out-of-range charge and drops non-numeric cooldowns', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.ability = { charge: 9999, frenzyUntil: -5, cooldowns: { beatDrop: 42, junk: 'x' } };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.ability.charge).toBe(ABILITY_CHARGE_MAX);
+    expect(s!.ability.frenzyUntil).toBe(0); // negative ⇒ 0
+    expect(s!.ability.cooldowns).toEqual({ beatDrop: 42 });
+  });
+
+  it('AC3: an active Ekstase + combo survive a v3 save round-trip (reload)', () => {
+    const store = memStorage();
+    const s = {
+      ...createChState(),
+      ability: { charge: 100, frenzyUntil: 1_712_000_000_000, cooldowns: {} },
+      combo: { stacks: 73 },
+    };
+    saveCh(s, 2000, store);
+    const loaded = loadCh(store);
+    expect(loaded!.state.ability).toEqual({
+      charge: 100,
+      frenzyUntil: 1_712_000_000_000,
+      cooldowns: {},
+    });
+    expect(loaded!.state.combo).toEqual({ stacks: 73 });
   });
 });
 
