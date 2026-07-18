@@ -1,10 +1,9 @@
 # Blender-Pipeline (headless) — authored 3D-Modelle fürs Web
 
-Das Spiel rendert heute **alles prozedural** in Three.js (Primitives + `toonMat`
-
-- Ink-Outlines, siehe `apps/game/src/engine/materials.ts`). Das bleibt der
-  Default: 0 KB Assets, perfekt diffbar, und der Cartoon-Look lebt ohnehin vom
-  Cel-Shading im Engine-Code.
+Das Spiel rendert heute **alles prozedural** in Three.js (Primitives mit
+`toonMat` und Ink-Outlines, siehe `apps/game/src/engine/materials.ts`). Das
+bleibt der Default: 0 KB Assets, perfekt diffbar, und der Cartoon-Look lebt
+ohnehin vom Cel-Shading im Engine-Code.
 
 Diese Pipeline ergänzt den prozeduralen Weg, wenn eine Form zu organisch für
 Primitives wird (skulptierte Charaktere, komplexe Props, Trophäen):
