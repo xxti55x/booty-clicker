@@ -739,10 +739,15 @@ function tabUnlocked(key: string): boolean {
       return state.stats.ascensions > 0 || Object.keys(state.ancients).length > 0;
     case 'heaven': // 🌈 Himmel (L2): once a Himmelfahrt is reachable or done
       return state.heaven.hpfLifetime > 0 || canHimmelfahrt(state.heaven, state.rsLifetime);
-    case 'transcend': // 🔮 Transzendenz (L3): only if enabled AND reachable/done
+    case 'transcend': // 🔮 Transzendenz (L3): only if enabled AND the player is in L2
+      // Reveal with the FIRST Himmelfahrt (hpfLifetime > 0), not first at the 100-HPF
+      // gate: the panel's locked state shows the „Lebenszeit-HPF X / 100"-Fortschritt,
+      // which is useless if the tab only appears once the gate is already met.
       return (
         !!transcendPanel &&
-        (state.transcend.teLifetime > 0 || canTranscend(state.transcend, state.heaven.hpfLifetime))
+        (state.heaven.hpfLifetime > 0 ||
+          state.transcend.teLifetime > 0 ||
+          canTranscend(state.transcend, state.heaven.hpfLifetime))
       );
     case 'chest': // 🎁 Truhen: once the first key/chest has ever dropped
       return state.stats.keysEarned > 0 || state.stats.chestsOpened > 0 || state.chests.keys > 0;
