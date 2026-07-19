@@ -78,7 +78,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.25;
+  renderer.toneMappingExposure = 1.45; // Goal: alle Bühnen deutlich heller
 
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0x0a0a10, 0.022);
@@ -104,7 +104,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   // cleanly across the toon materials, a lifted hemisphere + soft cool fill so
   // the shadow band stays colourful (never muddy), and the club rim lights for
   // pop. The beat PointLight still pulses the whole cast on the beat.
-  scene.add(new THREE.HemisphereLight(0xcdd2ff, 0x33222a, 0.55));
+  scene.add(new THREE.HemisphereLight(0xd6daff, 0x4a3a40, 0.95));
   const key = new THREE.DirectionalLight(0xfff4e0, 2.3);
   key.position.set(4.5, 8.5, 7);
   key.castShadow = true;
@@ -118,7 +118,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   key.shadow.bias = -0.0004;
   key.shadow.radius = 5;
   scene.add(key);
-  const fill = new THREE.DirectionalLight(0xa9c4ff, 0.5);
+  const fill = new THREE.DirectionalLight(0xa9c4ff, 0.75);
   fill.position.set(-6, 3, 6);
   scene.add(fill);
   const rimV = new THREE.PointLight(0x8b5cf6, 48, 55, 2);

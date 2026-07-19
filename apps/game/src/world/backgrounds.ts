@@ -811,10 +811,14 @@ export class World {
       return c;
     };
     const b = BGS[key];
-    (this.skyMat.uniforms.top!.value as THREE.Color).copy(hue(b.top));
-    (this.skyMat.uniforms.bot!.value as THREE.Color).copy(hue(b.bot));
-    (this.scene.fog as THREE.FogExp2).color.copy(hue(b.fog));
-    this.floorMat.color.copy(hue(b.floor));
+    // Goal „alle Bühnen heller": die Kulissen-Paletten werden beim Anwenden
+    // Richtung Weiß geliftet (Sky am stärksten, Boden dezent) — die Stimmungen
+    // bleiben unterscheidbar, aber nichts säuft mehr im Dunkel ab.
+    const lift = (c: THREE.Color, f: number): THREE.Color => c.lerp(new THREE.Color(0xffffff), f);
+    (this.skyMat.uniforms.top!.value as THREE.Color).copy(lift(hue(b.top), 0.22));
+    (this.skyMat.uniforms.bot!.value as THREE.Color).copy(lift(hue(b.bot), 0.3));
+    (this.scene.fog as THREE.FogExp2).color.copy(lift(hue(b.fog), 0.26));
+    this.floorMat.color.copy(lift(hue(b.floor), 0.14));
     this.floorMat.roughness = b.fr;
     this.floorMat.metalness = b.fm;
     b.build({
