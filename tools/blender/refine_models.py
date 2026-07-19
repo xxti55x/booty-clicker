@@ -35,6 +35,7 @@ from mathutils import Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import enrich  # noqa: E402 — Cartoon-Prop-Kits + Mesh-Detail-Pass
+import textures_bpy  # noqa: E402 — Textur-Vervollständigung (Normals + Grain)
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 MODELS = os.path.join(ROOT, "models")
@@ -313,6 +314,10 @@ def process(path, do_render):
         if floor is not None:
             (fx, fy), fradius, flo = floor
             enrich.enrich_stage(stem, (fx, fy), fradius, flo)
+    # Senior-Textur-Pass NACH dem Enrich (auch dessen Props + der Dioramen-Boden
+    # werden vervollständigt): Normal-Ableitung aus jeder Farb-Map + Grain für
+    # alles Untexturierte — danach trägt JEDES lit Material Textur + Relief.
+    textures_bpy.complete_textures(stem)
 
     # Export ZUERST (nur Modell-Inhalt), dann das Studio-Rig fürs Render obendrauf.
     bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", export_yup=True)

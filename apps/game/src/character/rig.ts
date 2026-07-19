@@ -89,13 +89,13 @@ export function buildCharacter(
   const hairT = toonMat({ color: cfg.hair, bands, map: repeated(strandTex(1), 2, 2) });
   // host: the `shorts` colour doubles as the suit fabric (trousers + jacket).
   const suitT = shortsT;
-  const jointT = toonMat({ color: 0x525c6e, bands });
+  const jointT = toonMat({ color: 0x525c6e, bands, map: repeated(brushedTex(4), 2, 2) });
   const darkT = toonMat({ color: 0x1d1d26, bands });
   const shoeT = robot
     ? jointT
     : host || boss || ninja || flair === 'lava'
       ? darkT
-      : toonMat({ color: 0xf2f3f6, bands });
+      : toonMat({ color: 0xf2f3f6, bands, map: repeated(weaveTex(), 4, 4) });
   const glowT = toonMat({ color: accent, emissive: accent, emissiveIntensity: 0.9, bands });
   // Facial ink + eye whites are unlit so the face always reads.
   const inkFlat = new THREE.MeshBasicMaterial({ color: line, toneMapped: false });

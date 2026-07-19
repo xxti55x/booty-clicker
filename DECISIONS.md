@@ -3,6 +3,29 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Senior-Textur-Pass in Blender — 100 % Material-Abdeckung (Goal)
+
+- **2026-07-19 — Warum ein Blender-seitiger Pass nötig war.** Der
+  Three.js-GLTFExporter exportiert `bumpMap` NICHT (glTF kennt nur
+  `normalTexture`) — alle In-Game-Reliefs (Planken, Pailletten, Sandkorn,
+  Samt) kamen flach in Blender an, und zig Principled-Materialien
+  (Accessoires, Enrich-Props, Dioramen-Böden) hatten gar keine Map.
+  `tools/blender/textures_bpy.py` schließt beide Lücken pro Modell: (1) aus
+  jeder Farb-Map wird per numpy-Sobel über die Luminanz eine echte
+  **Normal-Map abgeleitet** (dunkle Fugen = Rillen, 128 px, Strength 2.2)
+  und im glTF-Muster `TexImage → Normal Map → Principled.Normal` verdrahtet;
+  (2) jedes lit Material OHNE Farb-Map bekommt eine near-white
+  **Grain-Map** (256 px Wolken-Rauschen, Seed aus dem Datei-Stem) im
+  Exportmuster `Mix(MULTIPLY, TexImage, Farbe)` — der Exporter erkennt das
+  und schreibt die Farbe als `baseColorFactor` — plus die Grain-Normal.
+  Unlit-Materialien (Ink-Linien, Augen) bleiben bewusst flach. Der Pass
+  hängt in `refine_models.py` NACH dem Enrich (auch Props/Böden werden
+  vervollständigt); `verify_models.py` hat jetzt ein hartes Coverage-Gate:
+  jedes lit Material ohne Textur ⇒ Exit 1. Spiel-seitig bekamen die letzten
+  flachen Materialien Maps (Gelenke gebürstet, Schuhe Webstoff,
+  Rivalen-Bauch Punkte), damit Roh-Export und Refine dieselbe Sprache
+  sprechen.
+
 ## Roadmap-Phasen T + L — Textur-Vollausbau, Licht & Bloom
 
 - **2026-07-19 — T1–T5 in-game.** Prozedurale Maps rendern jetzt mit 512²

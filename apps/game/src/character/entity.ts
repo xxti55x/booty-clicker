@@ -203,7 +203,10 @@ export function buildEntity(
         }
       : {}),
   });
-  const bellyT = toonMat({ color: shifted(cfg.belly, dh, 0, boss ? -0.03 : 0) });
+  const bellyT = toonMat({
+    color: shifted(cfg.belly, dh, 0, boss ? -0.03 : 0),
+    map: repeated(dotsTex(3, 24), 2, 2), // weiches Bauch-Raster
+  });
   const bootyT = toonMat({
     color: shifted(cfg.booty, dh, ds, dl),
     map: repeated(dotsTex(2, 14), 2.5, 2.5),
