@@ -4,3 +4,4 @@ legacy
 booty-clicker.zip
 package-lock.json
 *.min.js
+models/web/vendor

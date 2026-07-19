@@ -11,6 +11,7 @@ export default tseslint.config(
       'legacy/**',
       '**/.wrangler/**',
       'booty-clicker.zip',
+      'models/web/vendor/**',
     ],
   },
   js.configs.recommended,

@@ -3,6 +3,32 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Web-Asset-Pipeline — Pirat als animiertes Draco-glTF (97 KB)
+
+- **2026-07-19 — 10-Stufen-Auftrag headless umgesetzt, Look bleibt 1:1.**
+  `tools/blender/web_asset.py` verdichtet den Roh-Export des Piraten (25 100
+  Tris, 66 Segmente) auf EIN skinned Mesh mit EINEM Material: Vertex-Colors
+  statt Textur (baseColorFactor × Map-Mittelwert — null Texturbytes),
+  sublineare Tri-Budget-Verteilung (t^0.7, Floor 72: Kugeln geben ab,
+  Zylinder behalten Form — der erste linear verteilte Versuch erzeugte
+  „Windrad"-Kappen an Brust/Bündchen), manuelles 18-Bone-Armature auf den
+  Physik-Kontrakt-Namen (alle Bones +Y/Roll 0 ⇒ Rest-Matrizen = Identity ⇒
+  Spiel-Posen laufen WERTGLEICH auf Pose-Bones, exakt die render_anim-
+  Konjugation). Zwei bewusste Abweichungen vom interaktiven Stufenplan:
+  starres Skinning statt Automatic Weights + Gelenk-Loops (das Spiel animiert
+  starre Segmente — Rigid-Binding repliziert den Look fehlerfrei, Candy-
+  Wrapper unmöglich, headless deterministisch) und KEIN globales Merge-by-
+  Distance (würde Vertices benachbarter Bones verschweißen → Risse).
+  Actions „Idle" (Hip Circles @0.85) + „Twerk" (@1.15) mit exakt
+  geschlossenen Loops (Frequenz-GCD je Move ⇒ Periode 2π/f_base), Cheek-
+  Jiggle aus der echten Feder-Sim (Welt→pelvis-lokal via invertierter
+  Pose-Matrix), NLA-Strips → zwei glTF-Clips. Budgets ALLE unterboten:
+  5 988/10 000 Tris · 1/2 Slots · 18/40 Bones · 97/800 KB · 1 Draw Call.
+  `models/web/index.html`: three.js + GLTFLoader + DRACOLoader (lokaler
+  Decoder-Pfad, kein CDN), Hemisphäre + 2 Directionals statt HDRI. Headless
+  verifiziert: 230 ms Load, beide Clips spielen/wechseln, 0 Konsolen-Fehler;
+  vendor/-Fremdcode auf den Lint/Prettier-Ignorelisten.
+
 ## Cartoon-Real-Rigs — echte Hände/Füße/Haare + Proportionen (Goal)
 
 - **2026-07-19 — Realismus im Cartoon-Rahmen, ohne die Physik anzufassen.**
