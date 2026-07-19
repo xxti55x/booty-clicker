@@ -9,17 +9,18 @@
  * PAID for in BP, and bought strictly in order.
  *
  * **v11 — themed specials.** Ability tiers are no longer uniform „+100 % DPS":
- * ODD tiers (1, 3, 5, …) are the classic **Verstärkung** (+100 % of this member's
- * base output, additive: mult = 1 + n_power), while EVERY EVEN tier grants the
- * member's **themed special** — a crew-wide utility bonus in the member's flavor
- * (the DJ widens the on-beat window, the Türsteher melts bosses, the Tycoon
- * prints BP, …). Specials stack additively per bought tier and are aggregated
- * over the whole crew by `crewSpecialBonuses`; the glue folds them into exactly
- * the same hooks the Twerk-Ahnen already use (gold mult, crit chance/damage,
- * boss damage, combo/beat window, Ekstase charge). Keeping the power line on odd
- * tiers preserves the M9 anti-plateau shape (DPS(level) ~ level²) at the gentler
- * v10 slope; the `CrewUps` ledger stays a plain bought-count, so saves migrate
- * for free.
+ * POWER tiers are the classic **Verstärkung** (+100 % of this member's base
+ * output, additive: mult = 1 + n_power), the member's other tiers grant its
+ * **themed special** — a crew-wide utility bonus in the member's flavor (the
+ * DJ widens the on-beat window, the Türsteher melts bosses, the Tycoon prints
+ * BP, the Produzent grooves the whole crew's idle DPS, …). Specials stack
+ * additively per bought tier and are aggregated by `crewSpecialBonuses`; the
+ * glue folds them into exactly the same hooks the Twerk-Ahnen already use.
+ * **v11.1:** WHICH tiers are power vs. special follows the member's
+ * TIER-RHYTHMUS (`TIER_PATTERNS`, 2 P + 2 S per 4er-Zyklus, immer P zuerst) —
+ * three rhythms across the roster so the upgrade lanes read differently per
+ * member while the long-run balance stays identical. The `CrewUps` ledger
+ * stays a plain bought-count, so saves migrate for free.
  *
  * Clicks still land `CLICK_DPS_SHARE` of total crew DPS on top of the Boss line,
  * so active twerking stays the star at every depth (P1).
@@ -29,12 +30,27 @@
  */
 
 /**
- * The ability-tier kinds (v11). `power` is the classic +100 %-output tier on every
- * ODD tier; each member's EVEN tiers grant its themed `special` — one of the
- * crew-wide utility kinds below (same hooks the Twerk-Ahnen use).
+ * The ability-tier kinds (v11). `power` is the classic +100 %-output tier;
+ * a member's other tiers grant its themed `special` — one of the crew-wide
+ * utility kinds below (same hooks the Twerk-Ahnen use; `idle` folds into
+ * `dpsOf` like the idle gear does).
  */
 export type AbilityKind =
-  'power' | 'gold' | 'crit' | 'critdmg' | 'boss' | 'combo' | 'beat' | 'ekstase';
+  'power' | 'gold' | 'crit' | 'critdmg' | 'boss' | 'combo' | 'beat' | 'ekstase' | 'idle';
+
+/**
+ * v11.1 „Abwechslung": Mitglieder folgen unterschiedlichen TIER-RHYTHMEN statt
+ * überall striktem Power/Special-Wechsel. Jedes Muster hat 2× power + 2×
+ * special pro 4er-Zyklus (Langzeit-Balance identisch) und beginnt mit power
+ * (Tier 1 = Lv 25 bleibt der vertraute +100-%-Einstieg — schützt die frühe
+ * Pacing-Wand). Nur die REIHENFOLGE variiert, sodass die Slot-Reihen der
+ * Heldenkarten unterschiedlich lesen.
+ */
+export const TIER_PATTERNS: readonly (readonly ('power' | 'special')[])[] = [
+  ['power', 'special', 'power', 'special'], // 0 · klassischer Wechsel
+  ['power', 'power', 'special', 'special'], // 1 · Kraft-Rush, dann Utility
+  ['power', 'special', 'special', 'power'], // 2 · Utility-Klammer
+];
 
 export interface HeroConfig {
   readonly id: string;
@@ -47,8 +63,10 @@ export interface HeroConfig {
   readonly baseDps: number;
   /** Slot-1 marker: levels raise CLICK damage instead of idle DPS. */
   readonly click?: boolean;
-  /** This member's themed special — granted on every EVEN ability tier (v11). */
+  /** This member's themed special — granted on its special tiers (v11). */
   readonly special: Exclude<AbilityKind, 'power'>;
+  /** Tier-Rhythmus-Index in `TIER_PATTERNS` (v11.1 Abwechslung). */
+  readonly rhythm: 0 | 1 | 2;
 }
 
 /** Cost multiplier per owned level (Clicker Heroes uses ~1.07). */
@@ -83,6 +101,13 @@ export const SPECIAL_BEAT_CAP_MS = 60;
 /** `ekstase`: −5 % Ekstase charge threshold per tier (shares the glue's 90 % clamp). */
 export const SPECIAL_EKSTASE = 0.05;
 /**
+ * `idle` („Groove"): +20 % Crew-DPS (global, idle only) per tier. Deliberately
+ * a touch weaker than a power tier and limited to two members — it lifts the
+ * idle side like the idle gear does without threatening P1 (clicks still take
+ * their 20 % DPS share of it).
+ */
+export const SPECIAL_IDLE = 0.2;
+/**
  * v10 idle retune: paid abilities removed ~×8 of the old free milestone power,
  * which over-nerfed the idle side (a 1-cps player relies on crew DPS almost
  * alone). This factor gives the DPS lines ~×2 back — actives feel it only via
@@ -116,6 +141,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 1,
     click: true,
     special: 'critdmg',
+    rhythm: 0,
   },
   {
     id: 'hype',
@@ -124,6 +150,7 @@ export const CREW: readonly HeroConfig[] = [
     baseCost: 50,
     baseDps: 5,
     special: 'combo',
+    rhythm: 1,
   },
   {
     id: 'dj',
@@ -132,6 +159,7 @@ export const CREW: readonly HeroConfig[] = [
     baseCost: 250,
     baseDps: 22,
     special: 'beat',
+    rhythm: 2,
   },
   {
     id: 'bouncer',
@@ -140,6 +168,7 @@ export const CREW: readonly HeroConfig[] = [
     baseCost: 1000,
     baseDps: 74,
     special: 'boss',
+    rhythm: 0,
   },
   {
     id: 'influencer',
@@ -148,6 +177,7 @@ export const CREW: readonly HeroConfig[] = [
     baseCost: 4000,
     baseDps: 245,
     special: 'gold',
+    rhythm: 1,
   },
   {
     id: 'choreo',
@@ -156,6 +186,7 @@ export const CREW: readonly HeroConfig[] = [
     baseCost: 20000,
     baseDps: 1100,
     special: 'crit',
+    rhythm: 2,
   },
   {
     id: 'producer',
@@ -163,7 +194,8 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Pumpt Hits am Fließband.',
     baseCost: 100000,
     baseDps: 5000,
-    special: 'gold',
+    special: 'idle',
+    rhythm: 0,
   },
   {
     id: 'promi',
@@ -172,6 +204,7 @@ export const CREW: readonly HeroConfig[] = [
     baseCost: 500000,
     baseDps: 22000,
     special: 'critdmg',
+    rhythm: 1,
   },
   {
     id: 'tycoon',
@@ -180,6 +213,7 @@ export const CREW: readonly HeroConfig[] = [
     baseCost: 3000000,
     baseDps: 120000,
     special: 'gold',
+    rhythm: 2,
   },
   {
     id: 'legend',
@@ -188,6 +222,7 @@ export const CREW: readonly HeroConfig[] = [
     baseCost: 20000000,
     baseDps: 700000,
     special: 'ekstase',
+    rhythm: 0,
   },
   // M9 crew expansion (spec §4.3.3): +5 endless tiers, ~×6–8 cost / ~×6–7 DPS each.
   {
@@ -197,6 +232,7 @@ export const CREW: readonly HeroConfig[] = [
     baseCost: 150000000,
     baseDps: 4500000,
     special: 'combo',
+    rhythm: 1,
   },
   {
     id: 'hologram',
@@ -205,6 +241,7 @@ export const CREW: readonly HeroConfig[] = [
     baseCost: 1200000000,
     baseDps: 30000000,
     special: 'crit',
+    rhythm: 2,
   },
   {
     id: 'aicluster',
@@ -212,7 +249,8 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Rechnet die perfekte Routine.',
     baseCost: 10000000000,
     baseDps: 220000000,
-    special: 'beat',
+    special: 'idle',
+    rhythm: 0,
   },
   {
     id: 'orbital',
@@ -221,6 +259,7 @@ export const CREW: readonly HeroConfig[] = [
     baseCost: 80000000000,
     baseDps: 1600000000,
     special: 'boss',
+    rhythm: 1,
   },
   {
     id: 'cosmic',
@@ -229,6 +268,7 @@ export const CREW: readonly HeroConfig[] = [
     baseCost: 650000000000,
     baseDps: 12000000000,
     special: 'ekstase',
+    rhythm: 2,
   },
 ];
 
@@ -251,28 +291,39 @@ export function abilityTiersUnlocked(level: number): number {
   return Math.floor((level - ABILITY_FIRST_LEVEL) / ABILITY_SPACING) + 1;
 }
 
-/** The kind of ability tier `n` (1-based) for a member: odd = power, even = special. */
+/**
+ * The kind of ability tier `n` (1-based) for a member — v11.1: read from the
+ * member's TIER-RHYTHMUS (`TIER_PATTERNS[cfg.rhythm]`, 4er-Zyklus). Every
+ * pattern carries 2 power + 2 special per cycle, so the long-run balance is
+ * rhythm-independent; only the ORDER differs per member.
+ */
 export function abilityKind(cfg: HeroConfig, tier: number): AbilityKind {
-  return Math.max(1, Math.floor(tier)) % 2 === 1 ? 'power' : cfg.special;
+  const pat = TIER_PATTERNS[cfg.rhythm];
+  return pat[(Math.max(1, Math.floor(tier)) - 1) % pat.length] === 'power' ? 'power' : cfg.special;
 }
 
-/** How many POWER tiers are among the first `bought` (odd tiers: 1, 3, 5, …). */
-export function powerTiers(bought: number): number {
-  return Math.ceil(Math.max(0, Math.floor(bought)) / 2);
+/** How many POWER tiers are among a member's first `bought` tiers (rhythm-aware). */
+export function powerTiers(cfg: HeroConfig, bought: number): number {
+  const n = Math.max(0, Math.floor(bought));
+  const pat = TIER_PATTERNS[cfg.rhythm];
+  const perCycle = pat.filter((k) => k === 'power').length; // 2 in jedem Muster
+  let count = Math.floor(n / pat.length) * perCycle;
+  for (let i = 0; i < n % pat.length; i++) if (pat[i] === 'power') count++;
+  return count;
 }
 
-/** How many SPECIAL tiers are among the first `bought` (even tiers: 2, 4, 6, …). */
-export function specialTiers(bought: number): number {
-  return Math.floor(Math.max(0, Math.floor(bought)) / 2);
+/** How many SPECIAL tiers are among a member's first `bought` tiers (rhythm-aware). */
+export function specialTiers(cfg: HeroConfig, bought: number): number {
+  return Math.max(0, Math.floor(bought)) - powerTiers(cfg, bought);
 }
 
 /**
- * Output multiplier from `bought` abilities: 1 + (power tiers bought). Since v11
- * only the ODD tiers are +100 %-output tiers — even tiers are the member's themed
- * special and leave its own output untouched.
+ * Output multiplier from `bought` abilities: 1 + (power tiers bought). Only the
+ * POWER tiers of the member's rhythm are +100 %-output tiers — its special
+ * tiers are crew-wide utility and leave its own output untouched.
  */
-export function abilityMult(bought: number): number {
-  return 1 + ABILITY_BONUS * powerTiers(bought);
+export function abilityMult(cfg: HeroConfig, bought: number): number {
+  return 1 + ABILITY_BONUS * powerTiers(cfg, bought);
 }
 
 /** Crew-wide bonuses aggregated from every member's bought SPECIAL tiers (v11). */
@@ -291,14 +342,17 @@ export interface CrewSpecialBonuses {
   beatWindowMs: number;
   /** Ekstase charge-threshold reduction (the glue clamps the summed total at 90 %). */
   ekstaseChargeRed: number;
+  /** Global crew-DPS multiplier from `idle` („Groove") tiers: 1 + 0.2·n. */
+  idleMult: number;
 }
 
 /**
- * Aggregate all bought special tiers across the crew into the seven crew-wide
- * bonuses. Pure over the `CrewUps` ledger — each member contributes
- * `specialTiers(ups)` stacks of its themed special. The combo/beat windows are
- * capped here (they gate skill checks); crit chance and the Ekstase reduction are
- * clamped by their existing pipeline caps at the call sites.
+ * Aggregate all bought special tiers across the crew into the crew-wide
+ * bonuses. Pure over the `CrewUps` ledger — each member contributes its
+ * rhythm-aware `specialTiers(cfg, ups)` stacks of its themed special. The
+ * combo/beat windows are capped here (they gate skill checks); crit chance and
+ * the Ekstase reduction are clamped by their existing pipeline caps at the
+ * call sites.
  */
 export function crewSpecialBonuses(ups: CrewUps): CrewSpecialBonuses {
   const n: Record<Exclude<AbilityKind, 'power'>, number> = {
@@ -309,8 +363,9 @@ export function crewSpecialBonuses(ups: CrewUps): CrewSpecialBonuses {
     combo: 0,
     beat: 0,
     ekstase: 0,
+    idle: 0,
   };
-  for (const cfg of CREW) n[cfg.special] += specialTiers(ups[cfg.id] ?? 0);
+  for (const cfg of CREW) n[cfg.special] += specialTiers(cfg, ups[cfg.id] ?? 0);
   return {
     goldMult: 1 + SPECIAL_GOLD * n.gold,
     critChance: SPECIAL_CRIT_CHANCE * n.crit,
@@ -319,6 +374,7 @@ export function crewSpecialBonuses(ups: CrewUps): CrewSpecialBonuses {
     comboWindowS: Math.min(SPECIAL_COMBO_CAP_S, SPECIAL_COMBO_S * n.combo),
     beatWindowMs: Math.min(SPECIAL_BEAT_CAP_MS, SPECIAL_BEAT_MS * n.beat),
     ekstaseChargeRed: SPECIAL_EKSTASE * n.ekstase,
+    idleMult: 1 + SPECIAL_IDLE * n.idle,
   };
 }
 
@@ -341,6 +397,8 @@ export function abilityKindLabel(kind: AbilityKind, outLabel: string): string {
       return '+12ms Beat-Fenster';
     case 'ekstase':
       return '−5% Ekstase-Ladung';
+    case 'idle':
+      return '+20% Crew-DPS';
   }
 }
 
@@ -378,13 +436,13 @@ export function gildMult(gildCount: number): number {
  */
 export function heroDps(cfg: HeroConfig, level: number, gildCount = 0, ups = 0): number {
   if (level <= 0 || cfg.click) return 0;
-  return cfg.baseDps * DPS_TUNE * level * abilityMult(ups) * gildMult(gildCount);
+  return cfg.baseDps * DPS_TUNE * level * abilityMult(cfg, ups) * gildMult(gildCount);
 }
 
 /** The click hero's shake damage at `level` (0 for DPS members), same scaling. */
 export function heroClick(cfg: HeroConfig, level: number, gildCount = 0, ups = 0): number {
   if (level <= 0 || !cfg.click) return 0;
-  return cfg.baseDps * level * abilityMult(ups) * gildMult(gildCount);
+  return cfg.baseDps * level * abilityMult(cfg, ups) * gildMult(gildCount);
 }
 
 /** Cost to buy the NEXT level from `level`: floor(baseCost · growth^level). */

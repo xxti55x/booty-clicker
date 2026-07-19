@@ -384,8 +384,9 @@ function powerFor(
     ancientClickMult(ancients) *
     global *
     (config.clickGearMult ?? 1);
-  // Idle gear (§5) + the permanent DPS-token pool (§6.2) multiply crew DPS only —
-  // never the click term (P1, M11-AC5).
+  // Idle gear (§5) + the permanent DPS-token pool (§6.2) + the crew's
+  // `idle`-special tiers (v11.1 Groove) multiply crew DPS only — never the
+  // click term (P1, M11-AC5).
   const idle =
     totalRawDps(crew, gilds, crewUp) *
     sm *
@@ -393,7 +394,8 @@ function powerFor(
     global *
     (config.idleGearMult ?? 1) *
     shardIdle *
-    (econOn(config) ? permTokenDpsMult(permTokens) : 1);
+    (econOn(config) ? permTokenDpsMult(permTokens) : 1) *
+    crewSpecialBonuses(crewUp).idleMult;
   return config.clickRate * baseClick * combo * crit + idle;
 }
 
@@ -589,15 +591,16 @@ function stepSecond(
  * whole crew. The Boss click line uses `heroClickValue` (its output is click
  * damage — weighted like DPS here, which matches how the drivers click ~always).
  *
- * v11: EVEN ability tiers are themed specials with no direct output of their own
- * (gold/crit feed the economy via `goldMultiplierNow`/`critFactor` instead), so a
- * special's marginal output is 0. Since abilities buy strictly in order, a special
- * would dead-lock the member's lane for a pure output-greedy bot — it is therefore
- * valued as the GATE to the following power tier: the bundle (special + next power)
- * is priced together against the power tier's output gain, and when that bundle
- * wins the ROI race the special is bought first (the power tier follows in the next
- * greedy iteration). Utility value of the specials themselves is deliberately NOT
- * credited here — the bot stays an honest lower bound.
+ * v11: special ability tiers carry no direct output of their own (gold/crit/idle
+ * feed the economy via `goldMultiplierNow`/`critFactor`/`powerFor` instead), so a
+ * special's marginal output is 0. Since abilities buy strictly in order, specials
+ * would dead-lock the member's lane for a pure output-greedy bot — they are
+ * therefore valued as the GATE to the following power tier: the bundle (all
+ * consecutive specials + the next power tier — v11.1 rhythms have up to TWO
+ * specials in a row) is priced together against the power tier's output gain, and
+ * when that bundle wins the ROI race the first special is bought (the rest follow
+ * in later greedy iterations). Utility value of the specials themselves is
+ * deliberately NOT credited here — the bot stays an honest lower bound.
  */
 function buyCrewGreedy(sim: Sim): void {
   const outputAt = (cfg: (typeof CREW)[number], lvl: number, ups: number): number => {
@@ -605,7 +608,8 @@ function buyCrewGreedy(sim: Sim): void {
     // Click hero's line counts as output too — the sim drivers click constantly,
     // so 1 click-damage ≈ CLICKS_PER_SEC dps; ROI-comparing them 1:1 is close
     // enough for a greedy bot and keeps this loop hero-agnostic.
-    if (cfg.click) return lvl <= 0 ? 0 : cfg.baseDps * lvl * abilityMult(ups) * Math.pow(1.25, g);
+    if (cfg.click)
+      return lvl <= 0 ? 0 : cfg.baseDps * lvl * abilityMult(cfg, ups) * Math.pow(1.25, g);
     return heroDps(cfg, lvl, g, ups);
   };
   let guard = 5000;
@@ -630,11 +634,19 @@ function buyCrewGreedy(sim: Sim): void {
         const direct = outputAt(cfg, lvl, ups + 1) - outputAt(cfg, lvl, ups);
         let roi = direct / ab.cost;
         if (direct <= 0) {
-          // Special tier: bundle-value it with the next power tier it unlocks.
-          const ab2 = nextAbility(cfg, lvl, ups + 1);
-          if (ab2.unlocked && ups + 1 < abilityTiersUnlocked(lvl)) {
-            const gain2 = outputAt(cfg, lvl, ups + 2) - outputAt(cfg, lvl, ups);
-            if (ab.cost + ab2.cost <= sim.gold) roi = gain2 / (ab.cost + ab2.cost);
+          // Special tier(s): bundle forward through the lane until the next
+          // power tier lands (rhythm patterns cap consecutive specials at 2;
+          // the scan bound of 4 is pure safety).
+          let costSum = ab.cost;
+          for (let k = ups + 1; k - ups <= 4; k++) {
+            const nxt = nextAbility(cfg, lvl, k);
+            if (!nxt.unlocked || k >= abilityTiersUnlocked(lvl)) break;
+            costSum += nxt.cost;
+            const gain = outputAt(cfg, lvl, k + 1) - outputAt(cfg, lvl, ups);
+            if (gain > 0) {
+              if (costSum <= sim.gold) roi = gain / costSum;
+              break;
+            }
           }
         }
         if (roi > bestRoi) {

@@ -64,6 +64,8 @@ export interface ToonMatParams {
   transparent?: boolean;
   opacity?: number;
   side?: THREE.Side;
+  /** Optional near-white detail texture (engine/textures.ts) — multiplies `color`. */
+  map?: THREE.Texture;
 }
 
 /** Cel-shaded material factory — the cartoon counterpart of `mk()`. */
@@ -76,6 +78,7 @@ export function toonMat(p: ToonMatParams): THREE.MeshToonMaterial {
     transparent: p.transparent ?? false,
     opacity: p.opacity ?? 1,
     side: p.side ?? THREE.FrontSide,
+    map: p.map ?? null,
   });
 }
 

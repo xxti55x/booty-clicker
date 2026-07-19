@@ -7,6 +7,7 @@ import {
   abilityTiersUnlocked,
   bulkCost,
   CREW,
+  crewSpecialBonuses,
   type HeroConfig,
   heroClick,
   heroDps,
@@ -42,6 +43,7 @@ const KIND_ICON: Record<AbilityKind, string> = {
   beat: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3.5v11.9a3.4 3.4 0 1 0 2 3.1V8.3c2.4.4 3.9 1.5 4.7 3.2.7-3.8-1.5-6.2-4.7-6.9V3.5h-2Z" fill="currentColor"/></svg>',
   ekstase:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.4c1 3.3 4.3 4.8 4.3 8.8a6.6 6.6 0 0 1-1.8 4.7c.2-2.3-.7-3.7-2.5-5-1.8 1.3-2.7 2.7-2.5 5a6.6 6.6 0 0 1-1.8-4.7c0-4 3.3-5.5 4.3-8.8Zm0 19.2a4.6 4.6 0 0 1-3.4-1.5c2.3.2 4.5.2 6.8 0A4.6 4.6 0 0 1 12 21.6Z" fill="currentColor"/></svg>',
+  idle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V11h3.6v9H4Zm6.2 0V4h3.6v16h-3.6Zm6.2 0V8H20v12h-3.6Z" fill="currentColor"/></svg>',
 };
 
 export interface CrewDeps {
@@ -61,6 +63,17 @@ export interface CrewDeps {
 export class Crew {
   private readonly body = byId('tabCrew');
   private amount: BuyAmount = 1;
+  /** Letztes gerendertes List-HTML — identische Rebuilds werden übersprungen. */
+  private lastHtml = '';
+  /**
+   * Pointer-down-Guard (Bugfix „Fähigkeit kaufen braucht Doppelklick"): der
+   * 0.25-s-Idle-Tick rendert den offenen Tab neu; ersetzte innerHTML zwischen
+   * Mousedown und Mouseup lässt den Klick auf einem verwaisten Button
+   * verpuffen. Solange ein Pointer in der Liste gedrückt ist, wird jeder
+   * Re-Render aufgeschoben und erst nach dem Pointerup nachgeholt.
+   */
+  private pointerHeld = false;
+  private renderPending = false;
 
   constructor(private readonly deps: CrewDeps) {
     this.body.innerHTML = `
@@ -78,6 +91,37 @@ export class Crew {
           x.classList.remove('active');
         b.classList.add('active');
         this.render();
+      });
+    }
+    // Ein EINZIGER delegierter Klick-Handler auf dem persistenten Container —
+    // überlebt jeden innerHTML-Rebuild (kein Re-Attach pro Zeile mehr).
+    const list = byId('crewList');
+    list.addEventListener('click', (ev) => {
+      const t = ev.target as HTMLElement;
+      const ab = t.closest<HTMLElement>('.ab.ready');
+      if (ab?.dataset.ab) {
+        const cfg = CREW.find((c) => c.id === ab.dataset.ab);
+        if (cfg) this.buyAbility(cfg);
+        return; // die Zeile darunter darf NICHT zusätzlich leveln
+      }
+      const row = t.closest<HTMLElement>('.item');
+      if (row?.dataset.id) {
+        const cfg = CREW.find((c) => c.id === row.dataset.id);
+        if (cfg) this.buy(cfg);
+      }
+    });
+    list.addEventListener('pointerdown', () => {
+      this.pointerHeld = true;
+    });
+    for (const evName of ['pointerup', 'pointercancel'] as const) {
+      window.addEventListener(evName, () => {
+        this.pointerHeld = false;
+        if (this.renderPending) {
+          this.renderPending = false;
+          // Nach dem Klick-Dispatch nachholen (click feuert synchron nach dem
+          // Pointerup im selben Task — ein sofortiger Rebuild bräche ihn doch).
+          window.setTimeout(() => this.render(), 0);
+        }
       });
     }
     this.render();
@@ -122,12 +166,21 @@ export class Crew {
   }
 
   render(): void {
+    if (this.pointerHeld) {
+      this.renderPending = true; // kein DOM-Swap unter einem gedrückten Finger
+      return;
+    }
     const list = byId('crewList');
     const s = this.deps.state;
     const sm = soulMult(s.souls, soulBonusEff(s.heaven.hpf));
     const global = heavenGlobalMult(s.heaven.hpf);
     // keep the per-hero display in lockstep with dpsOf/clickDamageOf (§5)
-    const dpsMult = sm * ancientDpsMult(s.ancients) * global * dpsGearMult(s.gear);
+    const dpsMult =
+      sm *
+      ancientDpsMult(s.ancients) *
+      global *
+      dpsGearMult(s.gear) *
+      crewSpecialBonuses(s.crewUp).idleMult;
     const clickMult = sm * ancientClickMult(s.ancients) * global * clickGearMult(s.gear);
     const rows: string[] = [];
     CREW.forEach((cfg, i) => {
@@ -181,7 +234,7 @@ export class Crew {
       }
       rows.push(
         `<div class="item ${affordable ? '' : 'locked'}" data-id="${cfg.id}">
-          <div class="nm">${cfg.name}${gildBadge}<span class="lv">Lv ${level}${ups > 0 ? ` · ×${abilityMult(ups)}` : ''}</span></div>
+          <div class="nm">${cfg.name}${gildBadge}<span class="lv">Lv ${level}${ups > 0 ? ` · ×${abilityMult(cfg, ups)}` : ''}</span></div>
           <div class="ds">${cfg.ds}</div>
           <div class="crew-foot">
             <span class="cost ${affordable ? '' : 'bad'}">${label} · ${fmt(cost)} BP</span>
@@ -191,20 +244,12 @@ export class Crew {
         </div>`,
       );
     });
-    list.innerHTML = rows.join('');
-    for (const el of Array.from(list.querySelectorAll<HTMLElement>('.item'))) {
-      const id = el.dataset.id;
-      const cfg = CREW.find((c) => c.id === id);
-      if (cfg) el.addEventListener('click', () => this.buy(cfg));
-    }
-    for (const el of Array.from(list.querySelectorAll<HTMLButtonElement>('.ab.ready'))) {
-      const id = el.dataset.ab;
-      const cfg = CREW.find((c) => c.id === id);
-      if (cfg)
-        el.addEventListener('click', (ev) => {
-          ev.stopPropagation(); // the row's level-buy handler must not also fire
-          this.buyAbility(cfg);
-        });
+    // Klicks laufen delegiert über den Container (Konstruktor) — hier wird nur
+    // noch HTML geschrieben, und auch das nur bei echter Änderung.
+    const html = rows.join('');
+    if (html !== this.lastHtml) {
+      this.lastHtml = html;
+      list.innerHTML = html;
     }
   }
 }

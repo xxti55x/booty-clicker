@@ -12,16 +12,13 @@ function byId(id: string): HTMLElement {
   return el;
 }
 
-const RIVALS = [
-  'Groupie',
-  'Möchtegern-Tänzer',
-  'TikTok-Twerker',
-  'Club-Rivalin',
-  'Bühnen-Diva',
-  'Konkurrenz-Crew',
-  'Playback-Betrüger',
-  'Steife Hüfte',
-];
+/** Rivalen-Namen PRO THEME (der Gegner-Körper ist themengebunden — der Name folgt). */
+const RIVALS: Record<'club' | 'synth' | 'beach' | 'space', string[]> = {
+  club: ['Club-Rivalin', 'Möchtegern-Tänzer', 'TikTok-Twerker', 'Bühnen-Diva'],
+  synth: ['Playback-Betrüger', 'Neon-Nervensäge', 'Retro-Rivale', 'Grid-Groover'],
+  beach: ['Strand-Angeber', 'Krabben-König', 'Sonnenbrand-Shaker', 'Promenaden-Poser'],
+  space: ['Alien-Groupie', 'Schwerelos-Shaker', 'Astro-Angeber', 'Mond-Wackler'],
+};
 const BOSSES = [
   'Goldener Twerk-Tyrann',
   'Bass-Baron',
@@ -33,7 +30,8 @@ const BOSSES = [
 
 function rivalName(zone: number, boss: boolean): string {
   if (boss) return '👑 ' + BOSSES[Math.floor(zone / 5) % BOSSES.length];
-  return RIVALS[zone % RIVALS.length];
+  const pool = RIVALS[stripTheme(zone)];
+  return pool[zone % pool.length];
 }
 
 /**
@@ -42,10 +40,10 @@ function rivalName(zone: number, boss: boolean): string {
  * click hot-path and the per-frame loop never rebuild DOM needlessly. The moving
  * HP bar + boss timer are refreshed cheaply per frame via `frame()`.
  */
-/** Kulissen-Tier je Zone (10er-Blöcke) — Spiegel der main.ts-Rotation, rein fürs Bild. */
+/** Kulissen-Tier je Zone (5er-Blöcke = Boss-Gates) — Spiegel der main.ts-Rotation. */
 const STRIP_THEMES = ['club', 'synth', 'beach', 'space'] as const;
 function stripTheme(zone: number): (typeof STRIP_THEMES)[number] {
-  return STRIP_THEMES[Math.floor((zone - 1) / 10) % STRIP_THEMES.length];
+  return STRIP_THEMES[Math.floor((zone - 1) / 5) % STRIP_THEMES.length];
 }
 /** Insel-Thumbnail-Farben je Kulisse (Oberseite / Unterseite). */
 const STRIP_COLORS: Record<(typeof STRIP_THEMES)[number], [string, string]> = {
@@ -78,10 +76,6 @@ export class ChHud {
   private readonly hpText = byId('rivalHpText');
   private readonly prog = byId('zoneProgress');
   private readonly timer = byId('rivalTimer');
-  private readonly travelInfo = byId('travelInfo');
-  private readonly travelPrev = byId('travelPrev') as HTMLButtonElement;
-  private readonly travelNext = byId('travelNext') as HTMLButtonElement;
-  private readonly travelFrontier = byId('travelFrontier') as HTMLButtonElement;
   private readonly zoneStrip = byId('zoneStrip');
 
   // Cached last-written values (change-detection, no DOM churn).
@@ -97,7 +91,6 @@ export class ChHud {
   private cTimer = '';
   private cBoss: boolean | null = null;
   private cCombo = '';
-  private cTravel = '';
   private cStrip = '';
 
   private setText(el: HTMLElement, next: string, cache: string): string {
@@ -132,30 +125,14 @@ export class ChHud {
     }
 
     this.cRival = this.setText(this.rivalNameEl, rivalName(combat.zone, combat.boss), this.cRival);
-    this.updateTravel(combat);
+    this.updateZoneStrip(combat.zone, combat.maxZone);
     this.frame(combat);
   }
 
   /**
-   * Reflect the farm/travel controls (§4.4): the frontier is `combat.maxZone`;
-   * below it the player is farming a cleared zone. Buttons clamp to 1..frontier —
-   * the pure `travelTo` guarantees the same, this only greys out dead ends.
-   */
-  private updateTravel(combat: CombatState): void {
-    const frontier = combat.maxZone;
-    const farming = combat.zone < frontier;
-    const info = farming ? `Farmen · Front: Bühne ${frontier}` : 'An der Frontier';
-    this.cTravel = this.setText(this.travelInfo, info, this.cTravel);
-    this.travelPrev.disabled = combat.zone <= 1;
-    this.travelNext.disabled = combat.zone >= frontier;
-    this.travelFrontier.disabled = !farming;
-    this.updateZoneStrip(combat.zone, frontier);
-  }
-
-  /**
-   * Bühnen-Bildleiste (Goal): fünf Insel-Thumbnails um die aktuelle Zone, die
-   * aktive markiert, Boss-Zonen (×5) mit Gold-Rand, hinter der Frontier gesperrt.
-   * Slots tragen data-z — der Klick-Travel ist in main.ts delegiert.
+   * Bühnen-Bildleiste (Goal-Umbau: reine ANZEIGE, nicht klickbar — die Bühnen
+   * wählt das Spiel selbst): fünf Insel-Thumbnails um die aktuelle Zone, die
+   * aktive markiert, Boss-Gates (×5) mit Gold-Rand, kommende Zonen gedimmt.
    */
   private updateZoneStrip(zone: number, frontier: number): void {
     const start = Math.max(1, zone - 2);
@@ -173,8 +150,8 @@ export class ChHud {
         .filter(Boolean)
         .join(' ');
       slots.push(
-        `<button class="${cls}" data-z="${z}" type="button" ${z > frontier ? 'disabled' : ''}
-           title="${z % 5 === 0 ? `Boss-Bühne ${z}` : `Bühne ${z}`}">${islandSvg(z)}<span>${z}</span></button>`,
+        `<span class="${cls}"
+           title="${z % 5 === 0 ? `Boss-Bühne ${z}` : `Bühne ${z}`}">${islandSvg(z)}<span>${z}</span></span>`,
       );
     }
     this.zoneStrip.innerHTML = slots.join('');
