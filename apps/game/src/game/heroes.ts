@@ -5,12 +5,21 @@
  * (Booty-Boss, `click: true`) is THE click-damage line — its levels raise shake
  * damage, not DPS; every member after it is a pure idle-DPS upgrade. On top of
  * levels each member has **kaufbare Fähigkeiten** (buyable abilities): the first
- * unlocks at Lv 25 and then one every 50 levels (25, 75, 125, …), each granting
- * +100 % base output — but only once PAID for in BP. Converting the old free
- * ×2 milestones into paid, additively-stacking abilities is the deliberate
- * slow-down: power now costs gold, and the multiplier grows linearly in bought
- * tiers (1+n) instead of exponentially, keeping the M9 anti-plateau shape
- * (DPS(level) ~ level²) at a gentler slope.
+ * unlocks at Lv 25 and then one every 50 levels (25, 75, 125, …) — but only once
+ * PAID for in BP, and bought strictly in order.
+ *
+ * **v11 — themed specials.** Ability tiers are no longer uniform „+100 % DPS":
+ * ODD tiers (1, 3, 5, …) are the classic **Verstärkung** (+100 % of this member's
+ * base output, additive: mult = 1 + n_power), while EVERY EVEN tier grants the
+ * member's **themed special** — a crew-wide utility bonus in the member's flavor
+ * (the DJ widens the on-beat window, the Türsteher melts bosses, the Tycoon
+ * prints BP, …). Specials stack additively per bought tier and are aggregated
+ * over the whole crew by `crewSpecialBonuses`; the glue folds them into exactly
+ * the same hooks the Twerk-Ahnen already use (gold mult, crit chance/damage,
+ * boss damage, combo/beat window, Ekstase charge). Keeping the power line on odd
+ * tiers preserves the M9 anti-plateau shape (DPS(level) ~ level²) at the gentler
+ * v10 slope; the `CrewUps` ledger stays a plain bought-count, so saves migrate
+ * for free.
  *
  * Clicks still land `CLICK_DPS_SHARE` of total crew DPS on top of the Boss line,
  * so active twerking stays the star at every depth (P1).
@@ -18,6 +27,14 @@
  * Balancing is entirely in `CREW` + the consts here. All math is pure so DPS,
  * costs and buy-amounts are unit-tested and deterministic.
  */
+
+/**
+ * The ability-tier kinds (v11). `power` is the classic +100 %-output tier on every
+ * ODD tier; each member's EVEN tiers grant its themed `special` — one of the
+ * crew-wide utility kinds below (same hooks the Twerk-Ahnen use).
+ */
+export type AbilityKind =
+  'power' | 'gold' | 'crit' | 'critdmg' | 'boss' | 'combo' | 'beat' | 'ekstase';
 
 export interface HeroConfig {
   readonly id: string;
@@ -30,6 +47,8 @@ export interface HeroConfig {
   readonly baseDps: number;
   /** Slot-1 marker: levels raise CLICK damage instead of idle DPS. */
   readonly click?: boolean;
+  /** This member's themed special — granted on every EVEN ability tier (v11). */
+  readonly special: Exclude<AbilityKind, 'power'>;
 }
 
 /** Cost multiplier per owned level (Clicker Heroes uses ~1.07). */
@@ -41,8 +60,28 @@ export const HERO_COST_GROWTH = 1.07;
  */
 export const ABILITY_FIRST_LEVEL = 25;
 export const ABILITY_SPACING = 50;
-/** Each bought ability adds +100 % of base output (additive: mult = 1 + n). */
+/** Each bought POWER tier (odd tiers) adds +100 % of base output (mult = 1 + n). */
 export const ABILITY_BONUS = 1;
+
+// ---- v11 themed-special magnitudes (per bought EVEN tier, additive stacks) ----
+/** `gold`: +25 % BP from every kill (global income). */
+export const SPECIAL_GOLD = 0.25;
+/** `crit`: +1.5 % click crit chance (the 40 % pipeline cap still applies). */
+export const SPECIAL_CRIT_CHANCE = 0.015;
+/** `critdmg`: +0.5 on the crit multiplier (×5 → ×5.5 → …, the endless lever). */
+export const SPECIAL_CRIT_DMG = 0.5;
+/** `boss`: +25 % damage against boss targets (click AND idle). */
+export const SPECIAL_BOSS = 0.25;
+/** `combo`: +0.2 s combo grace window per tier … */
+export const SPECIAL_COMBO_S = 0.2;
+/** … capped so deep runs can't trivialize the combo entirely. */
+export const SPECIAL_COMBO_CAP_S = 3;
+/** `beat`: +12 ms on-beat detection window per tier … */
+export const SPECIAL_BEAT_MS = 12;
+/** … capped (base is ±100 ms — the beat must stay a skill check). */
+export const SPECIAL_BEAT_CAP_MS = 60;
+/** `ekstase`: −5 % Ekstase charge threshold per tier (shares the glue's 90 % clamp). */
+export const SPECIAL_EKSTASE = 0.05;
 /**
  * v10 idle retune: paid abilities removed ~×8 of the old free milestone power,
  * which over-nerfed the idle side (a 1-cps player relies on crew DPS almost
@@ -61,7 +100,13 @@ export const CLICK_DPS_SHARE = 0.2;
 /** Flat click damage floor, so zone 1 is beatable before any crew exists. */
 export const CLICK_BASE = 1;
 
-/** The recruitable crew, cheapest → strongest (each a big DPS jump but pricier). */
+/**
+ * The recruitable crew, cheapest → strongest (each a big DPS jump but pricier).
+ * `special` is the member's themed even-tier ability (v11) — chosen to match the
+ * flavor: the DJ owns the beat, the Türsteher handles the (boss) trouble, the
+ * money people print BP, the show-offs sharpen crits, the crowd-workers keep the
+ * combo alive, and the transcendent dancers feed the Ekstase.
+ */
 export const CREW: readonly HeroConfig[] = [
   {
     id: 'boss',
@@ -70,16 +115,39 @@ export const CREW: readonly HeroConfig[] = [
     baseCost: 5,
     baseDps: 1,
     click: true,
+    special: 'critdmg',
   },
-  { id: 'hype', name: 'Hype-Girl', ds: 'Feuert das Publikum an.', baseCost: 50, baseDps: 5 },
-  { id: 'dj', name: 'DJ Wumms', ds: 'Legt den fetten Bass auf.', baseCost: 250, baseDps: 22 },
-  { id: 'bouncer', name: 'Türsteher', ds: 'Hält den Beat am Laufen.', baseCost: 1000, baseDps: 74 },
+  {
+    id: 'hype',
+    name: 'Hype-Girl',
+    ds: 'Feuert das Publikum an.',
+    baseCost: 50,
+    baseDps: 5,
+    special: 'combo',
+  },
+  {
+    id: 'dj',
+    name: 'DJ Wumms',
+    ds: 'Legt den fetten Bass auf.',
+    baseCost: 250,
+    baseDps: 22,
+    special: 'beat',
+  },
+  {
+    id: 'bouncer',
+    name: 'Türsteher',
+    ds: 'Hält den Beat am Laufen.',
+    baseCost: 1000,
+    baseDps: 74,
+    special: 'boss',
+  },
   {
     id: 'influencer',
     name: 'Insta-Influencerin',
     ds: 'Streamt jeden Move.',
     baseCost: 4000,
     baseDps: 245,
+    special: 'gold',
   },
   {
     id: 'choreo',
@@ -87,6 +155,7 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Perfektioniert die Routine.',
     baseCost: 20000,
     baseDps: 1100,
+    special: 'crit',
   },
   {
     id: 'producer',
@@ -94,14 +163,23 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Pumpt Hits am Fließband.',
     baseCost: 100000,
     baseDps: 5000,
+    special: 'gold',
   },
-  { id: 'promi', name: 'A-Promi', ds: 'Zieht die Massen an.', baseCost: 500000, baseDps: 22000 },
+  {
+    id: 'promi',
+    name: 'A-Promi',
+    ds: 'Zieht die Massen an.',
+    baseCost: 500000,
+    baseDps: 22000,
+    special: 'critdmg',
+  },
   {
     id: 'tycoon',
     name: 'Club-Tycoon',
     ds: 'Besitzt den ganzen Laden.',
     baseCost: 3000000,
     baseDps: 120000,
+    special: 'gold',
   },
   {
     id: 'legend',
@@ -109,6 +187,7 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Schreibt Tanzgeschichte.',
     baseCost: 20000000,
     baseDps: 700000,
+    special: 'ekstase',
   },
   // M9 crew expansion (spec §4.3.3): +5 endless tiers, ~×6–8 cost / ~×6–7 DPS each.
   {
@@ -117,6 +196,7 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Dreht jeden Move zum Meme.',
     baseCost: 150000000,
     baseDps: 4500000,
+    special: 'combo',
   },
   {
     id: 'hologram',
@@ -124,6 +204,7 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Tanzt an zwei Orten zugleich.',
     baseCost: 1200000000,
     baseDps: 30000000,
+    special: 'crit',
   },
   {
     id: 'aicluster',
@@ -131,6 +212,7 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Rechnet die perfekte Routine.',
     baseCost: 10000000000,
     baseDps: 220000000,
+    special: 'beat',
   },
   {
     id: 'orbital',
@@ -138,6 +220,7 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Twerkt in der Umlaufbahn.',
     baseCost: 80000000000,
     baseDps: 1600000000,
+    special: 'boss',
   },
   {
     id: 'cosmic',
@@ -145,6 +228,7 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Der Beat des Universums.',
     baseCost: 650000000000,
     baseDps: 12000000000,
+    special: 'ekstase',
   },
 ];
 
@@ -167,9 +251,97 @@ export function abilityTiersUnlocked(level: number): number {
   return Math.floor((level - ABILITY_FIRST_LEVEL) / ABILITY_SPACING) + 1;
 }
 
-/** Output multiplier from `bought` abilities: 1 + n (each = +100 % base). */
+/** The kind of ability tier `n` (1-based) for a member: odd = power, even = special. */
+export function abilityKind(cfg: HeroConfig, tier: number): AbilityKind {
+  return Math.max(1, Math.floor(tier)) % 2 === 1 ? 'power' : cfg.special;
+}
+
+/** How many POWER tiers are among the first `bought` (odd tiers: 1, 3, 5, …). */
+export function powerTiers(bought: number): number {
+  return Math.ceil(Math.max(0, Math.floor(bought)) / 2);
+}
+
+/** How many SPECIAL tiers are among the first `bought` (even tiers: 2, 4, 6, …). */
+export function specialTiers(bought: number): number {
+  return Math.floor(Math.max(0, Math.floor(bought)) / 2);
+}
+
+/**
+ * Output multiplier from `bought` abilities: 1 + (power tiers bought). Since v11
+ * only the ODD tiers are +100 %-output tiers — even tiers are the member's themed
+ * special and leave its own output untouched.
+ */
 export function abilityMult(bought: number): number {
-  return 1 + ABILITY_BONUS * Math.max(0, Math.floor(bought));
+  return 1 + ABILITY_BONUS * powerTiers(bought);
+}
+
+/** Crew-wide bonuses aggregated from every member's bought SPECIAL tiers (v11). */
+export interface CrewSpecialBonuses {
+  /** Global BP multiplier from `gold` tiers: 1 + 0.25·n. */
+  goldMult: number;
+  /** Additive click crit-chance bonus (pipeline still caps at 40 %). */
+  critChance: number;
+  /** Additive crit-multiplier bonus (on top of the base ×5). */
+  critDmg: number;
+  /** Damage multiplier vs boss targets: 1 + 0.25·n. */
+  bossMult: number;
+  /** Extra combo grace window in seconds (capped). */
+  comboWindowS: number;
+  /** Extra on-beat detection window in ms (capped). */
+  beatWindowMs: number;
+  /** Ekstase charge-threshold reduction (the glue clamps the summed total at 90 %). */
+  ekstaseChargeRed: number;
+}
+
+/**
+ * Aggregate all bought special tiers across the crew into the seven crew-wide
+ * bonuses. Pure over the `CrewUps` ledger — each member contributes
+ * `specialTiers(ups)` stacks of its themed special. The combo/beat windows are
+ * capped here (they gate skill checks); crit chance and the Ekstase reduction are
+ * clamped by their existing pipeline caps at the call sites.
+ */
+export function crewSpecialBonuses(ups: CrewUps): CrewSpecialBonuses {
+  const n: Record<Exclude<AbilityKind, 'power'>, number> = {
+    gold: 0,
+    crit: 0,
+    critdmg: 0,
+    boss: 0,
+    combo: 0,
+    beat: 0,
+    ekstase: 0,
+  };
+  for (const cfg of CREW) n[cfg.special] += specialTiers(ups[cfg.id] ?? 0);
+  return {
+    goldMult: 1 + SPECIAL_GOLD * n.gold,
+    critChance: SPECIAL_CRIT_CHANCE * n.crit,
+    critDmg: SPECIAL_CRIT_DMG * n.critdmg,
+    bossMult: 1 + SPECIAL_BOSS * n.boss,
+    comboWindowS: Math.min(SPECIAL_COMBO_CAP_S, SPECIAL_COMBO_S * n.combo),
+    beatWindowMs: Math.min(SPECIAL_BEAT_CAP_MS, SPECIAL_BEAT_MS * n.beat),
+    ekstaseChargeRed: SPECIAL_EKSTASE * n.ekstase,
+  };
+}
+
+/** Short German UI label for an ability tier of `kind` (power appends the out-label). */
+export function abilityKindLabel(kind: AbilityKind, outLabel: string): string {
+  switch (kind) {
+    case 'power':
+      return `+100% ${outLabel}`;
+    case 'gold':
+      return '+25% BP';
+    case 'crit':
+      return '+1,5% Krit-Chance';
+    case 'critdmg':
+      return '+0,5× Krit-Schaden';
+    case 'boss':
+      return '+25% Boss-Schaden';
+    case 'combo':
+      return '+0,2s Combo-Fenster';
+    case 'beat':
+      return '+12ms Beat-Fenster';
+    case 'ekstase':
+      return '−5% Ekstase-Ladung';
+  }
 }
 
 /** BP price of ability tier `n` for a member (level-cost at unlock × factor). */

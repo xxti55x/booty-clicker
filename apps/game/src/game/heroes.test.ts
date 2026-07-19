@@ -3,7 +3,15 @@ import { describe, expect, it } from 'vitest';
 import {
   ABILITY_COST_MULT,
   DPS_TUNE,
+  SPECIAL_BEAT_CAP_MS,
+  SPECIAL_BOSS,
+  SPECIAL_COMBO_CAP_S,
+  SPECIAL_CRIT_CHANCE,
+  SPECIAL_CRIT_DMG,
+  SPECIAL_GOLD,
   abilityCost,
+  abilityKind,
+  abilityKindLabel,
   abilityLevel,
   abilityMult,
   abilityTiersUnlocked,
@@ -13,12 +21,15 @@ import {
   clickDamageRaw,
   CREW,
   createCrew,
+  crewSpecialBonuses,
   heroClick,
   heroDps,
   HERO_COST_GROWTH,
   maxAffordable,
   nextAbility,
   nextLevelCost,
+  powerTiers,
+  specialTiers,
   totalRawDps,
 } from './heroes';
 
@@ -65,15 +76,52 @@ describe('heroes — kaufbare Fähigkeiten (buyable abilities)', () => {
     expect(abilityTiersUnlocked(1025)).toBe(21);
   });
 
-  it('each BOUGHT ability adds +100 % base output (mult = 1 + n), levels alone add nothing', () => {
+  it('only ODD (power) tiers raise output — mult = 1 + power tiers (v11)', () => {
     expect(abilityMult(0)).toBe(1);
-    expect(abilityMult(1)).toBe(2);
-    expect(abilityMult(3)).toBe(4);
+    expect(abilityMult(1)).toBe(2); // tier 1 = power
+    expect(abilityMult(2)).toBe(2); // tier 2 = special (no self output)
+    expect(abilityMult(3)).toBe(3); // tiers 1+3 = 2 power tiers
+    expect(abilityMult(4)).toBe(3);
+    expect(abilityMult(5)).toBe(4);
+    expect(powerTiers(7)).toBe(4);
+    expect(specialTiers(7)).toBe(3);
     // A Lv-100 member with nothing bought has NO milestone multiplier any more
     // (DPS_TUNE is the flat idle retune, not level-derived).
     expect(heroDps(hype, 100, 0, 0)).toBe(hype.baseDps * DPS_TUNE * 100);
-    expect(heroDps(hype, 100, 0, 2)).toBe(hype.baseDps * DPS_TUNE * 100 * 3);
-    expect(heroClick(boss, 100, 0, 2)).toBe(boss.baseDps * 100 * 3);
+    expect(heroDps(hype, 100, 0, 3)).toBe(hype.baseDps * DPS_TUNE * 100 * 3);
+    expect(heroClick(boss, 100, 0, 3)).toBe(boss.baseDps * 100 * 3);
+  });
+
+  it('abilityKind: odd tiers are power, even tiers the member theme (v11)', () => {
+    expect(abilityKind(hype, 1)).toBe('power');
+    expect(abilityKind(hype, 2)).toBe('combo'); // Hype-Girl keeps the crowd going
+    expect(abilityKind(hype, 3)).toBe('power');
+    expect(abilityKind(boss, 2)).toBe('critdmg');
+    expect(abilityKind(CREW[2], 4)).toBe('beat'); // DJ Wumms owns the beat
+    // Every member declares a themed special and every kind label resolves.
+    for (const cfg of CREW) {
+      expect(cfg.special).not.toBe('power');
+      expect(abilityKindLabel(abilityKind(cfg, 2), 'DPS').length).toBeGreaterThan(3);
+    }
+  });
+
+  it('crewSpecialBonuses aggregates bought EVEN tiers per theme, with caps', () => {
+    const none = crewSpecialBonuses({});
+    expect(none.goldMult).toBe(1);
+    expect(none.critChance).toBe(0);
+    expect(none.bossMult).toBe(1);
+    // 4 bought tiers on the Insta-Influencerin (gold theme) = 2 special tiers.
+    const gold = crewSpecialBonuses({ influencer: 4 });
+    expect(gold.goldMult).toBeCloseTo(1 + 2 * SPECIAL_GOLD, 9);
+    // Türsteher (boss) + Choreograph (crit) + Booty-Boss (critdmg) mix cleanly.
+    const mix = crewSpecialBonuses({ bouncer: 2, choreo: 2, boss: 6 });
+    expect(mix.bossMult).toBeCloseTo(1 + SPECIAL_BOSS, 9);
+    expect(mix.critChance).toBeCloseTo(SPECIAL_CRIT_CHANCE, 9);
+    expect(mix.critDmg).toBeCloseTo(3 * SPECIAL_CRIT_DMG, 9);
+    // Window caps: a silly-deep combo/beat stack clamps at the cap.
+    const deep = crewSpecialBonuses({ hype: 200, dj: 200 });
+    expect(deep.comboWindowS).toBe(SPECIAL_COMBO_CAP_S);
+    expect(deep.beatWindowMs).toBe(SPECIAL_BEAT_CAP_MS);
   });
 
   it('ability price = level-cost at the unlock level × ABILITY_COST_MULT', () => {

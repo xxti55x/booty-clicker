@@ -50,6 +50,7 @@ import {
   clickDamageRaw,
   createCrew,
   createCrewUps,
+  crewSpecialBonuses,
   totalRawDps,
 } from './heroes';
 import { incomeMultiplier } from './peach';
@@ -325,17 +326,20 @@ export function clickDamageOf(state: DerivedInput): number {
 
 /**
  * Full BP (gold) multiplier from the persistent meta stack (§4.6/§5/§6.2):
- * Peachiel (Ancient) × gold-gear (§5) × the permanent gold-token pool. Does NOT
- * include the transient Golden-Peach ×3 income boost — the glue folds that in
- * live via `peach.incomeMultiplier` (kills) while offline accrual uses this alone.
+ * Peachiel (Ancient) × gold-gear (§5) × the permanent gold-token pool × the crew's
+ * bought `gold`-special ability tiers (v11). Does NOT include the transient
+ * Golden-Peach ×3 income boost — the glue folds that in live via
+ * `peach.incomeMultiplier` (kills) while offline accrual uses this alone.
+ * `crewUp` is optional so pre-v11 callers/tests fold the neutral ×1.
  */
 export function goldMult(
-  state: Pick<ChState, 'ancients' | 'gear'> & { permTokens?: PermTokens },
+  state: Pick<ChState, 'ancients' | 'gear'> & { permTokens?: PermTokens; crewUp?: CrewUps },
 ): number {
   return (
     ancientGoldMult(state.ancients) *
     goldGearMult(state.gear) *
-    (state.permTokens ? permTokenGoldMult(state.permTokens) : 1)
+    (state.permTokens ? permTokenGoldMult(state.permTokens) : 1) *
+    (state.crewUp ? crewSpecialBonuses(state.crewUp).goldMult : 1)
   );
 }
 

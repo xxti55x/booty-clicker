@@ -1,5 +1,9 @@
 import type { ChState } from '../game/ch-state';
 import {
+  type AbilityKind,
+  abilityKind,
+  abilityKindLabel,
+  abilityMult,
   abilityTiersUnlocked,
   bulkCost,
   CREW,
@@ -24,6 +28,22 @@ function byId(id: string): HTMLElement {
 
 type BuyAmount = 1 | 10 | 'max';
 
+/** Tiny inline glyph per ability kind (rendered ~14 px inside the slot). */
+const KIND_ICON: Record<AbilityKind, string> = {
+  power:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.4 13.9 10l6.7 2-6.7 2L12 20.6 10.1 14l-6.7-2 6.7-2Z" fill="currentColor"/></svg>',
+  gold: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm0 4.4a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2Z" fill="currentColor" fill-rule="evenodd"/></svg>',
+  crit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.4 2 5.8 13.2h4.4L9.4 22l7.8-11.2h-4.4L13.4 2Z" fill="currentColor"/></svg>',
+  critdmg:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M13.2 6 9 12.6h2.7l-.9 5.4 4.2-6.6h-2.7l.9-5.4Z" fill="currentColor"/></svg>',
+  boss: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.4 17.5h15.2l1.2-9.3-4.9 3.1L12 4.9 8.1 11.3 3.2 8.2l1.2 9.3Zm0 1.6h15.2v1.8H4.4v-1.8Z" fill="currentColor"/></svg>',
+  combo:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8.6" cy="12" r="4.8" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="15.4" cy="12" r="4.8" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>',
+  beat: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3.5v11.9a3.4 3.4 0 1 0 2 3.1V8.3c2.4.4 3.9 1.5 4.7 3.2.7-3.8-1.5-6.2-4.7-6.9V3.5h-2Z" fill="currentColor"/></svg>',
+  ekstase:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.4c1 3.3 4.3 4.8 4.3 8.8a6.6 6.6 0 0 1-1.8 4.7c.2-2.3-.7-3.7-2.5-5-1.8 1.3-2.7 2.7-2.5 5a6.6 6.6 0 0 1-1.8-4.7c0-4 3.3-5.5 4.3-8.8Zm0 19.2a4.6 4.6 0 0 1-3.4-1.5c2.3.2 4.5.2 6.8 0A4.6 4.6 0 0 1 12 21.6Z" fill="currentColor"/></svg>',
+};
+
 export interface CrewDeps {
   state: ChState;
   /** Called after a successful purchase (refresh HUD, persist). */
@@ -33,8 +53,10 @@ export interface CrewDeps {
 /**
  * The Crew shop tab. Slot 1 (Booty-Boss) levels CLICK damage, every later
  * member is pure idle DPS (§goal v10). Each member additionally has kaufbare
- * Fähigkeiten (Lv 25, 75, 125, …): +100 % base output, paid in BP — the row
- * shows a gold buy button once the level requirement is met.
+ * Fähigkeiten (Lv 25, 75, 125, …), paid in BP: odd tiers grant +100 % base
+ * output, even tiers the member's THEMED SPECIAL (v11 — Gold, Krit, Boss,
+ * Combo, Beat oder Ekstase). The slot row shows a pulsing kind-tinted buy
+ * button once the level requirement is met.
  */
 export class Crew {
   private readonly body = byId('tabCrew');
@@ -125,39 +147,41 @@ export class Crew {
       const label = level === 0 ? 'Anheuern' : `+${count === 0 ? 1 : count}`;
       // Kaufbare Fähigkeiten als SLOT-REIHE (Goal: kein Riesen-Button — gekaufte
       // Tiers mit Haken, der nächste verfügbare leuchtet klickbar, kommende zeigen
-      // ihr Level; Stil-Referenz: klassische Idle-Upgrade-Slots in der Heldenkarte).
+      // ihr Level). v11: ungerade Tiers = +100 % Output, gerade Tiers = das
+      // Themen-Special des Mitglieds — Icon, Label und Farbton folgen der Art.
       const ab = level > 0 ? nextAbility(cfg, level, ups) : null;
       let abRow = '';
       if (ab) {
         const CHECK =
           '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12.5l5 5L19.5 7" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        const SPARK =
-          '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.4 13.9 10l6.7 2-6.7 2L12 20.6 10.1 14l-6.7-2 6.7-2Z" fill="currentColor"/></svg>';
         const slots: string[] = [];
         for (let t = 1; t <= ups; t++) {
+          const k = abilityKind(cfg, t);
           slots.push(
-            `<span class="ab done" title="Fähigkeit ${t}: +100% ${outLabel} — gekauft">${CHECK}</span>`,
+            `<span class="ab done" title="Fähigkeit ${t}: ${abilityKindLabel(k, outLabel)} — gekauft">${CHECK}</span>`,
           );
         }
+        const k = abilityKind(cfg, ab.tier);
+        const abLabel = abilityKindLabel(k, outLabel);
         if (ab.unlocked) {
           const can = ab.cost <= s.gold;
           slots.push(
-            `<button class="ab ready ${can ? '' : 'poor'}" data-ab="${cfg.id}" type="button"
-               title="Fähigkeit ${ab.tier}: +100% ${outLabel} kaufen">${SPARK}</button>`,
+            `<button class="ab ready k-${k} ${can ? '' : 'poor'}" data-ab="${cfg.id}" type="button"
+               title="Fähigkeit ${ab.tier}: ${abLabel} kaufen">${KIND_ICON[k]}</button>`,
           );
           slots.push(
-            `<span class="ab-cost ${can ? '' : 'bad'}">+100% ${outLabel} · ${fmt(ab.cost)} BP</span>`,
+            `<span class="ab-cost ${can ? '' : 'bad'}">${abLabel} · ${fmt(ab.cost)} BP</span>`,
           );
         } else {
           slots.push(
-            `<span class="ab lk" title="Fähigkeit ${ab.tier} (+100% ${outLabel}) ab Lv ${ab.level}">Lv${ab.level}</span>`,
+            `<span class="ab lk" title="Fähigkeit ${ab.tier} (${abLabel}) ab Lv ${ab.level}">Lv${ab.level}</span>`,
           );
         }
         abRow = `<div class="ab-slots">${slots.join('')}</div>`;
       }
       rows.push(
         `<div class="item ${affordable ? '' : 'locked'}" data-id="${cfg.id}">
-          <div class="nm">${cfg.name}${gildBadge}<span class="lv">Lv ${level}${ups > 0 ? ` · ×${ups + 1}` : ''}</span></div>
+          <div class="nm">${cfg.name}${gildBadge}<span class="lv">Lv ${level}${ups > 0 ? ` · ×${abilityMult(ups)}` : ''}</span></div>
           <div class="ds">${cfg.ds}</div>
           <div class="crew-foot">
             <span class="cost ${affordable ? '' : 'bad'}">${label} · ${fmt(cost)} BP</span>

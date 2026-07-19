@@ -59,7 +59,9 @@ describe('simulateEndless — self-runtime (§9.5-AC4)', () => {
 // M9-AC4 / §4.8 Messung 3: with RS_v2 + the 5 endless crew tiers + gilds (and now the
 // full loot economy), a 45-min run-chain reaches zone ≥ 75 and bank ≥ 500 RS within
 // ≤ 6 runs. These are "can-reach" FLOORS, so the full economy (which only accelerates)
-// runs ON here. Observed (all seeds): zone 75 by run 2, bank 508→2074.
+// runs ON here. Observed v11 (all seeds): zone 75 by run 2, bank 508→1295→2074 —
+// the ramp softened from the v10 508→2074 because EVEN ability tiers are now themed
+// specials (utility, not raw output); the bot's bank still multiplies each run.
 describe('simulateEndless — pacing baseline (M9-AC4)', () => {
   for (const seed of SEEDS_HEAVY) {
     it(`seed ${seed}: run-chain reaches zone ≥ 75 and bank ≥ 500 RS in ≤ 6 runs`, () => {
@@ -71,8 +73,10 @@ describe('simulateEndless — pacing baseline (M9-AC4)', () => {
       expect(maxBank).toBeGreaterThanOrEqual(500);
       expect(runsToZone75).toBeGreaterThan(0);
       expect(runsToZone75).toBeLessThanOrEqual(6);
-      // §4.8 Messung 3 shape: the bank multiplies each productive run (508→2074→…).
-      expect(chain.runs[1].bank).toBeGreaterThan(chain.runs[0].bank * 3);
+      // §4.8 Messung 3 shape: the bank multiplies each productive run — v11
+      // measured 508→1295 (×2.55; the v10 ×4 ramp softened by the themed
+      // special tiers, which trade raw output for utility).
+      expect(chain.runs[1].bank).toBeGreaterThan(chain.runs[0].bank * 2);
     });
   }
 });
