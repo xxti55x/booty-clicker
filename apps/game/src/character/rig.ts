@@ -98,7 +98,7 @@ export function buildCharacter(
       ? darkT
       : toonMat({ color: 0xf2f3f6, bands, map: repeated(weaveTex(), 4, 4) });
   // real-footwear kit: rubber soles, woven laces/socks, leather boot hide
-  const darkSole = host || boss || ninja || flair === 'lava';
+  const darkSole = host || boss || ninja || flair === 'lava' || flair === 'pirate';
   const soleT = toonMat({
     color: darkSole ? 0x14141c : 0xdfe2e8,
     bands,
@@ -519,8 +519,8 @@ export function buildCharacter(
         head.add(crown);
         // real hair under the crown: slicked black cap + villain goatee
         const bossHair = O(new THREE.Mesh(new THREE.SphereGeometry(0.33, 22, 22), hairT));
-        bossHair.position.set(0, 0.11, -0.03);
-        bossHair.scale.set(0.95, 0.72, 0.95);
+        bossHair.position.set(0, 0.14, -0.06); // tucked under the crown, off the forehead
+        bossHair.scale.set(0.93, 0.6, 0.9);
         head.add(bossHair);
         const goatee = O(new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.17, 12), hairT), 0.01);
         goatee.position.set(0, -0.36, 0.14);
@@ -768,7 +768,7 @@ export function buildCharacter(
       knee.add(sole);
       const upGeo = new THREE.SphereGeometry(0.125 * k, 18, 18);
       upGeo.scale(1, host ? 0.7 : 0.85, 1.5);
-      const upper = O(new THREE.Mesh(upGeo, shoeT));
+      const upper = O(new THREE.Mesh(upGeo, flair === 'pirate' ? leatherT : shoeT));
       upper.position.set(0, -0.96, 0.1);
       knee.add(upper);
       if (ninja) {

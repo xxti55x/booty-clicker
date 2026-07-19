@@ -3,6 +3,30 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Cartoon-Real-Rigs — echte Hände/Füße/Haare + Proportionen (Goal)
+
+- **2026-07-19 — Realismus im Cartoon-Rahmen, ohne die Physik anzufassen.**
+  Alle Verfeinerungen hängen als MESHES unter den unveränderten Bone-Pivots
+  (`stepPhysics`/`applyPose`/`renderCheeks` bleiben byte-gleich): Kopf-Bone
+  1.18 → 1.06 (≈1:6-Proportionen; Physik schreibt nur head.rotation, Skalieren
+  ist silhouette-sicher), Ohren an jedem unverdeckten Kopf, Deltoide,
+  Handgelenke und Waden für alle Human-Stile. Hände: Handflächen-Sphäre mit
+  IN DIE GEOMETRIE gebackener Skalierung (`geometry.scale()` statt
+  `mesh.scale`, sonst würden die Kind-Finger verzerrt), vier gekrümmte
+  Capsule-Finger + opponierbarer Daumen; der Robo bekommt segmentierte
+  Mech-Greifer. Schuhwerk pro Stil mit Sohlen-Unterkante exakt auf dem alten
+  Boden-Plant (knee-lokal −1.075): Schnür-Sneaker mit Socke+Zunge,
+  Derby+Absatzblock (Host), Panzerstiefel mit Goldkappe+Manschettenring
+  (Boss), Split-Toe-Tabi (Ninja), Lederstiefel mit Umschlag + dunkler Sohle
+  (Pirat), Glutnaht (Lava), Mech-Boot mit Heck-Thruster (Robo). Haar pro
+  Skin echt geschichtet: Swoosh+Koteletten+Strähne (Klassiker),
+  Puff-Wolken-Afro statt Helm-Kugel (Disco), Zwei-Lappen-Pompadour (Host),
+  Unter-Kronen-Haar + Kinnbart (Boss), Bandana-Zopf + Ohrring AM Ohr
+  (Pirat). Alles trägt Maps (Pore/Brushed/Weave/Leder=Pore). Headless
+  verifiziert: alle 10 Skins in-game (0 Page-Errors) + Blender-Renders;
+  Coverage-Gate 276/276 lit (100 %). models/ 58 → 66 MB (mehr Meshes —
+  beobachten, ggf. Segment-Counts senken).
+
 ## Senior-Textur-Pass in Blender — 100 % Material-Abdeckung (Goal)
 
 - **2026-07-19 — Warum ein Blender-seitiger Pass nötig war.** Der
