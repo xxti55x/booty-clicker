@@ -7,6 +7,7 @@ import { AudioEngine } from './audio/engine';
 import { buildCharacter, type CharacterInstance } from './character/rig';
 import { buildEntity, entityVariant, type EntityInstance } from './character/entity';
 import { DT, renderCheeks, stepPhysics } from './character/physics';
+import { applyAccents, createAccents, stepAccents, triggerClickAccent } from './character/accents';
 import { SKINS } from './character/skins';
 import { Choreographer } from './choreo/moves';
 import { createControls, frameCamera } from './engine/camera';
@@ -337,6 +338,7 @@ const world = new World(scene, skyMat, floorMat, glowSprite);
 const audio = new AudioEngine();
 const beatTracker = new BeatTracker();
 const choreo = new Choreographer();
+const accents = createAccents(); // Klick→Pose-Akzente (transient, nie persistiert)
 // The equipped skin drives the 3D rig now (§5) — no longer always classic.
 let char: CharacterInstance = buildCharacter(scene, SKINS[state.gear.skin]);
 // Show-Spin (Goal: „der Spieler dreht sich manchmal, wie die Gegner"): applyPose
@@ -1050,6 +1052,9 @@ function doShake(x?: number, y?: number): void {
     c.vy += (Math.random() * 2 - 1) * 2.6;
     c.vx += (Math.random() * 2 - 1) * 2.6;
   });
+  // Klick → Tanz: the dancer answers every shake with a hip-pop (tier/beat-
+  // scaled, crit = arm flare) — see `character/accents.ts`.
+  triggerClickAccent(accents, tier, crit, onBeat);
   if (effects.particles) {
     char.rig.pelvis.getWorldPosition(particleTmp);
     particles.burst(particleTmp.x, particleTmp.y, particleTmp.z, burstCount(tier));
@@ -1636,8 +1641,11 @@ function loop(nowMs: number): void {
 
   // physics
   acc += dt;
+  let physicsStepped = false;
   while (acc >= DT) {
     drive = stepPhysics(DT, char.rig, char.cheeks, choreo, drive);
+    stepAccents(accents, DT);
+    physicsStepped = true;
     {
       // Show-Spin: kurzer 360°-Turn alle ~12 s (Ende = Anfang ⇒ nahtlos).
       const cyc = t0 % 12;
@@ -1645,6 +1653,14 @@ function loop(nowMs: number): void {
       playerSpin.rotation.y = Math.PI * 2 * (k * k * (3 - 2 * k));
     }
     acc -= DT;
+  }
+  if (physicsStepped) {
+    // Klick-Akzente: additiv NACH dem Physik-Schritt (applyPose schreibt absolute
+    // Werte, der nächste Step resettet also sauber; ohne Step keine Re-Anwendung,
+    // sonst würde der Offset doppeln); Matrix-Refresh, damit renderCheeks die
+    // akzentuierte Pelvis-Orientierung sieht.
+    applyAccents(char.rig, accents, frenzy, t0);
+    char.rig.root.updateMatrixWorld(true);
   }
   renderCheeks(char.rig, char.cheeks);
   particles.update(dt);
