@@ -30,8 +30,9 @@ export interface CharacterInstance {
  * legX.thigh/knee`, the cheek anchors and the world-space `Cheek` list) keeps
  * its name, hierarchy and pivot transform, so `stepPhysics`/`renderCheeks`
  * animate exactly as before. Only the MESHES hanging under those bones are
- * new: cel-shaded (`toonMat`), ink-outlined (`withOutline`), with big round
- * heads, simple cartoon faces, chunky tapered limbs and mitt hands.
+ * new: cel-shaded (`toonMat`), ink-outlined (`withOutline`), cartoon-real
+ * proportions — ears, layered per-skin hair, deltoids/calves, real hands
+ * (palm + curled fingers + thumb) and styled footwear with soles and laces.
  * Pass the previous instance to detach it from the scene.
  */
 export function buildCharacter(
@@ -96,6 +97,17 @@ export function buildCharacter(
     : host || boss || ninja || flair === 'lava'
       ? darkT
       : toonMat({ color: 0xf2f3f6, bands, map: repeated(weaveTex(), 4, 4) });
+  // real-footwear kit: rubber soles, woven laces/socks, leather boot hide
+  const darkSole = host || boss || ninja || flair === 'lava';
+  const soleT = toonMat({
+    color: darkSole ? 0x14141c : 0xdfe2e8,
+    bands,
+    map: repeated(brushedTex(1), 2, 2),
+  });
+  const laceT = toonMat({ color: 0xf5f6f8, bands, map: repeated(weaveTex(), 6, 6) });
+  const leatherT = toonMat({ color: 0x50331a, bands, map: repeated(poreTex(2), 3, 3) });
+  const leatherLightT = toonMat({ color: 0x6b4522, bands, map: repeated(poreTex(2), 3, 3) });
+  const goldTrimT = toonMat({ color: accent, bands, map: repeated(brushedTex(2), 2, 2) });
   const glowT = toonMat({ color: accent, emissive: accent, emissiveIntensity: 0.9, bands });
   // Facial ink + eye whites are unlit so the face always reads.
   const inkFlat = new THREE.MeshBasicMaterial({ color: line, toneMapped: false });
@@ -208,9 +220,9 @@ export function buildCharacter(
   const head = new THREE.Group();
   head.name = 'head';
   head.position.y = 1.66;
-  // Cartoon proportions: oversized head (physics only writes head.rotation,
-  // so scaling the bone is silhouette-safe).
-  head.scale.setScalar(robot ? 1.08 : 1.18);
+  // Still cartoon-big, but closer to real proportions (~1:6 head-to-body).
+  // Physics only writes head.rotation, so scaling the bone is silhouette-safe.
+  head.scale.setScalar(robot ? 1.02 : 1.06);
   spine.add(head);
 
   /**
@@ -341,6 +353,15 @@ export function buildCharacter(
     jaw.position.set(0, -0.17, 0.04);
     jaw.scale.set(0.9, 0.7, 0.88);
     head.add(jaw);
+    if (!ninja) {
+      // real ears (hidden only under the ninja hood)
+      [-1, 1].forEach((s) => {
+        const ear = O(new THREE.Mesh(new THREE.SphereGeometry(0.055, 14, 14), skinT), 0.008);
+        ear.position.set(s * 0.3, 0.0, 0.03);
+        ear.scale.set(0.55, 1, 0.8);
+        head.add(ear);
+      });
+    }
 
     if (ninja) {
       // hooded head: glowing almond eyes behind the mask slit + headband
@@ -404,14 +425,54 @@ export function buildCharacter(
         new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 8, 16), glowT), // gold accent
         0.008,
       );
-      ring.position.set(0.3, -0.12, 0.02);
+      ring.position.set(0.31, -0.1, 0.03); // hangs from the real ear now
       head.add(ring);
+      // real hair: a dark ponytail spilling out under the bandana knot
+      const pirateHairT = toonMat({ color: 0x33210f, bands, map: repeated(strandTex(2), 2, 2) });
+      (
+        [
+          [0.05, 2.9, 0.42],
+          [-0.05, 2.75, 0.34],
+          [0, 3.0, 0.3],
+        ] as const
+      ).forEach(([x, rx, len]) => {
+        const strand = O(new THREE.Mesh(new THREE.ConeGeometry(0.05, len, 10), pirateHairT), 0.01);
+        strand.position.set(x, -0.1 - len * 0.32, -0.3);
+        strand.rotation.set(rx, 0, x * 2);
+        head.add(strand);
+      });
     } else if (disco) {
       face({ grin: 0.1, blush: 0xd9765a });
-      // giant afro + star glasses bar
-      const afro = O(new THREE.Mesh(new THREE.SphereGeometry(0.5, 26, 26), hairT), 0.026);
-      afro.position.y = 0.17;
+      // real afro: a core orb wrapped in a cloud of puffs (reads as actual hair,
+      // not a helmet) + sideburns
+      const afro = O(new THREE.Mesh(new THREE.SphereGeometry(0.42, 26, 26), hairT), 0.024);
+      afro.position.y = 0.18;
       head.add(afro);
+      (
+        [
+          [0.3, 0.44, 0.08, 0.17],
+          [-0.3, 0.44, 0.06, 0.17],
+          [0, 0.54, -0.05, 0.19],
+          [0.38, 0.2, 0, 0.16],
+          [-0.38, 0.2, 0, 0.16],
+          [0.2, 0.3, 0.3, 0.15],
+          [-0.2, 0.3, 0.3, 0.15],
+          [0.25, 0.37, -0.25, 0.16],
+          [-0.25, 0.37, -0.25, 0.16],
+          [0, 0.32, 0.37, 0.14],
+          [0, 0.4, -0.35, 0.16],
+        ] as const
+      ).forEach(([x, y, z, r]) => {
+        const puff = O(new THREE.Mesh(new THREE.SphereGeometry(r, 16, 16), hairT), 0.016);
+        puff.position.set(x, y, z);
+        head.add(puff);
+      });
+      [-1, 1].forEach((s) => {
+        const burn = sh(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.04), hairT));
+        burn.position.set(s * 0.29, -0.08, 0.1);
+        burn.rotation.z = s * 0.1;
+        head.add(burn);
+      });
       const glasses = new THREE.Mesh(new THREE.BoxGeometry(0.47, 0.13, 0.06), darkT);
       glasses.position.set(0, 0.05, 0.28);
       head.add(withOutline(glasses, { color: accent, thickness: 0.014 })); // gold rims
@@ -456,29 +517,71 @@ export function buildCharacter(
         }
         crown.position.y = 0.34;
         head.add(crown);
+        // real hair under the crown: slicked black cap + villain goatee
+        const bossHair = O(new THREE.Mesh(new THREE.SphereGeometry(0.33, 22, 22), hairT));
+        bossHair.position.set(0, 0.11, -0.03);
+        bossHair.scale.set(0.95, 0.72, 0.95);
+        head.add(bossHair);
+        const goatee = O(new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.17, 12), hairT), 0.01);
+        goatee.position.set(0, -0.36, 0.14);
+        goatee.rotation.x = Math.PI - 0.3;
+        head.add(goatee);
       }
     } else if (host) {
       face({ grin: 0.11, blush: 0xe89a72 });
-      // slick showbiz hair with a side part
+      // real showbiz hair: slick base, flattened side panels over the ears,
+      // a two-lobe pompadour wave up front and crisp sideburns
       const hair = O(new THREE.Mesh(new THREE.SphereGeometry(0.33, 24, 24), hairT));
-      hair.position.set(0, 0.1, -0.04);
-      hair.scale.set(0.95, 0.82, 0.95);
+      hair.position.set(0, 0.09, -0.05);
+      hair.scale.set(0.95, 0.8, 0.94);
       head.add(hair);
-      const quiff = O(new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 16), hairT), 0.012);
-      quiff.position.set(0.1, 0.3, 0.16);
-      quiff.scale.set(1.4, 0.7, 1);
-      head.add(quiff);
+      [-1, 1].forEach((s) => {
+        const side = O(new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 16), hairT), 0.012);
+        side.position.set(s * 0.27, 0.04, 0);
+        side.scale.set(0.5, 1.0, 0.95);
+        head.add(side);
+        const burn = sh(new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.12, 0.03), hairT));
+        burn.position.set(s * 0.295, -0.08, 0.1);
+        head.add(burn);
+      });
+      const pomp = O(new THREE.Mesh(new THREE.SphereGeometry(0.15, 18, 18), hairT), 0.012);
+      pomp.position.set(0.02, 0.31, 0.13);
+      pomp.scale.set(1.35, 0.8, 1.0);
+      pomp.rotation.z = -0.15;
+      head.add(pomp);
+      const wave = O(new THREE.Mesh(new THREE.SphereGeometry(0.11, 16, 16), hairT), 0.012);
+      wave.position.set(0.15, 0.26, 0.2);
+      wave.scale.set(0.95, 0.68, 0.9);
+      wave.rotation.z = -0.5;
+      head.add(wave);
     } else {
-      // classic human (Klassiker / recolours)
+      // classic human (Klassiker / recolours) — real layered hair: back
+      // volume, side layers over the ears, a big swept fringe with a loose
+      // strand tip, and sideburns
       face({ grin: 0.095, blush: 0xef8f74 });
       const hair = O(new THREE.Mesh(new THREE.SphereGeometry(0.35, 24, 24), hairT));
-      hair.position.set(0, 0.1, -0.04);
-      hair.scale.set(0.94, 0.88, 0.95);
+      hair.position.set(0, 0.08, -0.06);
+      hair.scale.set(0.95, 0.9, 0.92);
       head.add(hair);
-      const quiff = O(new THREE.Mesh(new THREE.SphereGeometry(0.11, 16, 16), hairT), 0.012);
-      quiff.position.set(-0.08, 0.31, 0.17);
-      quiff.scale.set(1.5, 0.75, 1);
-      head.add(quiff);
+      [-1, 1].forEach((s) => {
+        const side = O(new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 16), hairT), 0.012);
+        side.position.set(s * 0.26, 0.03, 0.02);
+        side.scale.set(0.55, 1.1, 0.95);
+        head.add(side);
+        const burn = sh(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.13, 0.03), hairT));
+        burn.position.set(s * 0.29, -0.09, 0.11);
+        burn.rotation.z = s * 0.08;
+        head.add(burn);
+      });
+      const swoosh = O(new THREE.Mesh(new THREE.SphereGeometry(0.15, 18, 18), hairT), 0.012);
+      swoosh.position.set(-0.06, 0.28, 0.16);
+      swoosh.scale.set(1.5, 0.66, 0.95);
+      swoosh.rotation.z = -0.2;
+      head.add(swoosh);
+      const strandTip = O(new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.16, 10), hairT), 0.01);
+      strandTip.position.set(0.17, 0.25, 0.2);
+      strandTip.rotation.z = -1.9;
+      head.add(strandTip);
     }
   }
 
@@ -493,9 +596,12 @@ export function buildCharacter(
     const upper = O(new THREE.Mesh(new THREE.CylinderGeometry(aw + 0.03, aw, 0.8, 16), upperMat));
     upper.position.y = -0.4;
     shoulder.add(upper);
-    if (boss) {
-      const delt = O(new THREE.Mesh(new THREE.SphereGeometry(0.19, 18, 18), skinT));
-      delt.position.y = -0.03;
+    if (!robot) {
+      // real deltoid rounds the shoulder joint into the arm
+      const delt = O(
+        new THREE.Mesh(new THREE.SphereGeometry(boss ? 0.19 : 0.135, 18, 18), upperMat),
+      );
+      delt.position.y = -0.04;
       shoulder.add(delt);
     }
     const elbow = new THREE.Group();
@@ -518,15 +624,55 @@ export function buildCharacter(
       wrap.position.y = -0.52;
       elbow.add(wrap);
     }
-    // chunky mitt hand
-    const hand = O(
+    // real hand: wrist, palm (scale baked into the geometry so child fingers
+    // stay undistorted), four softly curled fingers + opposable thumb; the
+    // robot gets segmented mech grippers instead
+    const wrist = O(
       new THREE.Mesh(
-        robot ? new THREE.BoxGeometry(0.18, 0.22, 0.14) : new THREE.SphereGeometry(0.14, 16, 16),
-        skinT,
+        new THREE.CylinderGeometry(aw - 0.018, aw - 0.032, 0.1, 12),
+        robot ? jointT : skinT,
       ),
     );
-    hand.position.y = -0.76;
-    elbow.add(hand);
+    wrist.position.y = -0.7;
+    elbow.add(wrist);
+    let hand: THREE.Mesh;
+    if (robot) {
+      hand = O(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.15, 0.12), skinT));
+      hand.position.y = -0.79;
+      elbow.add(hand);
+      [-0.05, 0.05].forEach((dx) => {
+        const f = sh(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.06), jointT));
+        f.position.set(dx, -0.12, 0.02);
+        f.rotation.x = 0.2;
+        hand.add(f);
+      });
+      const gripper = sh(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.11, 0.06), jointT));
+      gripper.position.set(0, -0.09, -0.06);
+      gripper.rotation.x = -0.35;
+      hand.add(gripper);
+    } else {
+      const palmGeo = new THREE.SphereGeometry(0.105 * bulk, 18, 18);
+      palmGeo.scale(1.0, 1.18, 0.72);
+      hand = O(new THREE.Mesh(palmGeo, skinT));
+      hand.position.y = -0.8;
+      elbow.add(hand);
+      const fr = 0.031 * bulk;
+      [-0.066, -0.022, 0.022, 0.066].forEach((dx, i) => {
+        const len = (i === 0 || i === 3 ? 0.11 : 0.14) * bulk;
+        const f = O(new THREE.Mesh(new THREE.CapsuleGeometry(fr, len, 4, 10), skinT), 0.006);
+        f.position.set(dx * bulk, -0.1 * bulk - len / 2, 0.01);
+        f.rotation.x = 0.24;
+        f.rotation.z = -dx * 1.1;
+        hand.add(f);
+      });
+      const thumb = O(
+        new THREE.Mesh(new THREE.CapsuleGeometry(fr + 0.004, 0.085 * bulk, 4, 10), skinT),
+        0.006,
+      );
+      thumb.position.set(s * 0.085 * bulk, -0.035, 0.035);
+      thumb.rotation.set(0.35, 0, -s * 1.0);
+      hand.add(thumb);
+    }
     return { shoulder, elbow, hand };
   }
   const armL = arm(1);
@@ -583,19 +729,126 @@ export function buildCharacter(
     );
     shin.position.y = -0.49;
     knee.add(shin);
+    if (!robot) {
+      // real calf muscle bulging the upper shin
+      const calfGeo = new THREE.SphereGeometry(lw * 0.92, 16, 16);
+      calfGeo.scale(0.9, 1.35, 0.95);
+      const calf = O(new THREE.Mesh(calfGeo, host ? suitT : skinT));
+      calf.position.set(0, -0.3, -0.03);
+      knee.add(calf);
+    }
     if (ninja) {
       const wrap = O(new THREE.Mesh(new THREE.CylinderGeometry(lw, lw, 0.16, 12), glowT), 0.008);
       wrap.position.y = -0.78;
       knee.add(wrap);
     }
-    // chunky cartoon shoe: box sole + round toe cap
-    const foot = O(new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.15, 0.48), shoeT));
-    foot.position.set(0, -1.0, 0.12);
-    knee.add(foot);
-    const toe = O(new THREE.Mesh(new THREE.SphereGeometry(0.135, 16, 16), shoeT), 0.014);
-    toe.scale.set(0.95, 0.75, 1);
-    toe.position.set(0, -1.0, 0.34);
-    knee.add(toe);
+    // ---- real footwear per style; every sole bottom stays at knee-local
+    // -1.075 so the feet keep planting on the floor exactly as before
+    const k = bulk;
+    if (robot) {
+      // mech boot: dark sole, chassis body, coloured toe plate, heel thruster
+      const sole = O(new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.06, 0.46), darkT));
+      sole.position.set(0, -1.045, 0.1);
+      knee.add(sole);
+      const boot = O(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.14, 0.4), jointT));
+      boot.position.set(0, -0.945, 0.08);
+      knee.add(boot);
+      const toe = O(new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.11, 0.14), skinT), 0.012);
+      toe.position.set(0, -0.96, 0.33);
+      knee.add(toe);
+      const jet = new THREE.Mesh(new THREE.CircleGeometry(0.045, 12), glowT);
+      jet.position.set(0, -0.95, -0.125);
+      jet.rotation.y = Math.PI;
+      knee.add(jet);
+    } else {
+      const sole = O(
+        new THREE.Mesh(new THREE.BoxGeometry(0.27 * k, host ? 0.05 : 0.075, 0.52 * k), soleT),
+      );
+      sole.position.set(0, host ? -1.05 : -1.038, 0.12);
+      knee.add(sole);
+      const upGeo = new THREE.SphereGeometry(0.125 * k, 18, 18);
+      upGeo.scale(1, host ? 0.7 : 0.85, 1.5);
+      const upper = O(new THREE.Mesh(upGeo, shoeT));
+      upper.position.set(0, -0.96, 0.1);
+      knee.add(upper);
+      if (ninja) {
+        // tabi: split toe + glowing ankle band
+        [-1, 1].forEach((s2) => {
+          const half = O(new THREE.Mesh(new THREE.SphereGeometry(0.068, 14, 14), shoeT), 0.01);
+          half.scale.set(0.95, 0.78, 1.25);
+          half.position.set(s2 * 0.062, -1.0, 0.37);
+          knee.add(half);
+        });
+        const band = O(
+          new THREE.Mesh(new THREE.CylinderGeometry(lw - 0.02, lw - 0.02, 0.07, 12), glowT),
+          0.008,
+        );
+        band.position.y = -0.92;
+        knee.add(band);
+      } else {
+        const toeGeo = new THREE.SphereGeometry(0.115 * k, 18, 18);
+        toeGeo.scale(1.05, 0.72, 1.2);
+        const toe = O(
+          new THREE.Mesh(toeGeo, boss ? goldTrimT : flair === 'pirate' ? leatherT : soleT),
+          0.012,
+        );
+        toe.position.set(0, -0.99, 0.36 * k);
+        knee.add(toe);
+      }
+      if (flair === 'pirate') {
+        // leather boot shaft with a folded lighter cuff
+        const shaft = O(
+          new THREE.Mesh(new THREE.CylinderGeometry(lw + 0.005, lw + 0.02, 0.3, 14), leatherT),
+        );
+        shaft.position.y = -0.84;
+        knee.add(shaft);
+        const fold = O(
+          new THREE.Mesh(new THREE.CylinderGeometry(lw + 0.045, lw + 0.02, 0.1, 14), leatherLightT),
+          0.012,
+        );
+        fold.position.y = -0.72;
+        knee.add(fold);
+      } else if (boss) {
+        const cuffRing = O(
+          new THREE.Mesh(new THREE.TorusGeometry(lw + 0.015, 0.032, 10, 20), goldTrimT),
+          0.01,
+        );
+        cuffRing.position.y = -0.9;
+        cuffRing.rotation.x = Math.PI / 2;
+        knee.add(cuffRing);
+      } else if (flair === 'lava') {
+        // molten seam glowing between sole and crust upper
+        const seam = sh(new THREE.Mesh(new THREE.BoxGeometry(0.275 * k, 0.022, 0.525 * k), glowT));
+        seam.position.set(0, -0.999, 0.12);
+        knee.add(seam);
+      } else if (host) {
+        // sleek derby: low profile + a proper heel block, no laces
+        const heelBlock = O(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.06, 0.12), darkT));
+        heelBlock.position.set(0, -1.045, -0.1);
+        knee.add(heelBlock);
+      } else if (!ninja) {
+        // sneakers: sock cuff, tongue and three laces across the instep
+        const sock = O(
+          new THREE.Mesh(
+            new THREE.CylinderGeometry(lw - 0.025, lw - 0.038, 0.1, 12),
+            disco ? goldTrimT : laceT,
+          ),
+          0.008,
+        );
+        sock.position.y = -0.925;
+        knee.add(sock);
+        const tongue = sh(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.09, 0.03), shoeT));
+        tongue.position.set(0, -0.88, 0.2);
+        tongue.rotation.x = 0.5;
+        knee.add(tongue);
+        for (let i = 0; i < 3; i++) {
+          const lace = sh(new THREE.Mesh(new THREE.BoxGeometry(0.125, 0.02, 0.022), laceT));
+          lace.position.set(0, -0.9 - i * 0.027, 0.225 - i * 0.05);
+          lace.rotation.x = 0.5;
+          knee.add(lace);
+        }
+      }
+    }
     return { thigh, knee };
   }
   const legL = leg(1);
