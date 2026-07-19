@@ -24,9 +24,9 @@ Ergebnis dem Spiel-Look 1:1 entspricht — dokumentiert in DECISIONS.md):
   · Hut/Bandana/Stiefel (Stage 4): sind hier korrekt am Kopf/Bein verankert;
     starr verskinnt auf head/knee/foot — kein Weight Painting nötig.
 
-Aufruf (aus dem Repo-Root, Blender 5 bpy):
+Aufruf (aus dem Repo-Root, Blender 5 bpy) — ein Lauf pro Playermodel:
     node tools/blender/dump_web_poses.mjs /tmp/…/web-poses.json
-    python3 tools/blender/web_asset.py <raw.glb> <poses.json> <out_dir>
+    python3 tools/blender/web_asset.py <raw.glb> <poses.json> <out_dir> [stem]
 """
 
 import json
@@ -40,10 +40,14 @@ from mathutils import Matrix, Quaternion, Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-RAW = sys.argv[sys.argv.index("--") + 1] if "--" in sys.argv else sys.argv[1]
-POSES = sys.argv[sys.argv.index("--") + 2] if "--" in sys.argv else sys.argv[2]
-OUT_DIR = sys.argv[sys.argv.index("--") + 3] if "--" in sys.argv else sys.argv[3]
-GLB_OUT = os.path.join(OUT_DIR, "character-web.glb")
+_args = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else sys.argv[1:]
+RAW, POSES, OUT_DIR = _args[0], _args[1], _args[2]
+STEM = (
+    _args[3]
+    if len(_args) > 3
+    else os.path.splitext(os.path.basename(RAW))[0].removeprefix("character-")
+)
+GLB_OUT = os.path.join(OUT_DIR, f"{STEM}.glb")
 
 TRI_TARGET = 6_000
 TRI_MAX = 10_000
@@ -60,6 +64,10 @@ SUB_DT = 1.0 / 120.0
 # three-Raum → Blender-Raum (pro Node, wie render_anim.py)
 CONV = Quaternion((1.0, 0.0, 0.0), math.radians(90.0))
 CONV_INV = CONV.inverted()
+
+# Boss-Rigs tragen root.scale 1.12 — Bone-Offsets leben in Weltmaß und müssen
+# den Faktor nachziehen (die Empties erben ihn über die Hierarchie von selbst).
+ROOT_SCALE = 1.0
 
 # Nodes, die 1:1 zu Deform-Bones werden (Namen = Physik-Kontrakt aus rig.ts).
 NODE_BONES = [
@@ -259,12 +267,14 @@ def stage3_decimate(meshes):
 def stage45_armature():
     """Stage 4+5 — manuelles Deform-Armature aus den Node-Rests (alle Bones
     +Y/Roll 0 ⇒ Rest-Matrizen identisch ⇒ Pose-Werte = Spielwerte)."""
+    global ROOT_SCALE
+    ROOT_SCALE = find("root").matrix_world.to_scale().x
     heads = {n: find(n).matrix_world.translation.copy() for n in NODE_BONES}
     for s in ("L", "R"):
-        heads["hand" + s] = heads["elbow" + s] + Vector((0, 0, -0.72))
-        heads["foot" + s] = heads["knee" + s] + Vector((0, 0, -0.98))
-    arm = bpy.data.armatures.new("PirateRig")
-    arm_obj = bpy.data.objects.new("PirateRig", arm)
+        heads["hand" + s] = heads["elbow" + s] + Vector((0, 0, -0.72 * ROOT_SCALE))
+        heads["foot" + s] = heads["knee" + s] + Vector((0, 0, -0.98 * ROOT_SCALE))
+    arm = bpy.data.armatures.new("CharRig")
+    arm_obj = bpy.data.objects.new("CharRig", arm)
     bpy.context.scene.collection.objects.link(arm_obj)
     bpy.context.view_layer.objects.active = arm_obj
     bpy.ops.object.mode_set(mode="EDIT")
@@ -295,8 +305,8 @@ def stage6_join_skin(meshes, arm_obj):
     bpy.context.view_layer.objects.active = meshes[0]
     bpy.ops.object.join()
     body = bpy.context.view_layer.objects.active
-    body.name = "PirateWeb"
-    body.data.name = "PirateWeb"
+    body.name = "CharWeb"
+    body.data.name = "CharWeb"
     mw = body.matrix_world.copy()
     body.parent = None
     body.matrix_world = mw
@@ -307,7 +317,7 @@ def stage6_join_skin(meshes, arm_obj):
     body.parent = arm_obj
     # Ein Material für alles: Vertex-Farben in einen Principled-Slot.
     body.data.materials.clear()
-    mat = bpy.data.materials.new("PirateWebMat")
+    mat = bpy.data.materials.new("CharWebMat")
     mat.use_nodes = True
     principled = next(n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
     principled.inputs["Roughness"].default_value = 0.85
@@ -353,7 +363,7 @@ def _apply_pose(nodes, arm_obj, p):
     # Pose-Bones
     pb["root"].location = root_loc
     pb["root"].rotation_quaternion = root_q
-    pb["pelvis"].location = pelvis_loc
+    pb["pelvis"].location = pelvis_loc * ROOT_SCALE
     pb["pelvis"].rotation_quaternion = pelvis_q
     for name, q in vals.items():
         pb[name].rotation_quaternion = q
@@ -502,16 +512,18 @@ def test_renders(arm_obj, poses):
     for tr in arm_obj.animation_data.nla_tracks:
         tr.mute = True  # Test-Posen manuell — sonst gewinnt der NLA-Stack
 
+    sc.render.image_settings.file_format = "JPEG"
+    sc.render.image_settings.quality = 86
+
     def shot(label):
         bpy.context.view_layer.update()
-        sc.render.filepath = os.path.join(OUT_DIR, f"pose-{label}.png")
+        sc.render.filepath = os.path.join(OUT_DIR, f"pose-{STEM}-{label}.jpg")
         bpy.ops.render.render(write_still=True)
 
     for b in pb:
         b.rotation_quaternion = (1, 0, 0, 0)
         b.location = (0, 0, 0)
         b.scale = (1, 1, 1)
-    shot("rest")
     pb["elbowL"].rotation_quaternion = to_blender(q_three_euler_xyz(-math.pi / 2, 0, 0))
     pb["shoulderR"].rotation_quaternion = to_blender(q_three_euler_xyz(0, 0, -math.pi / 4))
     pb["pelvis"].rotation_quaternion = to_blender(q_three_euler_xyz(0.35, 0, 0))
@@ -529,7 +541,7 @@ def _apply_pose_bones_only(arm_obj, p):
     pb = arm_obj.pose.bones
     pb["root"].location = vec_to_blender(0.0, p["rootY"], 0.0)
     pb["root"].rotation_quaternion = to_blender(q_three_euler_xyz(0.0, p["rootRotY"], 0.0))
-    pb["pelvis"].location = vec_to_blender(p["hipPosX"], 0.0, p["hipPosZ"])
+    pb["pelvis"].location = vec_to_blender(p["hipPosX"], 0.0, p["hipPosZ"]) * ROOT_SCALE
     pb["pelvis"].rotation_quaternion = to_blender(q_three_euler_xyz(p["hipX"], 0.0, p["hipZ"]))
     pb["spine"].rotation_quaternion = to_blender(
         q_three_euler_xyz(p["spineX"], p["spineY"], p["spineZ"])

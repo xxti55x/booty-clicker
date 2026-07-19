@@ -3,6 +3,20 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Web-Assets für ALLE 10 Playermodels (Goal)
+
+- **2026-07-19 — Pipeline generalisiert, ein Draco-glb pro Skin.**
+  `web_asset.py` nimmt jetzt Stem-Parameter (`models/web/<skin>.glb`) und
+  zieht bei Boss-Rigs den root.scale-Faktor 1.12 auf die Bone-Offsets nach
+  (`ROOT_SCALE` — Hüft-Sway lebt in Weltmaß; die Empties erben den Faktor
+  über die Hierarchie, Pose-Bones nicht). Alle 10 Skins durchgelaufen:
+  86–99 KB pro glb, jede Budget-Zeile BESTANDEN, Deformations-Gates als
+  JPEG (PNG→JPEG: 5,8 MB → 320 KB Repo-Gewicht). Demo bekam eine
+  Skin-Leiste (Emoji-Buttons, `?m=<skin>` für Deep-Links); Headless-Sweep
+  über alle 10: Idle+Twerk laden und wechseln, 2 Draw Calls, 75–163 ms
+  Load, null Konsolen-Fehler. Das Einzel-Asset `character-web.glb` ist
+  durch das 10er-Set ersetzt.
+
 ## Web-Asset-Pipeline — Pirat als animiertes Draco-glTF (97 KB)
 
 - **2026-07-19 — 10-Stufen-Auftrag headless umgesetzt, Look bleibt 1:1.**
