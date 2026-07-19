@@ -3,6 +3,29 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Bühnen-Rücknavigation + Boss-Fallback
+
+- **2026-07-19 — „Zurück zur Vor-Bühne farmen" als echter Loop.** Drei Teile:
+  (1) Der Zonen-Strip zeigt NUR erreichte Bühnen (keine Zukunfts-Spoiler)
+  und ist wieder klickbar — `travelTo` (Kern, war nie weg) bekam seine UI
+  zurück; reist man weit zurück, bleibt die Frontier als „… N"-Slot immer
+  erreichbar (sonst käme man nicht mehr zum Boss-Gate). (2) Boss-Timeout
+  wirft jetzt auf die VOR-Bühne zurück (`tickBoss` → zone−1, Frontier
+  bleibt) statt die Boss-Bühne neu zu bevölkern — dort BP farmen, Upgrades
+  kaufen. (3) „👑 Boss herausfordern"-Button (nur an der unbesiegten
+  Frontier-Boss-Bühne): `challengeBoss` überspringt die Rivalen-Welle —
+  der Retry kostet Farm-Zeit, aber kein Neu-Grinden. Der Sim-Bot modelliert
+  exakt das (`retryBossZone`: Welle nur beim ERSTEN Anlauf, Retry per
+  Button), damit die v12-Kalibrierung vergleichbar bleibt; einzige ehrliche
+  Verschiebung: die längste Power-Durststrecke wächst durch die
+  Fallback-Detours von ≤ 90 auf ~95–98 min (Anker neu: 105 min).
+  Stolperfalle im CSS: `.boss-challenge { display:block }` stand später im
+  Sheet als `.hidden` (gleiche Spezifität) und überschrieb das Verstecken —
+  `.boss-challenge.hidden` explizit ergänzt; Overlay brauchte zudem
+  `pointer-events:auto`. Headless bewiesen: Strip 4–8 ohne Zukunft,
+  Rückreise + Theme-Wechsel, Frontier-Rücksprung, Button-Sichtbarkeit in
+  allen drei Zuständen, 0 Page-Errors.
+
 ## Web-Assets für ALLE 10 Playermodels (Goal)
 
 - **2026-07-19 — Pipeline generalisiert, ein Draco-glb pro Skin.**

@@ -82,6 +82,7 @@ import {
   type CombatState,
   MONSTERS_PER_ZONE,
   bossHp,
+  challengeBoss,
   goldFor,
   hit,
   monsterHp,
@@ -223,6 +224,9 @@ interface Sim {
   shards: number;
   /** Epoch-ms until which the Golden-Peach ×3 income boost runs (§6.1). */
   boostUntilMs: number;
+  /** Boss-Bühne eines gescheiterten Gates (0 = keins): der Bot nutzt dort den
+   * „Boss herausfordern"-Button statt die Rivalen-Welle neu zu clearen. */
+  retryBossZone: number;
   /** Epoch-ms the next Golden-Peach spawns (0 = unseeded). */
   nextPeachAtMs: number;
   /** Smoothed gold/sec (EMA) feeding chest BP rewards (§6.2). */
@@ -284,6 +288,7 @@ function newSim(seed: number): Sim {
     pity: createPity(),
     shards: 0,
     boostUntilMs: 0,
+    retryBossZone: 0,
     nextPeachAtMs: 0,
     incomePerSec: 0,
     keysEarned: 0,
@@ -552,6 +557,7 @@ function stepSecond(
       const r = hit(combat, combat.hp);
       sim.gold += Math.floor(r.gold * goldMult);
       combat = r.state;
+      if (wasBoss && r.advancedZone) sim.retryBossZone = 0; // Gate besiegt
       let onFrontier = false;
       if (r.advancedZone && combat.zone > sim.lifetimeMaxZone) {
         const cleared = combat.zone - 1;
@@ -582,7 +588,19 @@ function stepSecond(
       remaining = 0;
     }
   }
-  return combat.boss ? tickBoss(combat, 1).state : combat;
+  if (combat.boss) {
+    const bossZone = combat.zone;
+    const bt = tickBoss(combat, 1);
+    if (bt.failed) sim.retryBossZone = bossZone; // Fallback auf die Vor-Bühne (Kern)
+    combat = bt.state;
+  }
+  // Retry wie ein Spieler: nach einem Fail zurück an der Boss-Bühne angekommen,
+  // den Boss per `challengeBoss` direkt herausfordern (Welle überspringen).
+  if (sim.retryBossZone === combat.zone && !combat.boss) {
+    combat = challengeBoss(combat);
+    if (combat.boss) sim.retryBossZone = 0;
+  }
+  return combat;
 }
 
 /**

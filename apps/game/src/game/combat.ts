@@ -149,17 +149,29 @@ export interface BossTickResult {
 }
 
 /**
- * Advance the boss timer by `dt`. On expiry the boss bounces: the zone's normal
- * rivals respawn (killsThisZone → 0) so the player can farm gold and re-approach
- * the boss when stronger. No zones are lost (never a soft-lock).
+ * Advance the boss timer by `dt`. On expiry the boss bounces the player back to
+ * the PREVIOUS stage (zone − 1, clamped) to farm gold and buy upgrades; the
+ * frontier (`maxZone`) is kept, so the boss stage stays reachable via the zone
+ * strip and the boss can be re-challenged when stronger. Never a soft-lock.
  */
 export function tickBoss(state: CombatState, dt: number): BossTickResult {
   if (!state.boss) return { state, failed: false };
   const bossTimer = state.bossTimer - dt;
   if (bossTimer <= 0) {
-    return { state: spawnFor(state.zone, 0, state.maxZone), failed: true };
+    return { state: spawnFor(Math.max(1, state.zone - 1), 0, state.maxZone), failed: true };
   }
   return { state: { ...state, bossTimer }, failed: false };
+}
+
+/**
+ * Challenge the frontier boss directly (skip the remaining rival wave). Only
+ * meaningful on the highest reached boss stage while its gate is unbeaten —
+ * everywhere else this is a no-op. Skipping the wave is a strictly risky
+ * trade (less farm gold, boss sooner), never an exploit.
+ */
+export function challengeBoss(state: CombatState): CombatState {
+  if (!isBossZone(state.zone) || state.boss || state.zone !== state.maxZone) return state;
+  return spawnFor(state.zone, MONSTERS_PER_ZONE, state.maxZone);
 }
 
 /** Fraction of the boss timer remaining (1..0), for the timer bar. */

@@ -352,7 +352,11 @@ describe('simulateEndless — first Himmelfahrt pacing (M10-AC4)', () => {
       for (let i = 1; i < era.powerMilestones.length; i++) {
         worst = Math.max(worst, era.powerMilestones[i] - era.powerMilestones[i - 1]);
       }
-      expect(worst).toBeLessThanOrEqual(90 * 60);
+      // Boss-Fallback (Goal „zurück zur Vor-Bühne farmen"): jeder gescheiterte
+      // Boss kostet jetzt echte Farm-Zeit auf der schwächeren Vor-Bühne, bevor
+      // der Retry zündet — die längste Durststrecke wächst von ≤ 90 auf
+      // gemessene ~95–98 min. Anker: 105 min.
+      expect(worst).toBeLessThanOrEqual(105 * 60);
     });
   }
 });

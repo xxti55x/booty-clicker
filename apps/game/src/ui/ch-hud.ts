@@ -77,6 +77,7 @@ export class ChHud {
   private readonly prog = byId('zoneProgress');
   private readonly timer = byId('rivalTimer');
   private readonly zoneStrip = byId('zoneStrip');
+  private readonly bossBtn = byId('bossChallenge');
 
   // Cached last-written values (change-detection, no DOM churn).
   private cZone = '';
@@ -92,6 +93,7 @@ export class ChHud {
   private cBoss: boolean | null = null;
   private cCombo = '';
   private cStrip = '';
+  private cChallenge: boolean | null = null;
 
   private setText(el: HTMLElement, next: string, cache: string): string {
     if (next !== cache) el.textContent = next;
@@ -126,6 +128,13 @@ export class ChHud {
 
     this.cRival = this.setText(this.rivalNameEl, rivalName(combat.zone, combat.boss), this.cRival);
     this.updateZoneStrip(combat.zone, combat.maxZone);
+    // „Boss herausfordern": nur an der Frontier-Boss-Bühne, solange ihr Gate
+    // unbesiegt ist und der Boss nicht schon tanzt.
+    const challenge = isBossZone(combat.zone) && !combat.boss && combat.zone === combat.maxZone;
+    if (challenge !== this.cChallenge) {
+      this.cChallenge = challenge;
+      this.bossBtn.classList.toggle('hidden', !challenge);
+    }
     this.frame(combat);
   }
 
@@ -135,24 +144,30 @@ export class ChHud {
    * aktive markiert, Boss-Gates (×5) mit Gold-Rand, kommende Zonen gedimmt.
    */
   private updateZoneStrip(zone: number, frontier: number): void {
-    const start = Math.max(1, zone - 2);
-    const sig = `${start}|${zone}|${frontier}`;
+    // Nur ERREICHTE Bühnen zeigen (nichts Zukünftiges spoilern): das Fenster
+    // endet an der Frontier und jede Bühne ist klickbar — zurückreisen zum
+    // Farmen, wieder vor zur Boss-Bühne.
+    const end = Math.min(frontier, Math.max(zone + 2, 5));
+    const start = Math.max(1, end - 4);
+    const sig = `${start}|${end}|${zone}|${frontier}`;
     if (sig === this.cStrip) return;
     this.cStrip = sig;
-    const slots: string[] = [];
-    for (let z = start; z < start + 5; z++) {
-      const cls = [
-        'zs',
-        z === zone ? 'active' : '',
-        z % 5 === 0 ? 'boss' : '',
-        z > frontier ? 'lockd' : '',
-      ]
+    const slot = (z: number): string => {
+      const cls = ['zs', z === zone ? 'active' : 'go', z % 5 === 0 ? 'boss' : '']
         .filter(Boolean)
         .join(' ');
-      slots.push(
-        `<span class="${cls}"
-           title="${z % 5 === 0 ? `Boss-Bühne ${z}` : `Bühne ${z}`}">${islandSvg(z)}<span>${z}</span></span>`,
-      );
+      const label = z % 5 === 0 ? `Boss-Bühne ${z}` : `Bühne ${z}`;
+      const title = z === zone ? label : `Zu ${label} reisen`;
+      return `<button type="button" class="${cls}" data-z="${z}"
+           title="${title}">${islandSvg(z)}<span>${z}</span></button>`;
+    };
+    const slots: string[] = [];
+    for (let z = start; z <= end; z++) slots.push(slot(z));
+    // Weit zurückgereist? Die Frontier bleibt IMMER erreichbar — als letzter
+    // Slot hinter einer „…"-Lücke (der Weg zurück zum Boss-Gate).
+    if (frontier > end) {
+      if (frontier > end + 1) slots.push('<span class="zs-gap">…</span>');
+      slots.push(slot(frontier));
     }
     this.zoneStrip.innerHTML = slots.join('');
   }

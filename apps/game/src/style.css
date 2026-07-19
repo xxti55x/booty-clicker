@@ -2314,8 +2314,8 @@ body {
   margin-bottom: 6px;
   pointer-events: auto;
 }
-/* Reine Anzeige (Goal-Umbau): Bühnen sind nicht mehr wählbar — kein Cursor,
-   kein Hover; der Fortschritt läuft automatisch. */
+/* Nur ERREICHTE Bühnen (keine Zukunft) — jede ist klickbar: zurückreisen zum
+   Farmen, wieder vor bis zur Frontier. */
 .zs {
   position: relative;
   display: flex;
@@ -2327,9 +2327,18 @@ body {
   background: rgba(0, 0, 0, 0.28);
   border: 2px solid rgba(255, 210, 120, 0.22);
   border-radius: 9px;
+  font: inherit;
+  cursor: pointer;
   transition:
     transform 0.12s,
     border-color 0.12s;
+}
+.zs.go:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 210, 120, 0.55);
+}
+.zs.active {
+  cursor: default;
 }
 .zs svg {
   width: 34px;
@@ -2362,6 +2371,39 @@ body {
   border: 5px solid transparent;
   border-top-color: var(--gold-base);
 }
-.zs.lockd {
-  opacity: 0.35;
+.zs-gap {
+  align-self: center;
+  font-weight: 800;
+  color: var(--parch);
+  opacity: 0.6;
+  padding: 0 2px;
+}
+.boss-challenge {
+  display: block;
+  width: 100%;
+  pointer-events: auto;
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 800;
+  color: #2a1504;
+  background: linear-gradient(180deg, #ffe08a, #f5b93c);
+  border: 2px solid #8a5a16;
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: 0 2px 0 #8a5a16;
+  transition:
+    transform 0.1s,
+    box-shadow 0.1s;
+}
+.boss-challenge.hidden {
+  display: none; /* .hidden steht früher im Sheet — gleiche Spezifität, hier explizit */
+}
+.boss-challenge:hover {
+  transform: translateY(-1px);
+}
+.boss-challenge:active {
+  transform: translateY(1px);
+  box-shadow: 0 0 0 #8a5a16;
 }

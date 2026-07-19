@@ -87,7 +87,16 @@ import {
   tierCritChanceBonus,
   tierCritMultBonus,
 } from './game/combo';
-import { type CombatState, goldFor, hit, monsterHp, spawnFor, tickBoss } from './game/combat';
+import {
+  challengeBoss,
+  type CombatState,
+  goldFor,
+  hit,
+  monsterHp,
+  spawnFor,
+  tickBoss,
+  travelTo,
+} from './game/combat';
 import {
   accrueSugar,
   beatWindowBonus,
@@ -824,11 +833,37 @@ function updateBackground(force = false): void {
   audio.setBackground(bg); // idempotent for a same-key (variant-only) rebuild
 }
 
-// ---------- Bühnen-Progression (Goal-Umbau) ----------
-// Bühnen sind NICHT mehr wählbar: kein Zonen-Klick, keine Travel-Pfeile. Die
-// Progression läuft von selbst — jede Bühne clearen, Boss-Gates besiegen, und
-// alle 5 Bühnen (= direkt nach einem Bosskampf) wechselt das Theme automatisch
-// (`bgForZone`); der Zonen-Strip ist eine reine Anzeige.
+// ---------- Bühnen-Progression & Rück-Navigation ----------
+// Vorwärts läuft die Progression von selbst (Bühne clearen, Boss-Gate, Theme-
+// Wechsel alle 5 Bühnen via `bgForZone`). Der Zonen-Strip zeigt NUR erreichte
+// Bühnen (nichts Zukünftiges) und ist klickbar: zurückreisen zum Farmen, wieder
+// vor bis zur Frontier. Scheitert ein Boss, wirft er auf die Vor-Bühne zurück —
+// dort BP farmen, Upgrades kaufen und den Boss per Button erneut herausfordern.
+document.getElementById('zoneStrip')?.addEventListener('click', (e) => {
+  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-z]');
+  if (!el) return;
+  const z = Number(el.dataset.z);
+  if (!Number.isFinite(z) || z === combat.zone || z > combat.maxZone || z < 1) return;
+  const back = z < combat.zone;
+  combat = travelTo(combat, z);
+  updateBackground();
+  syncEntity();
+  hud.update(state, combat, dps, clickDmg);
+  toasts.show(
+    '🗺',
+    `Bühne ${combat.zone}`,
+    back ? 'Farm-Modus — vorwärts geht’s jederzeit wieder.' : 'Zurück an der Front!',
+  );
+});
+document.getElementById('bossChallenge')?.addEventListener('click', () => {
+  const next = challengeBoss(combat);
+  if (next === combat) return;
+  combat = next;
+  syncEntity();
+  hud.update(state, combat, dps, clickDmg);
+  toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
+  audio.unlockJingle();
+});
 
 // ---------- combat glue ----------
 /** Ein Frame zeichnen: Bloom-Kette im high-Preset, sonst direkt (Roadmap L). */
@@ -1610,8 +1645,13 @@ function loop(nowMs: number): void {
     if (bt.failed) {
       state.stats.bossTimeouts += 1;
       state.stats.bossStreak = 0; // a timeout breaks the no-timeout boss streak (§7.3)
-      toasts.show('⏱', 'Zeit um!', 'Farm die Bühne & fordere den Boss erneut.');
+      toasts.show(
+        '⏱',
+        'Zeit um!',
+        `Zurück auf Bühne ${combat.zone} — farm BP, kauf Upgrades, dann fordere den Boss erneut.`,
+      );
       audio.bossLose();
+      updateBackground(); // eine Bühne zurück kann ein Theme zurück bedeuten
       syncEntity(); // the boss bounced us — back to the normal rival body
     }
   }
