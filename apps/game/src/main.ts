@@ -85,15 +85,7 @@ import {
   tierCritChanceBonus,
   tierCritMultBonus,
 } from './game/combo';
-import {
-  type CombatState,
-  goldFor,
-  hit,
-  monsterHp,
-  spawnFor,
-  tickBoss,
-  travelTo,
-} from './game/combat';
+import { type CombatState, goldFor, hit, monsterHp, spawnFor, tickBoss } from './game/combat';
 import {
   accrueSugar,
   beatWindowBonus,
@@ -179,12 +171,16 @@ import { World } from './world/backgrounds';
 const MOVE_SWITCH_CLICKS = 18;
 
 const BG_BY_TIER = ['club', 'synth', 'beach', 'space'] as const;
+// Bühnen-Auto-Rotation (Goal): Das Theme wechselt ALLE 5 Bühnen — und weil jede
+// 5. Bühne ein Boss-Gate ist (BOSS_EVERY), liegt jeder Theme-Wechsel exakt
+// HINTER einem Bosskampf (5→6, 10→11, …). Manuelles Wählen gibt es nicht mehr.
+const ZONES_PER_BG = 5;
 const bgForZone = (zone: number): (typeof BG_BY_TIER)[number] =>
-  BG_BY_TIER[Math.floor((zone - 1) / 10) % BG_BY_TIER.length];
+  BG_BY_TIER[Math.floor((zone - 1) / ZONES_PER_BG) % BG_BY_TIER.length];
 // Wave 3: scenery recolour lap — hue-shifts each stage's palette every full
-// 40-zone tour, in step with the rival's entityVariant, so endless laps 2, 3, …
-// never look identical to lap 1. Purely visual (kulisse buffs/tiers untouched).
-const bgVariant = (zone: number): number => Math.floor(Math.max(0, zone - 1) / 40);
+// 20-zone tour (4 Themes × 5 Bühnen), in step with the rival's entityVariant,
+// so endless laps 2, 3, … never look identical. Purely visual.
+const bgVariant = (zone: number): number => Math.floor(Math.max(0, zone - 1) / 20);
 
 // ---------- scene / engine ----------
 const canvas = document.getElementById('app') as HTMLCanvasElement;
@@ -822,27 +818,11 @@ function updateBackground(force = false): void {
   audio.setBackground(bg); // idempotent for a same-key (variant-only) rebuild
 }
 
-// ---------- farm / travel (G10, §4.4) ----------
-// The zone stepper drives the pure `travelTo` (clamped to 1..maxZone). Travelling
-// below the frontier lets you farm a cleared zone; the ⏫ button snaps back to it.
-document.getElementById('zoneStrip')?.addEventListener('click', (e) => {
-  const slot = (e.target as HTMLElement).closest<HTMLElement>('.zs');
-  if (slot?.dataset.z) travel(Number(slot.dataset.z));
-});
-
-function travel(toZone: number): void {
-  combat = travelTo(combat, toZone);
-  updateBackground();
-  syncEntity(); // the rival body follows the farmed zone's tier
-  syncMaxZones();
-  hud.update(state, combat, dps, clickDmg);
-  persist();
-}
-document.getElementById('travelPrev')?.addEventListener('click', () => travel(combat.zone - 1));
-document.getElementById('travelNext')?.addEventListener('click', () => travel(combat.zone + 1));
-document
-  .getElementById('travelFrontier')
-  ?.addEventListener('click', () => travel(Math.max(state.runMaxZone, combat.maxZone)));
+// ---------- Bühnen-Progression (Goal-Umbau) ----------
+// Bühnen sind NICHT mehr wählbar: kein Zonen-Klick, keine Travel-Pfeile. Die
+// Progression läuft von selbst — jede Bühne clearen, Boss-Gates besiegen, und
+// alle 5 Bühnen (= direkt nach einem Bosskampf) wechselt das Theme automatisch
+// (`bgForZone`); der Zonen-Strip ist eine reine Anzeige.
 
 // ---------- combat glue ----------
 const particleTmp = new THREE.Vector3();

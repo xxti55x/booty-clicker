@@ -91,9 +91,10 @@ export const ENTITY_THEMES: Record<BackgroundKey, EntityThemeConfig> = {
   },
 };
 
-/** Recolour-lap index for endless depth: zones 1–40 lap 0, 41–80 lap 1, … */
+/** Recolour-lap index for endless depth: zones 1–20 lap 0, 21–40 lap 1, … (one
+ * full 4-Theme × 5-Bühnen tour per lap, in lockstep with main's `bgVariant`). */
 export function entityVariant(zone: number): number {
-  return Math.floor(Math.max(0, zone - 1) / 40);
+  return Math.floor(Math.max(0, zone - 1) / 20);
 }
 
 export interface EntityBuildOpts {

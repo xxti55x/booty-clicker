@@ -81,7 +81,9 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   renderer.toneMappingExposure = 1.45; // Goal: alle Bühnen deutlich heller
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x0a0a10, 0.022);
+  // Dichte auf die Halbraum-Kamera abgestimmt (Distanz ~45–50): die Insel bleibt
+  // klar, nur der Hintergrund staffelt in den Dunst.
+  scene.fog = new THREE.FogExp2(0x0a0a10, 0.012);
   // Enges FOV = Tele-Kompression: die Insel liest als flaches Diorama
   // (Casual-Idle-Look), nicht als 3D-Raum mit gewölbter Nahkante.
   const camera = new THREE.PerspectiveCamera(26, 1, 0.1, 220);

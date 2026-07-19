@@ -1079,62 +1079,6 @@ body {
 .zone-kind:empty {
   display: none;
 }
-/* Farm/travel stepper (§4.4). The HUD is pointer-events:none; re-enable here. */
-.travel {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  pointer-events: auto;
-}
-.tvbtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  color: var(--gold-ink);
-  background: var(--gold-btn);
-  border: 2px solid var(--gold-line);
-  border-radius: 50%;
-  padding: 0;
-  cursor: pointer;
-  box-shadow:
-    0 2px 0 var(--gold-deep),
-    inset 0 1px 0 rgba(255, 245, 210, 0.8);
-  transition:
-    transform 0.06s,
-    box-shadow 0.06s;
-}
-.tvbtn:active:not(:disabled) {
-  transform: translateY(2px);
-  box-shadow: 0 0 0 var(--gold-deep);
-}
-.tvbtn .ui-ic {
-  display: block;
-  width: 12px;
-  height: 12px;
-  stroke-width: 3.4;
-}
-.tvbtn.frontier {
-  background: linear-gradient(180deg, #d8f59a 0%, var(--acc) 50%, #7fb322 100%);
-  border-color: #4a6b12;
-  box-shadow:
-    0 2px 0 var(--acc-deep),
-    inset 0 1px 0 rgba(245, 255, 220, 0.8);
-}
-.tvbtn.frontier:active:not(:disabled) {
-  box-shadow: 0 0 0 var(--acc-deep);
-}
-.tvbtn:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-.tv-info {
-  font-size: 11px;
-  color: #e8d9b6;
-  margin: 0 0 1px;
-  text-shadow: 1px 1px 0 rgba(40, 22, 6, 0.6);
-}
 .gild {
   display: inline-block;
   margin-left: 6px;
@@ -2365,6 +2309,8 @@ body {
   margin-bottom: 6px;
   pointer-events: auto;
 }
+/* Reine Anzeige (Goal-Umbau): Bühnen sind nicht mehr wählbar — kein Cursor,
+   kein Hover; der Fortschritt läuft automatisch. */
 .zs {
   position: relative;
   display: flex;
@@ -2376,7 +2322,6 @@ body {
   background: rgba(0, 0, 0, 0.28);
   border: 2px solid rgba(255, 210, 120, 0.22);
   border-radius: 9px;
-  cursor: pointer;
   transition:
     transform 0.12s,
     border-color 0.12s;
@@ -2414,8 +2359,4 @@ body {
 }
 .zs.lockd {
   opacity: 0.35;
-  cursor: default;
-}
-.zs:not(.lockd):hover {
-  border-color: var(--gold-base);
 }
