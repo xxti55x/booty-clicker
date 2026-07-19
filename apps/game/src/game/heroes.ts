@@ -69,8 +69,12 @@ export interface HeroConfig {
   readonly rhythm: 0 | 1 | 2;
 }
 
-/** Cost multiplier per owned level (Clicker Heroes uses ~1.07). */
-export const HERO_COST_GROWTH = 1.07;
+/**
+ * Cost multiplier per owned level (Clicker Heroes uses ~1.07; v12 Goal-Nerf
+ * hebt auf 1.075 — jede Leiter wird spürbar steiler, die Progression tiefer
+ * hinein deutlich langsamer).
+ */
+export const HERO_COST_GROWTH = 1.075;
 
 /**
  * Buyable-ability schedule: first at Lv 25, then one every 50 levels
@@ -110,12 +114,13 @@ export const SPECIAL_IDLE = 0.2;
 /**
  * v10 idle retune: paid abilities removed ~×8 of the old free milestone power,
  * which over-nerfed the idle side (a 1-cps player relies on crew DPS almost
- * alone). This factor gives the DPS lines ~×2 back — actives feel it only via
- * the 20 % click share, so the deliberate active-progression slowdown stays.
+ * alone); v10 gave the DPS lines ×2 back. v12 Goal-Nerf („a lot slower") nimmt
+ * davon wieder ein Viertel: ×1.5 — actives feel it only via the 20 % click
+ * share, so the click:idle shape stays.
  */
-export const DPS_TUNE = 2;
-/** Ability price = the level-cost at its unlock level × this factor. */
-export const ABILITY_COST_MULT = 6;
+export const DPS_TUNE = 1.5;
+/** Ability price = the level-cost at its unlock level × this factor (v12: 6 → 9). */
+export const ABILITY_COST_MULT = 9;
 
 /** Permanent per-gild DPS multiplier for a crew member (×1.25 each, spec §4.3.4). */
 export const GILD_DPS_MULT = 1.25;

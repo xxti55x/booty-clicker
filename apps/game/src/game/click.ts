@@ -26,9 +26,14 @@ export const CRIT_CHANCE = 0.2;
 export const CRIT_MULT = 5;
 /** Hard cap on crit chance (base 20 % + at most +20 %, spec §4.2.1). */
 export const CRIT_CHANCE_CAP = 0.4;
-/** Combo multiplier gained per stack (+2 %). */
-export const COMBO_STEP = 0.02;
-/** Stacks beyond this no longer raise the multiplier (cap ×2). */
+/**
+ * Combo multiplier gained per stack (+0.4 %). Goal-Nerf v12: die Combo gibt nur
+ * noch „ein bisschen mehr Schaden" — ×1.2 am Cap statt der alten ×2-Skalierung.
+ * Die Combo-TIERS (Krit-/Beat-Fenster-Perks, Juice) bleiben unverändert; nur der
+ * direkte Schadens-Multiplikator ist flach.
+ */
+export const COMBO_STEP = 0.004;
+/** Stacks beyond this no longer raise the multiplier (cap ×1.2). */
 export const COMBO_CAP = 50;
 /** Seconds a combo survives without a click before it soft-decays (§4.2.2). */
 export const COMBO_WINDOW_S = 1.5;

@@ -24,8 +24,8 @@ const HP_BASE = 10;
 const HP_GROWTH = 1.6;
 /** A boss has this many times a normal rival's HP. */
 const BOSS_HP_FACTOR = 10;
-/** Gold (BP) per kill ≈ HP / this. */
-const GOLD_DIVISOR = 15;
+/** Gold (BP) per kill ≈ HP / this (v12 Goal-Nerf: 15 → 20, Einkommen gedrosselt). */
+const GOLD_DIVISOR = 20;
 /** Bosses drop this many times the per-kill gold. */
 const BOSS_GOLD_FACTOR = 12;
 

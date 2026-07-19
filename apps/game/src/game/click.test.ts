@@ -22,12 +22,12 @@ import {
 } from './click';
 
 describe('comboMult', () => {
-  it('is 1 at 0 stacks, 2 at the cap, and clamps beyond the cap', () => {
+  it('is 1 at 0 stacks, 1.2 at the cap, and clamps beyond the cap (v12)', () => {
     expect(comboMult(0)).toBe(1);
-    expect(comboMult(25)).toBeCloseTo(1.5, 10);
-    expect(comboMult(COMBO_CAP)).toBe(2);
-    expect(comboMult(COMBO_CAP + 50)).toBe(2); // > cap ⇒ still 2
-    expect(comboMult(10_000)).toBe(2);
+    expect(comboMult(25)).toBeCloseTo(1.1, 10);
+    expect(comboMult(COMBO_CAP)).toBeCloseTo(1.2, 9);
+    expect(comboMult(COMBO_CAP + 50)).toBeCloseTo(1.2, 9); // > cap ⇒ still ×1.2
+    expect(comboMult(10_000)).toBeCloseTo(1.2, 9);
   });
 });
 
@@ -65,8 +65,9 @@ describe('effectiveClick', () => {
   it('multiplies base by combo and crit', () => {
     expect(effectiveClick({ baseClick: 10, combo: 0, crit: false })).toBe(10);
     expect(effectiveClick({ baseClick: 10, combo: 0, crit: true })).toBe(50);
-    expect(effectiveClick({ baseClick: 10, combo: COMBO_CAP, crit: false })).toBe(20);
-    expect(effectiveClick({ baseClick: 10, combo: COMBO_CAP, crit: true })).toBe(100);
+    // v12 Combo-Nerf: Cap ×1.2 statt ×2 („nur ein bisschen mehr Schaden").
+    expect(effectiveClick({ baseClick: 10, combo: COMBO_CAP, crit: false })).toBeCloseTo(12, 9);
+    expect(effectiveClick({ baseClick: 10, combo: COMBO_CAP, crit: true })).toBeCloseTo(60, 9);
   });
 
   it('folds in an optional extraMult (the M8+ beat/frenzy/gear hook)', () => {

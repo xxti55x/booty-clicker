@@ -18,8 +18,9 @@ export const PEACH_MIN_S = 90;
 export const PEACH_MAX_S = 240;
 /** How long a peach stays clickable once spawned (seconds). */
 export const PEACH_VISIBLE_S = 8;
-/** Income-boost multiplier while a caught peach's boost is active (×3, §6.1). */
-export const PEACH_BOOST = 3;
+/** Income-boost multiplier while a caught peach's boost is active (v12 Goal-Nerf:
+ * ×3 → ×2 — der Pfirsich war der dominante Beschleuniger der Gesamt-Progression). */
+export const PEACH_BOOST = 2;
 /** Boost duration once a peach is caught (seconds, §6.1). */
 export const PEACH_BOOST_S = 60;
 /** Chance a caught peach also drops a 🔑 (spec §6.1: 25 %). */
