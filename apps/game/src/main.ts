@@ -7,6 +7,7 @@ import { AudioEngine } from './audio/engine';
 import { buildCharacter, type CharacterInstance } from './character/rig';
 import { buildEntity, entityVariant, type EntityInstance } from './character/entity';
 import { DT, renderCheeks, stepPhysics } from './character/physics';
+import { applyAccents, createAccents, stepAccents, triggerClickAccent } from './character/accents';
 import { SKINS } from './character/skins';
 import { Choreographer } from './choreo/moves';
 import { createControls, frameCamera } from './engine/camera';
@@ -123,7 +124,7 @@ import {
   offlineCapS,
 } from './game/heaven';
 import { canAscend } from './game/ascension';
-import { CREW, type CrewLevels } from './game/heroes';
+import { CREW, type CrewLevels, type CrewSpecialBonuses, crewSpecialBonuses } from './game/heroes';
 import { buildAchievementCtx, newlyUnlocked } from './game/ch-achievements';
 import {
   type LoginReward,
@@ -260,9 +261,13 @@ combat = withBossTimerBonus(combat);
 
 let dps = 0;
 let clickDmg = 1;
+// Crew-wide special-ability bonuses (v11) — cached alongside dps/clickDmg since
+// they only change on the same events (ability buy, prestige, import).
+let crewSpec: CrewSpecialBonuses = crewSpecialBonuses(state.crewUp);
 function recompute(): void {
   dps = dpsOf(state);
   clickDmg = clickDamageOf(state);
+  crewSpec = crewSpecialBonuses(state.crewUp);
 }
 recompute();
 
@@ -286,13 +291,16 @@ function earnKeys(n: number): void {
 
 /**
  * Effective Ekstase charge threshold, lowered by Ekstasius (§4.6) + Gyrator gear
- * charge-reduction (§5). The combined reduction is clamped below 1 so a full
- * Diamant `allPct` fold can never drive the meter to zero (≥ 10 charge always).
+ * charge-reduction (§5) + Twerk-Legende/Kosmische-Entität `ekstase`-specials
+ * (v11). The combined reduction is clamped below 1 so a full Diamant `allPct`
+ * fold can never drive the meter to zero (≥ 10 charge always).
  */
 function ekstaseChargeMax(): number {
   const reduction = Math.min(
     0.9,
-    ancientEkstaseChargeReduction(state.ancients) + frenzyChargeReduction(state.gear),
+    ancientEkstaseChargeReduction(state.ancients) +
+      frenzyChargeReduction(state.gear) +
+      crewSpec.ekstaseChargeRed,
   );
   return ABILITY_CHARGE_MAX * (1 - reduction);
 }
@@ -330,6 +338,7 @@ const world = new World(scene, skyMat, floorMat, glowSprite);
 const audio = new AudioEngine();
 const beatTracker = new BeatTracker();
 const choreo = new Choreographer();
+const accents = createAccents(); // Klick→Pose-Akzente (transient, nie persistiert)
 // The equipped skin drives the 3D rig now (§5) — no longer always classic.
 let char: CharacterInstance = buildCharacter(scene, SKINS[state.gear.skin]);
 // Show-Spin (Goal: „der Spieler dreht sich manchmal, wie die Gegner"): applyPose
@@ -739,10 +748,15 @@ function tabUnlocked(key: string): boolean {
       return state.stats.ascensions > 0 || Object.keys(state.ancients).length > 0;
     case 'heaven': // 🌈 Himmel (L2): once a Himmelfahrt is reachable or done
       return state.heaven.hpfLifetime > 0 || canHimmelfahrt(state.heaven, state.rsLifetime);
-    case 'transcend': // 🔮 Transzendenz (L3): only if enabled AND reachable/done
+    case 'transcend': // 🔮 Transzendenz (L3): only if enabled AND the player is in L2
+      // Reveal with the FIRST Himmelfahrt (hpfLifetime > 0), not first at the 100-HPF
+      // gate: the panel's locked state shows the „Lebenszeit-HPF X / 100"-Fortschritt,
+      // which is useless if the tab only appears once the gate is already met.
       return (
         !!transcendPanel &&
-        (state.transcend.teLifetime > 0 || canTranscend(state.transcend, state.heaven.hpfLifetime))
+        (state.heaven.hpfLifetime > 0 ||
+          state.transcend.teLifetime > 0 ||
+          canTranscend(state.transcend, state.heaven.hpfLifetime))
       );
     case 'chest': // 🎁 Truhen: once the first key/chest has ever dropped
       return state.stats.keysEarned > 0 || state.stats.chestsOpened > 0 || state.chests.keys > 0;
@@ -928,8 +942,11 @@ function onKillProgress(
 
 function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void {
   const wasBoss = combat.boss;
-  // Glutaeus Maximus (§4.6) + Tyrann/Krönung gear (§5) boost damage dealt to a boss.
-  const effDmg = wasBoss ? dmg * ancientBossDmgMult(state.ancients) * bossDmgMult(state.gear) : dmg;
+  // Glutaeus Maximus (§4.6) + Tyrann/Krönung gear (§5) + the crew's `boss`-special
+  // ability tiers (v11 — Türsteher/Orbital-Station) boost damage dealt to a boss.
+  const effDmg = wasBoss
+    ? dmg * ancientBossDmgMult(state.ancients) * bossDmgMult(state.gear) * crewSpec.bossMult
+    : dmg;
   const r = hit(combat, effDmg);
   // A newly-spawned boss gets Chronilla's extra timer seconds.
   combat = r.bossSpawned ? withBossTimerBonus(r.state) : r.state;
@@ -961,32 +978,40 @@ function doShake(x?: number, y?: number): void {
   const onBeat = isOnBeat(
     choreo.phase,
     phaseVelocity(drive),
-    // Beatrix (§4.6) + Neon/Synth gear (§5) widen the on-beat window on top of the tier bonus.
+    // Beatrix (§4.6) + Neon/Synth gear (§5) + DJ/KI-Cluster `beat`-specials (v11)
+    // widen the on-beat window on top of the tier bonus.
     beatWindowMs(
       tierBeatWindowBonusMs(curTier) +
         ancientBeatWindowBonusMs(state.ancients) +
-        beatWindowBonus(state.gear),
+        beatWindowBonus(state.gear) +
+        crewSpec.beatWindowMs,
     ),
   );
 
-  // Wackelias (§4.6) + Showmaster/Club gear (§5) widen the combo grace window.
+  // Wackelias (§4.6) + Showmaster/Club gear (§5) + Hype-Girl/Viral-Team
+  // `combo`-specials (v11) widen the combo grace window.
   comboState = comboOnClick(
     comboState,
     onBeat,
-    COMBO_WINDOW_S + ancientComboWindowBonus(state.ancients) + comboWindowBonus(state.gear),
+    COMBO_WINDOW_S +
+      ancientComboWindowBonus(state.ancients) +
+      comboWindowBonus(state.gear) +
+      crewSpec.comboWindowS,
   );
   drive = Math.min(drive + 1.2, 6);
 
   const tier = comboTier(comboState.stacks);
-  // Cheeksana (§4.6) + Disco gear (§5) + permanent crit-chance tokens (§6.2) add crit
-  // chance on top of the combo-tier bonus (still 40 % cap after summing them all).
+  // Cheeksana (§4.6) + Disco gear (§5) + permanent crit-chance tokens (§6.2) +
+  // Choreograph/Hologramm `crit`-specials (v11) add crit chance on top of the
+  // combo-tier bonus (still 40 % cap after summing them all).
   const crit = rollCrit(
     rng.next(),
     critChance(
       tierCritChanceBonus(tier) +
         ancientCritChanceBonus(state.ancients) +
         critChanceBonus(state.gear) +
-        permTokenCritChance(state.permTokens),
+        permTokenCritChance(state.permTokens) +
+        crewSpec.critChance,
     ),
   );
   if (crit) {
@@ -1010,8 +1035,9 @@ function doShake(x?: number, y?: number): void {
     baseClick: clickDmg,
     combo: comboState.stacks,
     crit,
-    // Combo-tier + Disco/Lava gear (§5) crit-mult; Neon-Ninja gear widens on-beat ×.
-    critMultBonus: tierCritMultBonus(tier) + critMultBonus(state.gear),
+    // Combo-tier + Disco/Lava gear (§5) + Booty-Boss/A-Promi `critdmg`-specials
+    // (v11) raise the crit multiplier; Neon-Ninja gear widens on-beat ×.
+    critMultBonus: tierCritMultBonus(tier) + critMultBonus(state.gear) + crewSpec.critDmg,
     // Permanent „+1 % Krit-Schaden" tokens scale the whole crit multiplier (§6.2).
     critMultFactor: permTokenCritMult(state.permTokens),
     extraMult: beatBonus(onBeat, onBeatMultBonus(state.gear)) * frenzyMult(state.ability, now),
@@ -1026,6 +1052,9 @@ function doShake(x?: number, y?: number): void {
     c.vy += (Math.random() * 2 - 1) * 2.6;
     c.vx += (Math.random() * 2 - 1) * 2.6;
   });
+  // Klick → Tanz: the dancer answers every shake with a hip-pop (tier/beat-
+  // scaled, crit = arm flare) — see `character/accents.ts`.
+  triggerClickAccent(accents, tier, crit, onBeat);
   if (effects.particles) {
     char.rig.pelvis.getWorldPosition(particleTmp);
     particles.burst(particleTmp.x, particleTmp.y, particleTmp.z, burstCount(tier));
@@ -1612,8 +1641,11 @@ function loop(nowMs: number): void {
 
   // physics
   acc += dt;
+  let physicsStepped = false;
   while (acc >= DT) {
     drive = stepPhysics(DT, char.rig, char.cheeks, choreo, drive);
+    stepAccents(accents, DT);
+    physicsStepped = true;
     {
       // Show-Spin: kurzer 360°-Turn alle ~12 s (Ende = Anfang ⇒ nahtlos).
       const cyc = t0 % 12;
@@ -1621,6 +1653,14 @@ function loop(nowMs: number): void {
       playerSpin.rotation.y = Math.PI * 2 * (k * k * (3 - 2 * k));
     }
     acc -= DT;
+  }
+  if (physicsStepped) {
+    // Klick-Akzente: additiv NACH dem Physik-Schritt (applyPose schreibt absolute
+    // Werte, der nächste Step resettet also sauber; ohne Step keine Re-Anwendung,
+    // sonst würde der Offset doppeln); Matrix-Refresh, damit renderCheeks die
+    // akzentuierte Pelvis-Orientierung sieht.
+    applyAccents(char.rig, accents, frenzy, t0);
+    char.rig.root.updateMatrixWorld(true);
   }
   renderCheeks(char.rig, char.cheeks);
   particles.update(dt);

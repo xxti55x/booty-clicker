@@ -2299,6 +2299,38 @@ body {
   opacity: 0.55;
   cursor: not-allowed;
 }
+/* v11 kind tints: the pulsing buy slot hints its ability art by hue (power stays
+   the default gold chrome). */
+.ab.ready.k-gold {
+  color: #6b4a00;
+  background: linear-gradient(180deg, #ffe9a3, #f7c948);
+}
+.ab.ready.k-crit,
+.ab.ready.k-critdmg {
+  color: #7a1f11;
+  background: linear-gradient(180deg, #ffc4a3, #f78a48);
+  border-color: #b65a2a;
+}
+.ab.ready.k-boss {
+  color: #4a1a5e;
+  background: linear-gradient(180deg, #e3c2f0, #b97fd6);
+  border-color: #8a4aa8;
+}
+.ab.ready.k-combo {
+  color: #1d5c2a;
+  background: linear-gradient(180deg, #c9ecb4, #8fd06a);
+  border-color: #5a9a42;
+}
+.ab.ready.k-beat {
+  color: #12475e;
+  background: linear-gradient(180deg, #b8e6f5, #6ec3e3);
+  border-color: #3a8aa8;
+}
+.ab.ready.k-ekstase {
+  color: #7a1148;
+  background: linear-gradient(180deg, #ffc0dd, #f76ab0);
+  border-color: #b62a72;
+}
 .ab.lk {
   color: #9a814f;
   font-family: var(--display);

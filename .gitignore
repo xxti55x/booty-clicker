@@ -88,5 +88,9 @@ Desktop.ini
 *.seed
 *.pid.lock
 
+# ---- Blender-Animations-Pipeline (Roh-Frames; nur die GIFs sind Artefakte) ----
+models/renders/.animframes/
+tools/blender/__pycache__/
+
 # ---- Claude Code (agent worktrees + local session state) ----
 .claude/

@@ -66,13 +66,17 @@ export function buildCharacter(
   const O = <M extends THREE.Mesh>(m: M, thickness?: number): M =>
     withOutline(sh(m), { color: line, thickness });
 
+  // Bones carry stable names so exported glbs stay animatable outside the game
+  // (the Blender pipeline keyframes nodes by these names).
   const root = new THREE.Group();
+  root.name = 'root';
   scene.add(root);
   root.position.y = BASE_ROOT_Y;
   root.scale.setScalar(boss ? 1.12 : 1);
 
   // ---------- PELVIS ----------
   const pelvis = new THREE.Group();
+  pelvis.name = 'pelvis';
   pelvis.position.y = 0.9;
   root.add(pelvis);
   if (robot) {
@@ -90,14 +94,17 @@ export function buildCharacter(
     pelvis.add(belt);
   }
   const anchorL = new THREE.Object3D();
+  anchorL.name = 'anchorL';
   anchorL.position.set(0.19 * bulk, -0.02, -0.26);
   pelvis.add(anchorL);
   const anchorR = new THREE.Object3D();
+  anchorR.name = 'anchorR';
   anchorR.position.set(-0.19 * bulk, -0.02, -0.26);
   pelvis.add(anchorR);
 
   // ---------- SPINE / TORSO ----------
   const spine = new THREE.Group();
+  spine.name = 'spine';
   spine.position.y = 0.2;
   pelvis.add(spine);
   if (robot) {
@@ -160,6 +167,7 @@ export function buildCharacter(
   neck.position.y = 1.42;
   spine.add(neck);
   const head = new THREE.Group();
+  head.name = 'head';
   head.position.y = 1.66;
   // Cartoon proportions: oversized head (physics only writes head.rotation,
   // so scaling the bone is silhouette-safe).
@@ -438,6 +446,7 @@ export function buildCharacter(
   // ---------- ARMS (shoulder→elbow→hand) ----------
   function arm(s: number): ArmRig {
     const shoulder = new THREE.Group();
+    shoulder.name = s > 0 ? 'shoulderL' : 'shoulderR';
     shoulder.position.set(s * shW, 1.24, 0);
     spine.add(shoulder);
     const upperMat = host ? suitT : skinT;
@@ -451,6 +460,7 @@ export function buildCharacter(
       shoulder.add(delt);
     }
     const elbow = new THREE.Group();
+    elbow.name = s > 0 ? 'elbowL' : 'elbowR';
     elbow.position.y = -0.8;
     shoulder.add(elbow);
     if (robot) {
@@ -500,6 +510,7 @@ export function buildCharacter(
   // ---------- LEGS (hip→knee→foot) ----------
   function leg(s: number): LegRig {
     const thigh = new THREE.Group();
+    thigh.name = s > 0 ? 'thighL' : 'thighR';
     thigh.position.set(s * 0.22 * bulk, -0.02, 0);
     pelvis.add(thigh);
     const lw = robot ? 0.14 : 0.16 * bulk;
@@ -519,6 +530,7 @@ export function buildCharacter(
       thigh.add(lower);
     }
     const knee = new THREE.Group();
+    knee.name = s > 0 ? 'kneeL' : 'kneeR';
     knee.position.y = -1.02;
     thigh.add(knee);
     if (robot) {
@@ -626,6 +638,7 @@ export function buildCharacter(
   const cheekR = robot ? 0.34 : boss ? 0.5 : 0.44;
   function mkCheek(anchor: THREE.Object3D, s: number): Cheek {
     const g = new THREE.Group();
+    g.name = s > 0 ? 'cheekL' : 'cheekR';
     const m = O(new THREE.Mesh(new THREE.SphereGeometry(cheekR, 36, 36), shortsT), 0.022);
     m.scale.set(1.06, 1.0, 0.94);
     g.add(m);

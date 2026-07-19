@@ -42,6 +42,12 @@
  *    `travelTo` re-farming of cleared zones are not modeled. Every one of these can
  *    only ADD power / speed the bot, so leaving them out keeps E1–E4 honest *lower*
  *    bounds (the real game is at least this fast), never optimistic ones.
+ *  · **v11 crew specials** (even ability tiers): the `gold` specials fold into
+ *    `goldMultiplierNow` and the `crit`/`critdmg` specials into `critFactor` — real
+ *    economy/EV effects the bot earns exactly as the game grants them. The
+ *    `boss`/`combo`/`beat`/`ekstase` specials are utility the bot does NOT model
+ *    (same lower-bound rationale as the boss-damage mults above); it still BUYS
+ *    them, bundle-valued as gates to the next power tier (see `buyCrewGreedy`).
  */
 import { applyAscension, soulMult, soulsForMaxZone } from './ascension';
 import {
@@ -97,8 +103,10 @@ import {
 } from './heaven';
 import {
   CREW,
+  abilityMult,
   abilityTiersUnlocked,
   clickDamageRaw,
+  crewSpecialBonuses,
   heroDps,
   nextAbility,
   nextLevelCost,
@@ -297,16 +305,22 @@ function comboFactor(config: SimConfig): number {
  * fatter token pool lifts the EV exactly as the derived click pipeline does. Casual
  * (no-juice) configs assume no crit at all (crit = 1) — the §4.8 casual baseline.
  */
-function critFactor(config: SimConfig, permTokens: PermTokens): number {
+function critFactor(
+  config: SimConfig,
+  permTokens: PermTokens,
+  crewUp: Record<string, number> = {},
+): number {
   if (!config.juice) return 1;
   const econ = econOn(config);
+  // v11: the crew's `crit`/`critdmg` special ability tiers feed the same EV.
+  const spec = crewSpecialBonuses(crewUp);
   // Crit chance is hard-capped at 40 % in the real click pipeline (`click.critChance`,
   // §4.2.1); mirror the cap here so a fat token pool can't lift the EV past the game.
   const chance = Math.min(
     CRIT_CHANCE_CAP,
-    CRIT_CHANCE + (econ ? permTokenCritChance(permTokens) : 0),
+    CRIT_CHANCE + spec.critChance + (econ ? permTokenCritChance(permTokens) : 0),
   );
-  const mult = CRIT_MULT * (econ ? permTokenCritMult(permTokens) : 1);
+  const mult = (CRIT_MULT + spec.critDmg) * (econ ? permTokenCritMult(permTokens) : 1);
   return 1 + chance * (mult - 1);
 }
 
@@ -427,13 +441,19 @@ function tickPeach(sim: Sim, nowMs: number): void {
   }
 }
 
-/** Full BP (gold) multiplier this second: Peachiel × gold-tokens × live peach ×3. */
+/**
+ * Full BP (gold) multiplier this second: Peachiel × gold-tokens × live peach ×3 ×
+ * the crew's `gold`-special ability tiers (v11 — part of the core crew layer, so
+ * it folds even in the no-economy calibration configs, exactly as the game does).
+ */
 function goldMultiplierNow(sim: Sim, config: SimConfig, nowMs: number): number {
-  if (!econOn(config)) return ancientGoldMult(sim.ancients);
+  const crewGold = crewSpecialBonuses(sim.crewUp).goldMult;
+  if (!econOn(config)) return ancientGoldMult(sim.ancients) * crewGold;
   return (
     ancientGoldMult(sim.ancients) *
     permTokenGoldMult(sim.permTokens) *
-    incomeMultiplier(sim.boostUntilMs, nowMs)
+    incomeMultiplier(sim.boostUntilMs, nowMs) *
+    crewGold
   );
 }
 
@@ -568,6 +588,16 @@ function stepSecond(
  * comparing next LEVELS and unlocked-but-unbought ABILITIES (v10) across the
  * whole crew. The Boss click line uses `heroClickValue` (its output is click
  * damage — weighted like DPS here, which matches how the drivers click ~always).
+ *
+ * v11: EVEN ability tiers are themed specials with no direct output of their own
+ * (gold/crit feed the economy via `goldMultiplierNow`/`critFactor` instead), so a
+ * special's marginal output is 0. Since abilities buy strictly in order, a special
+ * would dead-lock the member's lane for a pure output-greedy bot — it is therefore
+ * valued as the GATE to the following power tier: the bundle (special + next power)
+ * is priced together against the power tier's output gain, and when that bundle
+ * wins the ROI race the special is bought first (the power tier follows in the next
+ * greedy iteration). Utility value of the specials themselves is deliberately NOT
+ * credited here — the bot stays an honest lower bound.
  */
 function buyCrewGreedy(sim: Sim): void {
   const outputAt = (cfg: (typeof CREW)[number], lvl: number, ups: number): number => {
@@ -575,7 +605,7 @@ function buyCrewGreedy(sim: Sim): void {
     // Click hero's line counts as output too — the sim drivers click constantly,
     // so 1 click-damage ≈ CLICKS_PER_SEC dps; ROI-comparing them 1:1 is close
     // enough for a greedy bot and keeps this loop hero-agnostic.
-    if (cfg.click) return lvl <= 0 ? 0 : cfg.baseDps * lvl * (1 + ups) * Math.pow(1.25, g);
+    if (cfg.click) return lvl <= 0 ? 0 : cfg.baseDps * lvl * abilityMult(ups) * Math.pow(1.25, g);
     return heroDps(cfg, lvl, g, ups);
   };
   let guard = 5000;
@@ -597,8 +627,16 @@ function buyCrewGreedy(sim: Sim): void {
       }
       const ab = nextAbility(cfg, lvl, ups);
       if (ab.unlocked && ab.cost <= sim.gold && ups < abilityTiersUnlocked(lvl)) {
-        const gain = outputAt(cfg, lvl, ups + 1) - outputAt(cfg, lvl, ups);
-        const roi = gain / ab.cost;
+        const direct = outputAt(cfg, lvl, ups + 1) - outputAt(cfg, lvl, ups);
+        let roi = direct / ab.cost;
+        if (direct <= 0) {
+          // Special tier: bundle-value it with the next power tier it unlocks.
+          const ab2 = nextAbility(cfg, lvl, ups + 1);
+          if (ab2.unlocked && ups + 1 < abilityTiersUnlocked(lvl)) {
+            const gain2 = outputAt(cfg, lvl, ups + 2) - outputAt(cfg, lvl, ups);
+            if (ab.cost + ab2.cost <= sim.gold) roi = gain2 / (ab.cost + ab2.cost);
+          }
+        }
         if (roi > bestRoi) {
           bestRoi = roi;
           bestBuy = { kind: 'ability', id: cfg.id, cost: ab.cost };
@@ -628,7 +666,7 @@ function economyStep(
   const econ = econOn(config);
   const nowMs = globalSec * 1000;
   if (econ) tickPeach(sim, nowMs);
-  const crit = critFactor(config, sim.permTokens);
+  const crit = critFactor(config, sim.permTokens, sim.crewUp);
   const dmg = damagePerSecond(sim, config, combo, crit);
   const goldMult = goldMultiplierNow(sim, config, nowMs);
   const luck = ancientChestLuckBonus(sim.ancients);
@@ -840,7 +878,7 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
       lastAdvanceT = globalT;
       ascensions++;
       if (opts.fullPrestige) {
-        const crit = critFactor(config, sim.permTokens);
+        const crit = critFactor(config, sim.permTokens, sim.crewUp);
         buyAncientsGreedy(sim, config, combo, crit); // §4.6 soul sink → deeper re-climbs
       }
       if (gained <= 0) {
@@ -999,7 +1037,7 @@ export function simulateAscensionEra(config: SimConfig, opts: EraOptions): EraRe
     if (combat.maxZone > prevFrontier) lastAdvanceT = globalT;
     if (combat.maxZone > maxBestZone) maxBestZone = combat.maxZone;
 
-    const crit = critFactor(config, sim.permTokens);
+    const crit = critFactor(config, sim.permTokens, sim.crewUp);
     const power = damagePerSecond(sim, config, combo, crit);
     maxPower = Math.max(maxPower, power);
     if (milestonePower <= 0) {
@@ -1128,7 +1166,7 @@ export function simulateFloatGuard(config: SimConfig, opts: FloatGuardOptions): 
     audit(rsLifetime);
     const hpf = hpfForRsLifetime(rsLifetime);
     const heaven: HeavenState = { ...createHeaven(), hpf, hpfLifetime: hpf };
-    const crit = critFactor(config, sim.permTokens);
+    const crit = critFactor(config, sim.permTokens, sim.crewUp);
     const power = powerFor(
       sim.crew,
       sim.crewUp,

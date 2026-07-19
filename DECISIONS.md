@@ -3,6 +3,54 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Choreografie komplett + Blender-Animations-Renders (Goal)
+
+- **2026-07-19 — Moves vervollständigt + Klick→Tanz-Akzente.** Die 5 Prototyp-
+  Moves artikulieren jetzt den ganzen Körper (Arm-Pumps, Kopf-Bobs, Knie-Pulse
+  auf zuvor eingefrorenen Kanälen), plus 3 neue Routinen (Welle, Booty-Slam,
+  Diva-Turn). Klick-Interaktion als ADDITIVE Akzent-Ebene
+  (`character/accents.ts`) NACH `stepPhysics`: Hip-Pop pro Klick (Combo-Tier-
+  skaliert, On-Beat-Bonus, Krit = Arm-Flare, Ekstase = Dauer-Shimmy) — der
+  unantastbare Physik-Kontrakt schreibt absolute Werte und resettet die
+  Offsets damit jeden Step von selbst; ein Guard verhindert Doppel-Anwendung
+  auf Frames ohne Physik-Step.
+- **2026-07-19 — Animations-Renders IN Blender, ohne Choreo-Duplikation.**
+  `dump_poses.mjs` bündelt das echte `choreo/moves.ts` per esbuild und samplet
+  Pose-Frames (12 fps, Phase-Rate 2.2 wie das Spiel); `render_anim.py`
+  keyframt sie mit dem exakten `applyPose`-Mapping auf die (neu benannten)
+  Rig-Nodes des Charakter-glb. Stolperfallen dokumentiert: der glTF-Importer
+  konvertiert JEDEN Node nach Z-up ((x,y,z)→(x,−z,y)); Rotationen per
+  Konjugation mit Rx(+90°); three-Euler 'XYZ' ≠ Blender 'XYZ' — deshalb die
+  exakte three.js-Quaternion-Formel statt Euler-Moduswahl. Die Po-Backen
+  laufen durch die Spiel-Federphysik (k 190/c 7/GRAV 3.2, 120-Hz-Substeps,
+  1 s Warm-up) statt handanimiert. Ergebnis: 8 Loop-GIFs (Cycles + Denoise,
+  Studio-Rig + Holzboden) in `models/renders/anim/`.
+
+## v11 — Themen-Specials statt uniform „+100 % DPS" (Goal)
+
+- **2026-07-19 — Gerade Ability-Tiers = Themen-Special des Mitglieds.** Spieler-
+  Feedback: „langweilig, dass alle Abilitys immer +100 % DPS sind." Neu: ungerade
+  Tiers (1, 3, 5, …) bleiben die klassische Verstärkung (+100 % Eigen-Output,
+  mult = 1 + n_power), jedes GERADE Tier gewährt das crew-weite Themen-Special
+  des Mitglieds — DJ Wumms/KI-Cluster +12 ms Beat-Fenster, Hype-Girl/Viral-Team
+  +0,2 s Combo-Fenster, Türsteher/Orbital-Station +25 % Boss-Schaden,
+  Influencerin/Produzent/Tycoon +25 % BP, Choreograph/Hologramm +1,5 %
+  Krit-Chance, Booty-Boss/A-Promi +0,5× Krit-Schaden, Legende/Kosmische Entität
+  −5 % Ekstase-Ladung. Die Specials folden in exakt dieselben Glue-Hooks wie die
+  Twerk-Ahnen (`crewSpecialBonuses` in `recompute` gecacht); Combo/Beat sind
+  gedeckelt (+3 s / +60 ms), Krit-Chance behält den 40-%-Cap, Ekstase teilt den
+  90-%-Clamp. Der `crewUp`-Zähler-Save bleibt unverändert gültig (Kind ist reine
+  Funktion von (Mitglied, Tier)) — **keine Schema-Migration**.
+- **2026-07-19 — Sim-Bot: Bundle-Bewertung statt Special-Deadlock.** Abilitys
+  kaufen strikt in Reihenfolge; ein Special hat für den Output-greedy Bot
+  Grenzwert 0 und würde die Lane des Mitglieds für immer blockieren. Der Bot
+  bewertet ein Special daher als TOR zum nächsten Power-Tier (Bundle-ROI über
+  beide Kosten); `gold` foldet real in `goldMultiplierNow`, `crit`/`critdmg` in
+  `critFactor` — `boss`/`combo`/`beat`/`ekstase` bleiben unmodelliert
+  (Lower-Bound-Prinzip wie die Boss-Mults). Envelope-Neuverankerung: Bank-Ramp
+  508→1295→2074 (v10: 508→2074, ×3-Assertion → ×2), z75 weiter in Run 2,
+  t10 0,93 min unverändert, t30 12,9/16,3 min (in ±25-%-Toleranz).
+
 ## Blender-Refine-Pass — Modelle final, Szenerie als Dioramen (Goal)
 
 - **2026-07-18 — `tools/blender/refine_models.py`: Veredelung IN Blender, reproduzierbar.**

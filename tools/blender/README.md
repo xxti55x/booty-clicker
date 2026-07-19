@@ -35,6 +35,8 @@ CPU-Preview-Renders (Cycles) sind möglich, aber langsam.
 | `export_all.cjs`    | Exportiert ALLE Spielmodelle → `models/*.glb` (vite + headless) |
 | `refine_models.py`  | Blender-Refine: Weld/Normals/Smooth, Bühnen-Dioramen, Renders   |
 | `verify_models.py`  | Blender-Import-Roundtrip über `models/**/*.glb` (bpy)           |
+| `dump_poses.mjs`    | Samplet die echten Choreo-Moves (`moves.ts`) → Pose-Frame-JSON  |
+| `render_anim.py`    | Keyframt + rendert die Moves in Blender → `renders/anim/*.gif`  |
 | `export_example.py` | Minimalbeispiel: Modell in bpy bauen → .glb                     |
 
 ## Benutzung (Pipeline-Reihenfolge)
@@ -43,8 +45,17 @@ CPU-Preview-Renders (Cycles) sind möglich, aber langsam.
 node tools/blender/export_all.cjs        # 1. Roh-Export aus den Spiel-Buildern
 python3 tools/blender/refine_models.py   # 2. Blender-Veredelung + models/renders/*.jpg
 python3 tools/blender/verify_models.py   # 3. in Blender gegenprüfen
+node tools/blender/dump_poses.mjs /tmp/poses.json     # 4. Moves → Pose-Frames
+python3 tools/blender/render_anim.py /tmp/poses.json  # 5. Choreo-GIFs (Cycles)
 python3 tools/blender/export_example.py out/model.glb
 ```
+
+`render_anim.py` braucht Pillow (`pip install pillow`) für die GIF-Montage und
+setzt die **benannten Rig-Nodes** des Charakter-Exports voraus (`root`,
+`pelvis`, `spine`, `head`, `shoulderL/R`, `elbowL/R`, `thighL/R`, `kneeL/R`,
+`anchorL/R`, `cheekL/R` — seit dem Naming-Pass in `character/rig.ts`). Die
+Po-Backen werden nicht gekeyframt-geraten, sondern mit der Spiel-Federphysik
+(k = 190, c = 7, GRAV = 3.2, 120-Hz-Substeps) simuliert.
 
 Regeln für Assets, die ins Spiel gehen:
 

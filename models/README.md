@@ -13,6 +13,8 @@ die volle Kette neu laufen lassen:
 node tools/blender/export_all.cjs        # 1. vite dev + headless Chromium → Roh-.glb
 python3 tools/blender/refine_models.py   # 2. Blender: Refine + Dioramen + Renders
 python3 tools/blender/verify_models.py   # 3. Blender-Import-Roundtrip (bpy)
+node tools/blender/dump_poses.mjs /tmp/poses.json    # 4. Choreo-Moves → Pose-Frames
+python3 tools/blender/render_anim.py /tmp/poses.json # 5. Blender: Animations-GIFs
 ```
 
 **Blender-Refine (Schritt 2)** macht die Dateien fertig — keine Nacharbeit
@@ -34,6 +36,15 @@ Diorama-Inhalt).
 `renders/` enthält den Cycles-Render-Nachweis jedes Modells (Studio-Rig,
 3-Punkt-Licht, OIDN-Denoise, Auto-Framing über die Prop-Kern-BBox).
 
+**Animations-Renders (`renders/anim/`).** Alle acht Twerk-Moves der
+Choreografie als in Blender gerenderte Loop-GIFs (Cycles, 12 fps, 4 s):
+`dump_poses.mjs` samplet die ECHTEN Move-Funktionen (`choreo/moves.ts` — keine
+Duplikation der Tanz-Mathematik), `render_anim.py` keyframet sie per
+`applyPose`-Mapping auf die benannten Rig-Nodes des Charakter-glb, simuliert
+die Po-Backen mit derselben Feder-Dämpfer-Physik wie das Spiel (k = 190,
+c = 7, 120-Hz-Substeps) und rendert die Sequenz im Studio-Setup mit
+Holzbühnen-Boden.
+
 ## Inhalt (22 Modelle)
 
 | Ordner        | Inhalt                                                          |
@@ -51,7 +62,10 @@ Diorama-Inhalt).
   die Farben bleiben erhalten, das Cel-Shading entsteht im Spiel (oder in
   Blender per Shader-Nodes) neu.
 - **Animation/Physik** — Rigs sind als eingefrorene Pose exportiert; die
-  Twerk-Physik (`stepPhysics`/`renderCheeks`) lebt nur zur Laufzeit.
+  Twerk-Physik (`stepPhysics`/`renderCheeks`) lebt nur zur Laufzeit. Die
+  Rig-Nodes tragen aber stabile Namen (`root`/`pelvis`/`spine`/`head`/
+  `shoulderL`/…), sodass `render_anim.py` (und jedes DCC-Tool) sie animieren
+  kann — die fertigen Choreo-Renders liegen in `renders/anim/`.
 
 ## In Blender öffnen
 
