@@ -123,23 +123,37 @@ export class Crew {
       const gildBadge =
         gild > 0 ? `<span class="gild" title="×1.25 pro Vergoldung">🏅${gild}</span>` : '';
       const label = level === 0 ? 'Anheuern' : `+${count === 0 ? 1 : count}`;
-      // Kaufbare Fähigkeit (§goal v10): buy button once unlocked, else progress bar.
+      // Kaufbare Fähigkeiten als SLOT-REIHE (Goal: kein Riesen-Button — gekaufte
+      // Tiers mit Haken, der nächste verfügbare leuchtet klickbar, kommende zeigen
+      // ihr Level; Stil-Referenz: klassische Idle-Upgrade-Slots in der Heldenkarte).
       const ab = level > 0 ? nextAbility(cfg, level, ups) : null;
       let abRow = '';
       if (ab) {
+        const CHECK =
+          '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12.5l5 5L19.5 7" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        const SPARK =
+          '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.4 13.9 10l6.7 2-6.7 2L12 20.6 10.1 14l-6.7-2 6.7-2Z" fill="currentColor"/></svg>';
+        const slots: string[] = [];
+        for (let t = 1; t <= ups; t++) {
+          slots.push(
+            `<span class="ab done" title="Fähigkeit ${t}: +100% ${outLabel} — gekauft">${CHECK}</span>`,
+          );
+        }
         if (ab.unlocked) {
           const can = ab.cost <= s.gold;
-          abRow = `<button class="btn ab-buy ${can ? '' : 'locked'}" data-ab="${cfg.id}" type="button">
-              Fähigkeit: +100% ${outLabel} · ${fmt(ab.cost)} BP
-            </button>`;
+          slots.push(
+            `<button class="ab ready ${can ? '' : 'poor'}" data-ab="${cfg.id}" type="button"
+               title="Fähigkeit ${ab.tier}: +100% ${outLabel} kaufen">${SPARK}</button>`,
+          );
+          slots.push(
+            `<span class="ab-cost ${can ? '' : 'bad'}">+100% ${outLabel} · ${fmt(ab.cost)} BP</span>`,
+          );
         } else {
-          const prev = ab.tier === 1 ? 0 : ab.level - 50;
-          const pct = Math.round(((level - prev) / (ab.level - prev)) * 100);
-          abRow = `<div class="ms-bar" title="Fähigkeit ${ab.tier} ab Lv ${ab.level}">
-              <div class="ms-fill" style="width:${pct}%"></div>
-            </div>
-            <div class="ms-txt">Fähigkeit ${ab.tier} (+100% ${outLabel}) ab Lv ${ab.level}</div>`;
+          slots.push(
+            `<span class="ab lk" title="Fähigkeit ${ab.tier} (+100% ${outLabel}) ab Lv ${ab.level}">Lv${ab.level}</span>`,
+          );
         }
+        abRow = `<div class="ab-slots">${slots.join('')}</div>`;
       }
       rows.push(
         `<div class="item ${affordable ? '' : 'locked'}" data-id="${cfg.id}">
@@ -159,7 +173,7 @@ export class Crew {
       const cfg = CREW.find((c) => c.id === id);
       if (cfg) el.addEventListener('click', () => this.buy(cfg));
     }
-    for (const el of Array.from(list.querySelectorAll<HTMLButtonElement>('.ab-buy'))) {
+    for (const el of Array.from(list.querySelectorAll<HTMLButtonElement>('.ab.ready'))) {
       const id = el.dataset.ab;
       const cfg = CREW.find((c) => c.id === id);
       if (cfg)

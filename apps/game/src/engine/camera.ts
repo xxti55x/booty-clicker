@@ -28,7 +28,7 @@ export function frameCamera(
   // Portrait: der sichtbare Streifen zwischen HUD und Bottom-Sheet ist klein —
   // hier gilt die NAHE Duo-Einstellung (Insel-Totale ist Landscape/Desktop).
   const radius = portrait ? 19 : 38;
-  const target = portrait ? { x: 1.4, y: -1.3, z: 1.5 } : { x: 5.0, y: -1.1, z: 1.5 };
+  const target = portrait ? { x: 1.4, y: -1.3, z: 1.5 } : { x: 6.4, y: -1.5, z: 3.2 };
   camera.position.set(
     target.x + radius * Math.sin(PHI) * Math.sin(THETA),
     target.y + radius * Math.cos(PHI),

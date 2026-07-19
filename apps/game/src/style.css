@@ -2258,3 +2258,132 @@ body {
     left: calc(50% + 20px);
   }
 }
+
+/* ---- Fähigkeits-Slots (Goal: Highlight statt Riesen-Button) ---- */
+.ab-slots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+}
+.ab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 2px solid var(--parch-line);
+  background: rgba(67, 46, 18, 0.08);
+  padding: 0;
+  flex: none;
+}
+.ab svg {
+  width: 15px;
+  height: 15px;
+}
+.ab.done {
+  color: #2e7d32;
+  border-color: #7fae6a;
+  background: rgba(126, 190, 90, 0.22);
+}
+.ab.ready {
+  color: var(--gold-ink);
+  background: var(--gold-btn);
+  border-color: var(--gold-line);
+  cursor: pointer;
+  animation: abpulse 1.1s ease-in-out infinite;
+}
+.ab.ready.poor {
+  animation: none;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.ab.lk {
+  color: #9a814f;
+  font-family: var(--display);
+  font-size: 8.5px;
+  font-weight: 800;
+  opacity: 0.75;
+}
+.ab-cost {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #96660c;
+}
+.ab-cost.bad {
+  color: #b0764a;
+}
+@keyframes abpulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 207, 94, 0.75);
+  }
+  55% {
+    box-shadow: 0 0 0 6px rgba(255, 207, 94, 0);
+  }
+}
+
+/* ---- Bühnen-Bildleiste (Goal: Zonen als Insel-Thumbnails) ---- */
+.zonestrip {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 4px;
+  margin-bottom: 6px;
+  pointer-events: auto;
+}
+.zs {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  width: 46px;
+  padding: 3px 2px 2px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 2px solid rgba(255, 210, 120, 0.22);
+  border-radius: 9px;
+  cursor: pointer;
+  transition:
+    transform 0.12s,
+    border-color 0.12s;
+}
+.zs svg {
+  width: 34px;
+  height: 23px;
+  display: block;
+}
+.zs span {
+  font-family: var(--display);
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--parch);
+  line-height: 1;
+  text-shadow: 1px 1px 0 rgba(40, 22, 6, 0.7);
+}
+.zs.boss {
+  border-color: rgba(255, 207, 94, 0.65);
+}
+.zs.active {
+  transform: scale(1.16);
+  border-color: var(--gold-base);
+  background: rgba(255, 207, 94, 0.16);
+  z-index: 1;
+}
+.zs.active::before {
+  content: '';
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--gold-base);
+}
+.zs.lockd {
+  opacity: 0.35;
+  cursor: default;
+}
+.zs:not(.lockd):hover {
+  border-color: var(--gold-base);
+}
