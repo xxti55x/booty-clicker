@@ -301,7 +301,9 @@ export function dpsOf(state: DerivedInput): number {
     heavenGlobalMult(hpf) *
     (state.transcend ? transcendGlobalMult(state.transcend.te) : 1) *
     (state.gear ? dpsGearMult(state.gear) : 1) *
-    (state.permTokens ? permTokenDpsMult(state.permTokens) : 1)
+    (state.permTokens ? permTokenDpsMult(state.permTokens) : 1) *
+    // v11.1 `idle`-Special („Groove"): hebt wie das Idle-Gear NUR die DPS-Seite.
+    (state.crewUp ? crewSpecialBonuses(state.crewUp).idleMult : 1)
   );
 }
 

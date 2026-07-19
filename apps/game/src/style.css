@@ -2275,6 +2275,11 @@ body {
   background: linear-gradient(180deg, #ffc0dd, #f76ab0);
   border-color: #b62a72;
 }
+.ab.ready.k-idle {
+  color: #114a44;
+  background: linear-gradient(180deg, #b4ecdd, #5ecdb0);
+  border-color: #2a8a72;
+}
 .ab.lk {
   color: #9a814f;
   font-family: var(--display);

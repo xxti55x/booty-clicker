@@ -3,6 +3,31 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## v11.1 — Klick-Verlust-Bugfix + Tier-Rhythmen (Goal)
+
+- **2026-07-19 — „Fähigkeit kaufen braucht Doppelklick" = DOM-Swap unterm
+  Finger.** Der 0.25-s-Idle-Tick rendert den offenen Shop-Tab per
+  `innerHTML` neu; da Idle-Gold die Anzeige fast jeden Tick ändert, wurde der
+  DOM bis zu 4×/s getauscht. Lag ein Mousedown auf dem alten Button und der
+  Swap vor dem Mouseup, feuerte der Click auf einen gemeinsamen Vorfahren —
+  Kauf verloren (oder schlimmer: der Zeilen-Handler levelte statt der
+  Fähigkeit). Dreifach-Fix in `crew.ts`: (1) EIN delegierter Click-Handler auf
+  dem persistenten Container statt Listener pro Zeile, (2) Render-Aufschub,
+  solange ein Pointer in der Liste gedrückt ist (Flush per `setTimeout(0)`
+  NACH dem Click-Dispatch), (3) Signatur-Skip identischer Rebuilds. Headless
+  bewiesen: 350-ms-Press kauft beim ersten Mal, 10 Schnellklicks zählen alle.
+- **2026-07-19 — Tier-Rhythmen + Groove-Special (Abwechslung).** Statt überall
+  striktem Power/Special-Wechsel folgt jedes Mitglied einem von drei
+  TIER-RHYTHMEN (`TIER_PATTERNS`: P-S-P-S, P-P-S-S „Kraft-Rush", P-S-S-P
+  „Utility-Klammer") — alle mit 2 P + 2 S pro 4er-Zyklus (Langzeit-Balance
+  identisch, nur die Reihenfolge liest sich pro Heldenkarte anders) und alle
+  mit Power auf Tier 1 (schützt die frühe Pacing-Wand). Neue Special-Art
+  `idle` („Groove", +20 % Crew-DPS, nur Idle-Seite — P1-schonend wie das
+  Idle-Gear) für Musik-Produzent + KI-Choreo-Cluster. Sim: das Special-Bundle
+  scannt jetzt durch BIS ZU ZWEI Specials in Folge zum nächsten Power-Tier
+  (sonst Deadlock der Kauf-Lane bei P-P-S-S/P-S-S-P); `gold`/`crit`/`idle`
+  folden real in Income/EV/DPS. Envelope hält ohne Neuverankerung (512 Tests).
+
 ## Auto-Bühnen, Halbraum-Zentrierung, Themen-Inseln + Texturen (Goal)
 
 - **2026-07-19 — Bühnen nicht mehr wählbar, Wechsel nur nach Boss.** Zonen-Strip
