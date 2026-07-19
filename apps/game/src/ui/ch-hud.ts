@@ -42,6 +42,30 @@ function rivalName(zone: number, boss: boolean): string {
  * click hot-path and the per-frame loop never rebuild DOM needlessly. The moving
  * HP bar + boss timer are refreshed cheaply per frame via `frame()`.
  */
+/** Kulissen-Tier je Zone (10er-Blöcke) — Spiegel der main.ts-Rotation, rein fürs Bild. */
+const STRIP_THEMES = ['club', 'synth', 'beach', 'space'] as const;
+function stripTheme(zone: number): (typeof STRIP_THEMES)[number] {
+  return STRIP_THEMES[Math.floor((zone - 1) / 10) % STRIP_THEMES.length];
+}
+/** Insel-Thumbnail-Farben je Kulisse (Oberseite / Unterseite). */
+const STRIP_COLORS: Record<(typeof STRIP_THEMES)[number], [string, string]> = {
+  club: ['#8b5cf6', '#4c2f8a'],
+  synth: ['#d65cd0', '#7a2f8a'],
+  beach: ['#eed28a', '#3aa0c9'],
+  space: ['#8a8ac9', '#3a3a6a'],
+};
+/** Mini-Insel-SVG für die Zonen-Bildleiste (Goal: Bühnen als Bild, nicht nur Text). */
+function islandSvg(zone: number): string {
+  const [top, side] = STRIP_COLORS[stripTheme(zone)];
+  return (
+    `<svg viewBox="0 0 44 30" aria-hidden="true">` +
+    `<ellipse cx="22" cy="12" rx="19" ry="8.5" fill="${top}"/>` +
+    `<path d="M4 13c3 5 10 8 18 8s15-3 18-8l-3 6-4 4-6-2-3 5-4-5-6 2-5-4z" fill="${side}"/>` +
+    `<path d="M13 21l2 5 3-4zM26 22l3 5 3-6z" fill="#5e421f"/>` +
+    `</svg>`
+  );
+}
+
 export class ChHud {
   private readonly zone = byId('zone');
   private readonly zoneKind = byId('zoneKind');
@@ -58,6 +82,7 @@ export class ChHud {
   private readonly travelPrev = byId('travelPrev') as HTMLButtonElement;
   private readonly travelNext = byId('travelNext') as HTMLButtonElement;
   private readonly travelFrontier = byId('travelFrontier') as HTMLButtonElement;
+  private readonly zoneStrip = byId('zoneStrip');
 
   // Cached last-written values (change-detection, no DOM churn).
   private cZone = '';
@@ -73,6 +98,7 @@ export class ChHud {
   private cBoss: boolean | null = null;
   private cCombo = '';
   private cTravel = '';
+  private cStrip = '';
 
   private setText(el: HTMLElement, next: string, cache: string): string {
     if (next !== cache) el.textContent = next;
@@ -123,6 +149,35 @@ export class ChHud {
     this.travelPrev.disabled = combat.zone <= 1;
     this.travelNext.disabled = combat.zone >= frontier;
     this.travelFrontier.disabled = !farming;
+    this.updateZoneStrip(combat.zone, frontier);
+  }
+
+  /**
+   * Bühnen-Bildleiste (Goal): fünf Insel-Thumbnails um die aktuelle Zone, die
+   * aktive markiert, Boss-Zonen (×5) mit Gold-Rand, hinter der Frontier gesperrt.
+   * Slots tragen data-z — der Klick-Travel ist in main.ts delegiert.
+   */
+  private updateZoneStrip(zone: number, frontier: number): void {
+    const start = Math.max(1, zone - 2);
+    const sig = `${start}|${zone}|${frontier}`;
+    if (sig === this.cStrip) return;
+    this.cStrip = sig;
+    const slots: string[] = [];
+    for (let z = start; z < start + 5; z++) {
+      const cls = [
+        'zs',
+        z === zone ? 'active' : '',
+        z % 5 === 0 ? 'boss' : '',
+        z > frontier ? 'lockd' : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      slots.push(
+        `<button class="${cls}" data-z="${z}" type="button" ${z > frontier ? 'disabled' : ''}
+           title="${z % 5 === 0 ? `Boss-Bühne ${z}` : `Bühne ${z}`}">${islandSvg(z)}<span>${z}</span></button>`,
+      );
+    }
+    this.zoneStrip.innerHTML = slots.join('');
   }
 
   /** Cheap per-frame refresh of the moving bits (HP bar + boss timer/progress). */

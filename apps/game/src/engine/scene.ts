@@ -160,9 +160,12 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   // stage-neutral cartoon-braun — die Insel liest als konstante Heimatbühne,
   // nur ihr „Belag" wechselt mit der Kulisse.
   const ISLAND_R = 6.4;
+  // Insel-Zentrum = DUO-Mitte (Spieler 0/0, Rivale ~2.9/3.6): beide stehen
+  // mittig auf der Insel, die Kamera zentriert Insel UND Duo zugleich.
+  const ISLAND_C = { x: 1.4, z: 1.7 };
   const floor = new THREE.Mesh(new THREE.CircleGeometry(ISLAND_R, 56), floorMat);
   floor.rotation.x = -Math.PI / 2;
-  floor.position.y = -2.4;
+  floor.position.set(ISLAND_C.x, -2.4, ISLAND_C.z);
   floor.receiveShadow = true;
   scene.add(floor);
   {
@@ -183,12 +186,12 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
       new THREE.CylinderGeometry(ISLAND_R, ISLAND_R * 0.88, 1.5, 56, 1, true),
       earth,
     );
-    rim.position.y = -3.15;
+    rim.position.set(ISLAND_C.x, -3.15, ISLAND_C.z);
     scene.add(rim);
     // Deckel gegen Durchgucken von schräg unten.
     const cap = new THREE.Mesh(new THREE.CircleGeometry(ISLAND_R * 0.9, 40), earthDark);
     cap.rotation.x = Math.PI / 2;
-    cap.position.y = -3.9;
+    cap.position.set(ISLAND_C.x, -3.9, ISLAND_C.z);
     scene.add(cap);
     // Hängende Fels-Zapfen (deterministischer Ring, größere Brocken zur Mitte).
     for (let i = 0; i < 16; i++) {
@@ -201,9 +204,75 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
       );
       spike.rotation.x = Math.PI;
       spike.rotation.y = a * 2.3;
-      spike.position.set(Math.cos(a) * rr, -3.9 - size * 0.75, Math.sin(a) * rr);
+      spike.position.set(
+        ISLAND_C.x + Math.cos(a) * rr,
+        -3.9 - size * 0.75,
+        ISLAND_C.z + Math.sin(a) * rr,
+      );
       scene.add(spike);
     }
+  }
+
+  // Hintergrund-Füllung (Goal: kein leerer Void hinter der Insel): ferne
+  // schwebende Mini-Inseln mit Gras-Deckel + Fels-Zapfen und puffige
+  // Toon-Wolken. Stage-neutral wie die Hauptinsel; der Nebel staffelt die Tiefe.
+  {
+    const grass = new THREE.MeshToonMaterial({
+      color: 0x7fb64a,
+      emissive: 0x2e4a16,
+      emissiveIntensity: 0.35,
+    });
+    const earthB = new THREE.MeshToonMaterial({
+      color: 0x7d5a33,
+      emissive: 0x4a3418,
+      emissiveIntensity: 0.45,
+    });
+    const cloudMat = new THREE.MeshToonMaterial({
+      color: 0xffffff,
+      emissive: 0x9aa2c0,
+      emissiveIntensity: 0.35,
+    });
+    const miniIsland = (x: number, y: number, z: number, r: number): void => {
+      const top = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.92, r * 0.28, 22), grass);
+      top.position.set(x, y, z);
+      scene.add(top);
+      const under = new THREE.Mesh(new THREE.ConeGeometry(r * 0.8, r * 1.5, 8), earthB);
+      under.rotation.x = Math.PI;
+      under.position.set(x, y - r * 0.85, z);
+      scene.add(under);
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2 + r;
+        const s2 = r * (0.28 + 0.1 * i);
+        const sp = new THREE.Mesh(new THREE.ConeGeometry(s2 * 0.7, s2 * 2, 6), earthB);
+        sp.rotation.x = Math.PI;
+        sp.position.set(x + Math.cos(a) * r * 0.55, y - r * 0.5 - s2, z + Math.sin(a) * r * 0.55);
+        scene.add(sp);
+      }
+    };
+    miniIsland(-9.5, -3.6, 14, 2.1);
+    miniIsland(13.5, -5.2, 11, 1.5);
+    miniIsland(-13, -1.8, 4, 1.2);
+    miniIsland(9, -6.5, 18, 2.6);
+    const cloud = (x: number, y: number, z: number, r: number): void => {
+      const g = new THREE.Group();
+      for (const [ox, oz, rr] of [
+        [-1.15, 0, 0.75],
+        [0, 0.32, 1.0],
+        [1.2, 0, 0.7],
+      ] as const) {
+        const b = new THREE.Mesh(new THREE.SphereGeometry(r * rr, 14, 10), cloudMat);
+        b.scale.set(1, 0.72, 0.66);
+        b.position.set(ox * r, oz * r, 0);
+        g.add(b);
+      }
+      g.position.set(x, y, z);
+      scene.add(g);
+    };
+    cloud(-8, 2.6, 12, 1.2);
+    cloud(12, 4.2, 15, 1.5);
+    cloud(-13.5, 5.4, 6, 1.0);
+    cloud(5, 6.4, 20, 1.8);
+    cloud(17, 0.8, 8, 1.1);
   }
 
   // Soft contact-shadow decal under the character.

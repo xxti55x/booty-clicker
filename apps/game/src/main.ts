@@ -332,6 +332,18 @@ const beatTracker = new BeatTracker();
 const choreo = new Choreographer();
 // The equipped skin drives the 3D rig now (§5) — no longer always classic.
 let char: CharacterInstance = buildCharacter(scene, SKINS[state.gear.skin]);
+// Show-Spin (Goal: „der Spieler dreht sich manchmal, wie die Gegner"): applyPose
+// schreibt root.rotation.y jeden Frame, also dreht eine WRAPPER-Group — die
+// Physik bleibt byte-identisch, die Cheeks folgen über ihre Welt-Anchors.
+const playerSpin = new THREE.Group();
+scene.add(playerSpin);
+function adoptPlayerIntoSpin(): void {
+  if (char.rig.root.parent !== playerSpin) {
+    char.rig.root.parent?.remove(char.rig.root);
+    playerSpin.add(char.rig.root);
+  }
+}
+adoptPlayerIntoSpin();
 // Wave 2: the rival's visual body — a cartoon creature across the dance floor,
 // themed by the zone's tier (BG_BY_TIER), boss-sized on boss targets and
 // recoloured every 40-zone lap. Purely visual; combat logic is untouched.
@@ -436,6 +448,7 @@ const gearPanel = new Gear({
   state,
   onEquip: () => {
     char = buildCharacter(scene, SKINS[state.gear.skin], char);
+    adoptPlayerIntoSpin();
     recompute();
     audio.buy();
     hud.update(state, combat, dps, clickDmg);
@@ -624,6 +637,7 @@ const chSettings = new ChSettings({
     comboT3KeyAwardedThisRun = false; // fresh run context for the imported save (§6.1)
     lastShakeTier = 0;
     char = buildCharacter(scene, SKINS[state.gear.skin], char); // rig follows the imported skin
+    adoptPlayerIntoSpin();
     recompute();
     updateBackground(true);
     syncEntity(); // rival body follows the imported zone/boss state
@@ -797,6 +811,11 @@ function updateBackground(force = false): void {
 // ---------- farm / travel (G10, §4.4) ----------
 // The zone stepper drives the pure `travelTo` (clamped to 1..maxZone). Travelling
 // below the frontier lets you farm a cleared zone; the ⏫ button snaps back to it.
+document.getElementById('zoneStrip')?.addEventListener('click', (e) => {
+  const slot = (e.target as HTMLElement).closest<HTMLElement>('.zs');
+  if (slot?.dataset.z) travel(Number(slot.dataset.z));
+});
+
 function travel(toZone: number): void {
   combat = travelTo(combat, toZone);
   updateBackground();
@@ -1595,6 +1614,12 @@ function loop(nowMs: number): void {
   acc += dt;
   while (acc >= DT) {
     drive = stepPhysics(DT, char.rig, char.cheeks, choreo, drive);
+    {
+      // Show-Spin: kurzer 360°-Turn alle ~12 s (Ende = Anfang ⇒ nahtlos).
+      const cyc = t0 % 12;
+      const k = Math.min(1, Math.max(0, (cyc - 11.1) / 0.9));
+      playerSpin.rotation.y = Math.PI * 2 * (k * k * (3 - 2 * k));
+    }
     acc -= DT;
   }
   renderCheeks(char.rig, char.cheeks);

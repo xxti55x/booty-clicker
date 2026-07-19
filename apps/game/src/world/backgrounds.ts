@@ -349,9 +349,10 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
         for (let iz = -4; iz < 4; iz++) {
           const tx = ix * 2 + 1;
           const tz = iz * 2 + 1;
-          // Insel-POV: Ecken-Tiles jenseits der Inselkante (R 8) entfallen —
-          // die Tanzfläche liegt als gerundetes Feld AUF der schwebenden Insel.
-          if (Math.hypot(tx, tz) > 5.8) continue;
+          // Insel-POV: Ecken-Tiles jenseits der Inselkante entfallen — die
+          // Tanzfläche liegt als gerundetes Feld AUF der schwebenden Insel
+          // (Insel-Zentrum = Duo-Mitte 1.4/1.7, siehe scene.ts ISLAND_C).
+          if (Math.hypot(tx - 1.4, tz - 1.7) > 5.6) continue;
           const t = new THREE.Mesh(
             new THREE.PlaneGeometry(1.9, 1.9),
             mk({
@@ -415,7 +416,7 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       // Scrolling neon grid (graphic already — kept).
       // Insel-POV: Grid auf die Inselfläche begrenzt (Diagonale < R 8).
       const grid = new THREE.GridHelper(9, 9, hue(0xff3fb0), hue(0x8b5cf6));
-      grid.position.y = -2.39;
+      grid.position.set(1.4, -2.39, 1.7); // Insel-Zentrum (Duo-Mitte)
       const gm = grid.material as THREE.LineBasicMaterial;
       gm.transparent = true;
       gm.opacity = 0.5;
