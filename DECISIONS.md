@@ -3,6 +3,29 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Roadmap-Phasen T + L — Textur-Vollausbau, Licht & Bloom
+
+- **2026-07-19 — T1–T5 in-game.** Prozedurale Maps rendern jetzt mit 512²
+  (Maler bleiben im 256er-Koordinatenraum, `SCALE`-Transform), Anisotropie
+  folgt dem Quality-Preset (1/4/8, GPU-gedeckelt, retroaktiv auf den Cache).
+  Relief via `bumpMap` = dieselbe near-white Muster-Map (dunkle Fugen lesen
+  als Rillen) auf allen Insel-Materialien + Deck (`deck.bump`). Charaktere:
+  pro Skin-Stil eigener Stoff (Robo gebürstet, Disco Pailletten mit
+  Emissive-Funkeln, Ninja Carbon, Showmaster Nadelstreifen, Boss Samt inkl.
+  Cape), Haar-Strähnen, Poren-Grain; Rivalen pro Theme (Konfetti/Scanlines/
+  Schalen-Bump/Glow-Flecken). Props: Palmen-Rinde, Speaker-Tolex,
+  Discokugel-Facetten, Berg-Korn, Planeten-Bänder, Krater-Mond, Wolken-
+  Wattierung. T5: Kanten-AO-Ring (transparenter Radial-Grime) erdet jedes
+  Deck. Alles weiter prozedural + near-white — Paletten/Hue-Laps tinten.
+- **2026-07-19 — Phase L.** Licht-Rig (`SceneLights`) wandert mit der Kulisse:
+  pro Theme eigenes Key/Fill/Hemi/Rim-Set (Beach goldene Stunde, Synth
+  rosé/cyan, Space hart-kalt); Schatten-Frustum auf das Insel-Zentrum
+  (1.4/1.7) statt Welt-Ursprung. `engine/post.ts`: RenderPass →
+  UnrealBloomPass (Threshold 0.82 — nur echte Emissives) → OutputPass,
+  aktiv NUR im high-Preset; low/medium rendern direkt ohne Composer-Kosten.
+  Bundle 702 → 726 KB. T6: Modell-Kette neu gelaufen — Maps in den glbs,
+  22/22 verifiziert (Samt-Cape im Boss-Render sichtbar).
+
 ## v12 — Progression massiv verlangsamt + Combo-Nerf (Goal)
 
 - **2026-07-19 — Goal „a lot slower, scales too fast with everything".** Sechs

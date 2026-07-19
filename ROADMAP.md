@@ -22,7 +22,7 @@ committen), die Reihenfolge ist die empfohlene Priorität.
 
 ---
 
-## Phase T — Textur-Upgrade (der Kern)
+## Phase T — Textur-Upgrade (der Kern) · ✅ umgesetzt (T1–T6)
 
 Ziel: Jede sichtbare Oberfläche hat eine bewusste Textur — nichts liest mehr
 als „flaches Toon-Plastik". Alles bleibt **prozedural** (0 KB Assets, kein
@@ -95,7 +95,7 @@ auf Licht; Bundle weiter < 1 MB; 60 fps im `quality: high` auf Desktop.
 
 ---
 
-## Phase L — Licht & Post-Processing
+## Phase L — Licht & Post-Processing · ✅ umgesetzt
 
 - **Per-Theme-Lichtsets**: heute ein globales Rig + Club-Rims. Je Theme ein
   kleines Delta (Beach: warme tiefe Sonne + kühles Fill; Synth: Pink/Cyan-Rims;
@@ -116,7 +116,7 @@ goldene Stunde; A/B-Screenshots; fps-Budget hält (Bloom nur high).
 
 ---
 
-## Phase U — UI-Vollständigkeit
+## Phase U — UI-Vollständigkeit · ⬜ offen
 
 - **Zahlen-Leben**: BP-Zähler tickt weich hoch (Tween statt Sprung), Kauf
   löst einen kurzen „Coin-Fly" zum Zähler aus; DPS/Klick-Änderungen pulsen.
@@ -138,7 +138,7 @@ Screen; jede Kauf-/Prestige-Aktion hat sicht- und hörbares Feedback.
 
 ---
 
-## Phase F — Weltgefühl & Übergänge
+## Phase F — Weltgefühl & Übergänge · ⬜ offen
 
 - **Bühnen-Wechsel als Moment**: Beim Theme-Wechsel (nach dem Boss) fliegt die
   alte Insel nach unten aus dem Bild und die neue schwebt ein (1–1.5 s,
