@@ -3,6 +3,29 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Choreografie komplett + Blender-Animations-Renders (Goal)
+
+- **2026-07-19 — Moves vervollständigt + Klick→Tanz-Akzente.** Die 5 Prototyp-
+  Moves artikulieren jetzt den ganzen Körper (Arm-Pumps, Kopf-Bobs, Knie-Pulse
+  auf zuvor eingefrorenen Kanälen), plus 3 neue Routinen (Welle, Booty-Slam,
+  Diva-Turn). Klick-Interaktion als ADDITIVE Akzent-Ebene
+  (`character/accents.ts`) NACH `stepPhysics`: Hip-Pop pro Klick (Combo-Tier-
+  skaliert, On-Beat-Bonus, Krit = Arm-Flare, Ekstase = Dauer-Shimmy) — der
+  unantastbare Physik-Kontrakt schreibt absolute Werte und resettet die
+  Offsets damit jeden Step von selbst; ein Guard verhindert Doppel-Anwendung
+  auf Frames ohne Physik-Step.
+- **2026-07-19 — Animations-Renders IN Blender, ohne Choreo-Duplikation.**
+  `dump_poses.mjs` bündelt das echte `choreo/moves.ts` per esbuild und samplet
+  Pose-Frames (12 fps, Phase-Rate 2.2 wie das Spiel); `render_anim.py`
+  keyframt sie mit dem exakten `applyPose`-Mapping auf die (neu benannten)
+  Rig-Nodes des Charakter-glb. Stolperfallen dokumentiert: der glTF-Importer
+  konvertiert JEDEN Node nach Z-up ((x,y,z)→(x,−z,y)); Rotationen per
+  Konjugation mit Rx(+90°); three-Euler 'XYZ' ≠ Blender 'XYZ' — deshalb die
+  exakte three.js-Quaternion-Formel statt Euler-Moduswahl. Die Po-Backen
+  laufen durch die Spiel-Federphysik (k 190/c 7/GRAV 3.2, 120-Hz-Substeps,
+  1 s Warm-up) statt handanimiert. Ergebnis: 8 Loop-GIFs (Cycles + Denoise,
+  Studio-Rig + Holzboden) in `models/renders/anim/`.
+
 ## v11 — Themen-Specials statt uniform „+100 % DPS" (Goal)
 
 - **2026-07-19 — Gerade Ability-Tiers = Themen-Special des Mitglieds.** Spieler-
