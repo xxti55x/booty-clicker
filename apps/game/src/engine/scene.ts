@@ -82,7 +82,9 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
 
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0x0a0a10, 0.022);
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 180);
+  // Enges FOV = Tele-Kompression: die Insel liest als flaches Diorama
+  // (Casual-Idle-Look), nicht als 3D-Raum mit gewölbter Nahkante.
+  const camera = new THREE.PerspectiveCamera(26, 1, 0.1, 220);
 
   scene.environment = makeEnv();
 
@@ -152,11 +154,57 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
     metalness: 0.65,
     envMapIntensity: 0.9,
   });
-  const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 64), floorMat);
+  // Schwebende Insel statt Endlos-Boden (Diorama-POV): begrenzte Spielfläche,
+  // Erdkante + hängende Fels-Zapfen darunter, Himmel ringsum. Die Oberseite
+  // bleibt `floorMat` (wird pro Bühne umgefärbt); Erde/Fels sind bewusst
+  // stage-neutral cartoon-braun — die Insel liest als konstante Heimatbühne,
+  // nur ihr „Belag" wechselt mit der Kulisse.
+  const ISLAND_R = 6.4;
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(ISLAND_R, 56), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = -2.4;
   floor.receiveShadow = true;
   scene.add(floor);
+  {
+    // Leichtes Emissive: die Unterseite hängt im Schatten — ohne Eigenglimmen
+    // wäre die Insel auf dunklen Bühnen (Club/Space) unsichtbar schwarz.
+    const earth = new THREE.MeshToonMaterial({
+      color: 0x7d5a33,
+      emissive: 0x4a3418,
+      emissiveIntensity: 0.55,
+    });
+    const earthDark = new THREE.MeshToonMaterial({
+      color: 0x5e421f,
+      emissive: 0x33220e,
+      emissiveIntensity: 0.55,
+    });
+    // Erdkante: leicht verjüngter offener Zylinder direkt unter der Oberfläche.
+    const rim = new THREE.Mesh(
+      new THREE.CylinderGeometry(ISLAND_R, ISLAND_R * 0.88, 1.5, 56, 1, true),
+      earth,
+    );
+    rim.position.y = -3.15;
+    scene.add(rim);
+    // Deckel gegen Durchgucken von schräg unten.
+    const cap = new THREE.Mesh(new THREE.CircleGeometry(ISLAND_R * 0.9, 40), earthDark);
+    cap.rotation.x = Math.PI / 2;
+    cap.position.y = -3.9;
+    scene.add(cap);
+    // Hängende Fels-Zapfen (deterministischer Ring, größere Brocken zur Mitte).
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2 + (i % 3) * 0.11;
+      const rr = ISLAND_R * (0.35 + 0.6 * (((i * 7) % 16) / 16));
+      const size = 0.8 + 1.1 * (1 - rr / ISLAND_R) + ((i * 5) % 4) * 0.22;
+      const spike = new THREE.Mesh(
+        new THREE.ConeGeometry(size * 0.75, size * 2.4, 6),
+        i % 3 === 0 ? earthDark : earth,
+      );
+      spike.rotation.x = Math.PI;
+      spike.rotation.y = a * 2.3;
+      spike.position.set(Math.cos(a) * rr, -3.9 - size * 0.75, Math.sin(a) * rr);
+      scene.add(spike);
+    }
+  }
 
   // Soft contact-shadow decal under the character.
   {

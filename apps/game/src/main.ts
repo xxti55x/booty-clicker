@@ -9,7 +9,7 @@ import { buildEntity, entityVariant, type EntityInstance } from './character/ent
 import { DT, renderCheeks, stepPhysics } from './character/physics';
 import { SKINS } from './character/skins';
 import { Choreographer } from './choreo/moves';
-import { createControls } from './engine/camera';
+import { createControls, frameCamera } from './engine/camera';
 import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
 import { effectivePixelRatio, qualityPreset } from './engine/quality';
@@ -1506,6 +1506,7 @@ function resize(): void {
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  frameCamera(camera, controls, camera.aspect); // Portrait ⇄ Landscape Diorama-Framing
   // Keep the peach on-screen when the viewport changes (B13c: never off-screen).
   clampPeachPos();
   applyPeachPos();

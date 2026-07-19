@@ -347,6 +347,11 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       const tiles: THREE.Mesh[] = [];
       for (let ix = -4; ix < 4; ix++)
         for (let iz = -4; iz < 4; iz++) {
+          const tx = ix * 2 + 1;
+          const tz = iz * 2 + 1;
+          // Insel-POV: Ecken-Tiles jenseits der Inselkante (R 8) entfallen —
+          // die Tanzfläche liegt als gerundetes Feld AUF der schwebenden Insel.
+          if (Math.hypot(tx, tz) > 5.8) continue;
           const t = new THREE.Mesh(
             new THREE.PlaneGeometry(1.9, 1.9),
             mk({
@@ -358,7 +363,7 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
             }),
           );
           t.rotation.x = -Math.PI / 2;
-          t.position.set(ix * 2 + 1, -2.39, iz * 2 + 1);
+          t.position.set(tx, -2.39, tz);
           propGroup.add(t);
           tiles.push(t);
         }
@@ -408,7 +413,8 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
       // Scrolling neon grid (graphic already — kept).
-      const grid = new THREE.GridHelper(80, 80, hue(0xff3fb0), hue(0x8b5cf6));
+      // Insel-POV: Grid auf die Inselfläche begrenzt (Diagonale < R 8).
+      const grid = new THREE.GridHelper(9, 9, hue(0xff3fb0), hue(0x8b5cf6));
       grid.position.y = -2.39;
       const gm = grid.material as THREE.LineBasicMaterial;
       gm.transparent = true;
@@ -520,7 +526,8 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
         mk({ color: hue(0x1a4a6a), roughness: 0.12, metalness: 0.35, envMapIntensity: 1.1 }),
       );
       sea.rotation.x = -Math.PI / 2;
-      sea.position.set(0, -2.36, 30);
+      // Insel-POV: der Ozean liegt TIEF unter der schwebenden Insel.
+      sea.position.set(0, -7.5, 30);
       propGroup.add(sea);
       // Toon palms — postcard framing on the visible side, echo behind.
       const sways: Sway[] = [];
