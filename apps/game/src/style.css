@@ -175,19 +175,19 @@ body {
   border-radius: 20px;
   text-transform: uppercase;
 }
-/* The shop is a carved wooden board (right side — mirrored from the classic
-   idle layout so the rival's screen-left staging stays visible). */
+/* The shop is a carved wooden board — Upgrades LINKS, Bühne rechts (Goal:
+   50/50-Split wie im Casual-Idle-Referenzlayout). */
 .shop {
   position: fixed;
   top: 0;
-  right: 0;
+  left: 0;
   height: 100%;
-  width: 320px;
+  width: 50vw;
   max-width: 82vw;
   background: var(--wood-panel);
-  border-left: 3px solid var(--wood-rim);
+  border-right: 3px solid var(--wood-rim);
   box-shadow:
-    inset 2px 0 0 rgba(255, 210, 120, 0.28),
+    inset -2px 0 0 rgba(255, 210, 120, 0.28),
     inset 0 0 40px rgba(0, 0, 0, 0.35);
   display: flex;
   flex-direction: column;
@@ -195,11 +195,26 @@ body {
   z-index: 20;
   /* B13b: keep tabs/content inside the safe area on notched phones. */
   padding-top: env(safe-area-inset-top, 0px);
-  padding-right: env(safe-area-inset-right, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 .shop.hidden {
-  transform: translateX(100%);
+  transform: translateX(-100%);
+}
+/* Breites Upgrade-Panel: Crew-Karten zweispaltig, Inhalte nicht endlos gedehnt. */
+@media (min-width: 641px) {
+  #crewList {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    align-items: start;
+  }
+  #crewList .item {
+    margin-bottom: 0;
+  }
+  .tabbody {
+    padding: 14px 18px;
+  }
 }
 .tabs {
   display: flex;
@@ -359,10 +374,10 @@ body {
 .toggleShop {
   position: fixed;
   top: 14px;
-  left: 16px;
+  right: 16px;
   /* B13b: nudge below the notch / clear of a rounded corner. */
   top: calc(14px + env(safe-area-inset-top, 0px));
-  left: calc(16px + env(safe-area-inset-left, 0px));
+  right: calc(16px + env(safe-area-inset-right, 0px));
   z-index: 25;
   display: flex;
   align-items: center;
@@ -558,7 +573,7 @@ body {
 .muteBtn {
   position: fixed;
   bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-  left: calc(16px + env(safe-area-inset-left, 0px));
+  right: calc(16px + env(safe-area-inset-right, 0px));
   z-index: 25;
   display: flex;
   align-items: center;
@@ -1008,6 +1023,9 @@ body {
   }
   /* Drop the top-UI below the corner controls (Crew / mute) so they never overlap
      the readout on a narrow screen — the old fixed HUD sat right under them. */
+  .topui {
+    left: 50%;
+  }
   .topui {
     top: calc(60px + env(safe-area-inset-top, 0px));
     width: min(440px, 96vw);
@@ -2220,4 +2238,23 @@ body {
   opacity: 0.55;
   cursor: not-allowed;
   box-shadow: 0 3px 0 var(--gold-deep);
+}
+
+/* ---- 50/50-Layout: Bühne rechts — Overlays über der rechten Hälfte ---- */
+@media (min-width: 641px) {
+  .topui,
+  .abilitybar,
+  .hintbar,
+  .toasts,
+  .boostBadge,
+  .coach {
+    left: 75%;
+  }
+  .topui {
+    left: 73.5%; /* nicht mit dem Crew-Button oben rechts kollidieren */
+    width: min(420px, 44vw);
+  }
+  .peachBtn {
+    left: calc(50% + 20px);
+  }
 }

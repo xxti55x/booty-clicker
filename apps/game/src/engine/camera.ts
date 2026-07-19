@@ -14,8 +14,8 @@ const PHI = 1.07;
 
 /**
  * Aspect-abhängiges Diorama-Framing (vom Resize-Handler aufgerufen):
- * · Landscape/Desktop: target.x nach −x versetzt — das schiebt die Insel in
- *   der SICHTBAREN Spielfläche ins Zentrum (Shop-Panel deckt rechts ~30 % ab).
+ * · Landscape/Desktop: target.x nach +x versetzt — das schiebt die Insel in
+ *   die RECHTE Fensterhälfte (der Upgrade-Shop belegt links 50 %).
  * · Portrait/Mobil: enges H-FOV — Duo zentrieren, weiter zurückziehen; die
  *   Insel füllt das untere Band, beide Akteure bleiben im Bild.
  */
@@ -27,8 +27,8 @@ export function frameCamera(
   const portrait = aspect < 1;
   // Portrait: der sichtbare Streifen zwischen HUD und Bottom-Sheet ist klein —
   // hier gilt die NAHE Duo-Einstellung (Insel-Totale ist Landscape/Desktop).
-  const radius = portrait ? 19 : 27;
-  const target = portrait ? { x: 1.4, y: -1.3, z: 1.5 } : { x: -0.9, y: -0.9, z: 1.5 };
+  const radius = portrait ? 19 : 38;
+  const target = portrait ? { x: 1.4, y: -1.3, z: 1.5 } : { x: 5.0, y: -1.1, z: 1.5 };
   camera.position.set(
     target.x + radius * Math.sin(PHI) * Math.sin(THETA),
     target.y + radius * Math.cos(PHI),
