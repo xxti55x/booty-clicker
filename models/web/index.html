@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Booty-Clicker · Web-Asset-Demo (Pfirsich-Pirat)</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: radial-gradient(1200px 700px at 50% 30%, #34344c, #17171f);
+        font-family: system-ui, sans-serif;
+      }
+      canvas {
+        display: block;
+      }
+      #hud {
+        position: fixed;
+        left: 12px;
+        bottom: 10px;
+        color: #cfd3e8;
+        font-size: 12px;
+        line-height: 1.5;
+        user-select: none;
+        text-shadow: 0 1px 2px #000;
+      }
+      #hint {
+        position: fixed;
+        top: 12px;
+        left: 0;
+        right: 0;
+        text-align: center;
+        color: #eef0fa;
+        font-size: 14px;
+        text-shadow: 0 1px 3px #000;
+        user-select: none;
+      }
+      #skins {
+        position: fixed;
+        right: 10px;
+        bottom: 8px;
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+        max-width: 46vw;
+        justify-content: flex-end;
+      }
+      #skins button {
+        font-size: 17px;
+        line-height: 1;
+        padding: 6px 7px;
+        border-radius: 9px;
+        border: 1px solid #4a4a66;
+        background: #232336cc;
+        cursor: pointer;
+      }
+      #skins button.on {
+        border-color: #a8e831;
+        background: #2f3a1ecc;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hint">Klick/Tipp: Idle ⇄ Twerk · Skin-Leiste unten rechts</div>
+    <div id="hud">lade …</div>
+    <div id="skins"></div>
+    <script type="importmap">
+      { "imports": { "three": "./vendor/three.module.js" } }
+    </script>
+    <script type="module">
+      /* Stage 10 — three.js + GLTFLoader + DRACOLoader (Decoder-Pfad lokal!).
+       * Licht bewusst ohne HDRI: Hemisphäre + zwei Directionals reichen für
+       * Flat-Vertex-Colors und sparen die Environment-Datei. */
+      import * as THREE from 'three';
+      import { GLTFLoader } from './vendor/loaders/GLTFLoader.js';
+      import { DRACOLoader } from './vendor/loaders/DRACOLoader.js';
+
+      const SKINS = [
+        ['classic', '🕺'],
+        ['disco', '🪩'],
+        ['robo', '🤖'],
+        ['host', '🎤'],
+        ['boss', '👑'],
+        ['neon', '🥷'],
+        ['pirate', '🏴‍☠️'],
+        ['lava', '🌋'],
+        ['gyrator', '🛸'],
+        ['diamond', '💠'],
+      ];
+      let t0 = performance.now();
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(innerWidth, innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 60);
+      camera.position.set(4.4, 1.1, 6.2);
+      camera.lookAt(0, -0.4, 0);
+
+      scene.add(new THREE.HemisphereLight(0xbdd0ff, 0x2c2436, 1.1));
+      const key = new THREE.DirectionalLight(0xfff1dc, 2.4);
+      key.position.set(4, 6, 5);
+      scene.add(key);
+      const rim = new THREE.DirectionalLight(0x9fb7ff, 1.0);
+      rim.position.set(-5, 3, -4);
+      scene.add(rim);
+
+      const ground = new THREE.Mesh(
+        new THREE.CircleGeometry(3.2, 48),
+        new THREE.MeshStandardMaterial({ color: 0x232333, roughness: 1 }),
+      );
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.y = -2.42;
+      scene.add(ground);
+
+      const draco = new DRACOLoader().setDecoderPath('./vendor/draco/');
+      const loader = new GLTFLoader().setDRACOLoader(draco);
+
+      const hud = document.getElementById('hud');
+      let mixer;
+      let actions = {};
+      let current = 'Idle';
+      let skin = new URLSearchParams(location.search).get('m') ?? 'pirate';
+      let ticking = false;
+      const clock = new THREE.Clock();
+      const pivot = new THREE.Group();
+      scene.add(pivot);
+
+      function loadSkin(stem) {
+        skin = stem;
+        t0 = performance.now();
+        pivot.clear();
+        mixer = undefined;
+        actions = {};
+        loader.load(
+          `./${stem}.glb`,
+          (gltf) => {
+            pivot.add(gltf.scene);
+            mixer = new THREE.AnimationMixer(gltf.scene);
+            for (const clip of gltf.animations) {
+              actions[clip.name] = mixer.clipAction(clip);
+            }
+            (actions[current] ?? Object.values(actions)[0])?.play();
+            window.__stats = {
+              skin: stem,
+              loadMs: Math.round(performance.now() - t0),
+              clips: gltf.animations.map((c) => c.name),
+              error: null,
+            };
+            document
+              .querySelectorAll('#skins button')
+              .forEach((b) => b.classList.toggle('on', b.dataset.m === stem));
+            if (!ticking) {
+              ticking = true;
+              tick();
+            }
+          },
+          undefined,
+          (err) => {
+            window.__stats = { skin: stem, error: String(err) };
+            hud.textContent = 'Ladefehler: ' + err;
+          },
+        );
+      }
+
+      const bar = document.getElementById('skins');
+      for (const [stem, icon] of SKINS) {
+        const b = document.createElement('button');
+        b.dataset.m = stem;
+        b.textContent = icon;
+        b.title = stem;
+        b.addEventListener('pointerdown', (e) => {
+          e.stopPropagation();
+          loadSkin(stem);
+        });
+        bar.appendChild(b);
+      }
+      loadSkin(skin);
+
+      addEventListener('pointerdown', () => {
+        if (!mixer) return;
+        const next = current === 'Idle' ? 'Twerk' : 'Idle';
+        if (!actions[next]) return;
+        actions[current].fadeOut(0.25);
+        actions[next].reset().fadeIn(0.25).play();
+        current = next;
+      });
+
+      addEventListener('resize', () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+
+      function tick() {
+        requestAnimationFrame(tick);
+        const dt = clock.getDelta();
+        mixer?.update(dt);
+        pivot.rotation.y += dt * 0.35;
+        renderer.render(scene, camera);
+        const info = renderer.info.render;
+        Object.assign(window.__stats ?? {}, {
+          calls: info.calls,
+          triangles: info.triangles,
+          clip: current,
+        });
+        hud.textContent =
+          `${skin} · ${window.__stats.loadMs} ms Load · ${info.calls} Draw Calls · ` +
+          `${info.triangles} Tris · Clip: ${current}`;
+      }
+    </script>
+  </body>
+</html>

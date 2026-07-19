@@ -3,6 +3,70 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Web-Assets für ALLE 10 Playermodels (Goal)
+
+- **2026-07-19 — Pipeline generalisiert, ein Draco-glb pro Skin.**
+  `web_asset.py` nimmt jetzt Stem-Parameter (`models/web/<skin>.glb`) und
+  zieht bei Boss-Rigs den root.scale-Faktor 1.12 auf die Bone-Offsets nach
+  (`ROOT_SCALE` — Hüft-Sway lebt in Weltmaß; die Empties erben den Faktor
+  über die Hierarchie, Pose-Bones nicht). Alle 10 Skins durchgelaufen:
+  86–99 KB pro glb, jede Budget-Zeile BESTANDEN, Deformations-Gates als
+  JPEG (PNG→JPEG: 5,8 MB → 320 KB Repo-Gewicht). Demo bekam eine
+  Skin-Leiste (Emoji-Buttons, `?m=<skin>` für Deep-Links); Headless-Sweep
+  über alle 10: Idle+Twerk laden und wechseln, 2 Draw Calls, 75–163 ms
+  Load, null Konsolen-Fehler. Das Einzel-Asset `character-web.glb` ist
+  durch das 10er-Set ersetzt.
+
+## Web-Asset-Pipeline — Pirat als animiertes Draco-glTF (97 KB)
+
+- **2026-07-19 — 10-Stufen-Auftrag headless umgesetzt, Look bleibt 1:1.**
+  `tools/blender/web_asset.py` verdichtet den Roh-Export des Piraten (25 100
+  Tris, 66 Segmente) auf EIN skinned Mesh mit EINEM Material: Vertex-Colors
+  statt Textur (baseColorFactor × Map-Mittelwert — null Texturbytes),
+  sublineare Tri-Budget-Verteilung (t^0.7, Floor 72: Kugeln geben ab,
+  Zylinder behalten Form — der erste linear verteilte Versuch erzeugte
+  „Windrad"-Kappen an Brust/Bündchen), manuelles 18-Bone-Armature auf den
+  Physik-Kontrakt-Namen (alle Bones +Y/Roll 0 ⇒ Rest-Matrizen = Identity ⇒
+  Spiel-Posen laufen WERTGLEICH auf Pose-Bones, exakt die render_anim-
+  Konjugation). Zwei bewusste Abweichungen vom interaktiven Stufenplan:
+  starres Skinning statt Automatic Weights + Gelenk-Loops (das Spiel animiert
+  starre Segmente — Rigid-Binding repliziert den Look fehlerfrei, Candy-
+  Wrapper unmöglich, headless deterministisch) und KEIN globales Merge-by-
+  Distance (würde Vertices benachbarter Bones verschweißen → Risse).
+  Actions „Idle" (Hip Circles @0.85) + „Twerk" (@1.15) mit exakt
+  geschlossenen Loops (Frequenz-GCD je Move ⇒ Periode 2π/f_base), Cheek-
+  Jiggle aus der echten Feder-Sim (Welt→pelvis-lokal via invertierter
+  Pose-Matrix), NLA-Strips → zwei glTF-Clips. Budgets ALLE unterboten:
+  5 988/10 000 Tris · 1/2 Slots · 18/40 Bones · 97/800 KB · 1 Draw Call.
+  `models/web/index.html`: three.js + GLTFLoader + DRACOLoader (lokaler
+  Decoder-Pfad, kein CDN), Hemisphäre + 2 Directionals statt HDRI. Headless
+  verifiziert: 230 ms Load, beide Clips spielen/wechseln, 0 Konsolen-Fehler;
+  vendor/-Fremdcode auf den Lint/Prettier-Ignorelisten.
+
+## Cartoon-Real-Rigs — echte Hände/Füße/Haare + Proportionen (Goal)
+
+- **2026-07-19 — Realismus im Cartoon-Rahmen, ohne die Physik anzufassen.**
+  Alle Verfeinerungen hängen als MESHES unter den unveränderten Bone-Pivots
+  (`stepPhysics`/`applyPose`/`renderCheeks` bleiben byte-gleich): Kopf-Bone
+  1.18 → 1.06 (≈1:6-Proportionen; Physik schreibt nur head.rotation, Skalieren
+  ist silhouette-sicher), Ohren an jedem unverdeckten Kopf, Deltoide,
+  Handgelenke und Waden für alle Human-Stile. Hände: Handflächen-Sphäre mit
+  IN DIE GEOMETRIE gebackener Skalierung (`geometry.scale()` statt
+  `mesh.scale`, sonst würden die Kind-Finger verzerrt), vier gekrümmte
+  Capsule-Finger + opponierbarer Daumen; der Robo bekommt segmentierte
+  Mech-Greifer. Schuhwerk pro Stil mit Sohlen-Unterkante exakt auf dem alten
+  Boden-Plant (knee-lokal −1.075): Schnür-Sneaker mit Socke+Zunge,
+  Derby+Absatzblock (Host), Panzerstiefel mit Goldkappe+Manschettenring
+  (Boss), Split-Toe-Tabi (Ninja), Lederstiefel mit Umschlag + dunkler Sohle
+  (Pirat), Glutnaht (Lava), Mech-Boot mit Heck-Thruster (Robo). Haar pro
+  Skin echt geschichtet: Swoosh+Koteletten+Strähne (Klassiker),
+  Puff-Wolken-Afro statt Helm-Kugel (Disco), Zwei-Lappen-Pompadour (Host),
+  Unter-Kronen-Haar + Kinnbart (Boss), Bandana-Zopf + Ohrring AM Ohr
+  (Pirat). Alles trägt Maps (Pore/Brushed/Weave/Leder=Pore). Headless
+  verifiziert: alle 10 Skins in-game (0 Page-Errors) + Blender-Renders;
+  Coverage-Gate 276/276 lit (100 %). models/ 58 → 66 MB (mehr Meshes —
+  beobachten, ggf. Segment-Counts senken).
+
 ## Senior-Textur-Pass in Blender — 100 % Material-Abdeckung (Goal)
 
 - **2026-07-19 — Warum ein Blender-seitiger Pass nötig war.** Der
