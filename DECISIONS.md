@@ -3,6 +3,31 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## v12 — Progression massiv verlangsamt + Combo-Nerf (Goal)
+
+- **2026-07-19 — Goal „a lot slower, scales too fast with everything".** Sechs
+  Schrauben, simulationsgetrieben abgestimmt: Combo-Multiplikator ×2 → ×1.2
+  (COMBO_STEP 0.02 → 0.004 — „nur ein bisschen mehr Schaden"; Combo-TIERS und
+  ihre Perks unverändert), DPS_TUNE 2 → 1.5, HERO_COST_GROWTH 1.07 → 1.075,
+  GOLD_DIVISOR 15 → 20, ABILITY_COST_MULT 6 → 9, Pfirsich-Boost ×3 → ×2 samt
+  halbierter Truhen-BP-Fenster (2/7/25/90 min statt 5/15/60/240) — die Messung
+  zeigte, dass die LOOT-ECONOMY der dominante Beschleuniger war. Verworfen:
+  SOUL_BONUS-Nerf (0.1 → 0.07 brickte den Casual komplett — das
+  Seelen-Compounding ist die Lebensader; `rsLifetime` ist ein Highwater, wer
+  auf derselben Max-Zone re-aszendiert, bekommt NICHTS Neues) und DPS_TUNE 1.4
+  (No-Econ-Casual flat bei z20).
+- **2026-07-19 — Neue Pacing-Envelope (±25 %).** t10 0.93 → 1.75 min; erste
+  Wand z30–39 → z25 (t25 ≈ 31 min; z30 im ersten 45-min-Sitting bewusst
+  unerreichbar); Frontier-Kette z75 in Run 3–4 statt 2; realistischer
+  Econ-Spieler t75 ≈ 3.9–5.4 h (Anker-Bot jetzt MIT Economy — ohne sie wallt
+  der 1-cps-Bot bei z25, der Loot-Layer ist Teil des echten Spiels); erste
+  Himmelfahrt 5.4–5.7 h → 15.3–15.5 h. E2 braucht Spieler-Geduld statt
+  Reflex-Bot (stallSeconds 240 → 1500, Budget 400k s): 15 Verbesserungen bis
+  z75, Himmelfahrt feuert, Worst-Ratio 0.88 < 2 — die Wand bleibt WEICH. E4
+  („Klick ist König") hält auf jedem Seed, aber der Combo-Nerf drückt den
+  Vorsprung bewusst: Floor 8 → 4 Zonen (gemessen 5–15). Economy-Witness auf
+  zwei Seeds gesplittet (Token+Shards / Shards→Gear-Level).
+
 ## v11.1 — Klick-Verlust-Bugfix + Tier-Rhythmen (Goal)
 
 - **2026-07-19 — „Fähigkeit kaufen braucht Doppelklick" = DOM-Swap unterm

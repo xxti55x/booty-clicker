@@ -103,10 +103,10 @@ describe('comboStep', () => {
 });
 
 describe('comboMult (re-exported single source)', () => {
-  it('caps at ×2', () => {
+  it('caps at ×1.2 (v12 Combo-Nerf)', () => {
     expect(comboMult(0)).toBe(1);
-    expect(comboMult(COMBO_CAP)).toBe(2);
-    expect(comboMult(10_000)).toBe(2);
+    expect(comboMult(COMBO_CAP)).toBeCloseTo(1.2, 9);
+    expect(comboMult(10_000)).toBeCloseTo(1.2, 9);
   });
 });
 

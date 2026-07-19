@@ -843,7 +843,7 @@ function onKillProgress(
   y?: number,
 ): void {
   // Peachiel (§4.6) × gold-gear (§5) × permanent gold-tokens (§6.2) × the live
-  // Golden-Peach ×3 income boost (§6.1) multiply kill gold — the boost thus lifts
+  // Golden-Peach ×2 income boost (§6.1, v12) multiply kill gold — the boost thus lifts
   // ALL income (click + idle + coach kills) uniformly for its 60-s window.
   const now = Date.now();
   const gold = Math.floor(r.gold * goldMult(state) * peachIncomeMult(state, now));
@@ -1169,7 +1169,7 @@ function updatePeachSchedule(now: number): void {
 }
 
 /**
- * Catch the on-screen Golden Peach (spec §6.1): activates the ×3 income boost for
+ * Catch the on-screen Golden Peach (spec §6.1): activates the ×2 income boost for
  * 60 s and rolls a 25 % → 1 🔑 drop, then schedules the next spawn. Part 3 renders
  * the button and calls this; returns the outcome (or null if no peach is catchable).
  * Persists the peach schedule + boost + the advanced RNG cursor.
@@ -1177,14 +1177,14 @@ function updatePeachSchedule(now: number): void {
 function catchPeach(): { keys: number; boostUntil: number } | null {
   const now = Date.now();
   if (!peachVisible(now)) return null;
-  state.peach.boostUntil = activateBoost(now); // fresh ×3 60-s window
+  state.peach.boostUntil = activateBoost(now); // fresh ×2 60-s window
   const keys = peachKeyRoll(rng);
   earnKeys(keys);
   state.peach.nextPeachAt = rollNextPeachAt(now, rng);
   toasts.show(
     '🍑',
     'Goldener Pfirsich!',
-    keys > 0 ? '×3 Einkommen 60 s · +1 🔑' : '×3 Einkommen 60 s',
+    keys > 0 ? '×2 Einkommen 60 s · +1 🔑' : '×2 Einkommen 60 s',
   );
   hud.update(state, combat, dps, clickDmg);
   persist();
@@ -1222,7 +1222,7 @@ function creditReward(reward: Reward): void {
       break;
     case 'boost': {
       // Stack DURATION onto the active income-boost window (§6.2 „stackt Dauer, nicht
-      // Faktor"): the single ×3 peach window is extended by the reward's duration,
+      // Faktor"): the single ×2 peach window is extended by the reward's duration,
       // capped 24 h ahead (`clampBoostUntil`) so the persisted window always stays
       // inside the boot-repair ceiling — a reload can never clip a legit stack.
       const now = Date.now();
@@ -1457,7 +1457,7 @@ const metaPanel = new Meta({
   season: () => currentSeason,
 });
 
-// ---------- Golden-Peach on-screen button + ×3-boost badge (§6.1, B13c) ----------
+// ---------- Golden-Peach on-screen button + ×2-boost badge (§6.1, B13c) ----------
 const peachBtn = document.getElementById('peachBtn') as HTMLButtonElement;
 const boostBadge = document.getElementById('boostBadge') as HTMLElement;
 // Peach footprint (matches `.peachBtn` in style.css) + safe margins so a spawn never
@@ -1505,7 +1505,7 @@ function applyPeachPos(): void {
  * Per-frame peach/boost HUD sync (§6.1, B13c). Shows the floating 🍑 while a peach is
  * on-screen — but DESPAWNS it under the bottom-sheet on narrow screens so it can't sit
  * under the sheet. A fresh spawn (`nextPeachAt` changed) is repositioned once. The
- * „×3 Boost" badge shows while the boost window runs.
+ * „×2 Boost" badge shows while the boost window runs.
  */
 function updatePeachButton(now: number): void {
   const spawned = peachVisible(now);
@@ -1609,7 +1609,7 @@ function loop(nowMs: number): void {
   comboState = comboStep(comboState, dt, comboDecayReduction(state.gear));
   const epochMs = Date.now();
   // Golden-Peach schedule (§6.1): despawn/reschedule the event, then sync the
-  // on-screen 🍑 button + ×3-boost badge (clamped/despawned per B13c).
+  // on-screen 🍑 button + ×2-boost badge (clamped/despawned per B13c).
   updatePeachSchedule(epochMs);
   updatePeachButton(epochMs);
   const tier = comboTier(comboState.stacks);

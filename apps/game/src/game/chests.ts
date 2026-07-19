@@ -282,8 +282,8 @@ export const LOOT_TABLES: Record<ChestTier, LootTable> = {
     tier: 'wood',
     tokenPool: [],
     rows: [
-      { kind: 'bp', weight: 45, bpMinutes: 5 },
-      { kind: 'boost', weight: 30, boostMult: 3, boostDurMs: 3 * MIN },
+      { kind: 'bp', weight: 45, bpMinutes: 2 },
+      { kind: 'boost', weight: 30, boostMult: 2, boostDurMs: 3 * MIN },
       { kind: 'shards', weight: 18, min: 1, max: 3 },
       { kind: 'keys', weight: 5, min: 1, max: 1 },
       { kind: 'sugar', weight: 1, sugar: 1 },
@@ -295,8 +295,8 @@ export const LOOT_TABLES: Record<ChestTier, LootTable> = {
     tier: 'gold',
     tokenPool: GOLD_TOKEN_POOL,
     rows: [
-      { kind: 'bp', weight: 30, bpMinutes: 15 },
-      { kind: 'boost', weight: 25, boostMult: 3, boostDurMs: 10 * MIN },
+      { kind: 'bp', weight: 30, bpMinutes: 7 },
+      { kind: 'boost', weight: 25, boostMult: 2, boostDurMs: 10 * MIN },
       { kind: 'shards', weight: 22, min: 3, max: 8 },
       { kind: 'keys', weight: 10, min: 1, max: 1 },
       { kind: 'token', weight: 8 },
@@ -309,8 +309,8 @@ export const LOOT_TABLES: Record<ChestTier, LootTable> = {
     tier: 'diamond',
     tokenPool: DIAMOND_TOKEN_POOL,
     rows: [
-      { kind: 'bp', weight: 20, bpMinutes: 60 },
-      { kind: 'boost', weight: 20, boostMult: 3, boostDurMs: 40 * MIN },
+      { kind: 'bp', weight: 20, bpMinutes: 25 },
+      { kind: 'boost', weight: 20, boostMult: 2, boostDurMs: 40 * MIN },
       { kind: 'shards', weight: 25, min: 10, max: 25 },
       { kind: 'keys', weight: 12, min: 1, max: 2 },
       { kind: 'token', weight: 15 },
@@ -323,8 +323,8 @@ export const LOOT_TABLES: Record<ChestTier, LootTable> = {
     tier: 'mythic',
     tokenPool: DIAMOND_TOKEN_POOL,
     rows: [
-      { kind: 'bp', weight: 15, bpMinutes: 240 },
-      { kind: 'boost', weight: 15, boostMult: 3, boostDurMs: 160 * MIN },
+      { kind: 'bp', weight: 15, bpMinutes: 90 },
+      { kind: 'boost', weight: 15, boostMult: 2, boostDurMs: 160 * MIN },
       { kind: 'shards', weight: 25, min: 40, max: 100 },
       { kind: 'keys', weight: 15, min: 2, max: 3 },
       { kind: 'token', weight: 12 },

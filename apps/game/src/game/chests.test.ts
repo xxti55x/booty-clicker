@@ -72,10 +72,10 @@ describe('chests — tiers, tables & sources (§6.2)', () => {
     expect(LOOT_TABLES.wood.tokenPool).toEqual([]);
   });
 
-  it('boost rows advertise exactly the delivered factor (the single ×3 window)', () => {
+  it('boost rows advertise exactly the delivered factor (the single peach window)', () => {
     // The glue credits boost DURATION onto the one Golden-Peach income window,
-    // whose factor is always PEACH_BOOST (×3). The table data must advertise that
-    // same factor — a row claiming ×2 while the window pays ×3 would break the
+    // whose factor is always PEACH_BOOST. The table data must advertise that
+    // same factor — a row claiming a different factor than the window pays would break the
     // §6.3.5 transparency promise (loot tables show the truth).
     for (const tier of ['wood', 'gold', 'diamond', 'mythic'] as ChestTier[]) {
       const boost = LOOT_TABLES[tier].rows.find((r) => r.kind === 'boost');
@@ -152,7 +152,7 @@ describe('chests — determinism (§6.4)', () => {
       const rng = new Rng({ seed, cursor: 0 });
       const r = openChest('gold', ctx({ incomePerSec: 1000 }), rng).rewards[0];
       if (r.kind === 'bp') {
-        expect(r.bp).toBe(1000 * 15 * 60); // 15 min of income
+        expect(r.bp).toBe(1000 * 7 * 60); // Gold-Tier: 7 min of income (v12)
         return;
       }
     }

@@ -37,13 +37,13 @@ describe('peach — schedule (§6.1)', () => {
 });
 
 describe('peach — boost (§6.1)', () => {
-  it('is ×3 income for exactly 60 s', () => {
+  it('is ×2 income for exactly 60 s (v12 Goal-Nerf)', () => {
     const now = 5_000;
     const until = activateBoost(now);
     expect(until).toBe(now + PEACH_BOOST_S * 1000);
-    expect(PEACH_BOOST).toBe(3);
-    expect(incomeMultiplier(until, now)).toBe(3);
-    expect(incomeMultiplier(until, now + 59_999)).toBe(3);
+    expect(PEACH_BOOST).toBe(2);
+    expect(incomeMultiplier(until, now)).toBe(2);
+    expect(incomeMultiplier(until, now + 59_999)).toBe(2);
     expect(boostActive(until, now + 59_999)).toBe(true);
     expect(incomeMultiplier(until, now + 60_001)).toBe(1); // expired
     expect(boostActive(until, now + 60_001)).toBe(false);
