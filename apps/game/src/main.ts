@@ -15,6 +15,7 @@ import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
 import { effectivePixelRatio, qualityPreset } from './engine/quality';
 import { setTextureAnisotropy } from './engine/textures';
+import { createPost } from './engine/post';
 import { createScene } from './engine/scene';
 import {
   ABILITY_CHARGE_MAX,
@@ -185,7 +186,9 @@ const bgVariant = (zone: number): number => Math.floor(Math.max(0, zone - 1) / 2
 
 // ---------- scene / engine ----------
 const canvas = document.getElementById('app') as HTMLCanvasElement;
-const { renderer, scene, camera, beat, skyMat, floorMat, glowSprite } = createScene(canvas);
+const { renderer, scene, camera, beat, skyMat, floorMat, glowSprite, lights } = createScene(canvas);
+// Roadmap L: Bloom-Composer (nur high-Preset aktiv — sonst rendert der Loop direkt).
+const post = createPost(renderer, scene, camera);
 const controls = createControls(camera, renderer.domElement);
 
 const effects = loadSettings();
@@ -333,7 +336,7 @@ if (loaded) {
 }
 
 // ---------- visuals ----------
-const world = new World(scene, skyMat, floorMat, glowSprite);
+const world = new World(scene, skyMat, floorMat, glowSprite, lights);
 const audio = new AudioEngine();
 const beatTracker = new BeatTracker();
 const choreo = new Choreographer();
@@ -828,6 +831,11 @@ function updateBackground(force = false): void {
 // (`bgForZone`); der Zonen-Strip ist eine reine Anzeige.
 
 // ---------- combat glue ----------
+/** Ein Frame zeichnen: Bloom-Kette im high-Preset, sonst direkt (Roadmap L). */
+function draw(): void {
+  if (post.enabled) post.render();
+  else renderer.render(scene, camera);
+}
 const particleTmp = new THREE.Vector3();
 let shakeMag = 0;
 
@@ -1538,6 +1546,7 @@ function resize(): void {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   frameCamera(camera, controls, camera.aspect); // Portrait ⇄ Landscape Diorama-Framing
+  post.setSize(w, h); // Composer-Puffer folgen (Roadmap L)
   // Keep the peach on-screen when the viewport changes (B13c: never off-screen).
   clampPeachPos();
   applyPeachPos();
@@ -1696,12 +1705,12 @@ function loop(nowMs: number): void {
     const oy = (Math.random() * 2 - 1) * shakeMag;
     camera.position.x += ox;
     camera.position.y += oy;
-    renderer.render(scene, camera);
+    draw();
     camera.position.x -= ox;
     camera.position.y -= oy;
   } else {
     shakeMag = 0;
-    renderer.render(scene, camera);
+    draw();
   }
 
   if (firstFrame) {

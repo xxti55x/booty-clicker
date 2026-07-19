@@ -11,6 +11,15 @@ export type GlowSpriteFn = (
   z: number,
 ) => THREE.Sprite;
 
+/** Das umstimmbare Licht-Rig (Roadmap L: pro Theme ein eigenes Licht-Delta). */
+export interface SceneLights {
+  hemi: THREE.HemisphereLight;
+  key: THREE.DirectionalLight;
+  fill: THREE.DirectionalLight;
+  rimA: THREE.PointLight;
+  rimB: THREE.PointLight;
+}
+
 export interface SceneContext {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
@@ -22,6 +31,8 @@ export interface SceneContext {
   /** Floor material — colour/roughness/metalness re-tuned per background. */
   floorMat: THREE.MeshPhysicalMaterial;
   glowSprite: GlowSpriteFn;
+  /** Umstimmbares Licht-Rig — die World färbt es mit der Kulisse um. */
+  lights: SceneLights;
 }
 
 /** Procedural equirectangular environment map (studio-ish gradient + blobs). */
@@ -106,13 +117,18 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   // cleanly across the toon materials, a lifted hemisphere + soft cool fill so
   // the shadow band stays colourful (never muddy), and the club rim lights for
   // pop. The beat PointLight still pulses the whole cast on the beat.
-  scene.add(new THREE.HemisphereLight(0xd6daff, 0x4a3a40, 0.95));
+  const hemi = new THREE.HemisphereLight(0xd6daff, 0x4a3a40, 0.95);
+  scene.add(hemi);
   const key = new THREE.DirectionalLight(0xfff4e0, 2.3);
   key.position.set(4.5, 8.5, 7);
+  // Roadmap L: Schatten-Frustum exakt auf die INSEL zentrieren (Zentrum 1.4/1.7,
+  // R 6.4) statt auf den Welt-Ursprung — kein abgeschnittener Inselrand mehr.
+  key.target.position.set(1.4, -2.4, 1.7);
+  scene.add(key.target);
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
   key.shadow.camera.near = 1;
-  key.shadow.camera.far = 30;
+  key.shadow.camera.far = 34;
   key.shadow.camera.left = -8;
   key.shadow.camera.right = 8;
   key.shadow.camera.top = 8;
@@ -123,15 +139,16 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   const fill = new THREE.DirectionalLight(0xa9c4ff, 0.75);
   fill.position.set(-6, 3, 6);
   scene.add(fill);
-  const rimV = new THREE.PointLight(0x8b5cf6, 48, 55, 2);
-  rimV.position.set(-6, 4, -5);
-  scene.add(rimV);
-  const rimL = new THREE.PointLight(0xa8e831, 30, 55, 2);
-  rimL.position.set(6, 2, 4);
-  scene.add(rimL);
+  const rimA = new THREE.PointLight(0x8b5cf6, 48, 55, 2);
+  rimA.position.set(-6, 4, -5);
+  scene.add(rimA);
+  const rimB = new THREE.PointLight(0xa8e831, 30, 55, 2);
+  rimB.position.set(6, 2, 4);
+  scene.add(rimB);
   const beat = new THREE.PointLight(0xffffff, 0, 25, 2);
   beat.position.set(0, 3, -3);
   scene.add(beat);
+  const lights: SceneLights = { hemi, key, fill, rimA, rimB };
 
   const GLOW = makeGlowTexture();
   const glowSprite: GlowSpriteFn = (color, size, x, y, z) => {
@@ -182,7 +199,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
     scene.add(m);
   }
 
-  return { renderer, scene, camera, beat, skyMat, floorMat, glowSprite };
+  return { renderer, scene, camera, beat, skyMat, floorMat, glowSprite, lights };
 }
 
 // Re-export so consumers can build props with the same material helper.

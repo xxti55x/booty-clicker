@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
 import { INK, mk, outlineMaterial, toonMat, withOutline } from '../engine/materials';
-import type { GlowSpriteFn } from '../engine/scene';
+import type { GlowSpriteFn, SceneLights } from '../engine/scene';
 import { gridTex, plankTex, platesTex, repeated, speckleTex } from '../engine/textures';
 import { buildIsland } from './island';
 import type { BackgroundKey, WorldAnim } from '../types';
@@ -62,6 +62,17 @@ interface BgConfig {
     scroll?: number;
     /** Relief-Stärke (Roadmap T2): Map/Emissive-Map dient zugleich als Bump-Höhe. */
     bump?: number;
+  };
+  /** Per-Theme-Lichtset (Roadmap L): Key/Fill/Hemi/Rims wechseln mit der Kulisse. */
+  light: {
+    key: number;
+    keyInt: number;
+    fill: number;
+    fillInt: number;
+    sky: number;
+    ground: number;
+    rimA: number;
+    rimB: number;
   };
   build: (ctx: BuildCtx) => void;
 }
@@ -313,6 +324,17 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     fm: 0.55,
     revealAt: 0,
     deck: { map: () => repeated(plankTex(1), 5, 5), bump: 0.35 }, // dunkles Club-Parkett
+    // Club: warmes Key, kühles Fill, Violett/Limette-Rims (der bisherige Look).
+    light: {
+      key: 0xfff4e0,
+      keyInt: 2.3,
+      fill: 0xa9c4ff,
+      fillInt: 0.75,
+      sky: 0xd6daff,
+      ground: 0x4a3a40,
+      rimA: 0x8b5cf6,
+      rimB: 0xa8e831,
+    },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
       // Mirror ball, hung low over the visible back floor — kept mirror-PBR for
@@ -438,6 +460,17 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       scroll: 0.045,
       bump: 0.15, // Grid-Linien als flache Grate
     },
+    // Synth: rosé Key, Cyan-Fill, Pink/Cyan-Rims — das Neon-Duo als Licht.
+    light: {
+      key: 0xffe0f2,
+      keyInt: 2.2,
+      fill: 0x7de8ff,
+      fillInt: 0.9,
+      sky: 0xe8c8ff,
+      ground: 0x301848,
+      rimA: 0xff3fb0,
+      rimB: 0x2ff5e8,
+    },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
       // Striped retro sun (shader kept as-is), now setting into the VISIBLE
@@ -528,6 +561,17 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     fm: 0.05,
     revealAt: 6000,
     deck: { map: () => repeated(speckleTex(1, 1100), 4, 4), bump: 0.25 }, // körniger Sand
+    // Beach: goldene Stunde — warmes starkes Key, weiches Himmel-Fill.
+    light: {
+      key: 0xffd9a0,
+      keyInt: 2.6,
+      fill: 0x9ec8ff,
+      fillInt: 0.6,
+      sky: 0xffe4c8,
+      ground: 0x6a4a30,
+      rimA: 0xff8a4d,
+      rimB: 0x3adfc0,
+    },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
       // Setting sun over the visible sea horizon (emissive disc + glow, kept).
@@ -669,6 +713,17 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     fm: 0.85,
     revealAt: 30000,
     deck: { map: () => repeated(platesTex(1), 4, 4), bump: 0.3 }, // vernietetes Metall-Deck
+    // Space: hartes kaltes Key, gedämpftes Fill, Cyan/Violett-Rims.
+    light: {
+      key: 0xeef4ff,
+      keyInt: 2.1,
+      fill: 0x8898c8,
+      fillInt: 0.55,
+      sky: 0xb8c8e8,
+      ground: 0x1c1c2e,
+      rimA: 0x63e8ff,
+      rimB: 0x9d5cf6,
+    },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
       // Star dome (Points — kept as-is).
@@ -804,6 +859,8 @@ export class World {
     private readonly skyMat: THREE.ShaderMaterial,
     private readonly floorMat: THREE.MeshPhysicalMaterial,
     private readonly glowSprite: GlowSpriteFn,
+    /** Optionales Licht-Rig (Roadmap L) — der Modell-Exporter lässt es weg. */
+    private readonly lights?: SceneLights,
   ) {
     this.scene.add(this.propGroup, this.islandGroup);
   }
@@ -865,6 +922,19 @@ export class World {
     this.floorMat.bumpMap = d.bump ? (this.floorMat.map ?? this.floorMat.emissiveMap) : null;
     this.floorMat.bumpScale = d.bump ?? 1;
     this.floorMat.needsUpdate = true;
+    // Roadmap L: das Licht-Rig wechselt mit der Kulisse (bewusst OHNE Hue-Lap —
+    // die Paletten shiften genug; Licht hält die Grundstimmung des Themes).
+    if (this.lights) {
+      const L = b.light;
+      this.lights.key.color.set(L.key);
+      this.lights.key.intensity = L.keyInt;
+      this.lights.fill.color.set(L.fill);
+      this.lights.fill.intensity = L.fillInt;
+      this.lights.hemi.color.set(L.sky);
+      this.lights.hemi.groundColor.set(L.ground);
+      this.lights.rimA.color.set(L.rimA);
+      this.lights.rimB.color.set(L.rimB);
+    }
     if (d.scroll && this.floorMat.emissiveMap) {
       const tex = this.floorMat.emissiveMap;
       const speed = d.scroll;
