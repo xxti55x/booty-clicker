@@ -2,23 +2,45 @@ import type * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 /**
- * Fixed stage camera. The view is authored (behind the character: theta = π + 0.3,
- * phi = 1.32, radius = 9.5) and the player cannot move it — no pan, no rotate, no
- * zoom. Dragging on the canvas is reserved entirely for clicking/twerking; only
- * code (screen shake, future cutscene moves) drives the camera.
+ * Fixed diorama camera (goal: Insel-POV wie ein Casual-Idle, nicht die zentrierte
+ * 3D-Nahansicht). Erhöhter Blick (~32° Elevation) aus größerer Distanz auf die
+ * schwebende Insel; das Ziel liegt ZWISCHEN Spieler (Ursprung) und Rivale
+ * (ENTITY_STAGE ≈ x 3.5 / z 4.4), sodass beide im Bild stehen. The player cannot
+ * move it — no pan, no rotate, no zoom. Dragging on the canvas is reserved
+ * entirely for clicking/twerking; only code (screen shake) drives the camera.
  */
-export function createControls(camera: THREE.PerspectiveCamera, dom: HTMLElement): OrbitControls {
-  const theta = Math.PI + 0.3;
-  const phi = 1.32;
-  const radius = 9.5;
-  camera.position.set(
-    radius * Math.sin(phi) * Math.sin(theta),
-    radius * Math.cos(phi) + 1.4,
-    radius * Math.sin(phi) * Math.cos(theta),
-  );
+const THETA = Math.PI + 0.3;
+const PHI = 1.07;
 
+/**
+ * Aspect-abhängiges Diorama-Framing (vom Resize-Handler aufgerufen):
+ * · Landscape/Desktop: target.x nach −x versetzt — das schiebt die Insel in
+ *   der SICHTBAREN Spielfläche ins Zentrum (Shop-Panel deckt rechts ~30 % ab).
+ * · Portrait/Mobil: enges H-FOV — Duo zentrieren, weiter zurückziehen; die
+ *   Insel füllt das untere Band, beide Akteure bleiben im Bild.
+ */
+export function frameCamera(
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls,
+  aspect: number,
+): void {
+  const portrait = aspect < 1;
+  // Portrait: der sichtbare Streifen zwischen HUD und Bottom-Sheet ist klein —
+  // hier gilt die NAHE Duo-Einstellung (Insel-Totale ist Landscape/Desktop).
+  const radius = portrait ? 19 : 27;
+  const target = portrait ? { x: 1.4, y: -1.3, z: 1.5 } : { x: -0.9, y: -0.9, z: 1.5 };
+  camera.position.set(
+    target.x + radius * Math.sin(PHI) * Math.sin(THETA),
+    target.y + radius * Math.cos(PHI),
+    target.z + radius * Math.sin(PHI) * Math.cos(THETA),
+  );
+  controls.target.set(target.x, target.y, target.z);
+  controls.update();
+}
+
+export function createControls(camera: THREE.PerspectiveCamera, dom: HTMLElement): OrbitControls {
   const controls = new OrbitControls(camera, dom);
-  controls.target.set(0, 0.1, 0);
+  frameCamera(camera, controls, window.innerWidth / Math.max(1, window.innerHeight));
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.enablePan = false;

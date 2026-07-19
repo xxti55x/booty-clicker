@@ -27,7 +27,7 @@ import type { BackgroundKey } from '../types';
  * a LARGER +x stages the rival on the open screen-left floor, clear of both
  * the player's silhouette and the UI in the boot framing.
  */
-export const ENTITY_STAGE = { x: 3.5, y: -2.4, z: 4.4 } as const;
+export const ENTITY_STAGE = { x: 2.9, y: -2.4, z: 3.6 } as const; // Insel-POV: näher am Zentrum
 /** Extra stage depth for the (larger) boss so it never crowds the player. */
 const BOSS_EXTRA_Z = 0.7;
 /** Boss variants are this much bigger (meaner silhouette, same floor plant). */
