@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 import { INK, sh, toonMat, withOutline } from '../engine/materials';
+import { dotsTex, repeated } from '../engine/textures';
 import type { BackgroundKey } from '../types';
 
 /**
@@ -179,9 +180,17 @@ export function buildEntity(
   const dh = (variant * 0.085) % 1;
   const ds = boss ? 0.08 : 0;
   const dl = boss ? -0.055 : 0;
-  const bodyT = toonMat({ color: shifted(cfg.body, dh, ds, dl) });
+  // Rivalen-Haut trägt ein subtiles Punkt-Raster (Goal „apply texture to all
+  // models") — near-white Map, Paletten-Shift und Boss-Tönung bleiben wirksam.
+  const bodyT = toonMat({
+    color: shifted(cfg.body, dh, ds, dl),
+    map: repeated(dotsTex(1, 18), 2, 2),
+  });
   const bellyT = toonMat({ color: shifted(cfg.belly, dh, 0, boss ? -0.03 : 0) });
-  const bootyT = toonMat({ color: shifted(cfg.booty, dh, ds, dl) });
+  const bootyT = toonMat({
+    color: shifted(cfg.booty, dh, ds, dl),
+    map: repeated(dotsTex(2, 14), 2.5, 2.5),
+  });
   const accent = shifted(cfg.accent, dh);
   const glowT = toonMat({ color: accent, emissive: accent, emissiveIntensity: 0.85 });
   const darkT = toonMat({ color: 0x221d2e });

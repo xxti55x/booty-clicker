@@ -134,7 +134,10 @@ function buildStageGroup(key: BackgroundKey): THREE.Object3D {
   scene.updateMatrixWorld(true);
   const group = new THREE.Group();
   group.name = `stage-${key}`;
-  for (const child of [...scene.children]) group.add(child);
+  // Die Themen-Insel (`stage-island`) ist ein Szenen-Fixture des Spiels — die
+  // Stage-Modelle bleiben die Prop-Kits, denen der Blender-Refine sein eigenes
+  // Diorama-Fundament baut (add_stage_floor).
+  for (const child of [...scene.children]) if (child.name !== 'stage-island') group.add(child);
   strip(group, group.name);
   return group;
 }

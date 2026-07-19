@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 import { INK, sh, toonMat, withOutline } from '../engine/materials';
+import { repeated, weaveTex } from '../engine/textures';
 import type { ArmRig, Cheek, LegRig, Rig, SkinConfig } from '../types';
 
 /** Root sits at pelvis height; feet plant at y = -2.4 (~7-head proportions). */
@@ -46,7 +47,9 @@ export function buildCharacter(
   const line = cfg.outline ?? INK;
   const accent = cfg.accent ?? (robot ? 0x38bdf8 : boss ? 0xffd24d : 0xa8e831);
   const skinT = toonMat({ color: cfg.skin, bands });
-  const shortsT = toonMat({ color: cfg.shorts, bands });
+  // Shorts (und damit die Cheeks) tragen ein feines Gewebe-Muster (Goal
+  // „apply texture to all models") — near-white Map, der Skin-Farbton bleibt.
+  const shortsT = toonMat({ color: cfg.shorts, bands, map: repeated(weaveTex(), 3, 3) });
   const hairT = toonMat({ color: cfg.hair, bands });
   // host: the `shorts` colour doubles as the suit fabric (trousers + jacket).
   const suitT = shortsT;

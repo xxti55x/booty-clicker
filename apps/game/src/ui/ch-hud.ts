@@ -12,16 +12,13 @@ function byId(id: string): HTMLElement {
   return el;
 }
 
-const RIVALS = [
-  'Groupie',
-  'Möchtegern-Tänzer',
-  'TikTok-Twerker',
-  'Club-Rivalin',
-  'Bühnen-Diva',
-  'Konkurrenz-Crew',
-  'Playback-Betrüger',
-  'Steife Hüfte',
-];
+/** Rivalen-Namen PRO THEME (der Gegner-Körper ist themengebunden — der Name folgt). */
+const RIVALS: Record<'club' | 'synth' | 'beach' | 'space', string[]> = {
+  club: ['Club-Rivalin', 'Möchtegern-Tänzer', 'TikTok-Twerker', 'Bühnen-Diva'],
+  synth: ['Playback-Betrüger', 'Neon-Nervensäge', 'Retro-Rivale', 'Grid-Groover'],
+  beach: ['Strand-Angeber', 'Krabben-König', 'Sonnenbrand-Shaker', 'Promenaden-Poser'],
+  space: ['Alien-Groupie', 'Schwerelos-Shaker', 'Astro-Angeber', 'Mond-Wackler'],
+};
 const BOSSES = [
   'Goldener Twerk-Tyrann',
   'Bass-Baron',
@@ -33,7 +30,8 @@ const BOSSES = [
 
 function rivalName(zone: number, boss: boolean): string {
   if (boss) return '👑 ' + BOSSES[Math.floor(zone / 5) % BOSSES.length];
-  return RIVALS[zone % RIVALS.length];
+  const pool = RIVALS[stripTheme(zone)];
+  return pool[zone % pool.length];
 }
 
 /**

@@ -3,6 +3,37 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Auto-Bühnen, Halbraum-Zentrierung, Themen-Inseln + Texturen (Goal)
+
+- **2026-07-19 — Bühnen nicht mehr wählbar, Wechsel nur nach Boss.** Zonen-Strip
+  ist reine Anzeige (Buttons → Spans), Travel-Pfeile entfernt (`travelTo` bleibt
+  pure/Sim-genutzt). Theme-Rotation alle 5 Bühnen: weil `BOSS_EVERY = 5`, liegt
+  JEDER Theme-Wechsel exakt hinter einem gewonnenen Bosskampf (5→6, 10→11, …).
+  Recolour-Lap folgt der kürzeren Tour (20 Zonen), Rivalen-Namen sind jetzt
+  themengebunden statt generisch rotierend.
+- **2026-07-19 — Insel im 50-%-Halbraum zentriert via `setViewOffset`.** Statt
+  Aim-Offset (Ziel seitlich verschieben ⇒ perspektivischer Skew am Bildrand)
+  rendert die Kamera eine 1.5×-breite virtuelle Ansicht, deren Zentrum bei 75 %
+  der Fensterbreite liegt — die Kamera schaut GERADE auf die Insel, die
+  Projektion setzt sie in die Mitte der rechten Fensterhälfte. Distanz
+  aspect-abhängig aus der Insel-Ausdehnung (ganze Bühne sichtbar), Nebel auf
+  die größere Distanz nachjustiert (0.022 → 0.012).
+- **2026-07-19 — Jede Bühne eine EIGENE Insel + prozedurale Texturen.** Die
+  geteilte Erd-Insel (scene.ts) wurde durch vier Themen-Bauwerke ersetzt
+  (`world/island.ts`, von der World mit der Kulisse gebaut/disposed): Club =
+  Stein-Plattform mit pulsierender Neonkante + Amethyst-Zapfen, Synth =
+  Chrom-Deck mit doppelter Neonkante über Neon-Drahtgitter-Kiel (+ das Grid ist
+  jetzt scrollende EMISSIVE-MAP über die GANZE Fläche — der alte GridHelper
+  deckte nur 9 von 12.8 Einheiten), Beach = Sandbank mit Sandstein-Strata +
+  Schaumkante, Space = vernietetes Metall-Deck auf Krater-Asteroid mit
+  Landelichtern. Auch die Hintergrund-Füllung ist themengebunden (Blöcke/
+  Portale/Mini-Inseln/Asteroiden). Texturen sind prozedurale Canvas-Maps
+  (`engine/textures.ts`, gecacht inkl. Repeat-Klone — Material-`dispose()`
+  fasst Texturen nie an), NEAR-WHITE gezeichnet, damit Materialfarbe +
+  Hue-Lap-Shift weiter tinten. Modelle: Shorts/Cheeks tragen ein Gewebe-,
+  Rivalen ein Punkt-Raster. Spielfläche (Radius/Zentrum/Höhe) unverändert —
+  Physik/Kamera/Klick-Logik unberührt.
+
 ## Choreografie komplett + Blender-Animations-Renders (Goal)
 
 - **2026-07-19 — Moves vervollständigt + Klick→Tanz-Akzente.** Die 5 Prototyp-

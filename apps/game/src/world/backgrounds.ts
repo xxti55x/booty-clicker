@@ -3,6 +3,8 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 
 import { INK, mk, outlineMaterial, toonMat, withOutline } from '../engine/materials';
 import type { GlowSpriteFn } from '../engine/scene';
+import { gridTex, plankTex, platesTex, repeated, speckleTex } from '../engine/textures';
+import { buildIsland } from './island';
 import type { BackgroundKey, WorldAnim } from '../types';
 
 /**
@@ -47,6 +49,18 @@ interface BgConfig {
   fm: number;
   /** BP milestone (highest-ever) before this appears in the shop (M2 content-gate). */
   revealAt?: number;
+  /**
+   * Insel-Deck-Texturierung (Goal „apply texture"): prozedurale Maps auf der
+   * geteilten Oberseite — `map` multipliziert die Deckfarbe, `emissiveMap`
+   * lässt Muster glühen (Synth-Grid), `scroll` schiebt die Emissive-Map (u/s).
+   */
+  deck?: {
+    map?: () => THREE.Texture;
+    emissiveMap?: () => THREE.Texture;
+    emissive?: number;
+    emissiveIntensity?: number;
+    scroll?: number;
+  };
   build: (ctx: BuildCtx) => void;
 }
 
@@ -292,10 +306,11 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     top: 0x241830,
     bot: 0x050507,
     fog: 0x0a0a10,
-    floor: 0x0c0c12,
-    fr: 0.2,
-    fm: 0.65,
+    floor: 0x2a2532,
+    fr: 0.3,
+    fm: 0.55,
     revealAt: 0,
+    deck: { map: () => repeated(plankTex(1), 5, 5) }, // dunkles Club-Parkett
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
       // Mirror ball, hung low over the visible back floor — kept mirror-PBR for
@@ -407,20 +422,21 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     top: 0x3a1060,
     bot: 0x0a0518,
     fog: 0x140628,
-    floor: 0x160a26,
-    fr: 0.15,
+    floor: 0x1c1230,
+    fr: 0.2,
     fm: 0.7,
     revealAt: 800,
+    // Das Neon-Grid ist jetzt das DECK selbst: glühende Grid-Textur über die
+    // GANZE Inselfläche (der alte GridHelper deckte nur 9 von 12.8 Einheiten),
+    // langsam scrollend wie der klassische Synthwave-Boden.
+    deck: {
+      emissiveMap: () => repeated(gridTex(8), 3, 3),
+      emissive: 0xff3fb0,
+      emissiveIntensity: 0.55,
+      scroll: 0.045,
+    },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
-      // Scrolling neon grid (graphic already — kept).
-      // Insel-POV: Grid auf die Inselfläche begrenzt (Diagonale < R 8).
-      const grid = new THREE.GridHelper(9, 9, hue(0xff3fb0), hue(0x8b5cf6));
-      grid.position.set(1.4, -2.39, 1.7); // Insel-Zentrum (Duo-Mitte)
-      const gm = grid.material as THREE.LineBasicMaterial;
-      gm.transparent = true;
-      gm.opacity = 0.5;
-      propGroup.add(grid);
       // Striped retro sun (shader kept as-is), now setting into the VISIBLE
       // horizon (+z wedge) instead of behind the boot camera.
       const sunMat = new THREE.ShaderMaterial({
@@ -486,7 +502,6 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       orb.position.set(15.5, 2.2, 23);
       propGroup.add(orb);
       anims.push((t) => {
-        grid.position.z = (t * 3) % 2;
         sunMat.uniforms.t.value = t;
         for (let i = 0; i < sways.length; i++) {
           const s = sways[i];
@@ -505,10 +520,11 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     top: 0xff8a4d,
     bot: 0x2a1533,
     fog: 0x3a1a30,
-    floor: 0x33241a,
-    fr: 0.55,
-    fm: 0.15,
+    floor: 0xb08b52,
+    fr: 0.85,
+    fm: 0.05,
     revealAt: 6000,
+    deck: { map: () => repeated(speckleTex(1, 1100), 4, 4) }, // körniger Sand
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
       // Setting sun over the visible sea horizon (emissive disc + glow, kept).
@@ -645,10 +661,11 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     top: 0x0a0a2a,
     bot: 0x000004,
     fog: 0x02020a,
-    floor: 0x08080f,
-    fr: 0.12,
-    fm: 0.8,
+    floor: 0x39404f,
+    fr: 0.45,
+    fm: 0.85,
     revealAt: 30000,
+    deck: { map: () => repeated(platesTex(1), 4, 4) }, // vernietetes Metall-Deck
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
       // Star dome (Points — kept as-is).
@@ -775,6 +792,7 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
  */
 export class World {
   private propGroup = new THREE.Group();
+  private islandGroup = new THREE.Group();
   /** Per-frame animation callbacks for the active background. */
   readonly anims: WorldAnim[] = [];
 
@@ -784,25 +802,36 @@ export class World {
     private readonly floorMat: THREE.MeshPhysicalMaterial,
     private readonly glowSprite: GlowSpriteFn,
   ) {
-    this.scene.add(this.propGroup);
+    this.scene.add(this.propGroup, this.islandGroup);
   }
 
-  /**
-   * Swap the stage. `variant` is the recolour lap (0 = original palette) —
-   * deeper endless laps hue-shift the sky, fog, floor and prop palette so
-   * lap 2+ of a tier reads visibly different (Wave-3 endless variety).
-   */
-  setBackground(key: BackgroundKey, variant = 0): void {
-    this.scene.remove(this.propGroup);
-    this.propGroup.traverse((o) => {
+  private disposeGroup(g: THREE.Group): void {
+    this.scene.remove(g);
+    g.traverse((o) => {
       const mesh = o as Partial<THREE.Mesh>;
       mesh.geometry?.dispose();
       const mat = mesh.material;
       if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
       else mat?.dispose();
     });
+  }
+
+  /**
+   * Swap the stage. `variant` is the recolour lap (0 = original palette) —
+   * deeper endless laps hue-shift the sky, fog, floor and prop palette so
+   * lap 2+ of a tier reads visibly different (Wave-3 endless variety).
+   * Seit dem Goal-Umbau wird auch die INSEL selbst pro Theme neu gebaut
+   * (`world/island.ts`) und das Deck texturiert (`deck`-Config).
+   */
+  setBackground(key: BackgroundKey, variant = 0): void {
+    this.disposeGroup(this.propGroup);
+    this.disposeGroup(this.islandGroup);
     this.propGroup = new THREE.Group();
-    this.scene.add(this.propGroup);
+    this.islandGroup = new THREE.Group();
+    // Benannt, damit der Modell-Exporter die Insel (Szenen-Fixture) von der
+    // Prop-Szenerie unterscheiden kann.
+    this.islandGroup.name = 'stage-island';
+    this.scene.add(this.propGroup, this.islandGroup);
     this.anims.length = 0;
 
     const dh = (variant * LAP_HUE) % 1;
@@ -822,6 +851,22 @@ export class World {
     this.floorMat.color.copy(lift(hue(b.floor), 0.14));
     this.floorMat.roughness = b.fr;
     this.floorMat.metalness = b.fm;
+    // Deck-Texturen (Goal „apply texture"): Map/Emissive-Map je Theme; ein
+    // Map-Wechsel braucht einen Programm-Rebuild (needsUpdate).
+    const d = b.deck ?? {};
+    this.floorMat.map = d.map?.() ?? null;
+    this.floorMat.emissiveMap = d.emissiveMap?.() ?? null;
+    this.floorMat.emissive.copy(d.emissive !== undefined ? hue(d.emissive) : new THREE.Color(0));
+    this.floorMat.emissiveIntensity = d.emissiveIntensity ?? 1;
+    this.floorMat.needsUpdate = true;
+    if (d.scroll && this.floorMat.emissiveMap) {
+      const tex = this.floorMat.emissiveMap;
+      const speed = d.scroll;
+      this.anims.push((t) => {
+        tex.offset.y = (t * speed) % 1;
+      });
+    }
+    buildIsland(this.islandGroup, key, hue, this.floorMat, this.anims);
     b.build({
       propGroup: this.propGroup,
       glowSprite: this.glowSprite,
