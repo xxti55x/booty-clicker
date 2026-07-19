@@ -1,7 +1,17 @@
 import * as THREE from 'three';
 
 import { INK, sh, toonMat, withOutline } from '../engine/materials';
-import { repeated, weaveTex } from '../engine/textures';
+import {
+  brushedTex,
+  carbonTex,
+  pinstripeTex,
+  poreTex,
+  repeated,
+  sequinTex,
+  strandTex,
+  velvetTex,
+  weaveTex,
+} from '../engine/textures';
 import type { ArmRig, Cheek, LegRig, Rig, SkinConfig } from '../types';
 
 /** Root sits at pelvis height; feet plant at y = -2.4 (~7-head proportions). */
@@ -46,20 +56,46 @@ export function buildCharacter(
   const bands = cfg.bands;
   const line = cfg.outline ?? INK;
   const accent = cfg.accent ?? (robot ? 0x38bdf8 : boss ? 0xffd24d : 0xa8e831);
-  const skinT = toonMat({ color: cfg.skin, bands });
-  // Shorts (und damit die Cheeks) tragen ein feines Gewebe-Muster (Goal
-  // „apply texture to all models") — near-white Map, der Skin-Farbton bleibt.
-  const shortsT = toonMat({ color: cfg.shorts, bands, map: repeated(weaveTex(), 3, 3) });
-  const hairT = toonMat({ color: cfg.hair, bands });
+  // Roadmap T3: Haut = hauchzartes Poren-Rauschen (Robo: gebürstetes Chassis-
+  // Metall), Haare = Strähnen — near-white, der Skin-Farbton tintet weiter.
+  const skinT = toonMat({
+    color: cfg.skin,
+    bands,
+    map: robot ? repeated(brushedTex(2), 2, 2) : repeated(poreTex(1), 2, 2),
+  });
+  // Shorts (und Cheeks) tragen PRO STIL ihren eigenen Stoff (Goal „apply
+  // texture to all models"): Robo bürstet Metall, Disco glitzert Pailletten
+  // (mit Emissive-Funkeln), Ninja webt Carbon, der Showmaster trägt
+  // Nadelstreifen, der Boss Samt — alle anderen das feine Gewebe.
+  const shortsDetail = robot
+    ? repeated(brushedTex(3), 2, 2)
+    : disco
+      ? repeated(sequinTex(9), 2.4, 2.4)
+      : ninja
+        ? repeated(carbonTex(), 3, 3)
+        : host
+          ? repeated(pinstripeTex(12), 2, 2)
+          : boss
+            ? repeated(velvetTex(1), 1.6, 1.6)
+            : repeated(weaveTex(), 3, 3);
+  const shortsT = toonMat({
+    color: cfg.shorts,
+    bands,
+    map: shortsDetail,
+    ...(disco
+      ? { emissiveMap: repeated(sequinTex(9), 2.4, 2.4), emissive: accent, emissiveIntensity: 0.2 }
+      : {}),
+  });
+  const hairT = toonMat({ color: cfg.hair, bands, map: repeated(strandTex(1), 2, 2) });
   // host: the `shorts` colour doubles as the suit fabric (trousers + jacket).
   const suitT = shortsT;
-  const jointT = toonMat({ color: 0x525c6e, bands });
+  const jointT = toonMat({ color: 0x525c6e, bands, map: repeated(brushedTex(4), 2, 2) });
   const darkT = toonMat({ color: 0x1d1d26, bands });
   const shoeT = robot
     ? jointT
     : host || boss || ninja || flair === 'lava'
       ? darkT
-      : toonMat({ color: 0xf2f3f6, bands });
+      : toonMat({ color: 0xf2f3f6, bands, map: repeated(weaveTex(), 4, 4) });
   const glowT = toonMat({ color: accent, emissive: accent, emissiveIntensity: 0.9, bands });
   // Facial ink + eye whites are unlit so the face always reads.
   const inkFlat = new THREE.MeshBasicMaterial({ color: line, toneMapped: false });
@@ -615,7 +651,12 @@ export function buildCharacter(
     const cape = sh(
       new THREE.Mesh(
         new THREE.CylinderGeometry(0.45, 1.0, 1.95, 18, 1, true, -Math.PI / 2, Math.PI),
-        toonMat({ color: cfg.cape ?? 0x7a1424, bands, side: THREE.DoubleSide }),
+        toonMat({
+          color: cfg.cape ?? 0x7a1424,
+          bands,
+          side: THREE.DoubleSide,
+          map: repeated(velvetTex(2), 1.4, 1.4), // T3: königlicher Samt-Fall
+        }),
       ),
     );
     cape.position.set(0, 0.48, 0.16);

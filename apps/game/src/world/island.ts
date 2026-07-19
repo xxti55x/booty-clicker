@@ -1,7 +1,15 @@
 import * as THREE from 'three';
 
 import { toonMat } from '../engine/materials';
-import { craterTex, platesTex, repeated, speckleTex, strataTex } from '../engine/textures';
+import {
+  craterTex,
+  edgeShadeTex,
+  platesTex,
+  repeated,
+  speckleTex,
+  strataTex,
+  velvetTex,
+} from '../engine/textures';
 import type { BackgroundKey, WorldAnim } from '../types';
 
 /**
@@ -46,17 +54,23 @@ function ring(n: number, f: (a: number, i: number) => void): void {
 // Club — dunkle Stein-Disco-Plattform mit Neonkante + Deckenkristallen
 // ---------------------------------------------------------------------------
 function clubIsland({ g, hue, anims }: IslandCtx): void {
+  const stoneTex = repeated(speckleTex(3, 700), 3, 1.2);
   const stone = toonMat({
     color: hue(0x6a5a86),
     emissive: hue(0x2a2040),
     emissiveIntensity: 0.5,
-    map: repeated(speckleTex(3, 700), 3, 1.2),
+    map: stoneTex,
+    bumpMap: stoneTex,
+    bumpScale: 0.4,
   });
+  const stoneDarkTex = repeated(speckleTex(4, 700), 2, 1);
   const stoneDark = toonMat({
     color: hue(0x4a3f63),
     emissive: hue(0x1c1630),
     emissiveIntensity: 0.5,
-    map: repeated(speckleTex(4, 700), 2, 1),
+    map: stoneDarkTex,
+    bumpMap: stoneDarkTex,
+    bumpScale: 0.4,
   });
   const rim = new THREE.Mesh(
     new THREE.CylinderGeometry(ISLAND_R, ISLAND_R * 0.86, 1.6, 48, 1, true),
@@ -89,13 +103,21 @@ function clubIsland({ g, hue, anims }: IslandCtx): void {
     for (let i = 0; i < gems.length; i++) gems[i].rotation.y += 0.004;
   });
   // Hintergrund: schwebende dunkle Blöcke mit Neon-Kanten + weiche Nachtwolken.
+  const blockMatTex = repeated(speckleTex(5, 500), 2, 2);
   const blockMat = toonMat({
     color: hue(0x3d3356),
     emissive: hue(0x181226),
     emissiveIntensity: 0.55,
-    map: repeated(speckleTex(5, 500), 2, 2),
+    map: blockMatTex,
+    bumpMap: blockMatTex,
+    bumpScale: 0.35,
   });
-  const cloudMat = toonMat({ color: 0xcfc6e6, emissive: 0x6a5c92, emissiveIntensity: 0.35 });
+  const cloudMat = toonMat({
+    color: 0xcfc6e6,
+    emissive: 0x6a5c92,
+    emissiveIntensity: 0.35,
+    map: repeated(velvetTex(3), 1.5, 1.5),
+  });
   for (const [x, y, z, s] of [
     [-11, -4.2, 13, 1.9],
     [12.5, -6, 10, 1.4],
@@ -122,11 +144,14 @@ function clubIsland({ g, hue, anims }: IslandCtx): void {
 // Synth — Chrom-Deck über invertierter Neon-Pyramide, schwebende Shards
 // ---------------------------------------------------------------------------
 function synthIsland({ g, hue, anims }: IslandCtx): void {
+  const chromeTex = repeated(platesTex(2), 4, 1);
   const chrome = toonMat({
     color: hue(0x8a7fb0),
     emissive: hue(0x2c2348),
     emissiveIntensity: 0.5,
-    map: repeated(platesTex(2), 4, 1),
+    map: chromeTex,
+    bumpMap: chromeTex,
+    bumpScale: 0.3,
   });
   const rim = new THREE.Mesh(
     new THREE.CylinderGeometry(ISLAND_R, ISLAND_R * 0.93, 1.1, 48, 1, true),
@@ -212,17 +237,23 @@ const i2 = (x: number): boolean => Math.abs(Math.round(x)) % 2 === 0;
 // Beach — Sandbank mit Sandstein-Schichten, Muscheln + grünen Mini-Inseln
 // ---------------------------------------------------------------------------
 function beachIsland({ g, hue, anims }: IslandCtx): void {
+  const sandstoneTex = repeated(strataTex(2), 2.5, 1);
   const sandstone = toonMat({
     color: hue(0xd9b273),
     emissive: hue(0x6a4f28),
     emissiveIntensity: 0.5,
-    map: repeated(strataTex(2), 2.5, 1),
+    map: sandstoneTex,
+    bumpMap: sandstoneTex,
+    bumpScale: 0.5,
   });
+  const earthDarkTex = repeated(speckleTex(6, 800), 2, 1);
   const earthDark = toonMat({
     color: hue(0x8a6a3e),
     emissive: hue(0x40301a),
     emissiveIntensity: 0.5,
-    map: repeated(speckleTex(6, 800), 2, 1),
+    map: earthDarkTex,
+    bumpMap: earthDarkTex,
+    bumpScale: 0.35,
   });
   const rim = new THREE.Mesh(
     new THREE.CylinderGeometry(ISLAND_R, ISLAND_R * 0.85, 1.7, 48, 1, true),
@@ -271,8 +302,18 @@ function beachIsland({ g, hue, anims }: IslandCtx): void {
   }
   g.add(at(star, 4.6, TOP_Y + 0.06, -3.4));
   // Hintergrund: die klassischen grünen Mini-Inseln + weiße Puffwolken.
-  const grass = toonMat({ color: hue(0x7fb64a), emissive: hue(0x2e4a16), emissiveIntensity: 0.35 });
-  const cloudMat = toonMat({ color: 0xffffff, emissive: 0x9aa2c0, emissiveIntensity: 0.35 });
+  const grass = toonMat({
+    color: hue(0x7fb64a),
+    emissive: hue(0x2e4a16),
+    emissiveIntensity: 0.35,
+    map: repeated(speckleTex(11, 900), 2, 2),
+  });
+  const cloudMat = toonMat({
+    color: 0xffffff,
+    emissive: 0x9aa2c0,
+    emissiveIntensity: 0.35,
+    map: repeated(velvetTex(3), 1.5, 1.5),
+  });
   for (const [x, y, z, r] of [
     [-11, -3.6, 14, 2.1],
     [12, -5.2, 11, 1.5],
@@ -301,17 +342,23 @@ function beachIsland({ g, hue, anims }: IslandCtx): void {
 // Space — vernietetes Metall-Deck auf Krater-Asteroid, Kristalle + Trümmer
 // ---------------------------------------------------------------------------
 function spaceIsland({ g, hue, anims }: IslandCtx): void {
+  const rockTex = repeated(craterTex(3), 2, 1.2);
   const rock = toonMat({
     color: hue(0x8d87a6),
     emissive: hue(0x2e2a44),
     emissiveIntensity: 0.55,
-    map: repeated(craterTex(3), 2, 1.2),
+    map: rockTex,
+    bumpMap: rockTex,
+    bumpScale: 0.6,
   });
+  const deckTex = repeated(platesTex(5), 5, 1);
   const deck = toonMat({
     color: hue(0x707a92),
     emissive: hue(0x252c40),
     emissiveIntensity: 0.5,
-    map: repeated(platesTex(5), 5, 1),
+    map: deckTex,
+    bumpMap: deckTex,
+    bumpScale: 0.3,
   });
   // Metall-Fassung unter der Deckkante, darunter der Asteroiden-Bauch.
   const band = new THREE.Mesh(
@@ -414,5 +461,13 @@ export function buildIsland(
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   g.add(at(floor, 0, TOP_Y, 0));
+  // T5 Fake-AO: weicher Grime-Ring am Deckrand erdet den Boden (unter den
+  // Club-Tiles bei +0.01, über dem Deck selbst).
+  const ao = new THREE.Mesh(
+    new THREE.CircleGeometry(ISLAND_R, 56),
+    new THREE.MeshBasicMaterial({ map: edgeShadeTex(), transparent: true, depthWrite: false }),
+  );
+  ao.rotation.x = -Math.PI / 2;
+  g.add(at(ao, 0, TOP_Y + 0.004, 0));
   BUILDERS[key]({ g, hue, anims });
 }

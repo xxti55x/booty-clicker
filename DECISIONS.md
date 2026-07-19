@@ -3,6 +3,52 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Senior-Textur-Pass in Blender — 100 % Material-Abdeckung (Goal)
+
+- **2026-07-19 — Warum ein Blender-seitiger Pass nötig war.** Der
+  Three.js-GLTFExporter exportiert `bumpMap` NICHT (glTF kennt nur
+  `normalTexture`) — alle In-Game-Reliefs (Planken, Pailletten, Sandkorn,
+  Samt) kamen flach in Blender an, und zig Principled-Materialien
+  (Accessoires, Enrich-Props, Dioramen-Böden) hatten gar keine Map.
+  `tools/blender/textures_bpy.py` schließt beide Lücken pro Modell: (1) aus
+  jeder Farb-Map wird per numpy-Sobel über die Luminanz eine echte
+  **Normal-Map abgeleitet** (dunkle Fugen = Rillen, 128 px, Strength 2.2)
+  und im glTF-Muster `TexImage → Normal Map → Principled.Normal` verdrahtet;
+  (2) jedes lit Material OHNE Farb-Map bekommt eine near-white
+  **Grain-Map** (256 px Wolken-Rauschen, Seed aus dem Datei-Stem) im
+  Exportmuster `Mix(MULTIPLY, TexImage, Farbe)` — der Exporter erkennt das
+  und schreibt die Farbe als `baseColorFactor` — plus die Grain-Normal.
+  Unlit-Materialien (Ink-Linien, Augen) bleiben bewusst flach. Der Pass
+  hängt in `refine_models.py` NACH dem Enrich (auch Props/Böden werden
+  vervollständigt); `verify_models.py` hat jetzt ein hartes Coverage-Gate:
+  jedes lit Material ohne Textur ⇒ Exit 1. Spiel-seitig bekamen die letzten
+  flachen Materialien Maps (Gelenke gebürstet, Schuhe Webstoff,
+  Rivalen-Bauch Punkte), damit Roh-Export und Refine dieselbe Sprache
+  sprechen.
+
+## Roadmap-Phasen T + L — Textur-Vollausbau, Licht & Bloom
+
+- **2026-07-19 — T1–T5 in-game.** Prozedurale Maps rendern jetzt mit 512²
+  (Maler bleiben im 256er-Koordinatenraum, `SCALE`-Transform), Anisotropie
+  folgt dem Quality-Preset (1/4/8, GPU-gedeckelt, retroaktiv auf den Cache).
+  Relief via `bumpMap` = dieselbe near-white Muster-Map (dunkle Fugen lesen
+  als Rillen) auf allen Insel-Materialien + Deck (`deck.bump`). Charaktere:
+  pro Skin-Stil eigener Stoff (Robo gebürstet, Disco Pailletten mit
+  Emissive-Funkeln, Ninja Carbon, Showmaster Nadelstreifen, Boss Samt inkl.
+  Cape), Haar-Strähnen, Poren-Grain; Rivalen pro Theme (Konfetti/Scanlines/
+  Schalen-Bump/Glow-Flecken). Props: Palmen-Rinde, Speaker-Tolex,
+  Discokugel-Facetten, Berg-Korn, Planeten-Bänder, Krater-Mond, Wolken-
+  Wattierung. T5: Kanten-AO-Ring (transparenter Radial-Grime) erdet jedes
+  Deck. Alles weiter prozedural + near-white — Paletten/Hue-Laps tinten.
+- **2026-07-19 — Phase L.** Licht-Rig (`SceneLights`) wandert mit der Kulisse:
+  pro Theme eigenes Key/Fill/Hemi/Rim-Set (Beach goldene Stunde, Synth
+  rosé/cyan, Space hart-kalt); Schatten-Frustum auf das Insel-Zentrum
+  (1.4/1.7) statt Welt-Ursprung. `engine/post.ts`: RenderPass →
+  UnrealBloomPass (Threshold 0.82 — nur echte Emissives) → OutputPass,
+  aktiv NUR im high-Preset; low/medium rendern direkt ohne Composer-Kosten.
+  Bundle 702 → 726 KB. T6: Modell-Kette neu gelaufen — Maps in den glbs,
+  22/22 verifiziert (Samt-Cape im Boss-Render sichtbar).
+
 ## v12 — Progression massiv verlangsamt + Combo-Nerf (Goal)
 
 - **2026-07-19 — Goal „a lot slower, scales too fast with everything".** Sechs

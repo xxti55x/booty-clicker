@@ -2,8 +2,18 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
 import { INK, mk, outlineMaterial, toonMat, withOutline } from '../engine/materials';
-import type { GlowSpriteFn } from '../engine/scene';
-import { gridTex, plankTex, platesTex, repeated, speckleTex } from '../engine/textures';
+import type { GlowSpriteFn, SceneLights } from '../engine/scene';
+import {
+  bandsTex,
+  craterTex,
+  gridTex,
+  plankTex,
+  platesTex,
+  repeated,
+  sequinTex,
+  speckleTex,
+  strataTex,
+} from '../engine/textures';
 import { buildIsland } from './island';
 import type { BackgroundKey, WorldAnim } from '../types';
 
@@ -60,6 +70,19 @@ interface BgConfig {
     emissive?: number;
     emissiveIntensity?: number;
     scroll?: number;
+    /** Relief-Stärke (Roadmap T2): Map/Emissive-Map dient zugleich als Bump-Höhe. */
+    bump?: number;
+  };
+  /** Per-Theme-Lichtset (Roadmap L): Key/Fill/Hemi/Rims wechseln mit der Kulisse. */
+  light: {
+    key: number;
+    keyInt: number;
+    fill: number;
+    fillInt: number;
+    sky: number;
+    ground: number;
+    rimA: number;
+    rimB: number;
   };
   build: (ctx: BuildCtx) => void;
 }
@@ -95,10 +118,11 @@ function palm(
 ): void {
   const { propGroup, hue } = ctx;
   const g = new THREE.Group();
+  const barkTex = repeated(strataTex(4), 1, 1.6);
   const trunk = O(
     new THREE.Mesh(
       new THREE.CylinderGeometry(0.13 * s, 0.24 * s, 3.3 * s, 8),
-      toonMat({ color: hue(trunkHex) }),
+      toonMat({ color: hue(trunkHex), map: barkTex, bumpMap: barkTex, bumpScale: 0.25 }),
     ),
   );
   trunk.position.y = 1.62 * s;
@@ -147,7 +171,8 @@ function speakerStack(
   const g = new THREE.Group();
   g.position.set(x, -2.4, z);
   g.rotation.y = Math.atan2(-x, -z); // face the stage centre
-  const cabMat = toonMat({ color: hue(0x3a2b58) });
+  const tolex = repeated(speckleTex(9, 1200), 2, 2);
+  const cabMat = toonMat({ color: hue(0x3a2b58), map: tolex, bumpMap: tolex, bumpScale: 0.15 });
   const rimMat = toonMat({ color: 0x241c34 });
   const discMat = toonMat({ color: 0x171226 });
   const accent = hue(0xffd24d);
@@ -310,7 +335,18 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     fr: 0.3,
     fm: 0.55,
     revealAt: 0,
-    deck: { map: () => repeated(plankTex(1), 5, 5) }, // dunkles Club-Parkett
+    deck: { map: () => repeated(plankTex(1), 5, 5), bump: 0.35 }, // dunkles Club-Parkett
+    // Club: warmes Key, kühles Fill, Violett/Limette-Rims (der bisherige Look).
+    light: {
+      key: 0xfff4e0,
+      keyInt: 2.3,
+      fill: 0xa9c4ff,
+      fillInt: 0.75,
+      sky: 0xd6daff,
+      ground: 0x4a3a40,
+      rimA: 0x8b5cf6,
+      rimB: 0xa8e831,
+    },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
       // Mirror ball, hung low over the visible back floor — kept mirror-PBR for
@@ -324,6 +360,7 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
             metalness: 1,
             envMapIntensity: 2,
             flatShading: true,
+            map: repeated(sequinTex(7), 3, 3), // T4: Facetten-Raster
           }),
         ),
         { thickness: 0.05 },
@@ -434,6 +471,18 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       emissive: 0xff3fb0,
       emissiveIntensity: 0.55,
       scroll: 0.045,
+      bump: 0.15, // Grid-Linien als flache Grate
+    },
+    // Synth: rosé Key, Cyan-Fill, Pink/Cyan-Rims — das Neon-Duo als Licht.
+    light: {
+      key: 0xffe0f2,
+      keyInt: 2.2,
+      fill: 0x7de8ff,
+      fillInt: 0.9,
+      sky: 0xe8c8ff,
+      ground: 0x301848,
+      rimA: 0xff3fb0,
+      rimB: 0x2ff5e8,
     },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
@@ -456,7 +505,13 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       propGroup.add(sun);
       propGroup.add(glowSprite(hue(0xff4f90), 16, 9, 0.6, 33));
       // Toon mountain ring with neon wireframe ridges (all azimuths).
-      const mtnMat = toonMat({ color: hue(0x1c1038) });
+      const mtnRock = repeated(speckleTex(10, 600), 2, 2);
+      const mtnMat = toonMat({
+        color: hue(0x1c1038),
+        map: mtnRock,
+        bumpMap: mtnRock,
+        bumpScale: 0.4,
+      });
       const wireMat = new THREE.MeshBasicMaterial({
         color: hue(0xff3fb0),
         wireframe: true,
@@ -524,7 +579,18 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     fr: 0.85,
     fm: 0.05,
     revealAt: 6000,
-    deck: { map: () => repeated(speckleTex(1, 1100), 4, 4) }, // körniger Sand
+    deck: { map: () => repeated(speckleTex(1, 1100), 4, 4), bump: 0.25 }, // körniger Sand
+    // Beach: goldene Stunde — warmes starkes Key, weiches Himmel-Fill.
+    light: {
+      key: 0xffd9a0,
+      keyInt: 2.6,
+      fill: 0x9ec8ff,
+      fillInt: 0.6,
+      sky: 0xffe4c8,
+      ground: 0x6a4a30,
+      rimA: 0xff8a4d,
+      rimB: 0x3adfc0,
+    },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
       // Setting sun over the visible sea horizon (emissive disc + glow, kept).
@@ -665,7 +731,18 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     fr: 0.45,
     fm: 0.85,
     revealAt: 30000,
-    deck: { map: () => repeated(platesTex(1), 4, 4) }, // vernietetes Metall-Deck
+    deck: { map: () => repeated(platesTex(1), 4, 4), bump: 0.3 }, // vernietetes Metall-Deck
+    // Space: hartes kaltes Key, gedämpftes Fill, Cyan/Violett-Rims.
+    light: {
+      key: 0xeef4ff,
+      keyInt: 2.1,
+      fill: 0x8898c8,
+      fillInt: 0.55,
+      sky: 0xb8c8e8,
+      ground: 0x1c1c2e,
+      rimA: 0x63e8ff,
+      rimB: 0x9d5cf6,
+    },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
       // Star dome (Points — kept as-is).
@@ -691,7 +768,12 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       const planet = O(
         new THREE.Mesh(
           new THREE.SphereGeometry(2.6, 28, 20),
-          toonMat({ color: hue(0x9d5cf6), emissive: hue(0x2a1060), emissiveIntensity: 0.35 }),
+          toonMat({
+            color: hue(0x9d5cf6),
+            emissive: hue(0x2a1060),
+            emissiveIntensity: 0.35,
+            map: repeated(bandsTex(1), 2, 1), // T4: Gasriesen-Bänder
+          }),
         ),
         0.06,
       );
@@ -710,7 +792,10 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       propGroup.add(ring);
       propGroup.add(glowSprite(hue(0x8b5cf6), 10, 12, 0.3, 24));
       const moon = O(
-        new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 10), toonMat({ color: 0xffe9c9 })),
+        new THREE.Mesh(
+          new THREE.SphereGeometry(0.5, 14, 10),
+          toonMat({ color: 0xffe9c9, map: repeated(craterTex(6), 1.5, 1.5) }),
+        ),
         0.03,
       );
       propGroup.add(moon);
@@ -718,7 +803,12 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       const far = O(
         new THREE.Mesh(
           new THREE.SphereGeometry(4, 28, 20),
-          toonMat({ color: hue(0x3adfc0), emissive: hue(0x0a4038), emissiveIntensity: 0.3 }),
+          toonMat({
+            color: hue(0x3adfc0),
+            emissive: hue(0x0a4038),
+            emissiveIntensity: 0.3,
+            map: repeated(bandsTex(2), 2, 1),
+          }),
         ),
         0.08,
       );
@@ -801,6 +891,8 @@ export class World {
     private readonly skyMat: THREE.ShaderMaterial,
     private readonly floorMat: THREE.MeshPhysicalMaterial,
     private readonly glowSprite: GlowSpriteFn,
+    /** Optionales Licht-Rig (Roadmap L) — der Modell-Exporter lässt es weg. */
+    private readonly lights?: SceneLights,
   ) {
     this.scene.add(this.propGroup, this.islandGroup);
   }
@@ -858,7 +950,23 @@ export class World {
     this.floorMat.emissiveMap = d.emissiveMap?.() ?? null;
     this.floorMat.emissive.copy(d.emissive !== undefined ? hue(d.emissive) : new THREE.Color(0));
     this.floorMat.emissiveIntensity = d.emissiveIntensity ?? 1;
+    // T2-Relief: dieselbe Muster-Map trägt die Höhe (Fugen/Nieten/Grid-Grate).
+    this.floorMat.bumpMap = d.bump ? (this.floorMat.map ?? this.floorMat.emissiveMap) : null;
+    this.floorMat.bumpScale = d.bump ?? 1;
     this.floorMat.needsUpdate = true;
+    // Roadmap L: das Licht-Rig wechselt mit der Kulisse (bewusst OHNE Hue-Lap —
+    // die Paletten shiften genug; Licht hält die Grundstimmung des Themes).
+    if (this.lights) {
+      const L = b.light;
+      this.lights.key.color.set(L.key);
+      this.lights.key.intensity = L.keyInt;
+      this.lights.fill.color.set(L.fill);
+      this.lights.fill.intensity = L.fillInt;
+      this.lights.hemi.color.set(L.sky);
+      this.lights.hemi.groundColor.set(L.ground);
+      this.lights.rimA.color.set(L.rimA);
+      this.lights.rimB.color.set(L.rimB);
+    }
     if (d.scroll && this.floorMat.emissiveMap) {
       const tex = this.floorMat.emissiveMap;
       const speed = d.scroll;
