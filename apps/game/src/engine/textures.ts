@@ -418,6 +418,41 @@ export function spotsTex(seed = 1, n = 26): THREE.CanvasTexture {
   });
 }
 
+/** Weiche Planeten-Bänder (Space-Kulisse): horizontale Pastell-Streifen. */
+export function bandsTex(seed = 1): THREE.CanvasTexture {
+  return make(`bands:${seed}`, 128, 128, (x) => {
+    x.fillStyle = '#f1eef4';
+    x.fillRect(0, 0, 128, 128);
+    const r = rng(seed * 2711);
+    let y = 0;
+    while (y < 128) {
+      const h = 8 + r() * 22;
+      const v = 208 + Math.floor(r() * 46);
+      x.fillStyle = `rgba(${v},${Math.floor(v * 0.97)},${Math.floor(v * 1.02)},0.75)`;
+      x.fillRect(0, y, 128, h);
+      y += h;
+    }
+  });
+}
+
+/**
+ * Kanten-AO für das Insel-Deck (Roadmap T5): transparentes Zentrum, zum Rand
+ * hin ein weicher dunkler „Grime"-Ring — als Overlay-Disc gelegt erdet er den
+ * Boden, statt ihn abrupt an der Neonkante enden zu lassen.
+ */
+export function edgeShadeTex(): THREE.CanvasTexture {
+  return make('edgeShade', 256, 256, (x) => {
+    const g = x.createRadialGradient(128, 128, 0, 128, 128, 128);
+    g.addColorStop(0, 'rgba(16,10,24,0)');
+    g.addColorStop(0.72, 'rgba(16,10,24,0)');
+    g.addColorStop(0.93, 'rgba(16,10,24,0.28)');
+    g.addColorStop(1, 'rgba(16,10,24,0.5)');
+    x.clearRect(0, 0, 256, 256);
+    x.fillStyle = g;
+    x.fillRect(0, 0, 256, 256);
+  });
+}
+
 const repeatCache = new Map<string, THREE.CanvasTexture>();
 
 /**

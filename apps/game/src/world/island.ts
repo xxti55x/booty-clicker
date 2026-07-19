@@ -1,7 +1,15 @@
 import * as THREE from 'three';
 
 import { toonMat } from '../engine/materials';
-import { craterTex, platesTex, repeated, speckleTex, strataTex } from '../engine/textures';
+import {
+  craterTex,
+  edgeShadeTex,
+  platesTex,
+  repeated,
+  speckleTex,
+  strataTex,
+  velvetTex,
+} from '../engine/textures';
 import type { BackgroundKey, WorldAnim } from '../types';
 
 /**
@@ -104,7 +112,12 @@ function clubIsland({ g, hue, anims }: IslandCtx): void {
     bumpMap: blockMatTex,
     bumpScale: 0.35,
   });
-  const cloudMat = toonMat({ color: 0xcfc6e6, emissive: 0x6a5c92, emissiveIntensity: 0.35 });
+  const cloudMat = toonMat({
+    color: 0xcfc6e6,
+    emissive: 0x6a5c92,
+    emissiveIntensity: 0.35,
+    map: repeated(velvetTex(3), 1.5, 1.5),
+  });
   for (const [x, y, z, s] of [
     [-11, -4.2, 13, 1.9],
     [12.5, -6, 10, 1.4],
@@ -289,8 +302,18 @@ function beachIsland({ g, hue, anims }: IslandCtx): void {
   }
   g.add(at(star, 4.6, TOP_Y + 0.06, -3.4));
   // Hintergrund: die klassischen grünen Mini-Inseln + weiße Puffwolken.
-  const grass = toonMat({ color: hue(0x7fb64a), emissive: hue(0x2e4a16), emissiveIntensity: 0.35 });
-  const cloudMat = toonMat({ color: 0xffffff, emissive: 0x9aa2c0, emissiveIntensity: 0.35 });
+  const grass = toonMat({
+    color: hue(0x7fb64a),
+    emissive: hue(0x2e4a16),
+    emissiveIntensity: 0.35,
+    map: repeated(speckleTex(11, 900), 2, 2),
+  });
+  const cloudMat = toonMat({
+    color: 0xffffff,
+    emissive: 0x9aa2c0,
+    emissiveIntensity: 0.35,
+    map: repeated(velvetTex(3), 1.5, 1.5),
+  });
   for (const [x, y, z, r] of [
     [-11, -3.6, 14, 2.1],
     [12, -5.2, 11, 1.5],
@@ -438,5 +461,13 @@ export function buildIsland(
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   g.add(at(floor, 0, TOP_Y, 0));
+  // T5 Fake-AO: weicher Grime-Ring am Deckrand erdet den Boden (unter den
+  // Club-Tiles bei +0.01, über dem Deck selbst).
+  const ao = new THREE.Mesh(
+    new THREE.CircleGeometry(ISLAND_R, 56),
+    new THREE.MeshBasicMaterial({ map: edgeShadeTex(), transparent: true, depthWrite: false }),
+  );
+  ao.rotation.x = -Math.PI / 2;
+  g.add(at(ao, 0, TOP_Y + 0.004, 0));
   BUILDERS[key]({ g, hue, anims });
 }

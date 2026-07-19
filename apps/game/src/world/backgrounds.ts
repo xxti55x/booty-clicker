@@ -3,7 +3,17 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 
 import { INK, mk, outlineMaterial, toonMat, withOutline } from '../engine/materials';
 import type { GlowSpriteFn, SceneLights } from '../engine/scene';
-import { gridTex, plankTex, platesTex, repeated, speckleTex } from '../engine/textures';
+import {
+  bandsTex,
+  craterTex,
+  gridTex,
+  plankTex,
+  platesTex,
+  repeated,
+  sequinTex,
+  speckleTex,
+  strataTex,
+} from '../engine/textures';
 import { buildIsland } from './island';
 import type { BackgroundKey, WorldAnim } from '../types';
 
@@ -108,10 +118,11 @@ function palm(
 ): void {
   const { propGroup, hue } = ctx;
   const g = new THREE.Group();
+  const barkTex = repeated(strataTex(4), 1, 1.6);
   const trunk = O(
     new THREE.Mesh(
       new THREE.CylinderGeometry(0.13 * s, 0.24 * s, 3.3 * s, 8),
-      toonMat({ color: hue(trunkHex) }),
+      toonMat({ color: hue(trunkHex), map: barkTex, bumpMap: barkTex, bumpScale: 0.25 }),
     ),
   );
   trunk.position.y = 1.62 * s;
@@ -160,7 +171,8 @@ function speakerStack(
   const g = new THREE.Group();
   g.position.set(x, -2.4, z);
   g.rotation.y = Math.atan2(-x, -z); // face the stage centre
-  const cabMat = toonMat({ color: hue(0x3a2b58) });
+  const tolex = repeated(speckleTex(9, 1200), 2, 2);
+  const cabMat = toonMat({ color: hue(0x3a2b58), map: tolex, bumpMap: tolex, bumpScale: 0.15 });
   const rimMat = toonMat({ color: 0x241c34 });
   const discMat = toonMat({ color: 0x171226 });
   const accent = hue(0xffd24d);
@@ -348,6 +360,7 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
             metalness: 1,
             envMapIntensity: 2,
             flatShading: true,
+            map: repeated(sequinTex(7), 3, 3), // T4: Facetten-Raster
           }),
         ),
         { thickness: 0.05 },
@@ -492,7 +505,13 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       propGroup.add(sun);
       propGroup.add(glowSprite(hue(0xff4f90), 16, 9, 0.6, 33));
       // Toon mountain ring with neon wireframe ridges (all azimuths).
-      const mtnMat = toonMat({ color: hue(0x1c1038) });
+      const mtnRock = repeated(speckleTex(10, 600), 2, 2);
+      const mtnMat = toonMat({
+        color: hue(0x1c1038),
+        map: mtnRock,
+        bumpMap: mtnRock,
+        bumpScale: 0.4,
+      });
       const wireMat = new THREE.MeshBasicMaterial({
         color: hue(0xff3fb0),
         wireframe: true,
@@ -749,7 +768,12 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       const planet = O(
         new THREE.Mesh(
           new THREE.SphereGeometry(2.6, 28, 20),
-          toonMat({ color: hue(0x9d5cf6), emissive: hue(0x2a1060), emissiveIntensity: 0.35 }),
+          toonMat({
+            color: hue(0x9d5cf6),
+            emissive: hue(0x2a1060),
+            emissiveIntensity: 0.35,
+            map: repeated(bandsTex(1), 2, 1), // T4: Gasriesen-Bänder
+          }),
         ),
         0.06,
       );
@@ -768,7 +792,10 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       propGroup.add(ring);
       propGroup.add(glowSprite(hue(0x8b5cf6), 10, 12, 0.3, 24));
       const moon = O(
-        new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 10), toonMat({ color: 0xffe9c9 })),
+        new THREE.Mesh(
+          new THREE.SphereGeometry(0.5, 14, 10),
+          toonMat({ color: 0xffe9c9, map: repeated(craterTex(6), 1.5, 1.5) }),
+        ),
         0.03,
       );
       propGroup.add(moon);
@@ -776,7 +803,12 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       const far = O(
         new THREE.Mesh(
           new THREE.SphereGeometry(4, 28, 20),
-          toonMat({ color: hue(0x3adfc0), emissive: hue(0x0a4038), emissiveIntensity: 0.3 }),
+          toonMat({
+            color: hue(0x3adfc0),
+            emissive: hue(0x0a4038),
+            emissiveIntensity: 0.3,
+            map: repeated(bandsTex(2), 2, 1),
+          }),
         ),
         0.08,
       );
