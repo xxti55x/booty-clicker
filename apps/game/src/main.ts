@@ -14,6 +14,7 @@ import { createControls, frameCamera } from './engine/camera';
 import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
 import { effectivePixelRatio, qualityPreset } from './engine/quality';
+import { setTextureAnisotropy } from './engine/textures';
 import { createScene } from './engine/scene';
 import {
   ABILITY_CHARGE_MAX,
@@ -191,6 +192,8 @@ const effects = loadSettings();
 function applyQuality(q: Quality): void {
   const preset = qualityPreset(q);
   renderer.setPixelRatio(effectivePixelRatio(q, window.devicePixelRatio));
+  // Roadmap T1: Textur-Anisotropie folgt dem Preset (GPU-Maximum deckelt real).
+  setTextureAnisotropy(Math.min(preset.anisotropy, renderer.capabilities.getMaxAnisotropy() || 1));
   if (renderer.shadowMap.enabled !== preset.shadows) {
     renderer.shadowMap.enabled = preset.shadows;
     renderer.shadowMap.needsUpdate = true;

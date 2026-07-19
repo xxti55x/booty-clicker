@@ -60,6 +60,8 @@ interface BgConfig {
     emissive?: number;
     emissiveIntensity?: number;
     scroll?: number;
+    /** Relief-Stärke (Roadmap T2): Map/Emissive-Map dient zugleich als Bump-Höhe. */
+    bump?: number;
   };
   build: (ctx: BuildCtx) => void;
 }
@@ -310,7 +312,7 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     fr: 0.3,
     fm: 0.55,
     revealAt: 0,
-    deck: { map: () => repeated(plankTex(1), 5, 5) }, // dunkles Club-Parkett
+    deck: { map: () => repeated(plankTex(1), 5, 5), bump: 0.35 }, // dunkles Club-Parkett
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
       // Mirror ball, hung low over the visible back floor — kept mirror-PBR for
@@ -434,6 +436,7 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       emissive: 0xff3fb0,
       emissiveIntensity: 0.55,
       scroll: 0.045,
+      bump: 0.15, // Grid-Linien als flache Grate
     },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
@@ -524,7 +527,7 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     fr: 0.85,
     fm: 0.05,
     revealAt: 6000,
-    deck: { map: () => repeated(speckleTex(1, 1100), 4, 4) }, // körniger Sand
+    deck: { map: () => repeated(speckleTex(1, 1100), 4, 4), bump: 0.25 }, // körniger Sand
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
       // Setting sun over the visible sea horizon (emissive disc + glow, kept).
@@ -665,7 +668,7 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     fr: 0.45,
     fm: 0.85,
     revealAt: 30000,
-    deck: { map: () => repeated(platesTex(1), 4, 4) }, // vernietetes Metall-Deck
+    deck: { map: () => repeated(platesTex(1), 4, 4), bump: 0.3 }, // vernietetes Metall-Deck
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
       // Star dome (Points — kept as-is).
@@ -858,6 +861,9 @@ export class World {
     this.floorMat.emissiveMap = d.emissiveMap?.() ?? null;
     this.floorMat.emissive.copy(d.emissive !== undefined ? hue(d.emissive) : new THREE.Color(0));
     this.floorMat.emissiveIntensity = d.emissiveIntensity ?? 1;
+    // T2-Relief: dieselbe Muster-Map trägt die Höhe (Fugen/Nieten/Grid-Grate).
+    this.floorMat.bumpMap = d.bump ? (this.floorMat.map ?? this.floorMat.emissiveMap) : null;
+    this.floorMat.bumpScale = d.bump ?? 1;
     this.floorMat.needsUpdate = true;
     if (d.scroll && this.floorMat.emissiveMap) {
       const tex = this.floorMat.emissiveMap;

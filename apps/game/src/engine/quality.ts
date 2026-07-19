@@ -6,12 +6,14 @@ export interface QualityPreset {
   pixelRatioCap: number;
   /** Whether shadow mapping is enabled. */
   shadows: boolean;
+  /** Textur-Anisotropie-Obergrenze (Roadmap T1) — real capped by the GPU. */
+  anisotropy: number;
 }
 
 const PRESETS: Record<Quality, QualityPreset> = {
-  low: { pixelRatioCap: 1, shadows: false },
-  medium: { pixelRatioCap: 1.5, shadows: true },
-  high: { pixelRatioCap: 2, shadows: true },
+  low: { pixelRatioCap: 1, shadows: false, anisotropy: 1 },
+  medium: { pixelRatioCap: 1.5, shadows: true, anisotropy: 4 },
+  high: { pixelRatioCap: 2, shadows: true, anisotropy: 8 },
 };
 
 export function qualityPreset(q: Quality): QualityPreset {

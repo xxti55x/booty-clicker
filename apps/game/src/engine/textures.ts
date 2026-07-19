@@ -12,17 +12,43 @@ import * as THREE from 'three';
 
 const cache = new Map<string, THREE.CanvasTexture>();
 
+/**
+ * Anisotropie-Deckel (Roadmap T1): das Quality-Preset setzt ihn beim Boot über
+ * `setTextureAnisotropy` (real vom GPU-Maximum begrenzt); bereits erzeugte
+ * Texturen werden retroaktiv nachgezogen.
+ */
+let TEX_ANISO = 4;
+export function setTextureAnisotropy(n: number): void {
+  TEX_ANISO = Math.max(1, Math.floor(n));
+  for (const t of cache.values()) {
+    t.anisotropy = TEX_ANISO;
+    t.needsUpdate = true;
+  }
+  for (const t of repeatCache.values()) {
+    t.anisotropy = TEX_ANISO;
+    t.needsUpdate = true;
+  }
+}
+
+/**
+ * T1: Die Maler zeichnen in einem 256er-Koordinatenraum, gerendert wird mit
+ * `SCALE` 2 auf 512² — schärfere Kanten in Kameranähe ohne neue Zeichenlogik.
+ */
+const SCALE = 2;
+
 function make(key: string, w: number, h: number, draw: (x: CanvasRenderingContext2D) => void) {
   const hit = cache.get(key);
   if (hit) return hit;
   const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  draw(c.getContext('2d')!);
+  c.width = w * SCALE;
+  c.height = h * SCALE;
+  const x = c.getContext('2d')!;
+  x.scale(SCALE, SCALE);
+  draw(x);
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
+  t.anisotropy = TEX_ANISO;
   cache.set(key, t);
   return t;
 }
@@ -225,6 +251,169 @@ export function weaveTex(): THREE.CanvasTexture {
       x.moveTo(0, i);
       x.lineTo(64, i);
       x.stroke();
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// T3 · Charakter-/Rivalen-Stoffe — pro Skin-Stil eine eigene Material-Antwort
+// ---------------------------------------------------------------------------
+
+/** Gebürstetes Metall (Robo): feine horizontale Schleifspuren. */
+export function brushedTex(seed = 1): THREE.CanvasTexture {
+  return make(`brushed:${seed}`, 128, 128, (x) => {
+    x.fillStyle = '#eceef2';
+    x.fillRect(0, 0, 128, 128);
+    const r = rng(seed * 7207);
+    for (let i = 0; i < 90; i++) {
+      const y = r() * 128;
+      const v = 205 + Math.floor(r() * 50);
+      x.strokeStyle = `rgba(${v},${v + 2},${v + 6},0.55)`;
+      x.lineWidth = 0.6 + r() * 0.9;
+      x.beginPath();
+      x.moveTo(-4, y);
+      x.lineTo(132, y + (r() - 0.5) * 2);
+      x.stroke();
+    }
+  });
+}
+
+/** Samt (Boss-Cape/-Shorts): weiches, großflächiges Glanz-Wolken-Rauschen. */
+export function velvetTex(seed = 1): THREE.CanvasTexture {
+  return make(`velvet:${seed}`, 128, 128, (x) => {
+    x.fillStyle = '#efeaf2';
+    x.fillRect(0, 0, 128, 128);
+    const r = rng(seed * 9091);
+    for (let i = 0; i < 26; i++) {
+      const cx = r() * 128;
+      const cy = r() * 128;
+      const cr = 14 + r() * 26;
+      const g = x.createRadialGradient(cx, cy, 0, cx, cy, cr);
+      const dark = r() < 0.5;
+      g.addColorStop(0, dark ? 'rgba(120,100,140,0.10)' : 'rgba(255,255,255,0.12)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      x.fillStyle = g;
+      x.fillRect(cx - cr, cy - cr, cr * 2, cr * 2);
+    }
+  });
+}
+
+/** Pailletten (Disco): dichtes Glitzer-Punktraster — auch als Emissive-Map. */
+export function sequinTex(gap = 9): THREE.CanvasTexture {
+  return make(`sequin:${gap}`, 128, 128, (x) => {
+    x.fillStyle = '#5a5462';
+    x.fillRect(0, 0, 128, 128);
+    for (let iy = 0; iy * gap < 128 + gap; iy++)
+      for (let ix = 0; ix * gap < 128 + gap; ix++) {
+        const off = iy % 2 === 0 ? 0 : gap / 2;
+        const px = ix * gap + off;
+        const py = iy * gap;
+        const shine = 190 + Math.floor(((ix * 7 + iy * 13) % 8) * 8);
+        x.fillStyle = `rgb(${shine},${shine},${shine + 4})`;
+        x.beginPath();
+        x.arc(px, py, gap * 0.34, 0, 7);
+        x.fill();
+        x.fillStyle = 'rgba(255,255,255,0.85)';
+        x.beginPath();
+        x.arc(px - gap * 0.1, py - gap * 0.1, gap * 0.1, 0, 7);
+        x.fill();
+      }
+  });
+}
+
+/** Carbon-Waffel (Neon/Ninja): diagonales Köper-Gewebe. */
+export function carbonTex(): THREE.CanvasTexture {
+  return make('carbon', 64, 64, (x) => {
+    x.fillStyle = '#e9e9ee';
+    x.fillRect(0, 0, 64, 64);
+    const cell = 8;
+    for (let iy = 0; iy < 64 / cell; iy++)
+      for (let ix = 0; ix < 64 / cell; ix++) {
+        const even = (ix + iy) % 2 === 0;
+        x.fillStyle = even ? 'rgba(150,150,165,0.35)' : 'rgba(255,255,255,0.28)';
+        x.fillRect(ix * cell, iy * cell, cell - 1, cell - 1);
+      }
+  });
+}
+
+/** Nadelstreifen (Showmaster-Anzug): feine helle Vertikalstreifen. */
+export function pinstripeTex(gap = 12): THREE.CanvasTexture {
+  return make(`pinstripe:${gap}`, 128, 128, (x) => {
+    x.fillStyle = '#ecebef';
+    x.fillRect(0, 0, 128, 128);
+    x.strokeStyle = 'rgba(255,255,255,0.75)';
+    x.lineWidth = 1.4;
+    for (let i = 0; i * gap <= 128; i++) {
+      x.beginPath();
+      x.moveTo(i * gap, 0);
+      x.lineTo(i * gap, 128);
+      x.stroke();
+    }
+  });
+}
+
+/** Haar-Strähnen: leicht gebogene vertikale Linien (sehr subtil). */
+export function strandTex(seed = 1): THREE.CanvasTexture {
+  return make(`strand:${seed}`, 128, 128, (x) => {
+    x.fillStyle = '#f0eef2';
+    x.fillRect(0, 0, 128, 128);
+    const r = rng(seed * 6373);
+    for (let i = 0; i < 46; i++) {
+      const sx = r() * 128;
+      const bow = (r() - 0.5) * 18;
+      const v = 195 + Math.floor(r() * 45);
+      x.strokeStyle = `rgba(${v},${Math.floor(v * 0.96)},${Math.floor(v * 0.92)},0.5)`;
+      x.lineWidth = 1 + r() * 1.6;
+      x.beginPath();
+      x.moveTo(sx, -6);
+      x.bezierCurveTo(sx + bow, 40, sx - bow, 90, sx + bow * 0.4, 134);
+      x.stroke();
+    }
+  });
+}
+
+/** Poren/Haut: ultra-subtiles Rauschen (< 5 % Kontrast) gegen leere Flächen. */
+export function poreTex(seed = 1): THREE.CanvasTexture {
+  return make(`pore:${seed}`, 128, 128, (x) => {
+    x.fillStyle = '#f6f4f2';
+    x.fillRect(0, 0, 128, 128);
+    const r = rng(seed * 4241);
+    for (let i = 0; i < 900; i++) {
+      const v = 236 + Math.floor(r() * 14);
+      x.fillStyle = `rgba(${v},${v - 2},${v - 4},0.5)`;
+      x.beginPath();
+      x.arc(r() * 128, r() * 128, 0.7 + r() * 1.1, 0, 7);
+      x.fill();
+    }
+  });
+}
+
+/** Scanlines (Synth-Rivale): horizontale Bildschirmzeilen. */
+export function scanlineTex(gap = 5): THREE.CanvasTexture {
+  return make(`scanline:${gap}`, 64, 64, (x) => {
+    x.fillStyle = '#f1eff4';
+    x.fillRect(0, 0, 64, 64);
+    x.fillStyle = 'rgba(130,120,155,0.28)';
+    for (let y = 0; y < 64; y += gap) x.fillRect(0, y, 64, 1.6);
+  });
+}
+
+/** Weiche Blob-Flecken (Alien-Glow, Club-Konfetti-Sprenkel, Muschel-Buckel). */
+export function spotsTex(seed = 1, n = 26): THREE.CanvasTexture {
+  return make(`spots:${seed}:${n}`, 128, 128, (x) => {
+    x.fillStyle = '#141018';
+    x.fillRect(0, 0, 128, 128);
+    const r = rng(seed * 3499);
+    for (let i = 0; i < n; i++) {
+      const cx = r() * 128;
+      const cy = r() * 128;
+      const cr = 4 + r() * 9;
+      const g = x.createRadialGradient(cx, cy, 0, cx, cy, cr);
+      g.addColorStop(0, 'rgba(255,255,255,0.95)');
+      g.addColorStop(0.6, 'rgba(255,255,255,0.4)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      x.fillStyle = g;
+      x.fillRect(cx - cr, cy - cr, cr * 2, cr * 2);
     }
   });
 }

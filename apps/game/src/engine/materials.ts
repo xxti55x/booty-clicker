@@ -66,6 +66,15 @@ export interface ToonMatParams {
   side?: THREE.Side;
   /** Optional near-white detail texture (engine/textures.ts) — multiplies `color`. */
   map?: THREE.Texture;
+  /**
+   * Optional Relief-Map (Roadmap T2): dunkle Muster-Linien lesen als Rillen.
+   * Meist dieselbe Textur wie `map` — die Luminanz trägt die Höhe.
+   */
+  bumpMap?: THREE.Texture;
+  /** Relief-Stärke (dezent halten — das Cel-Banding bleibt dominant). */
+  bumpScale?: number;
+  /** Optional glow pattern (sequins, scanner spots) — multiplies `emissive`. */
+  emissiveMap?: THREE.Texture;
 }
 
 /** Cel-shaded material factory — the cartoon counterpart of `mk()`. */
@@ -79,6 +88,9 @@ export function toonMat(p: ToonMatParams): THREE.MeshToonMaterial {
     opacity: p.opacity ?? 1,
     side: p.side ?? THREE.FrontSide,
     map: p.map ?? null,
+    bumpMap: p.bumpMap ?? null,
+    bumpScale: p.bumpScale ?? 1,
+    emissiveMap: p.emissiveMap ?? null,
   });
 }
 

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 import { INK, sh, toonMat, withOutline } from '../engine/materials';
-import { dotsTex, repeated } from '../engine/textures';
+import { dotsTex, repeated, scanlineTex, speckleTex, spotsTex } from '../engine/textures';
 import type { BackgroundKey } from '../types';
 
 /**
@@ -180,11 +180,28 @@ export function buildEntity(
   const dh = (variant * 0.085) % 1;
   const ds = boss ? 0.08 : 0;
   const dl = boss ? -0.055 : 0;
-  // Rivalen-Haut trägt ein subtiles Punkt-Raster (Goal „apply texture to all
-  // models") — near-white Map, Paletten-Shift und Boss-Tönung bleiben wirksam.
+  // Rivalen-Haut PRO THEME (Roadmap T3): der Club-Blob trägt Konfetti-Sprenkel,
+  // der Synth-Blob Scanlines, die Strand-Krabbe eine körnige Schale (Bump), der
+  // Space-Alien glühende Flecken — near-white Maps, Paletten-Shift und
+  // Boss-Tönung bleiben wirksam.
+  const bodyDetail =
+    theme === 'synth'
+      ? repeated(scanlineTex(5), 2.5, 2.5)
+      : theme === 'beach'
+        ? repeated(speckleTex(8, 700), 2, 2)
+        : repeated(dotsTex(1, 18), 2, 2);
+  const accentGlow = shifted(cfg.accent, dh);
   const bodyT = toonMat({
     color: shifted(cfg.body, dh, ds, dl),
-    map: repeated(dotsTex(1, 18), 2, 2),
+    map: bodyDetail,
+    ...(theme === 'beach' ? { bumpMap: bodyDetail, bumpScale: 0.25 } : {}),
+    ...(theme === 'space'
+      ? {
+          emissiveMap: repeated(spotsTex(2, 20), 2, 2),
+          emissive: accentGlow,
+          emissiveIntensity: 0.3,
+        }
+      : {}),
   });
   const bellyT = toonMat({ color: shifted(cfg.belly, dh, 0, boss ? -0.03 : 0) });
   const bootyT = toonMat({
