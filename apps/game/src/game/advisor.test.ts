@@ -15,6 +15,7 @@ import { type ChState, createChState } from './ch-state';
 import { COMBO_CAP, comboMult } from './click';
 import { BOSS_TIME_S, bossHp } from './combat';
 import { CREW, type CrewLevels, heroClick, heroDps, nextAbility, nextLevelCost } from './heroes';
+import { bossBreakerDmgMult } from './transcend';
 
 /** Ein Zustand mit den Feldern, die Burst und Tipp lesen. */
 function stateWith(over: Partial<ChState> = {}): ChState {
@@ -51,6 +52,27 @@ describe('advisor — burstEstimate (P3)', () => {
     const spec = stateWith({ crew: { bouncer: 80 }, crewUp: { bouncer: 2 } });
     expect(burstEstimate(glut, 100, 10)).toBeGreaterThan(burstEstimate(plain, 100, 10));
     expect(burstEstimate(spec, 100, 10)).toBeCloseTo(burstEstimate(plain, 100, 10) * 1.25, 6);
+  });
+
+  // ROADMAP-V2 P2: Spiel-Pfad (`applyHit`) und Telemetrie teilen den Boss-Stack —
+  // sonst unterschätzt die Wand-Anzeige den Spieler nach dem Kauf systematisch.
+  it('faltet den Mythos-Knoten „Boss-Brecher" ein und rechnet ohne L3-Slice neutral', () => {
+    const plain = stateWith();
+    const brecher = stateWith({
+      transcend: { te: 0, teLifetime: 2, transcendences: 1, mythos: { bossbrecher: 1 } },
+    });
+    expect(burstEstimate(brecher, 100, 10)).toBeCloseTo(
+      burstEstimate(plain, 100, 10) * bossBreakerDmgMult(brecher.transcend),
+      6,
+    );
+    // Die Lücke schließt sich exakt um den Faktor — dieselbe Zahl, die den Boss killt.
+    expect(bossGap(brecher, { zone: 25 }, 100, 10)).toBeCloseTo(
+      bossGap(plain, { zone: 25 }, 100, 10) / (1 - 0.1),
+      9,
+    );
+    // Ein Aufrufer ganz ohne `transcend` (ältere Fixtures) rechnet unverändert.
+    const { ancients, gear, crewUp } = plain;
+    expect(burstEstimate({ ancients, gear, crewUp }, 100, 10)).toBe(burstEstimate(plain, 100, 10));
   });
 
   it('bleibt bei Müll-Eingaben bei 0 statt negativ', () => {

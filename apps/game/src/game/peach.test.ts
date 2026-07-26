@@ -34,6 +34,26 @@ describe('peach — schedule (§6.1)', () => {
     expect(rollNextPeachAt(0, a)).toBe(rollNextPeachAt(0, b));
     expect(a.cursor).toBe(b.cursor);
   });
+
+  // ROADMAP-V2 P2, Mythos-Knoten „Pfirsich-Magnet": der Faktor skaliert NUR die
+  // gewürfelte Pause. Default 1 ⇒ byte-gleich zu vorher (die Sim fährt ohne Knoten).
+  it('skaliert die Pause mit `gapMult`, ohne den Zufallszug zu verändern', () => {
+    const mk = (): Rng => new Rng({ seed: 3, cursor: 5 });
+    const plain = rollNextPeachAt(0, mk());
+    const faster = rollNextPeachAt(0, mk(), 1 / 1.2);
+    expect(faster).toBeCloseTo(plain / 1.2, 6); // exakt +20 % Frequenz
+    expect(rollNextPeachAt(0, mk(), 1)).toBe(plain); // Default = altes Verhalten
+    // Beide Aufrufe kosten genau einen Zug — der RNG-Cursor bleibt vergleichbar.
+    const a = mk();
+    const b = mk();
+    rollNextPeachAt(0, a);
+    rollNextPeachAt(0, b, 0.5);
+    expect(a.cursor).toBe(b.cursor);
+    // Müll-Faktoren fallen auf 1 zurück (nie 0 s Pause, nie NaN).
+    for (const bad of [0, -2, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(rollNextPeachAt(0, mk(), bad)).toBe(plain);
+    }
+  });
 });
 
 describe('peach — boost (§6.1)', () => {

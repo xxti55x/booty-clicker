@@ -169,7 +169,15 @@ import {
   milestoneHighwater,
   totalStars,
 } from './game/stars';
-import { canTranscend, transcendGlobalMult } from './game/transcend';
+import {
+  bossBreakerDmgMult,
+  buyMythosNode,
+  canTranscend,
+  fruhstartCrew,
+  mythosOfflineCapBonusS,
+  mythosPeachGapMult,
+  transcendGlobalMult,
+} from './game/transcend';
 import { isTranscendEnabled } from './game/flags';
 import { shouldShakeOnKey } from './game/input';
 import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
@@ -301,7 +309,7 @@ let rng = new Rng(state.rng);
 {
   const bootNow = Date.now();
   if (state.peach.nextPeachAt <= 0 || state.peach.nextPeachAt > bootNow + PEACH_MAX_S * 1000) {
-    state.peach.nextPeachAt = rollNextPeachAt(bootNow, rng);
+    state.peach.nextPeachAt = rollNextPeachAt(bootNow, rng, mythosPeachGapMult(state.transcend));
   }
   state.peach.boostUntil = clampBoostUntil(state.peach.boostUntil, bootNow);
 }
@@ -375,7 +383,13 @@ function offlineOpts(): {
   return {
     clickDmg,
     coachCps: coachCps(state.heaven) + coachCpsBonus(state.gear),
-    capS: offlineCapS(state.heaven) + offlineCapBonus(state.gear),
+    // Nachtschicht (Himmelsbaum) + Beach-Gear + der Mythos-Knoten „Nachtschwärmer"
+    // (+4 h, ROADMAP-V2 P2) — dieselbe Summe füttert die X3-Willkommen-zurück-Card,
+    // deren Cap-Zeile den Ausbau also sofort spiegelt.
+    capS:
+      offlineCapS(state.heaven) +
+      offlineCapBonus(state.gear) +
+      mythosOfflineCapBonusS(state.transcend),
     // Peachiel × gold-gear × permanent gold-tokens (§6.2). The transient peach ×3
     // boost is a 60-s live event — immaterial to multi-hour offline accrual and a
     // stale boostUntil would be wrong — so it is deliberately excluded here.
@@ -589,6 +603,21 @@ function applyFruhstarter(prevCrew: CrewLevels): void {
   state.crew = restored;
 }
 
+/**
+ * Mythos-Knoten „Frühstart" (ROADMAP-V2 P2): die ersten drei Crew-Mitglieder starten
+ * nach einem Reset auf Lv 5. Anders als der Himmelsbaum-„Frühstarter" (nur Aszension,
+ * prozentual auf die VORIGE Crew) greift er nach JEDEM der drei Resets — TE überlebt
+ * alle drei, und nach einer Transzendenz ist der Himmelsbaum weg, sodass der Knoten
+ * genau dort am meisten wert ist. Hebt nur an, senkt nie (Max-Regel).
+ */
+function applyMythosFruhstart(): void {
+  state.crew = fruhstartCrew(
+    state.crew,
+    CREW.map((c) => c.id),
+    state.transcend,
+  );
+}
+
 const prestige = new Prestige({
   state,
   getRunMaxZone: () => Math.max(state.runMaxZone, combat.maxZone),
@@ -601,6 +630,7 @@ const prestige = new Prestige({
     const prevCrew = { ...state.crew };
     Object.assign(state, ascendState(state)); // mutate in place — panels hold this ref
     applyFruhstarter(prevCrew);
+    applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
     combat = withBossTimerBonus(spawnFor(1, 0, 1));
     comboState = createCombo(state.combo.stacks); // run-scoped juice resets
     comboT3KeyAwardedThisRun = false; // the combo-Tier-3 key is once per run (§6.1)
@@ -638,6 +668,7 @@ const heaven = new Heaven({
   onHimmelfahrt: () => {
     syncMaxZones();
     Object.assign(state, himmelfahrtState(state)); // mutate in place
+    applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
     combat = withBossTimerBonus(spawnFor(1, 0, 1));
     comboState = createCombo(state.combo.stacks);
     comboT3KeyAwardedThisRun = false; // once per run (§6.1)
@@ -688,6 +719,7 @@ if (transcendEnabled) {
       if (!canTranscend(state.transcend, state.heaven.hpfLifetime)) return;
       syncMaxZones(); // fold live combat maxzones + RNG cursor + combo into state first
       Object.assign(state, transcendState(state)); // mutate in place (banks TE, wipes L1+L2)
+      applyMythosFruhstart(); // P2: der Knoten überlebt den tiefsten Reset und greift hier
       // ---- re-seed, mirroring the Himmelfahrt handler exactly (L2-wipe hazard) ----
       combat = withBossTimerBonus(spawnFor(1, 0, 1)); // zone/front travel reset to Bühne 1
       comboState = createCombo(state.combo.stacks); // run-scoped combo juice reset
@@ -711,6 +743,19 @@ if (transcendEnabled) {
       );
       checkAchievements(); // Transzendenz / TE milestones (§7.3)
       audio.unlockJingle();
+      persist();
+    },
+    // ROADMAP-V2 P2 — Mythos-Shop: gehaltenes TE gegen einen permanenten Wahl-Knoten.
+    // Der Kauf senkt `te` und damit den ×3^TE-Boost, deshalb muss der HUD-Multiplikator
+    // sofort neu gerechnet werden (`recompute` liest die Held-TE über `dpsOf`/`clickDamageOf`).
+    onBuyMythos: (id) => {
+      const r = buyMythosNode(state.transcend, id);
+      if (!r.bought) return;
+      state.transcend = r.transcend;
+      recompute();
+      audio.buy();
+      hud.update(state, combat, dps, clickDmg);
+      transcendPanel?.refresh();
       persist();
     },
   });
@@ -814,10 +859,12 @@ function showWelcomeBack(card: WelcomeBackData): void {
   (document.getElementById('wbAway') as HTMLElement).textContent = card.away;
   (document.getElementById('wbGold') as HTMLElement).textContent = `+${fmt(card.gold)} BP`;
   // Der Cap-Hinweis erscheint NUR, wenn er auch gegriffen hat — sonst wäre er
-  // eine Drohung ohne Anlass. Mit Hinweis auf den Ausbau (Himmelsbaum, P4).
+  // eine Drohung ohne Anlass. Mit Hinweis auf den Ausbau (Himmelsbaum P4 und,
+  // sobald der Knoten gekauft ist, den Mythos-Nachtschwärmer aus P2).
   wbCap.classList.toggle('hidden', !card.capped);
   if (card.capped) {
-    wbCap.textContent = `Cap: ${card.capLabel} — länger zählt der Idle-Verdienst nicht. Mehr geht mit dem Himmelsbaum.`;
+    const owl = mythosOfflineCapBonusS(state.transcend) > 0 ? ' (inkl. Nachtschwärmer 🔮)' : '';
+    wbCap.textContent = `Cap: ${card.capLabel}${owl} — länger zählt der Idle-Verdienst nicht. Mehr geht mit dem Himmelsbaum.`;
   }
   welcomeBack.classList.remove('hidden');
 }
@@ -879,8 +926,19 @@ function tabUnlocked(key: string): boolean {
       );
     case 'anc': // 🌀 Ahnen: the soul sink — only after a first ascension banks souls
       return state.stats.ascensions > 0 || Object.keys(state.ancients).length > 0;
-    case 'heaven': // 🌈 Himmel (L2): once a Himmelfahrt is reachable or done
-      return state.heaven.hpfLifetime > 0 || canHimmelfahrt(state.heaven, state.rsLifetime);
+    case 'heaven': // 🌈 Himmel (L2): ab der ersten Aszension, spätestens am L2-Gate
+      // ROADMAP-V2 P2a: Der Tab öffnet jetzt schon mit der ersten Aszension statt erst
+      // bei 1 000 Lebenszeit-RS. Grund ist derselbe, aus dem der 🔮-Tab bewusst VOR
+      // seinem Gate erscheint (siehe 'transcend' unten): eine Schicht, die man erst
+      // sieht, wenn sie ohnehin offen ist, kann kein Ziel sein. Der Panel-Zustand ist
+      // dort ehrlich gesperrt (Fortschritt „Lebenszeit-RS X / 1 000") und trägt den
+      // 🔮-Teaser, der ohne diese Öffnung praktisch nie zu sehen wäre. Reine Anzeige —
+      // `canHimmelfahrt` bleibt das einzige echte Gate.
+      return (
+        state.stats.ascensions > 0 ||
+        state.heaven.hpfLifetime > 0 ||
+        canHimmelfahrt(state.heaven, state.rsLifetime)
+      );
     case 'transcend': // 🔮 Transzendenz (L3): only if enabled AND the player is in L2
       // Reveal with the FIRST Himmelfahrt (hpfLifetime > 0), not first at the 100-HPF
       // gate: the panel's locked state shows the „Lebenszeit-HPF X / 100"-Fortschritt,
@@ -1297,8 +1355,15 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
   const wasBoss = combat.boss;
   // Glutaeus Maximus (§4.6) + Tyrann/Krönung gear (§5) + the crew's `boss`-special
   // ability tiers (v11 — Türsteher/Orbital-Station) boost damage dealt to a boss.
+  // ROADMAP-V2 P2: der Mythos-Knoten „Boss-Brecher" hängt im GLEICHEN Stack (×1/0.9
+  // ⇔ −10 % Boss-Ausdauer) — `advisor.bossDamageMult` spiegelt ihn, damit die
+  // P3-Wand-Telemetrie und der echte Kampf dieselbe Zahl sehen.
   let effDmg = wasBoss
-    ? dmg * ancientBossDmgMult(state.ancients) * bossDmgMult(state.gear) * crewSpec.bossMult
+    ? dmg *
+      ancientBossDmgMult(state.ancients) *
+      bossDmgMult(state.gear) *
+      crewSpec.bossMult *
+      bossBreakerDmgMult(state.transcend)
     : dmg;
   // ROADMAP-V2 A2: Theme-Gimmick des Gates. Nur der IDLE-Anteil wird hier
   // gefiltert — der Klick-Pfad entscheidet in `doShake` selbst (er kennt Takt und
@@ -1568,7 +1633,7 @@ function peachVisible(now: number): boolean {
 function updatePeachSchedule(now: number): void {
   const at = state.peach.nextPeachAt;
   if (at <= 0 || now >= at + PEACH_VISIBLE_S * 1000) {
-    state.peach.nextPeachAt = rollNextPeachAt(now, rng);
+    state.peach.nextPeachAt = rollNextPeachAt(now, rng, mythosPeachGapMult(state.transcend));
   }
 }
 
@@ -1584,7 +1649,7 @@ function catchPeach(): { keys: number; boostUntil: number } | null {
   state.peach.boostUntil = activateBoost(now); // fresh ×2 60-s window
   const keys = peachKeyRoll(rng);
   earnKeys(keys);
-  state.peach.nextPeachAt = rollNextPeachAt(now, rng);
+  state.peach.nextPeachAt = rollNextPeachAt(now, rng, mythosPeachGapMult(state.transcend));
   toasts.show(
     '🍑',
     'Goldener Pfirsich!',

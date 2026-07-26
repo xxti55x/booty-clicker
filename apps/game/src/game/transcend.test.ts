@@ -1,11 +1,26 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  MYTHOS_BOSS_CUT,
+  MYTHOS_FRUHSTART_LEVEL,
+  MYTHOS_FRUHSTART_SLOTS,
+  MYTHOS_NODES,
+  MYTHOS_OFFLINE_CAP_H,
+  MYTHOS_PEACH_RATE,
   TRANSCEND_GLOBAL_BASE,
   TRANSCEND_MIN_HPF_LIFETIME,
   bankTranscendence,
+  bossBreakerDmgMult,
+  buyMythosNode,
+  canBuyMythos,
   canTranscend,
   createTranscend,
+  fruhstartCrew,
+  mythosNodeConfig,
+  mythosOfflineCapBonusS,
+  mythosOwned,
+  mythosPeachGapMult,
+  mythosSpent,
   teForHpfLifetime,
   teSpent,
   transcendGain,
@@ -131,5 +146,140 @@ describe('transcend — held-vs-spent accounting (mirrors souls M10 / HPF)', () 
     const after = bankTranscendence(inflated, 100); // formula ⇒ 2, below 10
     expect(after.te).toBe(10); // no gain, held preserved
     expect(after.teLifetime).toBe(10); // highwater never shrinks
+  });
+});
+
+// ---- Mythos-Shop (ROADMAP-V2 P2): der TE-Sink -------------------------------
+/** Ein Slice mit `n` gehaltenen TE (lifetime = held, nichts ausgegeben). */
+function withTe(n: number): ReturnType<typeof createTranscend> {
+  return { ...createTranscend(), te: n, teLifetime: n, transcendences: 1 };
+}
+
+describe('transcend — Mythos-Katalog (Kostenkurve gegen die TE-Einkommenskurve)', () => {
+  it('hat vier einmalige Wahl-Knoten mit eindeutigen Ids', () => {
+    expect(MYTHOS_NODES).toHaveLength(4);
+    expect(new Set(MYTHOS_NODES.map((n) => n.id)).size).toBe(4);
+    for (const cfg of MYTHOS_NODES) {
+      expect(mythosNodeConfig(cfg.id)).toBe(cfg);
+      expect(cfg.name.length).toBeGreaterThan(0);
+      expect(cfg.desc.length).toBeGreaterThan(0);
+    }
+    expect(mythosNodeConfig('gibtsnicht')).toBeUndefined();
+  });
+
+  it('kostet 1/1/2/2 TE — die erste Transzendenz (2 TE) finanziert genau eine Entscheidung', () => {
+    expect(MYTHOS_NODES.map((n) => n.cost)).toEqual([1, 1, 2, 2]);
+    // Der Vorrat am Gate: ⌊log10(100)⌋ = 2 TE. Ein 1-TE-Knoten lässt ×3 stehen …
+    const atGate = bankTranscendence(createTranscend(), TRANSCEND_MIN_HPF_LIFETIME);
+    expect(atGate.te).toBe(2);
+    expect(canBuyMythos(atGate, 'fruhstart')).toBe(true);
+    expect(transcendGlobalMult(buyMythosNode(atGate, 'fruhstart').transcend.te)).toBe(3);
+    // … ein 2-TE-Knoten kostet den kompletten Boost (×1). Beides bezahlbar, beides teuer.
+    expect(transcendGlobalMult(buyMythosNode(atGate, 'bossbrecher').transcend.te)).toBe(1);
+    // Das ganze Board ist bewusst unerreichbar: 6 TE ⇔ 10^6 Lebenszeit-HPF.
+    const board = MYTHOS_NODES.reduce((s, n) => s + n.cost, 0);
+    expect(board).toBe(6);
+    expect(teForHpfLifetime(1e6)).toBe(board);
+  });
+});
+
+describe('transcend — Mythos kaufen (permanent, kein Respec)', () => {
+  it('bucht Kosten vom gehaltenen TE ab und lässt teLifetime unberührt', () => {
+    const t = withTe(3);
+    const r = buyMythosNode(t, 'nachtschwarmer'); // 2 TE
+    expect(r.bought).toBe(true);
+    expect(r.transcend.te).toBe(1);
+    expect(r.transcend.teLifetime).toBe(3); // Highwater bleibt — nichts wird zurückerstattet
+    expect(r.transcend.mythos).toEqual({ nachtschwarmer: 1 });
+    expect(mythosOwned(r.transcend, 'nachtschwarmer')).toBe(true);
+    // Das Ausgegebene bleibt über beide Wege konsistent auditierbar.
+    expect(teSpent(r.transcend)).toBe(2);
+    expect(mythosSpent(r.transcend)).toBe(2);
+    expect(t.te).toBe(3); // pure: Eingabe unverändert
+  });
+
+  it('verweigert zu teure, doppelte und unbekannte Käufe (no-op, gleiche Referenz)', () => {
+    const poor = withTe(1);
+    expect(canBuyMythos(poor, 'bossbrecher')).toBe(false); // 2 TE, nur 1 gehalten
+    expect(buyMythosNode(poor, 'bossbrecher')).toEqual({ transcend: poor, bought: false });
+
+    const bought = buyMythosNode(withTe(3), 'fruhstart').transcend;
+    expect(canBuyMythos(bought, 'fruhstart')).toBe(false); // schon gekauft
+    expect(buyMythosNode(bought, 'fruhstart').bought).toBe(false);
+    expect(buyMythosNode(bought, 'fruhstart').transcend.te).toBe(2); // kein zweiter Abzug
+
+    expect(canBuyMythos(withTe(9), 'gibtsnicht')).toBe(false);
+    expect(buyMythosNode(withTe(9), 'gibtsnicht').bought).toBe(false);
+  });
+
+  it('Käufe überleben jede weitere Transzendenz und werden nie zurückerstattet', () => {
+    const t1 = bankTranscendence(createTranscend(), 100); // 2 TE
+    const spent = buyMythosNode(t1, 'pfirsichmagnet').transcend; // −1 TE
+    expect(spent.te).toBe(1);
+    // Eine zweite Transzendenz eine Größenordnung tiefer: +1 TE, Knoten bleibt.
+    const t2 = bankTranscendence(spent, 1_000);
+    expect(t2.te).toBe(2); // gehalten 1 + Gewinn 1 — die ausgegebene TE kommt NICHT zurück
+    expect(t2.teLifetime).toBe(3);
+    expect(mythosOwned(t2, 'pfirsichmagnet')).toBe(true);
+    expect(teSpent(t2)).toBe(1);
+  });
+
+  it('liest kaputte Ledger-Werte konservativ als ungekauft', () => {
+    const junk = { ...withTe(2), mythos: { fruhstart: 0, bossbrecher: Number.NaN } };
+    expect(mythosOwned(junk, 'fruhstart')).toBe(false);
+    expect(mythosOwned(junk, 'bossbrecher')).toBe(false);
+    expect(mythosOwned(junk, 'nachtschwarmer')).toBe(false); // gar nicht im Ledger
+    expect(mythosSpent(junk)).toBe(0);
+  });
+});
+
+describe('transcend — Mythos-Effekte (ohne Kauf strikt neutral ⇒ Sim sieht sie nie)', () => {
+  const none = createTranscend(); // te = 0, nichts gekauft — der Zustand JEDES Sim-Ankers
+
+  it('sind ohne Kauf exakt der Identitäts-Wert', () => {
+    expect(bossBreakerDmgMult(none)).toBe(1);
+    expect(mythosOfflineCapBonusS(none)).toBe(0);
+    expect(mythosPeachGapMult(none)).toBe(1);
+    expect(fruhstartCrew({ boss: 3 }, ['boss', 'hype', 'dj'], none)).toEqual({ boss: 3 });
+  });
+
+  it('Boss-Brecher: −10 % Boss-Ausdauer als wirkungsgleicher Schadens-Faktor', () => {
+    const t = buyMythosNode(withTe(2), 'bossbrecher').transcend;
+    expect(MYTHOS_BOSS_CUT).toBe(0.1);
+    expect(bossBreakerDmgMult(t)).toBeCloseTo(1 / 0.9, 12);
+    // Die Wirkungsgleichheit selbst: 10 000 HP fallen bei 90 % des alten Schadens.
+    const hp = 10_000;
+    expect(hp / bossBreakerDmgMult(t)).toBeCloseTo(hp * (1 - MYTHOS_BOSS_CUT), 9);
+  });
+
+  it('Nachtschwärmer: +4 h Offline-Cap in Sekunden', () => {
+    const t = buyMythosNode(withTe(2), 'nachtschwarmer').transcend;
+    expect(mythosOfflineCapBonusS(t)).toBe(MYTHOS_OFFLINE_CAP_H * 3600);
+    expect(mythosOfflineCapBonusS(t)).toBe(14_400);
+  });
+
+  it('Pfirsich-Magnet: +20 % Frequenz ⇔ Pause ×1/1.2', () => {
+    const t = buyMythosNode(withTe(1), 'pfirsichmagnet').transcend;
+    expect(mythosPeachGapMult(t)).toBeCloseTo(1 / (1 + MYTHOS_PEACH_RATE), 12);
+    // Frequenz = 1/Pause: der Kehrwert ist exakt +20 %.
+    expect(1 / mythosPeachGapMult(t)).toBeCloseTo(1.2, 12);
+  });
+
+  it('Frühstart: hebt die ersten drei Plätze auf Lv 5, senkt aber nie', () => {
+    const t = buyMythosNode(withTe(1), 'fruhstart').transcend;
+    const ids = ['boss', 'hype', 'dj', 'bouncer'];
+    expect(MYTHOS_FRUHSTART_SLOTS).toBe(3);
+    expect(MYTHOS_FRUHSTART_LEVEL).toBe(5);
+    // Frische Crew nach einem Reset: genau die ersten drei stehen auf 5, der vierte nicht.
+    expect(fruhstartCrew({}, ids, t)).toEqual({ boss: 5, hype: 5, dj: 5 });
+    // Ein bereits höherer Stand (Himmelsbaum-Frühstarter) wird nicht kassiert.
+    expect(fruhstartCrew({ boss: 12, dj: 1, bouncer: 7 }, ids, t)).toEqual({
+      boss: 12,
+      hype: 5,
+      dj: 5,
+      bouncer: 7,
+    });
+    // Kürzere Id-Liste als Slots ⇒ kein Absturz, nur was da ist.
+    expect(fruhstartCrew({}, ['boss'], t)).toEqual({ boss: 5 });
   });
 });

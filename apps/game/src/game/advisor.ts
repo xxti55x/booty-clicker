@@ -20,8 +20,9 @@
  *  · Krit-EV = `1 + CRIT_CHANCE·(CRIT_MULT − 1)` = ×1.8 aus den BASIS-Konstanten,
  *    ohne Tier-/Gear-/Token-Boni (dieselbe Annahme, mit der §4.8 kalibriert ist).
  *  · Boss-Schadens-Multiplikatoren (Glutaeus, Tyrann/Krönung-Gear, `boss`-
- *    Specials) zählen VOLL — das ist Macht, die der Spieler sicher besitzt und
- *    die nur im Bosskampf zählt, also gehört sie genau in dieses Fenster.
+ *    Specials, der Mythos-Knoten „Boss-Brecher") zählen VOLL — das ist Macht, die
+ *    der Spieler sicher besitzt und die nur im Bosskampf zählt, also gehört sie
+ *    genau in dieses Fenster.
  *  · NICHT eingerechnet: On-Beat ×1.5 (Können), Twerk-Ekstase ×10 (ein einzelnes
  *    Fenster), der Twerk-Coach. Alles davon macht den echten Burst nur GRÖSSER,
  *    die Schätzung bleibt also eine Untergrenze — der Tipp verspricht nie zu viel.
@@ -39,6 +40,7 @@ import {
   bestCrewBuy,
   crewSpecialBonuses,
 } from './heroes';
+import { bossBreakerDmgMult } from './transcend';
 
 /** Angenommene Dauer-Klickrate im Boss-Fenster. */
 export const ADVISOR_CLICKS_PER_SEC = 5;
@@ -60,17 +62,28 @@ export const HINT_GAP_MAX = 0.8;
  */
 export const HINT_BUDGET_REACH = 3;
 
-/** Die Felder, aus denen der Burst folgt (Boss-Schadens-Stack). */
-type BurstInput = Pick<ChState, 'ancients' | 'gear' | 'crewUp'>;
+/**
+ * Die Felder, aus denen der Burst folgt (Boss-Schadens-Stack). `transcend` ist
+ * optional, damit ältere Aufrufer/Fixtures ohne L3-Slice weiter passen — fehlt er,
+ * zählt der Mythos-Knoten „Boss-Brecher" als ungekauft (×1).
+ */
+type BurstInput = Pick<ChState, 'ancients' | 'gear' | 'crewUp'> &
+  Partial<Pick<ChState, 'transcend'>>;
 /** Die Felder, aus denen der Kauf-Tipp folgt. */
 type HintInput = Pick<ChState, 'gold' | 'crew' | 'crewUp' | 'gilds'>;
 
-/** Gesamter Boss-Schadens-Multiplikator (Ahnen × Gear × Crew-Specials). */
+/**
+ * Gesamter Boss-Schadens-Multiplikator (Ahnen × Gear × Crew-Specials × Mythos).
+ * Der Mythos-Knoten „Boss-Brecher" (ROADMAP-V2 P2) sitzt hier ABSICHTLICH mit drin:
+ * Spiel-Pfad (`applyHit`) und Telemetrie teilen denselben Term, sonst würde die
+ * Wand-Anzeige den Spieler nach dem Kauf systematisch unterschätzen.
+ */
 function bossDamageMult(state: BurstInput): number {
   return (
     ancientBossDmgMult(state.ancients) *
     bossDmgMult(state.gear) *
-    crewSpecialBonuses(state.crewUp).bossMult
+    crewSpecialBonuses(state.crewUp).bossMult *
+    (state.transcend ? bossBreakerDmgMult(state.transcend) : 1)
   );
 }
 

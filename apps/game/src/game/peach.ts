@@ -50,9 +50,15 @@ export function clampBoostUntil(boostUntil: number, now: number): number {
  * Epoch-ms for the next peach: `now` + a random `PEACH_MIN_S..PEACH_MAX_S` seconds,
  * drawn from the injected `rng` (§9.4). Pure over `(now, rng-state)`; advances the
  * cursor by one draw.
+ *
+ * `gapMult` skaliert NUR die gewürfelte Pause, nie den Zufallszug selbst (ROADMAP-V2
+ * P2, Mythos-Knoten „Pfirsich-Magnet": ×1/1.2 ⇒ +20 % Frequenz). Default 1 ⇒ Verhalten
+ * byte-gleich zu vorher, deshalb sieht die Sim (te = 0, kein Knoten) exakt die alte
+ * Kurve. Nicht-endliche / nicht-positive Faktoren fallen auf 1 zurück.
  */
-export function rollNextPeachAt(now: number, rng: Rng): number {
-  const delayS = PEACH_MIN_S + rng.next() * (PEACH_MAX_S - PEACH_MIN_S);
+export function rollNextPeachAt(now: number, rng: Rng, gapMult = 1): number {
+  const m = Number.isFinite(gapMult) && gapMult > 0 ? gapMult : 1;
+  const delayS = (PEACH_MIN_S + rng.next() * (PEACH_MAX_S - PEACH_MIN_S)) * m;
   return now + delayS * 1000;
 }
 

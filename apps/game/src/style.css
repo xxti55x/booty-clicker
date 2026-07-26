@@ -2302,6 +2302,36 @@ body {
 .item.mythos-soon .lv {
   color: #d0a8ff;
 }
+/* ---- ROADMAP-V2 P2: Mythos-Shop (TE-Sink) + 🔮-Teaser im Himmel-Tab ---- */
+.tc-bank {
+  color: #ffe9a8;
+  font-weight: 800;
+}
+.item.tc-node-owned {
+  cursor: default;
+  border-color: var(--gold-deep);
+  box-shadow:
+    0 3px 0 rgba(30, 17, 5, 0.4),
+    inset 0 0 0 1px rgba(255, 207, 94, 0.5);
+}
+.cost.tc-owned {
+  color: #2e7d32;
+}
+/* Gesperrter Teaser-Knoten: abgedunkelt, Schloss, KEIN Klick-Verhalten. */
+.item.tc-teaser {
+  cursor: default;
+  opacity: 0.5;
+  filter: grayscale(0.45);
+  border-style: dashed;
+  border-color: rgba(208, 168, 255, 0.45);
+}
+.item.tc-teaser:hover {
+  background: linear-gradient(180deg, #f6ead0 0%, var(--parch) 60%, var(--parch-deep) 100%);
+  border-color: rgba(208, 168, 255, 0.45);
+}
+.item.tc-teaser .lv {
+  color: #7a3fb8;
+}
 
 /* ---- v10: kaufbare Crew-Fähigkeiten (goal: slower progression) ---- */
 .btn.ab-buy {

@@ -3,6 +3,74 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## ROADMAP-V2 Schritt 6 — P2 Transzendenz-Teaser + TE-Sink
+
+- **`mythos` war seit M14 ein leerer Slot — genau dafür gebaut, also KEIN
+  Schema-Bump.** Der L3-Slice führt `mythos: Record<string, number>` als
+  „spent-TE ledger" mit Kommentar „der Katalog ist absichtlich leer, das hier ist
+  nur der Platz"; `repairTranscend` schickt ihn seit v9 durch `repairCountMap`,
+  die X7-Matrix deckt ihn ab (`{ diamantBooty: 2.7, bad: -1, junk: 'x' }` ⇒
+  `{ diamantBooty: 2 }`). Der Mythos-Shop schreibt nur `id → 1` in genau diese
+  Map. Save bleibt bei **v11**, keine Migration, keine neuen Fixtures — ein Bump
+  ohne neues Feld wäre reine Zeremonie gewesen.
+- **Die Kostenkurve folgt der TE-Einkommenskurve, nicht dem Bauchgefühl.**
+  `teForHpfLifetime = ⌊log10(HPF_life)⌋` startet am 100-HPF-Gate bei **2** und
+  gibt je Größenordnung +1. Der realistische Lebensvorrat liegt also bei **2–4
+  TE**, nicht bei Dutzenden. Die in der Roadmap skizzierte 1/2/3/5-Kurve (11 TE)
+  entspräche 10¹¹ Lebenszeit-HPF — der Shop wäre Deko gewesen. Gewählt:
+  **1/1/2/2**, Board-Summe 6. Damit finanziert die erste Transzendenz (2 TE)
+  genau EINE Entscheidung: ×9 behalten, oder ein 1-TE-Knoten + ×3, oder zwei
+  billige Knoten und gar kein Boost. Das volle Board (10⁶ HPF) ist **absichtlich**
+  unerreichbar — P2 wollte eine Auswahl, keine Checkliste.
+- **Der Preis ist der Boost selbst, und das bleibt so.** `transcendGlobalMult`
+  rechnet auf dem GEHALTENEN TE; jeder Kauf kostet also zusätzlich ×3 globalen
+  Schaden. Der Scaffold-Kommentar erlaubt ausdrücklich, stattdessen `teLifetime`
+  zu füttern (Boost immun gegen Ausgeben) — verworfen: dann wäre der Shop gratis
+  und die „Entscheidung" aus P2 verschwunden. Die Card nennt deshalb VOR dem
+  Klick beides, Kosten und Boost danach („2 🔮 · danach Boost ×27").
+- **Boss-Brecher als Schadens-Faktor, nicht als HP-Abzug — wegen der geteilten
+  Kurve.** `bossHp(zone)` lesen Combat, HUD, Advisor UND die Sim. Ein Eingriff
+  dort hätte einen Zustands-Parameter durch `spawnFor`/`hit`/`tickBoss`/
+  `travelTo` und die Sim schleifen müssen. Stattdessen hängt `1/(1−0.1)` im
+  Boss-Schadens-Stack — wirkungsgleich (der Boss fällt bei 90 % der Ausdauer),
+  aber an EINER Stelle im Spielpfad (`applyHit`) und gespiegelt in
+  `advisor.bossDamageMult`. Diese Spiegelung ist Pflicht, nicht Kosmetik: sonst
+  unterschätzte die P3-Wand-Telemetrie den Spieler nach dem Kauf dauerhaft.
+- **Sim-Ehrlichkeit ohne Anker-Verschiebung.** Alle Anker fahren `te = 0`, kein
+  Knoten gekauft; jeder Effekt-Getter liefert dann exakt den Identitätswert
+  (×1 / +0 s / unveränderte Crew). `rollNextPeachAt` bekam `gapMult = 1` als
+  Default, damit der Zufallszug byte-gleich bleibt und die Sim (die ohne Faktor
+  aufruft) dieselbe Kurve sieht. Ergebnis: 651 Tests grün, E2/E3/E4 und das
+  Himmelfahrts-Fenster **unverändert** — nichts musste re-ankert werden.
+- **Käufe sind permanent, es gibt keinen Respec — konsistent mit `mythos`.**
+  `transcendState` nimmt den ganzen L3-Slice inklusive Ledger mit, `teSpent`
+  (= `teLifetime − te`) bleibt über jede weitere Transzendenz stabil. Deshalb
+  ist jeder Knoten einstufig: eine Kaufkurve, die nie zurückgedreht werden
+  kann, muss klein und lesbar sein.
+- **Frühstart greift nach ALLEN drei Resets, nicht nur nach der Aszension.** Der
+  Himmelsbaum-„Frühstarter" ist aszensions-gebunden und prozentual — nach einer
+  Transzendenz ist er weg, weil L2 mitgewiped wird. Genau dort ist der TE-Knoten
+  am meisten wert, also hängt er in `onAscend`, `onHimmelfahrt` UND
+  `onTranscend`. Er hebt nur an (Max-Regel), kassiert also nie einen höheren
+  Stand des Himmelsbaum-Knotens ein.
+- **Der 🌈-Tab öffnet jetzt mit der ersten Aszension — sonst hätte der Teaser ein
+  Zeitfenster von Minuten.** Bisher: `hpfLifetime > 0 || canHimmelfahrt(…)`, also
+  erst ab 1 000 Lebenszeit-RS — dem Moment, in dem die Himmelfahrt ohnehin
+  bereitsteht. Der 🔮-Teaser darin wäre praktisch nie zu sehen gewesen, weil der
+  echte 🔮-Tab eine Sekunde später erscheint. Die Öffnung folgt exakt der
+  Begründung, die schon über dem 'transcend'-Case steht („eine Schicht, die man
+  erst sieht, wenn sie offen ist, kann kein Ziel sein"); das Panel zeigt vor dem
+  Gate ehrlich „Lebenszeit-RS X / 1 000 (30 %)". Reine Anzeige — `canHimmelfahrt`
+  bleibt das einzige echte Gate, und die 'transcend'-Regel ist **unangetastet**.
+- **Beweis (Headless, Port 4188, Save v11).**
+  `p2-a-himmel-teaser.png` — Save nach erster Aszension (`hpfLifetime 0`):
+  🌈-Tab sichtbar, 🔮-Tab **nicht**, unten der gesperrte Knoten „🔮 ??? 🔒" mit
+  `cursor: default` (kein Klick-Handler). `p2-b-shop-kaufbar.png` — 5 TE, alle
+  vier Knoten mit Kosten + „danach Boost ×N". `p2-c-shop-gekauft.png` — nach
+  zwei Käufen: Haken, Gold-Rand, Kontostand 5 → 1 🔮, Boost ×243 → ×3, Save
+  trägt `mythos: { nachtschwarmer: 1, bossbrecher: 1 }`.
+  `p2-c-offline-cap-crop.png` — X3-Card mit Cap **8 h → 12 h**.
+
 ## ROADMAP-V2 Schritt 5 — A2 Boss-Gimmicks
 
 - **2026-07-26 — Der entscheidende Befund: ein Boss-Gate ist kein Regler,
