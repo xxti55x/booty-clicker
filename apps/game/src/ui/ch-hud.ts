@@ -28,7 +28,12 @@ const BOSSES = [
   'DJ Dämon',
 ];
 
-function rivalName(zone: number, boss: boolean): string {
+/**
+ * Der angezeigte Gegner-Name. Boss-Namen tragen die Krone schon im String —
+ * ROADMAP-V2 G2 nutzt genau diesen Namen fürs Auftritts-Banner, damit HUD und
+ * Banner nie auseinanderlaufen (eine Quelle, keine Kopie).
+ */
+export function rivalName(zone: number, boss: boolean): string {
   if (boss) return '👑 ' + BOSSES[Math.floor(zone / 5) % BOSSES.length];
   const pool = RIVALS[stripTheme(zone)];
   return pool[zone % pool.length];

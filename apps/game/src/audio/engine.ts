@@ -244,11 +244,11 @@ export class AudioEngine {
     osc.stop(t + dur + 0.02);
   }
 
-  private clapNoise(gain: number, dur: number): void {
+  private clapNoise(gain: number, dur: number, delay = 0): void {
     const ctx = this.ctx;
     const bus = this.sfxBus;
     if (!ctx || !bus) return;
-    const t = ctx.currentTime;
+    const t = ctx.currentTime + delay;
     const src = ctx.createBufferSource();
     src.buffer = getNoiseBuffer(ctx);
     const bp = ctx.createBiquadFilter();
@@ -294,10 +294,72 @@ export class AudioEngine {
     this.clapNoise(0.08, 0.05);
   }
 
+  /**
+   * ROADMAP-V2 G2 — Bass-Drop-Stinger zum Boss-Auftritt. Drei Lagen im
+   * bestehenden Graph (keine Samples): ein gefilterter Rausch-Riser zieht 0.45 s
+   * hoch, dann fällt ein Sub-Sinus von 110 auf 32 Hz („Drop") und ein
+   * Sägezahn-Grollen + Klatsch setzen den Aufschlag. Ohne Kontext ein No-op —
+   * derselbe Vertrag wie alle SFX hier.
+   */
+  bossIntro(): void {
+    const ctx = this.ctx;
+    const bus = this.sfxBus;
+    if (!ctx || !bus) return;
+    const t = ctx.currentTime;
+    const DROP = 0.45; // Sekunden bis zum Aufschlag
+    // Riser: Bandpass-Rauschen, das in den Drop hineinzieht.
+    const src = ctx.createBufferSource();
+    src.buffer = getNoiseBuffer(ctx);
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 1.4;
+    bp.frequency.setValueAtTime(420, t);
+    bp.frequency.exponentialRampToValueAtTime(6200, t + DROP);
+    const rg = ctx.createGain();
+    rg.gain.setValueAtTime(0.0001, t);
+    rg.gain.exponentialRampToValueAtTime(0.1, t + DROP * 0.94);
+    rg.gain.exponentialRampToValueAtTime(0.0001, t + DROP + 0.12);
+    src.connect(bp);
+    bp.connect(rg);
+    rg.connect(bus);
+    src.start(t);
+    src.stop(t + DROP + 0.16);
+    // Drop: Sub-Sinus 110 → 32 Hz.
+    const sub = ctx.createOscillator();
+    const sg = ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(110, t + DROP);
+    sub.frequency.exponentialRampToValueAtTime(32, t + DROP + 0.5);
+    sg.gain.setValueAtTime(0.0001, t + DROP);
+    sg.gain.linearRampToValueAtTime(0.28, t + DROP + 0.03);
+    sg.gain.exponentialRampToValueAtTime(0.0001, t + DROP + 0.62);
+    sub.connect(sg);
+    sg.connect(bus);
+    sub.start(t + DROP);
+    sub.stop(t + DROP + 0.68);
+    // Aufschlag: tiefes Sägezahn-Grollen + Klatsch.
+    this.tone(65.41, 0.7, 'sawtooth', 0.11, DROP);
+    this.clapNoise(0.16, 0.26, DROP);
+  }
+
+  /**
+   * ROADMAP-V2 G2 — Mini-Fanfare fürs Zonen-Clear (25/25 ohne Boss): zwei kurze
+   * Töne, hörbar leiser und kürzer als `bossWin`, damit der Boss-Sieg der
+   * lautere Moment bleibt.
+   */
+  zoneClear(): void {
+    [659.25, 987.77].forEach((f, i) => this.tone(f, 0.13, 'triangle', 0.075, i * 0.08));
+  }
+
   bossWin(): void {
     [392, 523.25, 659.25, 783.99, 1046.5].forEach((f, i) =>
       this.tone(f, 0.22, 'sawtooth', 0.14, i * 0.1),
     );
+    // G2: die Fanfare bekommt einen Schluss-Akkord + Jubel-Klatsch statt
+    // einfach abzureißen — der Sieg-Beat braucht ein Ende, keinen Abbruch.
+    [523.25, 659.25, 783.99, 1318.5].forEach((f) => this.tone(f, 0.65, 'triangle', 0.095, 0.5));
+    this.clapNoise(0.15, 0.32, 0.5);
   }
 
   bossLose(): void {
