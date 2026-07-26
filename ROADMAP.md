@@ -1,5 +1,9 @@
 # ROADMAP — Grafik-Vollausbau & Feinschliff
 
+> **Abgelöst durch [`ROADMAP-V2.md`](ROADMAP-V2.md).** Phasen T + L sind
+> umgesetzt; die offenen Phasen U + F leben dort weiter (Säule G und X).
+> Diese Datei bleibt als Verlaufs-Dokument der T/L-Umsetzung stehen.
+
 Wohin das Spiel als Nächstes wächst: **alle Texturen aufwerten** und das Spiel
 **fertiger, runder und optisch gefälliger** machen. Jede Phase ist so
 geschnitten, dass sie einzeln landen kann (bauen → headless screenshotten →
