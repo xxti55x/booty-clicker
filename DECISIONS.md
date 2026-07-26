@@ -3,6 +3,97 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## ROADMAP-V2 Schritt 4 — X2+X3+G3 Ekstase-Fenster, Offline-Rückkehr, Idle-Leben
+
+- **2026-07-26 — X2: Der Balken zeigt jetzt IMMER die Ladung, der Ring die
+  Laufzeit.** Vorher trug `#ekstaseFill` beide Bedeutungen: außerhalb der
+  Ekstase die Ladung, innerhalb die Restzeit. Das las sich im Fenster wie eine
+  Ladung, die rückwärts läuft — und verbarg, wie weit die NÄCHSTE Ekstase schon
+  ist (im ×10-Fenster klickt man am meisten, die Ladung steigt also am
+  schnellsten). Jetzt sind es zwei Kanäle: Balken = Ladung (durchgehend), Ring
+  am linken Pillen-Ende = Restlaufzeit mit den Sekunden im Kern. Headless
+  gegengeprüft: bei offener Ekstase Ring 85 % / 51 s bei Ladung 0 %, nach 14
+  Klicks Ring 77 % / 46 s bei Ladung 8 % — beides gleichzeitig lesbar.
+- **Der Ring misst sein Fenster selbst, weil der Save die Dauer nicht kennt.**
+  Persistiert ist nur `frenzyUntil`; `frenzyFraction` rechnet gegen die
+  BASIS-Dauer (12 s) und pegelt deshalb bei einer per Ekstase-Ausdauer/Gear
+  verlängerten Ekstase (30 s sind erreichbar) über eine Minute lang auf 100 %.
+  `trackFrenzyWindow` misst die Länge beim ERSTEN Frame des Fensters und führt
+  sie mit — pur, getestet, ohne Schema-Bump. Ein Reload mitten in der Ekstase
+  startet den Ring bei 100 % der REST-Zeit: die verlorene Vorgeschichte ist
+  nicht rekonstruierbar, und ein zu voller Ring ist ehrlicher als ein
+  springender.
+- **Der Deck-Puls moduliert das geteilte `floorMat`, statt Geometrie zu
+  bauen.** Ein zweites Emissive-Deck (Overlay-Disc) hätte einen Draw-Call und
+  Z-Fighting gekostet. `World.setEkstase(active, beatV)` lerpt stattdessen das
+  Theme-Emissive Richtung Ekstase-Pink und hebt die Intensität — mit demselben
+  `beatV`, den die Kulissen-Anims bekommen, also im Takt der Neonkanten. Die
+  Ruhelage wird bei jedem `rebuild` frisch gemerkt, ein G1-Bühnenwechsel
+  MITTEN im Fenster reißt den Puls daher nicht ab; beim Fenster-Ende wird genau
+  einmal zurückgestellt. `low` schaltet ihn per `preset.ekstaseDeck` ab
+  (headless gemessen: high 1.60…1.87 Intensität + wechselnde Farbe, low
+  konstant 1.00/Schwarz).
+- **X3: Der Offline-Verdienst wird gepuffert — aber trotzdem MITGESPEICHERT.**
+  „Erst beim Einsacken gutschreiben" und „niemals Verlust" widersprechen sich,
+  sobald der Tab hart wegbricht (Crash/Task-Kill, kein `beforeunload`). Gelöst
+  ohne Kompromiss: `state.gold` bleibt bis zum Klick unberührt (die Card darf
+  den Moment inszenieren), aber `persist()` schreibt `withPendingOffline(state)`
+  — den Kontostand INKLUSIVE Puffer. Ein Reload findet das Gold als Kontostand
+  vor, die Abwesenheit ist dann ~0, also keine zweite Card und keine
+  Doppelbuchung. Zusätzlich sackt JEDER Schließ-Pfad ein (Button, Backdrop-
+  Klick, Escape) — „Überspringen" ist kein Verzicht. Headless: HUD vor dem Klick
+  500.01K, danach 1.18M, im Save lag der Betrag schon vorher.
+- **Die Card rechnet nicht selbst — sie ruft `offlineGold` auf.** Ein zweiter
+  Rechenweg für die Anzeige wäre die klassische Quelle für „zeigt X, bucht Y".
+  `welcomeBackData(dps, zone, elapsed, opts)` ist die EINZIGE Quelle: sie ruft
+  `offlineGold` mit denselben Argumenten und gibt den Betrag zurück, den
+  `main.ts` dann gutschreibt. Der Unit-Test prüft genau das über sieben
+  Parameter-Kombinationen (Coach, Gold-Mult, Rate-Bonus, ausgebauter Cap).
+  Schwelle: > 10 min (exakt 10 min noch nicht) — darunter bleibt es die stille
+  Gutschrift von vorher, auch beim Tab-Rückkehr-Pfad.
+- **Der Cap-Hinweis erscheint nur, wenn der Cap gegriffen hat.** `capped` ist
+  `elapsed > capS`, nicht „Cap existiert" — ein Hinweis ohne Anlass wäre eine
+  Drohung. Der angezeigte Cap ist der WIRKSAME (Nachtschicht/Beach-Gear heben
+  ihn), nicht die 8-h-Konstante, sonst würde die Card den eigenen Ausbau
+  verschweigen.
+- **G3: Ambient-Leben kostet EINEN Draw-Call pro Sorte, egal wie viele
+  Stücke.** Glühwürmchen = ein `Points`, Sternschnuppen/Kometen/Möwen/Publikum =
+  je ein `InstancedMesh` mit einem Material. Die Preset-Dichte
+  (`ambientLife`: low 0.5) skaliert damit die STÜCKZAHL, nicht die Batches —
+  low spart Füllrate, nicht Draw-Calls. Der Beach-Schaumpuls kostet gar nichts:
+  er animiert den Kantenring, den `world/island.ts` ohnehin baut.
+- **Das Publikum hängt an der `islandGroup`, das Flugzeug-Zeug an der
+  `propGroup`.** Beide fahren beim G1-Wechsel mit, aber die Kulisse nur mit
+  `PROP_PARALLAX` (0.55). Was AUF der Bühne steht (Publikum, Glühwürmchen) muss
+  1:1 mitfahren, sonst löst es sich beim Absturz von der Insel; was am Himmel
+  fliegt, darf zurückbleiben. Der Bogen liegt im +z-Halbraum — von der
+  Diorama-Kamera aus hinter dem Duo, nie davor.
+- **Draw-Call-Budget: die Bühnen waren schon VOR G3 drüber.** Erste Messung
+  (`renderer.info.render.calls`, high): club 269, synth 298, beach 316, space
+  237 — das Budget der Roadmap ist 250. Das war kein G3-Schaden, sondern die
+  alten Props: eine Palme trug 6 Wedel- und 2 Nuss-Meshes MIT je eigener
+  Ink-Hülle (18 Draw-Calls pro Baum, bei 6 Palmen 108), der Synth-Bergring 12
+  Kegel + 12 Hüllen + 12 Drahtgitter (36), die Tanzfläche 25 Kacheln mit je
+  EIGENEM Material. Behoben durch reines Batching bei gleichem Bild: alles
+  Statische gleichen Materials wird in EINE Geometrie gebacken (`bake` in
+  `world/island.ts`, `mergeGeometries` mit dem Transform in den Vertices) —
+  Palmwedel/Nüsse, Bergring, Sand-Zapfen, Seestern, Schirm, Puffwolken,
+  Club-Zapfen/Blöcke, Mini-Inseln, Landelichter, Weltraum-Kristalle und
+  -Trümmer; die Kacheln sind ein `InstancedMesh` mit `instanceColor`. Was sich
+  EINZELN bewegt (die vier drehenden Amethyste, die Synth-Shards), bleibt ein
+  eigenes Objekt. Ergebnis MIT dem neuen Ambient-Leben: club 237, synth 229,
+  beach 239, space 219 — und 242 im G2-Boss-Punch-In, der durch die Kamerafahrt
+  mehr Kulisse ins Frustum zieht (vor dem zweiten Batching-Durchgang lag genau
+  dieser Moment mit 251 noch drüber). Die Kacheln verloren dabei ihren
+  Standard-Material-Anteil aus den vier Club-Spots; das ×1.12 im Farb-Term
+  gleicht die Helligkeit aus.
+- **Streifen sind ein Kreuz aus zwei Dreiecken, Möwen stehen ohne Yaw.** Ein
+  einzelnes flaches Dreieck, das in die Flugrichtung gedreht wird, steht je nach
+  Bahn kantenständig zur Kamera — also unsichtbar. Das Kreuz kostet ein Dreieck
+  mehr und keinen Draw-Call. Die Möwen-Silhouetten drehen aus demselben Grund
+  gar nicht mit ihrer Ellipse mit: sie stehen wie ein Sprite zur Diorama-Kamera.
+  Beide fliegen bewusst TIEF — der obere Himmel liegt hinter dem HUD-Streifen.
+
 ## ROADMAP-V2 Schritt 3 — P1+P3 Bühnen-Sterne & Wand-Telemetrie
 
 - **2026-07-26 — Stern 2 gibt es nur an Boss-Gates; Nicht-Boss-Bühnen tragen

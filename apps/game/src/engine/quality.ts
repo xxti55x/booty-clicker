@@ -22,6 +22,20 @@ export interface QualityPreset {
   cinematics: boolean;
   /** ROADMAP-V2 G2: Partikel im Boss-Kill-Konfetti (0 = aus). */
   confetti: number;
+  /**
+   * ROADMAP-V2 X2: Deck-Emissive-Puls im Ekstase-Fenster. `false` = das Deck
+   * bleibt ruhig (low-Preset) — der CSS-Rand-Glow, der Countdown-Ring am Button
+   * und der Shimmy tragen das Fenster dann allein, sie kosten nichts.
+   */
+  ekstaseDeck: boolean;
+  /**
+   * ROADMAP-V2 G3: Dichte-Faktor der Ambient-Elemente je Bühne (Glühwürmchen,
+   * Sternschnuppen, Möwen, Kometen, Publikum-Silhouetten). 1 = volle Dichte,
+   * 0.5 = halbe (low-Preset), 0 = gar keins. Wirkt als Multiplikator auf die
+   * Stückzahlen, nicht auf die Zahl der Materialien — ein Element mehr oder
+   * weniger kostet keinen zusätzlichen Draw-Call.
+   */
+  ambientLife: number;
 }
 
 const PRESETS: Record<Quality, QualityPreset> = {
@@ -32,6 +46,8 @@ const PRESETS: Record<Quality, QualityPreset> = {
     stageTransition: false,
     cinematics: false,
     confetti: 0,
+    ekstaseDeck: false,
+    ambientLife: 0.5,
   },
   medium: {
     pixelRatioCap: 1.5,
@@ -40,6 +56,8 @@ const PRESETS: Record<Quality, QualityPreset> = {
     stageTransition: true,
     cinematics: true,
     confetti: 70,
+    ekstaseDeck: true,
+    ambientLife: 1,
   },
   high: {
     pixelRatioCap: 2,
@@ -48,6 +66,8 @@ const PRESETS: Record<Quality, QualityPreset> = {
     stageTransition: true,
     cinematics: true,
     confetti: 130,
+    ekstaseDeck: true,
+    ambientLife: 1,
   },
 };
 

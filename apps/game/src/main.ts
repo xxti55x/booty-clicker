@@ -37,6 +37,7 @@ import {
 import {
   ascendState,
   chestLuck,
+  type ChState,
   clickDamageOf,
   createChState,
   dpsOf,
@@ -157,6 +158,7 @@ import { shouldShakeOnKey } from './game/input';
 import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
 import { applyLegacyInheritance } from './game/legacy-import';
 import { loadSettings, type Quality, saveSettings } from './game/settings';
+import { type WelcomeBackData, welcomeBackData } from './game/welcome-back';
 import { loadCh, offlineGold, resetCh, saveCh } from './save/ch-store';
 import { loadGame } from './save/store';
 import { Rng } from './util/rng';
@@ -243,7 +245,6 @@ applyQuality(effects.quality);
 let state = createChState();
 const loaded = loadCh();
 let offlineEarnedMs = 0;
-let offlineEarned = 0;
 if (loaded) {
   state = loaded.state;
   offlineEarnedMs = Math.max(0, Date.now() - loaded.lastSeen);
@@ -359,14 +360,40 @@ function offlineOpts(): {
     rateBonus: offlineRateBonus(state.gear),
   };
 }
+/**
+ * ROADMAP-V2 X3: Der Offline-Verdienst wird GEPUFFERT, solange die Willkommen-
+ * zurück-Card offen ist — erst „Einsacken" (oder irgendein anderes Schließen)
+ * bucht ihn auf `state.gold`. `null` = keine Card (unter 10 min weg oder nichts
+ * verdient), dann wird wie bisher still gebucht.
+ */
+let offlineCard: WelcomeBackData | null = null;
+/** Noch nicht eingesackter Offline-Verdienst (0 = nichts offen). */
+let pendingOffline = 0;
 if (loaded) {
-  offlineEarned = offlineGold(dps, combat.zone, offlineEarnedMs, offlineOpts());
-  state.gold += offlineEarned;
-  state.stats.goldLifetime += offlineEarned;
+  offlineCard = welcomeBackData(dps, combat.zone, offlineEarnedMs, offlineOpts());
+  if (offlineCard) {
+    pendingOffline = offlineCard.gold;
+  } else {
+    const silent = offlineGold(dps, combat.zone, offlineEarnedMs, offlineOpts());
+    state.gold += silent;
+    state.stats.goldLifetime += silent;
+  }
+}
+
+/** X3: `state` + gepufferter Offline-Verdienst — nur fürs Speichern, nie live. */
+function withPendingOffline(s: ChState, amount: number): ChState {
+  return {
+    ...s,
+    gold: s.gold + amount,
+    stats: { ...s.stats, goldLifetime: s.stats.goldLifetime + amount },
+  };
 }
 
 // ---------- visuals ----------
 const world = new World(scene, skyMat, floorMat, glowSprite, lights);
+// ROADMAP-V2 G3: Ambient-Dichte VOR dem ersten `setBackground` setzen, damit die
+// Boot-Bühne direkt mit den Preset-Stückzahlen gebaut wird (kein Rebuild).
+world.setAmbientLife(preset.ambientLife);
 const audio = new AudioEngine();
 const beatTracker = new BeatTracker();
 const choreo = new Choreographer();
@@ -444,7 +471,13 @@ function syncMaxZones(): void {
 const persist = (): void => {
   if (suppressSave) return;
   syncMaxZones();
-  saveCh(state, Date.now());
+  // X3: Ein noch nicht eingesackter Offline-Verdienst wird MITGESPEICHERT, ohne
+  // schon auf `state.gold` zu liegen. Die Card darf den Betrag also inszenieren
+  // („erst beim Klick gutgeschrieben"), aber ein hart weggerissener Tab (Crash,
+  // Task-Kill, kein `beforeunload`) kann ihn nicht mehr verschlucken: „niemals
+  // Verlust" schlägt die Inszenierung. Beim Reload ist der Betrag Kontostand,
+  // die Abwesenheit dann ~0 — also keine zweite Card und keine Doppelbuchung.
+  saveCh(pendingOffline >= 1 ? withPendingOffline(state, pendingOffline) : state, Date.now());
 };
 window.setInterval(persist, 10_000);
 
@@ -459,12 +492,23 @@ document.addEventListener('visibilitychange', () => {
   } else if (document.visibilityState === 'visible' && hiddenAt > 0) {
     const elapsed = Math.max(0, Date.now() - hiddenAt);
     hiddenAt = 0;
+    // X3: Ab 10 min Abwesenheit trägt die Card den Betrag (und puffert ihn),
+    // darunter bleibt es die stille Gutschrift von vorher.
+    const card = welcomeBackData(dps, combat.zone, elapsed, offlineOpts());
+    if (card) {
+      // Eine noch offene Card zuerst abrechnen, damit die neue genau ihren
+      // eigenen Betrag zeigt (zwei Puffer übereinander wären eine Lüge).
+      claimOffline();
+      pendingOffline = card.gold;
+      showWelcomeBack(card);
+      persist();
+      return;
+    }
     const grant = offlineGold(dps, combat.zone, elapsed, offlineOpts());
     if (grant >= 1) {
       state.gold += grant;
       state.stats.goldLifetime += grant;
       hud.update(state, combat, dps, clickDmg);
-      if (elapsed > 60_000) showWelcomeBack(grant, elapsed);
       persist();
     }
   }
@@ -700,27 +744,61 @@ const chSettings = new ChSettings({
     window.location.reload();
   },
   effects,
-  onGraphicsChange: () => applyQuality(effects.quality),
+  onGraphicsChange: () => {
+    applyQuality(effects.quality);
+    // G3: Dichte-Wechsel baut die laufende Bühne einmal neu (No-op bei gleichem Wert).
+    world.setAmbientLife(preset.ambientLife);
+  },
 });
 
-// ---------- welcome back ----------
+// ---------- welcome back (ROADMAP-V2 X3) ----------
 const welcomeBack = document.getElementById('welcomeBack') as HTMLElement;
-document.getElementById('wbClose')?.addEventListener('click', () => {
+const wbCap = document.getElementById('wbCap') as HTMLElement;
+/**
+ * Den gepufferten Offline-Verdienst gutschreiben. Idempotent (der Puffer wird
+ * zuerst geleert), damit „Einsacken" + irgendein zweiter Schließ-Pfad nie
+ * doppelt zahlen.
+ */
+function claimOffline(): void {
+  if (pendingOffline < 1) return;
+  const amount = pendingOffline;
+  pendingOffline = 0;
+  state.gold += amount;
+  state.stats.goldLifetime += amount;
+  hud.update(state, combat, dps, clickDmg);
+  audio.buy();
+  toasts.show('🍑', 'Eingesackt!', `+${fmt(amount)} BP von deiner Crew.`);
+  persist();
+}
+/**
+ * Card zu — und ZWINGEND buchen. „Überspringen" ist kein Verzicht: wer die Card
+ * per Button, Klick daneben oder Escape wegräumt, hat den Verdienst trotzdem
+ * verdient (X3: niemals Verlust).
+ */
+function closeWelcomeBack(): void {
+  if (welcomeBack.classList.contains('hidden')) return;
   welcomeBack.classList.add('hidden');
+  claimOffline();
+}
+document.getElementById('wbClose')?.addEventListener('click', closeWelcomeBack);
+welcomeBack.addEventListener('click', (e) => {
+  if (e.target === welcomeBack) closeWelcomeBack(); // Klick auf den Backdrop
 });
-function showWelcomeBack(earned: number, elapsedMs: number): void {
-  const mins = Math.floor(elapsedMs / 60_000);
-  const dur =
-    mins < 1
-      ? '< 1 min'
-      : mins < 60
-        ? `${mins} min`
-        : `${Math.floor(mins / 60)} h ${mins % 60} min`;
-  (document.getElementById('wbText') as HTMLElement).textContent =
-    `Du warst ${dur} weg. Deine Crew hat weitergetwerkt: +${fmt(earned)} BP (Idle-Rate 50 %, max. 8 h).`;
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape') closeWelcomeBack();
+});
+function showWelcomeBack(card: WelcomeBackData): void {
+  (document.getElementById('wbAway') as HTMLElement).textContent = card.away;
+  (document.getElementById('wbGold') as HTMLElement).textContent = `+${fmt(card.gold)} BP`;
+  // Der Cap-Hinweis erscheint NUR, wenn er auch gegriffen hat — sonst wäre er
+  // eine Drohung ohne Anlass. Mit Hinweis auf den Ausbau (Himmelsbaum, P4).
+  wbCap.classList.toggle('hidden', !card.capped);
+  if (card.capped) {
+    wbCap.textContent = `Cap: ${card.capLabel} — länger zählt der Idle-Verdienst nicht. Mehr geht mit dem Himmelsbaum.`;
+  }
   welcomeBack.classList.remove('hidden');
 }
-if (offlineEarned >= 1) showWelcomeBack(offlineEarned, offlineEarnedMs);
+if (offlineCard) showWelcomeBack(offlineCard);
 
 // ---------- tabs ----------
 const tabBodies: Record<string, string> = {
@@ -1833,6 +1911,10 @@ let t0 = 0;
       rotY: number;
       stageY: number;
       swapping: boolean;
+      calls: number;
+      tris: number;
+      deckE: number;
+      deckI: number;
     };
   }
 ).chVs = () => ({
@@ -1842,6 +1924,14 @@ let t0 = 0;
   rotY: entity.root.rotation.y,
   stageY: world.stageY,
   swapping: world.transitioning,
+  // ROADMAP-V2 G3: Draw-Call-Budget (< 250/Bühne) direkt aus dem Renderer —
+  // der Verify-Lauf liest die Zahl je Theme, statt sie zu schätzen.
+  calls: renderer.info.render.calls,
+  tris: renderer.info.render.triangles,
+  // ROADMAP-V2 X2: der Deck-Emissive-Puls, direkt vom geteilten Deck-Material —
+  // damit der Headless-Beweis den Puls MISST statt ihn aus Pixeln zu raten.
+  deckE: floorMat.emissive.getHex(),
+  deckI: floorMat.emissiveIntensity,
 });
 let uiTimer = 0;
 let lastRenderMs = 0;
@@ -1933,6 +2023,10 @@ function loop(nowMs: number): void {
   // G1: Aus-/Einfahrt der Bühne tickt im bestehenden Loop, VOR den Kulissen-
   // Anims (nach einem Rebuild zeigt `world.anims` schon auf die neue Bühne).
   world.update(dt);
+  // ROADMAP-V2 X2: Solange das Ekstase-Fenster offen ist, pulst das Deck-Emissive
+  // im SELBEN `beatV` wie Neonkanten und Lautsprecher-Dome. Nach `world.update`,
+  // damit ein Rebuild mitten im Wechsel die frische Theme-Ruhelage gemerkt hat.
+  world.setEkstase(frenzy && preset.ekstaseDeck, beatV);
   stepCinematics(dt); // G2: Licht-Dim + Kamera-Punch des Boss-Auftritts
   // Duo + Kontaktschatten stehen NICHT auf der Insel-Gruppe (die Cheek-Physik
   // simuliert in Weltkoordinaten — Mitfahren würde die Federn zerren), also

@@ -869,6 +869,50 @@ body {
   max-width: 360px;
   width: 88vw;
 }
+
+/* ---- X3: Willkommen-zurück-Card (Offline-Rückkehr als Moment) ---- */
+.dialog.wb {
+  max-width: 340px;
+  width: 86vw;
+}
+.wb-rows {
+  margin: 14px 0 4px;
+  text-align: left;
+}
+.wb-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 2px solid var(--parch-line);
+  border-radius: 10px;
+  background: #fff8e6;
+  margin-bottom: 6px;
+}
+.wb-k {
+  font-size: 12px;
+  color: var(--parch-soft);
+}
+.wb-v {
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--parch-ink);
+  white-space: nowrap;
+}
+.wb-v.wb-gold {
+  color: #a06a12;
+}
+.wb-cap {
+  margin: 8px 2px 2px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--parch-soft);
+}
+.wb-cap.hidden {
+  display: none;
+}
 .lb-list {
   max-height: 50vh;
   overflow-y: auto;
@@ -1379,6 +1423,46 @@ body {
 }
 .ability-btn.active .ability-fill {
   background: linear-gradient(90deg, #ffd24d, #ff6b8d);
+}
+
+/* ---- X2: Countdown-Ring der Ekstase-LAUFZEIT (Ladung = .ability-fill) ----
+   Conic-Gradient von 12 Uhr aus: der helle Sektor ist die Rest-Laufzeit
+   (`--ek-left`, von der AbilityBar gesetzt), der Rest läuft dunkel ab. Sitzt
+   im linken Ende der Pille, damit das Label mittig lesbar bleibt. */
+.ability-ring {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  z-index: 2;
+  display: none;
+  background: conic-gradient(
+    from 0deg,
+    #ffe98a 0%,
+    #ffd24d var(--ek-left, 100%),
+    rgba(24, 12, 4, 0.72) var(--ek-left, 100%),
+    rgba(24, 12, 4, 0.72) 100%
+  );
+  box-shadow: 0 0 10px rgba(255, 210, 77, 0.7);
+}
+.ability-ring.on {
+  display: block;
+}
+.ability-ring b {
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: #2a1a10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffe6a8;
 }
 @keyframes ekready {
   0%,

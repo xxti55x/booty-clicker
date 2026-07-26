@@ -11,6 +11,8 @@ describe('quality presets', () => {
       stageTransition: false,
       cinematics: false,
       confetti: 0,
+      ekstaseDeck: false,
+      ambientLife: 0.5,
     });
   });
 
@@ -38,6 +40,24 @@ describe('quality presets', () => {
       expect(qualityPreset(q).confetti).toBeGreaterThan(0);
     }
     expect(qualityPreset('high').confetti).toBeGreaterThan(qualityPreset('medium').confetti);
+  });
+
+  // ROADMAP-V2 X2: der Deck-Puls des Ekstase-Fensters hängt am Preset.
+  it('low skips the X2 deck pulse, medium/high run it', () => {
+    expect(qualityPreset('low').ekstaseDeck).toBe(false);
+    expect(qualityPreset('medium').ekstaseDeck).toBe(true);
+    expect(qualityPreset('high').ekstaseDeck).toBe(true);
+  });
+
+  // ROADMAP-V2 G3: low halbiert die Ambient-Dichte, medium/high fahren voll.
+  it('low halves the G3 ambient density, medium/high run it fully', () => {
+    expect(qualityPreset('low').ambientLife).toBe(0.5);
+    expect(qualityPreset('medium').ambientLife).toBe(1);
+    expect(qualityPreset('high').ambientLife).toBe(1);
+    for (const q of ['low', 'medium', 'high'] as const) {
+      expect(qualityPreset(q).ambientLife).toBeGreaterThan(0);
+      expect(qualityPreset(q).ambientLife).toBeLessThanOrEqual(1);
+    }
   });
 
   it('caps the device pixel ratio to the preset', () => {

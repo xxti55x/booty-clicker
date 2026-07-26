@@ -158,6 +158,10 @@
     <div class="abilitybar" id="abilityBar">
       <button class="ability-btn" id="ekstaseBtn" type="button" title="Twerk-Ekstase (Taste F)">
         <span class="ability-fill" id="ekstaseFill"></span>
+        <!-- X2: Countdown-Ring der LAUFZEIT (der Balken darüber ist die LADUNG). -->
+        <span class="ability-ring" id="ekstaseRing" aria-hidden="true">
+          <b id="ekstaseRingSec">0</b>
+        </span>
         <span class="ability-label" id="ekstaseLabel">🍑 Ekstase</span>
       </button>
     </div>
@@ -252,11 +256,22 @@
       <div class="tabbody" id="tabSet" style="display: none"></div>
     </div>
 
+    <!-- X3: Offline-Rückkehr als Moment — die BP landen erst mit „Einsacken". -->
     <div class="overlay hidden" id="welcomeBack">
-      <div class="dialog">
+      <div class="dialog wb">
         <div class="dt">🍑 Willkommen zurück!</div>
-        <div class="dd" id="wbText"></div>
-        <button class="btn" id="wbClose">Einsammeln</button>
+        <div class="wb-rows">
+          <div class="wb-row">
+            <span class="wb-k">Du warst weg</span>
+            <b class="wb-v" id="wbAway">–</b>
+          </div>
+          <div class="wb-row">
+            <span class="wb-k">Deine Crew hat erspielt</span>
+            <b class="wb-v wb-gold" id="wbGold">–</b>
+          </div>
+        </div>
+        <div class="wb-cap hidden" id="wbCap"></div>
+        <button class="btn" id="wbClose" type="button">Einsacken</button>
       </div>
     </div>
 
