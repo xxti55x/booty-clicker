@@ -3,6 +3,76 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## ROADMAP-V2 Schritt 2 — G1+G2 Bühnen-Wechsel & Boss-Auftritt
+
+- **2026-07-26 — Aus zwei Cuts werden zwei Momente.** G1: `World.setBackground`
+  bekam ein drittes Argument `{ animate }`. Damit fährt die ALTE `islandGroup`
+  in 0.5 s mit Cubic-Ease-In und leichtem Tilt 17 Einheiten nach unten aus dem
+  Bild (die Kulisse mit 0.55-Parallaxe hinterher), wird ERST DANN entsorgt und
+  neu gebaut, und die neue Bühne schwebt in 0.7 s mit Ease-Out + kleinem
+  Überschwinger (~0.35 Einheiten) herein. Kamera bleibt ruhig; getickt wird in
+  `world.update(dt)` aus dem bestehenden Render-Loop. Drei Entscheidungen, die
+  nicht offensichtlich waren:
+  (1) **Palette überblendet stetig über beide Phasen.** Sky/Fog/Deck-Ton und
+  das Licht-Rig werden nicht am Umschaltpunkt gesetzt, sondern von der alten
+  zur neuen Palette gelerpt (`paletteFor`/`snapshotPalette`/`applyPalette`) —
+  sonst hätte mitten im Wechsel der Himmel hart umgeschlagen, also genau der
+  Hard-Cut, den G1 beseitigen soll. Diskret bleiben nur Dinge, die es sein
+  müssen (Deck-Map/Emissive-Map brauchen einen Programm-Rebuild) — die passieren
+  unter dem Bildrand.
+  (2) **Duo + Kontaktschatten fahren NICHT mit, sie treten ab.** Der naive Weg
+  (Spieler-Wrapper und Rivale am Insel-Versatz mitziehen) zerreißt die
+  Cheek-Physik: die Federn (k = 190, c = 7) laufen in WELTkoordinaten, ihr
+  stationärer Nachlauf ist c·v/k, und bei Spitzengeschwindigkeit ~100 u/s wären
+  das ~3.7 Einheiten Gummiband quer über die Bühne. Kompensieren hieße den
+  Physik-Zustand von außen anfassen — verboten. Also: ab −0.35 Einheiten
+  Deck-Versatz werden Duo und Kontaktschatten unsichtbar (16 px Bewegung, der
+  Wechsel hat sichtbar begonnen) und kommen mit der neuen Bühne zurück. Dafür
+  gibt `createScene` den Kontaktschatten jetzt heraus.
+  (3) **Klicks werden IGNORIERT, nicht gepuffert**, und Idle-DPS/Coach/Boss-Timer
+  pausieren für die 1.2 s. Puffern hätte einen Klick-Schwall auf einen Rivalen
+  losgelassen, der gar nicht auf der Bühne steht, und Combo-Fenster/On-Beat/
+  Ekstase-Ladung verfälscht. Nebeneffekt, der zählt: kein Idle-Kill kann mitten
+  im Wechsel den nächsten Wechsel auslösen (der Fall ist zusätzlich abgesichert
+  — ein `animate`-Aufruf während eines laufenden Übergangs tauscht das ZIEL,
+  statt hart umzuschalten).
+- **G2 — der Boss-Auftritt.** Beide Spawn-Pfade (25/25 auf der Boss-Bühne und
+  der „Boss herausfordern"-Button) laufen jetzt durch EIN `bossEntrance()`:
+  CSS-Banner „👑 <Bossname>" rollt oben in die `.topui`-Spalte ein (Name aus
+  `rivalName` — dieselbe Quelle wie das HUD, damit beide nie auseinanderlaufen),
+  0.8 s Licht-Moment und ein Bass-Drop-Stinger (`audio.bossIntro()`: Rausch-
+  Riser 0.45 s → Sub-Sinus 110→32 Hz → Sägezahn-Grollen + Klatsch, alles im
+  bestehenden WebAudio-Graph, keine Samples). Der Licht-Moment senkt Key/Fill/
+  Hemi **und** `renderer.toneMappingExposure`; das war die eigentliche Erkenntnis:
+  ein reines Rig-Dim ist auf der Bühne kaum zu sehen, weil das Rig dort gar nicht
+  die dominante Lichtquelle ist (die Club-Spots stehen auf Intensität 90, halbe
+  Kulissen leuchten emissiv). Die Belichtung senkt alles gleichmäßig, das Rig-Dim
+  gibt dem Moment die Form. Dazu ein Kamera-Punch-In über das FOV (−14 %) statt
+  über die Position, damit die Kamera ruhig bleibt — dieselbe „kurz zupacken,
+  weich lösen"-Hüllkurve wie der Screen-Shake. `resize()` stellt den Punch
+  vorher zurück, sonst würde `frameCamera` die Distanz aus dem gepunchten FOV
+  rechnen und die Bühne dauerhaft falsch rahmen.
+- **G2 — der Sieg-Beat.** Boss-Kill: Konfetti aus dem bestehenden Partikel-Pool
+  (fünf Abschusspunkte quer über die Insel statt eines zentralen Klumpens),
+  `audio.bossWin()` bekam einen Schluss-Akkord + Jubel-Klatsch statt abzureißen,
+  Truhen-Toast unverändert. Zonen-Clear ohne Boss-Gate: zwei kurze, leisere Töne
+  (`audio.zoneClear()`), damit der Boss der lautere Moment bleibt. Reihenfolge in
+  `onKillProgress` gedreht — erst Sieg-Beat (Toast/Fanfare/Konfetti) auf der
+  alten Bühne, DANN `updateBackground()`; vorher wäre der Wechsel losgelaufen,
+  bevor der Sieg überhaupt zu sehen war.
+- **Preset-Pflicht**: `QualityPreset` trägt jetzt `stageTransition`, `cinematics`
+  und `confetti`. low = Hard-Swap wie vor G1, keine Regie, kein Konfetti;
+  medium/high animieren, high wirft doppelt so viel Konfetti. 557 → 559 Tests.
+- **Headless-Beweis** (SwiftShader läuft ~0.2× Echtzeit und EIN Screenshot
+  kostet ~0.3 Simulationssekunden — eine Frame-Serie aus EINEM 1.2-s-Übergang
+  wäre zwangsläufig grobkörnig): der gleiche Übergang wird sechsmal gefahren und
+  je Durchlauf EIN Frame an einer festen Position der Fahrt geschossen, getriggert
+  über den echten Insel-Versatz (`window.chVs()` liefert dafür jetzt zusätzlich
+  `stageY`/`swapping`, read-only wie der Rest des Hooks). Belegt: 6-Frame-Serie
+  Synthwave → Neon-Club ohne Hard-Cut, Boss-Auftritt mit Banner + sichtbarem Dim +
+  Punch, Boss-Kill mit Konfetti und anschließendem Wechsel, low-Preset ohne jede
+  Bewegung. 0 Page-Errors.
+
 ## ROADMAP-V2 Schritt 1 — X7 Save-Migrations-Matrix
 
 - **2026-07-19 — Jeder historische Save-Stand hat jetzt ein Fixture-Paar.**

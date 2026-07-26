@@ -876,15 +876,77 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// G1 — Bühnen-Wechsel als Moment (ROADMAP-V2)
+// ---------------------------------------------------------------------------
+
+/** Ausfahrt der ALTEN Bühne (s) — Cubic-Ease-In, sie fällt beschleunigt weg. */
+const OUT_S = 0.5;
+/** Einfahrt der NEUEN Bühne (s) — Ease-Out mit kleinem Überschwinger. */
+const IN_S = 0.7;
+/** Fallhöhe: weit genug, dass die Insel bei jedem Framing aus dem Bild ist. */
+const DROP_Y = 17;
+/** Leichter Kippwinkel, damit die Bühne fällt statt zu „faten". */
+const TILT = 0.14;
+/** Kulissen-Parallaxe: die ferne Szenerie zieht schwächer mit als die Insel. */
+const PROP_PARALLAX = 0.55;
+
+const easeInCubic = (k: number): number => k * k * k;
+/**
+ * Ease-Out mit Überschwinger. `c = 0.75` federt ~2 % über die Ruhelage — bei
+ * `DROP_Y` sind das gut 0.35 Einheiten, also spürbar als Landung, aber klein
+ * genug, dass das Duo (das erst ab −0.35 wieder auftritt) nicht im Deck steht.
+ */
+const easeOutBack = (k: number): number => {
+  const c = 0.75;
+  const p = k - 1;
+  return 1 + (c + 1) * p * p * p + c * p * p;
+};
+
+/** Alles, was beim Theme-Wechsel STETIG überblendet werden kann (G1). */
+interface Palette {
+  skyTop: THREE.Color;
+  skyBot: THREE.Color;
+  fog: THREE.Color;
+  floor: THREE.Color;
+  key: THREE.Color;
+  keyInt: number;
+  fill: THREE.Color;
+  fillInt: number;
+  sky: THREE.Color;
+  ground: THREE.Color;
+  rimA: THREE.Color;
+  rimB: THREE.Color;
+}
+
 /**
  * Owns the swappable stage props and the sky/fog/floor tint. Replaces the
  * prototype's propGroup/anims globals + setBackground().
+ *
+ * G1: `setBackground(key, variant, { animate: true })` macht aus dem Cut einen
+ * Moment — die alte `islandGroup` fährt nach unten aus dem Bild (Kulisse mit
+ * Parallaxe hinterher), erst DANN wird sie entsorgt und die neue Bühne gebaut,
+ * die von unten einschwebt. Sky/Fog/Deck-Farbe und das Licht-Rig blenden über
+ * die GANZE Dauer stetig über, damit nirgends ein Hard-Cut sitzt. Getickt wird
+ * im bestehenden Render-Loop (`update(dt)`), die Kamera bleibt unberührt.
  */
 export class World {
   private propGroup = new THREE.Group();
   private islandGroup = new THREE.Group();
   /** Per-frame animation callbacks for the active background. */
   readonly anims: WorldAnim[] = [];
+
+  /** G1-Übergangs-Zustand: `null` = keine Bühne in Bewegung. */
+  private trans: {
+    key: BackgroundKey;
+    variant: number;
+    /** `false` = die alte Bühne fährt noch aus, `true` = die neue fährt ein. */
+    entering: boolean;
+    /** Sekunden in der laufenden Phase. */
+    t: number;
+    from: Palette;
+    to: Palette;
+  } | null = null;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -908,14 +970,91 @@ export class World {
     });
   }
 
+  /** Lap-Hue-Funktion für einen Recolour-Lap (Identität auf Lap 0). */
+  private static hueFn(variant: number): (hex: number) => THREE.Color {
+    const dh = (variant * LAP_HUE) % 1;
+    return (hex) => {
+      const c = new THREE.Color(hex);
+      if (dh !== 0) c.offsetHSL(dh, 0, 0);
+      return c;
+    };
+  }
+
   /**
-   * Swap the stage. `variant` is the recolour lap (0 = original palette) —
-   * deeper endless laps hue-shift the sky, fog, floor and prop palette so
-   * lap 2+ of a tier reads visibly different (Wave-3 endless variety).
-   * Seit dem Goal-Umbau wird auch die INSEL selbst pro Theme neu gebaut
-   * (`world/island.ts`) und das Deck texturiert (`deck`-Config).
+   * Die überblendbare Palette eines Themes. Goal „alle Bühnen heller": die
+   * Kulissen-Paletten werden Richtung Weiß geliftet (Sky am stärksten, Boden
+   * dezent) — die Stimmungen bleiben unterscheidbar, aber nichts säuft mehr im
+   * Dunkel ab. Das Licht-Rig (Roadmap L) läuft bewusst OHNE Hue-Lap.
    */
-  setBackground(key: BackgroundKey, variant = 0): void {
+  private static paletteFor(key: BackgroundKey, variant: number): Palette {
+    const hue = World.hueFn(variant);
+    const lift = (c: THREE.Color, f: number): THREE.Color => c.lerp(new THREE.Color(0xffffff), f);
+    const b = BGS[key];
+    const L = b.light;
+    return {
+      skyTop: lift(hue(b.top), 0.22),
+      skyBot: lift(hue(b.bot), 0.3),
+      fog: lift(hue(b.fog), 0.26),
+      floor: lift(hue(b.floor), 0.14),
+      key: new THREE.Color(L.key),
+      keyInt: L.keyInt,
+      fill: new THREE.Color(L.fill),
+      fillInt: L.fillInt,
+      sky: new THREE.Color(L.sky),
+      ground: new THREE.Color(L.ground),
+      rimA: new THREE.Color(L.rimA),
+      rimB: new THREE.Color(L.rimB),
+    };
+  }
+
+  /** Die AKTUELL gesetzte Palette (Startpunkt einer G1-Überblendung). */
+  private snapshotPalette(): Palette {
+    const l = this.lights;
+    const base = World.paletteFor('club', 0); // Fallback-Werte ohne Licht-Rig
+    return {
+      skyTop: (this.skyMat.uniforms.top!.value as THREE.Color).clone(),
+      skyBot: (this.skyMat.uniforms.bot!.value as THREE.Color).clone(),
+      fog: (this.scene.fog as THREE.FogExp2).color.clone(),
+      floor: this.floorMat.color.clone(),
+      key: l ? l.key.color.clone() : base.key,
+      keyInt: l ? l.key.intensity : base.keyInt,
+      fill: l ? l.fill.color.clone() : base.fill,
+      fillInt: l ? l.fill.intensity : base.fillInt,
+      sky: l ? l.hemi.color.clone() : base.sky,
+      ground: l ? l.hemi.groundColor.clone() : base.ground,
+      rimA: l ? l.rimA.color.clone() : base.rimA,
+      rimB: l ? l.rimB.color.clone() : base.rimB,
+    };
+  }
+
+  /** Palette schreiben — `k < 1` blendet von `from` nach `to` (G1). */
+  private applyPalette(from: Palette, to: Palette, k: number): void {
+    const c = (a: THREE.Color, b: THREE.Color): THREE.Color =>
+      k >= 1 ? b.clone() : a.clone().lerp(b, k);
+    const n = (a: number, b: number): number => (k >= 1 ? b : a + (b - a) * k);
+    (this.skyMat.uniforms.top!.value as THREE.Color).copy(c(from.skyTop, to.skyTop));
+    (this.skyMat.uniforms.bot!.value as THREE.Color).copy(c(from.skyBot, to.skyBot));
+    (this.scene.fog as THREE.FogExp2).color.copy(c(from.fog, to.fog));
+    this.floorMat.color.copy(c(from.floor, to.floor));
+    if (this.lights) {
+      this.lights.key.color.copy(c(from.key, to.key));
+      this.lights.key.intensity = n(from.keyInt, to.keyInt);
+      this.lights.fill.color.copy(c(from.fill, to.fill));
+      this.lights.fill.intensity = n(from.fillInt, to.fillInt);
+      this.lights.hemi.color.copy(c(from.sky, to.sky));
+      this.lights.hemi.groundColor.copy(c(from.ground, to.ground));
+      this.lights.rimA.color.copy(c(from.rimA, to.rimA));
+      this.lights.rimB.color.copy(c(from.rimB, to.rimB));
+    }
+  }
+
+  /**
+   * Die harte Hälfte des Wechsels: alte Gruppen entsorgen, Deck-Texturen +
+   * Insel + Kulisse neu bauen. Alles hier ist DISKRET (Map-Wechsel brauchen
+   * einen Programm-Rebuild) — im animierten Fall läuft es, während die Bühne
+   * unter dem Bildrand steht.
+   */
+  private rebuild(key: BackgroundKey, variant: number): void {
     this.disposeGroup(this.propGroup);
     this.disposeGroup(this.islandGroup);
     this.propGroup = new THREE.Group();
@@ -926,21 +1065,8 @@ export class World {
     this.scene.add(this.propGroup, this.islandGroup);
     this.anims.length = 0;
 
-    const dh = (variant * LAP_HUE) % 1;
-    const hue = (hex: number): THREE.Color => {
-      const c = new THREE.Color(hex);
-      if (dh !== 0) c.offsetHSL(dh, 0, 0);
-      return c;
-    };
+    const hue = World.hueFn(variant);
     const b = BGS[key];
-    // Goal „alle Bühnen heller": die Kulissen-Paletten werden beim Anwenden
-    // Richtung Weiß geliftet (Sky am stärksten, Boden dezent) — die Stimmungen
-    // bleiben unterscheidbar, aber nichts säuft mehr im Dunkel ab.
-    const lift = (c: THREE.Color, f: number): THREE.Color => c.lerp(new THREE.Color(0xffffff), f);
-    (this.skyMat.uniforms.top!.value as THREE.Color).copy(lift(hue(b.top), 0.22));
-    (this.skyMat.uniforms.bot!.value as THREE.Color).copy(lift(hue(b.bot), 0.3));
-    (this.scene.fog as THREE.FogExp2).color.copy(lift(hue(b.fog), 0.26));
-    this.floorMat.color.copy(lift(hue(b.floor), 0.14));
     this.floorMat.roughness = b.fr;
     this.floorMat.metalness = b.fm;
     // Deck-Texturen (Goal „apply texture"): Map/Emissive-Map je Theme; ein
@@ -954,19 +1080,6 @@ export class World {
     this.floorMat.bumpMap = d.bump ? (this.floorMat.map ?? this.floorMat.emissiveMap) : null;
     this.floorMat.bumpScale = d.bump ?? 1;
     this.floorMat.needsUpdate = true;
-    // Roadmap L: das Licht-Rig wechselt mit der Kulisse (bewusst OHNE Hue-Lap —
-    // die Paletten shiften genug; Licht hält die Grundstimmung des Themes).
-    if (this.lights) {
-      const L = b.light;
-      this.lights.key.color.set(L.key);
-      this.lights.key.intensity = L.keyInt;
-      this.lights.fill.color.set(L.fill);
-      this.lights.fill.intensity = L.fillInt;
-      this.lights.hemi.color.set(L.sky);
-      this.lights.hemi.groundColor.set(L.ground);
-      this.lights.rimA.color.set(L.rimA);
-      this.lights.rimB.color.set(L.rimB);
-    }
     if (d.scroll && this.floorMat.emissiveMap) {
       const tex = this.floorMat.emissiveMap;
       const speed = d.scroll;
@@ -982,5 +1095,107 @@ export class World {
       variant,
       hue,
     });
+  }
+
+  /** Bühnen-Versatz setzen (G1) — `y` in Welt-Einheiten, `tilt` in Radiant. */
+  private setStageOffset(y: number, tilt: number): void {
+    this.islandGroup.position.y = y;
+    this.islandGroup.rotation.z = tilt;
+    this.propGroup.position.y = y * PROP_PARALLAX;
+    this.propGroup.rotation.z = tilt * PROP_PARALLAX;
+  }
+
+  /**
+   * Swap the stage. `variant` is the recolour lap (0 = original palette) —
+   * deeper endless laps hue-shift the sky, fog, floor and prop palette so
+   * lap 2+ of a tier reads visibly different (Wave-3 endless variety).
+   * Seit dem Goal-Umbau wird auch die INSEL selbst pro Theme neu gebaut
+   * (`world/island.ts`) und das Deck texturiert (`deck`-Config).
+   *
+   * G1: mit `{ animate: true }` (medium/high) wird daraus die Aus-/Einfahrt —
+   * siehe `update()`. Ohne die Option (und im low-Preset) bleibt es der
+   * bisherige Hard-Swap in EINEM Frame.
+   */
+  setBackground(key: BackgroundKey, variant = 0, opts?: { animate?: boolean }): void {
+    if (opts?.animate) {
+      if (this.trans) {
+        // Nachgereichter Wechsel MITTEN im laufenden: nur das Ziel austauschen,
+        // damit nie zwei Übergänge übereinander liegen. Steht die neue Bühne
+        // schon in der Einfahrt, wird sie neu gebaut und fährt erneut ein.
+        this.trans.key = key;
+        this.trans.variant = variant;
+        this.trans.to = World.paletteFor(key, variant);
+        if (this.trans.entering) {
+          this.rebuild(key, variant);
+          this.setStageOffset(-DROP_Y, -TILT);
+          this.trans.t = 0;
+        }
+        return;
+      }
+      // Die alte Bühne bleibt vorerst stehen und fährt aus; entsorgt wird sie
+      // erst, wenn sie unter dem Bildrand ist (siehe `update`).
+      this.trans = {
+        key,
+        variant,
+        entering: false,
+        t: 0,
+        from: this.snapshotPalette(),
+        to: World.paletteFor(key, variant),
+      };
+      return;
+    }
+    // Hard-Swap: ein laufender Übergang wird verworfen (Prestige/Import setzen
+    // die Bühne hart — dort darf keine halb ausgefahrene Insel hängenbleiben).
+    this.trans = null;
+    this.rebuild(key, variant);
+    this.setStageOffset(0, 0);
+    const p = World.paletteFor(key, variant);
+    this.applyPalette(p, p, 1);
+  }
+
+  /** Läuft gerade ein Bühnen-Wechsel? (Der Loop pausiert dann Treffer/Klicks.) */
+  get transitioning(): boolean {
+    return this.trans !== null;
+  }
+
+  /** Aktueller Höhen-Versatz der Bühne (0 = Ruhelage) — für den Headless-Beweis. */
+  get stageY(): number {
+    return this.islandGroup.position.y;
+  }
+
+  /**
+   * G1-Tick aus dem Render-Loop. Phase 1 (`OUT_S`): die alte Insel-Gruppe fällt
+   * mit Cubic-Ease-In und leichtem Tilt aus dem Bild, die Kulisse mit
+   * Parallaxe hinterher. Am Phasenende wird sie entsorgt und die neue Bühne
+   * gebaut (unter dem Bildrand). Phase 2 (`IN_S`): die neue Gruppe schwebt mit
+   * Ease-Out und kleinem Überschwinger in die Ruhelage. Über BEIDE Phasen
+   * blendet die Palette stetig — kein Hard-Cut, auch nicht am Himmel.
+   */
+  update(dt: number): void {
+    const tr = this.trans;
+    if (!tr) return;
+    tr.t += dt;
+    if (!tr.entering) {
+      const k = Math.min(1, tr.t / OUT_S);
+      const e = easeInCubic(k);
+      this.setStageOffset(-DROP_Y * e, TILT * e);
+      this.applyPalette(tr.from, tr.to, (k * OUT_S) / (OUT_S + IN_S));
+      if (k >= 1) {
+        this.rebuild(tr.key, tr.variant);
+        this.setStageOffset(-DROP_Y, -TILT);
+        tr.entering = true;
+        tr.t = 0;
+      }
+      return;
+    }
+    const k = Math.min(1, tr.t / IN_S);
+    const e = easeOutBack(k);
+    this.setStageOffset(-DROP_Y * (1 - e), -TILT * (1 - e));
+    this.applyPalette(tr.from, tr.to, (OUT_S + k * IN_S) / (OUT_S + IN_S));
+    if (k >= 1) {
+      this.setStageOffset(0, 0);
+      this.applyPalette(tr.to, tr.to, 1);
+      this.trans = null;
+    }
   }
 }

@@ -33,6 +33,12 @@ export interface SceneContext {
   glowSprite: GlowSpriteFn;
   /** Umstimmbares Licht-Rig — die World färbt es mit der Kulisse um. */
   lights: SceneLights;
+  /**
+   * Weicher Kontaktschatten unter dem Tänzer. Liegt auf der Deckhöhe der Insel
+   * — beim G1-Bühnenwechsel fährt die Insel darunter weg, also wird er (wie das
+   * Duo selbst) für die Dauer des Wechsels ausgeblendet.
+   */
+  contactShadow: THREE.Mesh;
 }
 
 /** Procedural equirectangular environment map (studio-ish gradient + blobs). */
@@ -180,7 +186,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   });
 
   // Soft contact-shadow decal under the character.
-  {
+  const contactShadow = ((): THREE.Mesh => {
     const c = document.createElement('canvas');
     c.width = c.height = 128;
     const x = c.getContext('2d')!;
@@ -197,9 +203,10 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
     m.rotation.x = -Math.PI / 2;
     m.position.y = -2.385;
     scene.add(m);
-  }
+    return m;
+  })();
 
-  return { renderer, scene, camera, beat, skyMat, floorMat, glowSprite, lights };
+  return { renderer, scene, camera, beat, skyMat, floorMat, glowSprite, lights, contactShadow };
 }
 
 // Re-export so consumers can build props with the same material helper.

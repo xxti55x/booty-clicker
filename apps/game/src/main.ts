@@ -152,7 +152,7 @@ import { loadGame } from './save/store';
 import { Rng } from './util/rng';
 import { AbilityBar } from './ui/ability-bar';
 import { Ancients } from './ui/ancients';
-import { ChHud } from './ui/ch-hud';
+import { ChHud, rivalName } from './ui/ch-hud';
 import { ChSettings } from './ui/ch-settings';
 import { Chests } from './ui/chest-panel';
 import { Crew } from './ui/crew';
@@ -168,6 +168,7 @@ import { Prestige } from './ui/prestige';
 import { Toasts } from './ui/toasts';
 import { Transcend } from './ui/transcend-panel';
 import { World } from './world/backgrounds';
+import { ISLAND_C } from './world/island';
 
 /**
  * Booty Clicker — endless (Clicker-Heroes-style) bootstrap.
@@ -195,14 +196,24 @@ const bgVariant = (zone: number): number => Math.floor(Math.max(0, zone - 1) / 2
 
 // ---------- scene / engine ----------
 const canvas = document.getElementById('app') as HTMLCanvasElement;
-const { renderer, scene, camera, beat, skyMat, floorMat, glowSprite, lights } = createScene(canvas);
+const { renderer, scene, camera, beat, skyMat, floorMat, glowSprite, lights, contactShadow } =
+  createScene(canvas);
+/** Ruhe-FOV der Diorama-Kamera — Basis für den G2-Punch-In. */
+const BASE_FOV = camera.fov;
+/** Ruhe-Belichtung — Basis für das G2-Licht-Dim (siehe `stepCinematics`). */
+const BASE_EXPOSURE = renderer.toneMappingExposure;
 // Roadmap L: Bloom-Composer (nur high-Preset aktiv — sonst rendert der Loop direkt).
 const post = createPost(renderer, scene, camera);
 const controls = createControls(camera, renderer.domElement);
 
 const effects = loadSettings();
+/**
+ * Das aktive Grafik-Preset (ROADMAP-V2 Preset-Pflicht): G1-Bühnenwechsel,
+ * G2-Regie und Konfetti-Dichte lesen es live, `applyQuality` schreibt es.
+ */
+let preset = qualityPreset(effects.quality);
 function applyQuality(q: Quality): void {
-  const preset = qualityPreset(q);
+  preset = qualityPreset(q);
   renderer.setPixelRatio(effectivePixelRatio(q, window.devicePixelRatio));
   // Roadmap T1: Textur-Anisotropie folgt dem Preset (GPU-Maximum deckelt real).
   setTextureAnisotropy(Math.min(preset.anisotropy, renderer.capabilities.getMaxAnisotropy() || 1));
@@ -819,6 +830,13 @@ muteBtn.addEventListener('click', () => {
 // In Tour-Modus (`gear.bgAuto`) the tier rotation drives the kulisse and keeps
 // `gear.bg` (⇒ its mini-buff/set) synced with the view; with a manual pick the
 // chosen `gear.bg` is fixed and the loop never rotates away from it (§5.5).
+/**
+ * `force` = Hard-Swap in einem Frame (Prestige/Import/Kulissen-Wahl: dort ist
+ * der Wechsel Teil eines Resets, keine Bühnen-Reise). Ohne `force` — also bei
+ * Boss-Advance, Rückreise über eine Theme-Grenze und Boss-Timeout — fährt die
+ * alte Bühne aus und die neue ein (ROADMAP-V2 G1), sofern das Preset das
+ * hergibt (low: weiterhin Hard-Swap).
+ */
 function updateBackground(force = false): void {
   const bg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
   const variant = bgVariant(combat.zone); // recolour lap follows depth even on a manual kulisse
@@ -829,8 +847,122 @@ function updateBackground(force = false): void {
     state.gear.bg = bg;
     recompute(); // Space +5 % dpsPct etc. follow the auto-rotation
   }
-  world.setBackground(bg, variant);
+  cancelCinematics(); // ein laufender Boss-Punch darf nicht ins neue Licht-Rig schreiben
+  world.setBackground(bg, variant, { animate: !force && preset.stageTransition });
   audio.setBackground(bg); // idempotent for a same-key (variant-only) rebuild
+}
+
+// ---------- ROADMAP-V2 G2: Boss-Auftritt + Sieg-Beat ----------
+// Der wichtigste Kampf des Loops sah aus wie jeder Rivalen-Wechsel. Jetzt hat
+// er einen Auftritt: Namens-Banner rollt ein, das Szenen-Licht fällt kurz weg,
+// die Kamera zieht an, ein Bass-Drop-Stinger legt sich darunter. Alles Optische
+// hängt am Preset (`cinematics`); Banner + Stinger tragen die INFORMATION und
+// bleiben deshalb auch im low-Preset.
+
+/** Standzeit des Banners — deckungsgleich mit der CSS-Keyframe-Dauer. */
+const BANNER_MS = 2400;
+/** Dauer des Auftritts-Moments (Licht-Dim + Kamera-Punch) in Sekunden. */
+const BOSS_CINE_S = 0.8;
+/** Anteil des Moments, in dem angezogen wird (Rest = weiches Lösen). */
+const CINE_ATTACK = 0.19;
+
+const bossBanner = document.getElementById('bossBanner') as HTMLElement;
+let bannerTimer = 0;
+/** < 0 = kein Auftritts-Moment aktiv; sonst die verstrichene Zeit in s. */
+let cineT = -1;
+let cineKeyInt = 0;
+let cineFillInt = 0;
+let cineHemiInt = 0;
+
+/** „👑 <Bossname>" einrollen lassen (Name aus derselben Quelle wie das HUD). */
+function showBossBanner(zone: number): void {
+  bossBanner.textContent = rivalName(zone, true); // trägt die 👑 bereits
+  bossBanner.classList.remove('hidden');
+  // Keyframes neu anstoßen (zweiter Boss in derselben Sitzung): Animation aus,
+  // Reflow erzwingen, zurück auf den Stylesheet-Wert.
+  bossBanner.style.animation = 'none';
+  void bossBanner.offsetWidth;
+  bossBanner.style.animation = '';
+  window.clearTimeout(bannerTimer);
+  bannerTimer = window.setTimeout(() => bossBanner.classList.add('hidden'), BANNER_MS);
+}
+
+/** Regie beenden und Licht + Belichtung + Brennweite EXAKT zurücksetzen. */
+function cancelCinematics(): void {
+  if (cineT < 0) return;
+  cineT = -1;
+  lights.key.intensity = cineKeyInt;
+  lights.fill.intensity = cineFillInt;
+  lights.hemi.intensity = cineHemiInt;
+  renderer.toneMappingExposure = BASE_EXPOSURE;
+  camera.fov = BASE_FOV;
+  camera.updateProjectionMatrix();
+}
+
+function startCinematics(): void {
+  if (!preset.cinematics || world.transitioning) return;
+  cancelCinematics(); // ein laufender Moment wird sauber abgeschlossen
+  cineKeyInt = lights.key.intensity;
+  cineFillInt = lights.fill.intensity;
+  cineHemiInt = lights.hemi.intensity;
+  cineT = 0;
+}
+
+/**
+ * Ein Frame Boss-Regie: Licht, Belichtung und Brennweite folgen derselben
+ * „kurz zupacken, weich lösen"-Hüllkurve wie der Screen-Shake — nur schreibt
+ * sie auf Licht/Exposure/FOV statt auf die Kamera-Position, damit die Kamera
+ * selbst ruhig bleibt.
+ *
+ * Warum ZUSÄTZLICH die Tonemapping-Belichtung: das Key/Fill/Hemi-Rig ist in
+ * den Themen nicht die dominante Lichtquelle (die Club-Spots stehen auf 90,
+ * halbe Kulissen leuchten emissiv) — ein reines Rig-Dim wäre auf der Bühne
+ * kaum zu sehen. Die Belichtung senkt ALLES gleichmäßig, das Rig-Dim gibt dem
+ * Moment die Form.
+ */
+function stepCinematics(dt: number): void {
+  if (cineT < 0) return;
+  cineT += dt;
+  const k = Math.min(1, cineT / BOSS_CINE_S);
+  const punch =
+    k < CINE_ATTACK ? k / CINE_ATTACK : Math.pow(1 - (k - CINE_ATTACK) / (1 - CINE_ATTACK), 1.6);
+  lights.key.intensity = cineKeyInt * (1 - 0.68 * punch);
+  lights.fill.intensity = cineFillInt * (1 - 0.68 * punch);
+  lights.hemi.intensity = cineHemiInt * (1 - 0.5 * punch);
+  renderer.toneMappingExposure = BASE_EXPOSURE * (1 - 0.62 * punch);
+  camera.fov = BASE_FOV * (1 - 0.14 * punch);
+  camera.updateProjectionMatrix();
+  if (k >= 1) cancelCinematics();
+}
+
+/** Der Boss betritt die Bühne — beide Spawn-Pfade laufen hier zusammen. */
+function bossEntrance(): void {
+  showBossBanner(combat.zone);
+  startCinematics();
+  audio.bossIntro();
+  haptics.boss(effects.haptics);
+}
+
+/**
+ * Konfetti-Wurf über der Bühne zum Boss-Sieg. Nutzt den bestehenden
+ * Partikel-Pool (`ParticleSystem`, 200 Slots) — fünf Abschuss-Punkte quer über
+ * die Insel statt eines zentralen Klumpens, damit der Wurf die Bühne
+ * überspannt. Dichte kommt aus dem Preset (low: gar nicht).
+ */
+function bossConfetti(): void {
+  const total = preset.confetti;
+  if (!effects.particles || total <= 0) return;
+  const spots = [
+    [-3.2, -1.6],
+    [-1.4, 1.8],
+    [0.7, -0.4],
+    [2.4, 1.6],
+    [3.6, -1.2],
+  ] as const;
+  const per = Math.max(1, Math.round(total / spots.length));
+  for (const [dx, dz] of spots) {
+    particles.burst(ISLAND_C.x + dx, 0.9 + Math.random() * 0.9, ISLAND_C.z + dz, per, 1.5);
+  }
 }
 
 // ---------- Bühnen-Progression & Rück-Navigation ----------
@@ -862,7 +994,7 @@ document.getElementById('bossChallenge')?.addEventListener('click', () => {
   syncEntity();
   hud.update(state, combat, dps, clickDmg);
   toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
-  audio.unlockJingle();
+  bossEntrance(); // G2: derselbe Auftritt wie beim 25/25-Spawn
 });
 
 // ---------- combat glue ----------
@@ -908,7 +1040,7 @@ function onKillProgress(
   }
   if (r.bossSpawned) {
     toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
-    audio.unlockJingle();
+    bossEntrance(); // G2: Banner + Licht-Dim + Kamera-Punch + Bass-Drop
   }
   if (r.advancedZone) {
     // Vergoldung (§4.3.4): the first clear of each 10-zone (10, 20, 30, …) — i.e.
@@ -938,7 +1070,6 @@ function onKillProgress(
     if (combat.zone > state.runMaxZone) state.runMaxZone = combat.zone;
     if (fromClick && x !== undefined) pops.gold(gold, x, y ?? 0);
     // was the kill a boss? (advanced from a boss target)
-    updateBackground();
     if (combat.zone % 5 === 1 && combat.zone > 1) {
       const bossZone = combat.zone - 1;
       // §6.1: a boss kill guarantees 1 🔑 (whole part guaranteed, the Truhen-Magnet/
@@ -959,9 +1090,17 @@ function onKillProgress(
         `${chestEmoji(tier)} · +${keys} 🔑 · +${shards} 🧩 (Bühne ${combat.zone})`,
       );
       audio.bossWin();
+      bossConfetti(); // G2: Sieg-Beat über der Bühne
       if (effects.screenShake) shakeMag = Math.max(shakeMag, SHAKE_BOSS_KILL);
       haptics.boss(effects.haptics);
+    } else if (!wasBoss) {
+      // G2: Zonen-Clear ohne Boss-Gate — sehr kurze, leise Mini-Fanfare, damit
+      // der Boss-Sieg der lautere Moment bleibt.
+      audio.zoneClear();
     }
+    // Der Kulissen-Wechsel kommt ZULETZT: erst der Sieg-Beat (Toast, Fanfare,
+    // Konfetti) auf der alten Bühne, dann fährt sie aus (G1).
+    updateBackground();
   }
   syncMaxZones();
 }
@@ -994,6 +1133,11 @@ let downY = 0;
 let downT = 0;
 
 function doShake(x?: number, y?: number): void {
+  // G1: Während die Bühne aus- und einfährt zählt kein Klick. Bewusst
+  // IGNORIEREN statt puffern — der Wechsel dauert 1.2 s, ein nachgeholter
+  // Klick-Schwall würde Combo-Fenster, On-Beat-Wertung und Ekstase-Ladung
+  // verfälschen; und der Rivale, den man träfe, steht gar nicht auf der Bühne.
+  if (world.transitioning) return;
   state.totalClicks += 1;
   state.meta = advanceMeta(state.meta, 'clicks'); // §7.2 „Shakes" quest (no-op if inactive)
   const now = Date.now();
@@ -1575,6 +1719,9 @@ peachBtn.addEventListener('click', () => {
 
 // ---------- resize ----------
 function resize(): void {
+  // G2: `frameCamera` rechnet die Distanz aus dem FOV — ein laufender Punch-In
+  // würde die Bühne dauerhaft falsch rahmen, also erst zurückstellen.
+  cancelCinematics();
   const w = window.innerWidth;
   const h = window.innerHeight;
   renderer.setSize(w, h);
@@ -1616,11 +1763,28 @@ const clock = new THREE.Clock();
 let acc = 0;
 let t0 = 0;
 // Headless-smoke hook (same spirit as `window.chLoot`): render time + the
-// live rival's look/facing, so the screenshot rig can time taunt/boss frames
-// under software-GL time dilation. Read-only; no gameplay surface.
+// live rival's look/facing + der G1-Bühnen-Versatz, so the screenshot rig can
+// time taunt/boss/Wechsel-Frames under software-GL time dilation. Read-only;
+// no gameplay surface.
 (
-  window as unknown as { chVs: () => { t0: number; theme: string; boss: boolean; rotY: number } }
-).chVs = () => ({ t0, theme: entity.theme, boss: entity.boss, rotY: entity.root.rotation.y });
+  window as unknown as {
+    chVs: () => {
+      t0: number;
+      theme: string;
+      boss: boolean;
+      rotY: number;
+      stageY: number;
+      swapping: boolean;
+    };
+  }
+).chVs = () => ({
+  t0,
+  theme: entity.theme,
+  boss: entity.boss,
+  rotY: entity.root.rotation.y,
+  stageY: world.stageY,
+  swapping: world.transitioning,
+});
 let uiTimer = 0;
 let lastRenderMs = 0;
 let firstFrame = true;
@@ -1633,13 +1797,17 @@ function loop(nowMs: number): void {
   t0 += dt;
   state.stats.playTimeS += dt;
 
+  // G1: Der Bühnen-Wechsel friert den Kampf für seine 1.2 s ein — sonst würde
+  // Idle-DPS auf einen Rivalen einschlagen, der gar nicht auf der Bühne steht,
+  // und ein Kill mitten im Wechsel könnte den nächsten Wechsel auslösen.
+  const swapping = world.transitioning;
   // Idle DPS chips away at the current target; the Twerk-Coach auto-clicks at
   // 25 % of the click value (no crit/beat, §4.3.5) — Robo gear stars add cps (§5),
   // the same sum the offline accrual uses; boss timer ticks down.
-  if (dps > 0) applyHit(dps * dt, false);
+  if (dps > 0 && !swapping) applyHit(dps * dt, false);
   const cps = coachCps(state.heaven) + coachCpsBonus(state.gear);
-  if (cps > 0) applyHit(coachDps(clickDmg, cps) * dt, false);
-  if (combat.boss) {
+  if (cps > 0 && !swapping) applyHit(coachDps(clickDmg, cps) * dt, false);
+  if (combat.boss && !swapping) {
     const bt = tickBoss(combat, dt);
     combat = bt.state;
     if (bt.failed) {
@@ -1700,6 +1868,21 @@ function loop(nowMs: number): void {
   const beatV = Math.max(0, Math.sin(choreo.phase * 2.2));
   beat.intensity = beatV * drive * 4;
   if (beatTracker.update(choreo.phase)) audio.beat(0.5 + drive * 0.08);
+  // G1: Aus-/Einfahrt der Bühne tickt im bestehenden Loop, VOR den Kulissen-
+  // Anims (nach einem Rebuild zeigt `world.anims` schon auf die neue Bühne).
+  world.update(dt);
+  stepCinematics(dt); // G2: Licht-Dim + Kamera-Punch des Boss-Auftritts
+  // Duo + Kontaktschatten stehen NICHT auf der Insel-Gruppe (die Cheek-Physik
+  // simuliert in Weltkoordinaten — Mitfahren würde die Federn zerren), also
+  // treten sie für die Dauer des Wechsels ab und mit der neuen Bühne wieder auf.
+  // Erst ausblenden, wenn das Deck wirklich unter den Füßen weggefahren ist
+  // (0.35 Einheiten ≈ 16 px), und wieder auftreten, sobald es zurück ist —
+  // so gibt es keinen Pop VOR der ersten Bewegung. Frisch gelesen, weil
+  // `world.update` den Wechsel eben beendet haben kann.
+  const offStage = world.stageY < -0.35;
+  playerSpin.visible = !offStage;
+  entity.root.visible = !offStage;
+  contactShadow.visible = !offStage;
   world.anims.forEach((a) => a(t0, beatV));
   // The rival twerks back — same beat envelope, its own loop (independent of the rig).
   entity.update(t0, beatV, drive);
