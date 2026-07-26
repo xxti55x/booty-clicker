@@ -5,6 +5,18 @@ here (spec §7).
 
 ## ROADMAP-V2 Schritt 4 — X2+X3+G3 Ekstase-Fenster, Offline-Rückkehr, Idle-Leben
 
+- **2026-07-26 — Review-Befund (Fable): der Phase-L-Bloom lief NIE.**
+  `post.enabled` wurde nirgends gesetzt (bei einem Refactor verloren) — der
+  Composer war toter Code, alle Abnahmen liefen ohne Bloom. Beim Review-
+  Aktivieren zeigte die Kette eine uniforme Aufhellung des gesamten Bildes
+  (mutmaßlich doppelte sRGB-Konvertierung im Composer-Pfad); Threshold-
+  Korrektur (0.82 → 1.05, linearer HDR-Raum — für sich genommen richtig und
+  behalten) ändert daran nichts. Entscheid: Bloom bleibt explizit AUS
+  (`post.enabled = false` mit Known-Issue-Kommentar), denn das Spiel ist in
+  seinem bloomlosen Look abgenommen — ein stilles Aktivieren eines nie
+  validierten Effekts wäre eine Verschlechterung. Die Farb-Pipeline-Reparatur
+  ist ein eigenes künftiges Paket.
+
 - **2026-07-26 — X2: Der Balken zeigt jetzt IMMER die Ladung, der Ring die
   Laufzeit.** Vorher trug `#ekstaseFill` beide Bedeutungen: außerhalb der
   Ekstase die Ladung, innerhalb die Restzeit. Das las sich im Fenster wie eine
