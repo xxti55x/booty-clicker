@@ -3,6 +3,102 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## ROADMAP-V2 Schritt 8 — G4 Prestige-Zeremonien + G6 UI-Zahlen-Leben + X5 Audio-Lücken
+
+- **Die Zeremonie ist REIN OPTISCH — die Gutschrift läuft immer vorher.** Alle
+  drei Reset-Handler buchen, setzen zurück, refreshen die Panels und
+  persistieren exakt wie bisher; `playCeremony` ist die LETZTE Zeile. Damit ist
+  der Skip-Tap gefahrlos (es gibt nichts zu überspringen außer Pixeln), das
+  Overlay darf seine Zeiger selbst schlucken (kein Klick rutscht auf die Bühne
+  durch), und ein Absturz mitten in der Blende kostet nichts. Der Zahlen-
+  Aufzähler bekommt die DIFFERENZ als fertigen Wert gereicht (`souls − vorher`)
+  — er rechnet nichts, er zeigt nur.
+- **DOM statt Three für die Zeremonie-Partikel.** Die Blende läuft in genau der
+  Sekunde, in der die Bühne ohnehin komplett neu gebaut wird (Rivale, Kulisse,
+  Crew-Liste, Modifikator-Karte). Ein paar Dutzend absolut positionierte Spans
+  mit einer CSS-Keyframe kosten dort nichts, während zusätzliche Three-Sprites
+  neue Geometrie im teuersten Frame des Spiels bräuchten. Der einzige rAF ist
+  der Aufzähler, und auch der lebt nur für die Dauer der Blende.
+- **✨/🍑/🔮 statt des Roadmap-👻 als Zeremonie-Glyph.** Die Roadmap skizziert
+  „Seelen-Regen 👻 · +N 👻". Genommen wurden die Glyphen, die das Spiel für
+  diese drei Währungen ÜBERALL schon benutzt (HUD-Seelenzeile, Ahnen-Kosten,
+  Prestige-Toasts, Himmel-/Mythos-Panel). Ein 👻 wäre ein zweites Symbol für
+  eine bestehende Währung — genau der Stil-Bruch, den das G6-Konsistenz-Audit
+  eigentlich einsammeln soll. Unterschieden werden die drei ohnehin dreifach:
+  Glyph, Farbe/Bewegung (Regen vs. Implosion) und Dauer (1.5 s vs. 2 s).
+- **Der „Neustart"-Sweep liegt IM Overlay, nicht in der G1-Insel-Animation.**
+  Die drei Reset-Pfade rufen `updateBackground(true)` — ein bewusster Hard-Swap,
+  weil der Wechsel dort Teil eines Resets ist und nicht einer Bühnen-Reise (G1
+  friert für seine 1.2 s den Kampf ein und verschluckt Klicks; das mitten in
+  einen Prestige-Reset zu legen wäre eine Verhaltensänderung an G1). Der Sweep
+  ist deshalb ein CSS-Band, das am Ende der Blende einmal durchs Bild fährt —
+  derselbe „frischer Lauf"-Beat, ohne einen abgenommenen Pfad anzufassen.
+- **Preset-Pflicht ohne neues Preset-Feld.** Die Blende hängt an
+  `preset.cinematics` (aus für low ⇒ es bleibt beim Toast von früher), die
+  Sprite-Dichte an `preset.confetti` — dieselben zwei Regler, die schon den
+  G2-Boss-Auftritt und den Sieg-Wurf steuern. Ein drittes Feld hätte dieselbe
+  Information ein drittes Mal gespeichert. Der AUDIO-Stinger hängt bewusst an
+  KEINEM Preset: er kostet keine Bildrate, und im low-Preset ist er der einzige
+  Moment, der den Reset überhaupt markiert (gleiche Logik wie beim
+  G2-Boss-Stinger, der auch in low bleibt).
+- **G6: `fmt` bleibt die Anzeige-Quelle, getweent wird nur der WERT.** Der
+  Zähler rendert weiter `fmt(v)` — der Tween liefert nur das `v` dazwischen.
+  Ein neuer Kontostand bricht den laufenden Tween ab und startet beim GEZEIGTEN
+  Wert (sonst zuckt die Zahl bei jedem Idle-Tick zurück), und `shouldTween`
+  schluckt Sprünge unter 0.1 %: ein Idle-Tick von 1 000 000 auf 1 000 050 sähe
+  als Tween identisch aus und kostete nur einen rAF. Der rAF läuft
+  ausschließlich während echter Bewegung — im Ruhezustand ist der Zähler
+  exakt so teuer wie vorher.
+- **Kauf-Effekte leben in einer Overlay-Schicht, nicht im Panel.** Der
+  0.25-s-Idle-Tick rendert den offenen Tab neu, sobald sich Gold ändert (also
+  praktisch immer) — ein Konfetti-Partikel IM Crew-Markup wäre nach maximal
+  250 ms mitten im Flug weg, und der frisch gekaufte Fähigkeits-Slot wird beim
+  Rebuild ohnehin durch ein neues Element ersetzt. Die fixe, klick-durchlässige
+  Schicht `#fxLayer` überlebt jeden Rebuild; der Slot-Stempel merkt sich die
+  Position VOR dem Kauf. Nebeneffekt: das Panel-HTML bleibt frei von
+  Effekt-Markup, und `crew.ts` meldet mit `buy`/`buyAbility` jetzt ehrlich
+  zurück, ob wirklich gekauft wurde (gefeiert wird nur ein echter Kauf).
+- **Tab-Wechsel blendet nur EIN.** Die Bodies werden per `display` geschaltet;
+  ein Ausblenden bräuchte einen zweiten, verzögerten Schritt und ließe beide
+  Panels kurz übereinander liegen (Layout-Sprung im Bottom-Sheet). Die
+  120-ms-Keyframe rührt nur `opacity`/`transform` an.
+- **Leerzustände: Stroke-Icons, keine Emojis — und sie ERSETZEN nichts.** Die
+  Icons sind dieselben Pfade wie in der Tab-Leiste (eine Icon-Sprache); Emojis
+  tragen im Spiel Bedeutung (Truhen-Stufen, Sterne, Währungen) und wären hier
+  eine zweite Bedeutungsebene für reines Chrome. Die Karte steht ÜBER der Liste,
+  statt sie zu verdrängen: die gesperrten Knoten sind das Versprechen, der
+  Leerzustand sagt nur, wie man es einlöst. Beim Ruhm-Tab wurde die Bedingung
+  bewusst auf „nie aszendiert" (`rsLifetime === 0`) gelockert statt „nichts zu
+  holen" — sonst wäre sie unerreichbar, weil der Tab genau dann erscheint, wenn
+  sich eine Aszension lohnt.
+- **Konsistenz-Audit (Alt-Phase U): bewusst NICHTS angefasst.** Die
+  Rest-Emojis in HUD und Toasts sind Absicht — Truhen-Stufen (🪵🥈🥇💎🌌),
+  Sterne, Währungen (✨🍑🔮🔑🧩) und Event-Marken (👑👺⏱) sind dort Inhalt,
+  nicht Dekor. Gefunden wurde kein Stil-Bruch, der eine Änderung rechtfertigt;
+  neu dazu kam mit den Leerzuständen ausschließlich Stroke-Ikonografie.
+- **X5: die Ekstase-Lage hängt am FENSTER, nicht an der Intensitätsstufe.**
+  `intensityFor` liefert 3 sowohl bei Ekstase als auch bei Combo-Tier 4 — die
+  vorhandene Stufe-3-Schicht (Lead + Filter-Sweep) bleibt genau so. Die neue
+  zweite Instrumenten-Lage bekommt deshalb einen eigenen Schalter
+  (`setEkstase`), damit das Fenster hörbar sein eigenes Signal hat und nicht mit
+  einer heißen Combo verschwimmt. Sie hängt am selben `out`-Bus wie die übrige
+  Musik, wird also vom Mute-Schalter und vom gestoppten Loop automatisch
+  miterfasst.
+- **`swell` als zweiter Ton-Helfer.** Der bestehende `tone` schlägt in 6 ms an —
+  richtig für Klicks und Stiche, falsch für eine Zeremonie, die tragen soll.
+  `swell` ergänzt weiches Anschwellen plus optionales Frequenz-Gleiten (der
+  Transzendenz-Sog von 110 auf 55 Hz); `tone` bleibt unangetastet, damit kein
+  bestehender SFX seinen Charakter ändert.
+- **Klang wird MESSBAR bewiesen, nicht behauptet.** Headless gibt es kein
+  Audio-Foto, also bekam die Engine `debug` (Kontext-Status + effektive
+  Master-Lautstärke) und `main.ts` die Beweis-Oberfläche `window.chAudio` —
+  gleicher Geist wie `chLoot`/`chGob`. Der Smoke misst damit den Mute-Vertrag
+  (Master exakt 0) und zählt `createOscillator`-Aufrufe pro 2 s mit und ohne
+  laufende Ekstase (club 10 → 26, synth 10 → 36, beach 8 → 17, space 6 → 15).
+  Bewusst gegen eine echte Ekstase (Taste F) gemessen statt gegen den Schalter:
+  der Loop schreibt `setEkstase(frenzy)` jeden Frame und überschriebe jede
+  Fernsteuerung — dieselbe Falle hätte einen falsch-negativen Beweis erzeugt.
+
 ## ROADMAP-V2 Schritt 7 — A1 Bühnen-Modifikatoren + A4 Choreo-Sets + A3 Truhen-Kobold
 
 - **Der Modifikator-SEED reist im `CombatState`, nicht der fertige Faktor — und
