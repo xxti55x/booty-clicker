@@ -3,6 +3,115 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## ROADMAP-V2 Schritt 9 — P4 Himmelsbaum-Ausbau
+
+- **Drei Äste, 18 Knoten — und die fünf alten bleiben byte-gleich.** Twerk-Coach,
+  Frühstarter, Nachtschicht, Ekstase-Ausdauer und Truhen-Magnet behalten Id,
+  Kostenliste und Wirkung; sie wurden nur einem Ast zugeordnet (Coach +
+  Ekstase-Ausdauer → 🕺 Ritual, Nachtschicht + Truhen-Magnet → 💰 Ökonomie,
+  Frühstarter → ⚔️ Kampf: er ist der einzige Knoten, der einen RE-CLIMB direkt
+  stärkt, und Re-Climb ist Kampf, nicht Buchhaltung). Damit verliert kein Alt-Save
+  eine einzige gekaufte Stufe, und die neuen Knoten füllen jeden Ast auf 4 normale
+  - 1 Exklusiv-Paar auf.
+- **Kein Schema-Bump — und unbekannte Baum-Ids ÜBERLEBEN das Laden.** `heaven.tree`
+  ist seit v5 ein offenes `Record<string, number>`; `repairHeaven` filtert nur auf
+  „positive ganze Zahl", nicht auf bekannte Ids. Neue Knoten brauchen also keine
+  Migration. Die offene Frage war, ob unbekannte Ids beim Laden geprunt werden
+  sollten — Entscheidung: **überleben lassen**. Wer mit einem neueren Build spielt,
+  dort einen neuen Knoten kauft und danach eine ältere Version öffnet (Itch-Build,
+  zweites Gerät), bekäme beim Prunen seine HPF _nicht_ zurück, sondern verlöre sie
+  ersatzlos. Gefährlich ist das Überleben nicht, weil `treeLevel` jetzt die EINZIGE
+  Effekt-Quelle ist und jede Stufe auf das Max-Level des Knotens deckelt — eine
+  unbekannte Id hat Max-Level 0 und ist damit von Natur aus wirkungslos (derselbe
+  Deckel neutralisiert nebenbei ein hand-editiertes `coach: 999`). Aufgeräumt
+  werden die Fremd-Ids beim Respec, also genau dann, wenn der Spieler ohnehin
+  „alles auf Anfang" sagt — erstattet wird für sie nichts, weil kein Preis bekannt ist.
+- **Exklusiv-Paare statt einer weiteren Einkaufsliste.** Pro Ast schließen sich zwei
+  Knoten gegenseitig aus (Truhen- vs. Pfirsich-Fokus · Klick- vs. Crew-Doktrin ·
+  Ekstase- vs. Combo-Doktrin). Die Sperre hängt an EINEM Feld (`exclusiveWith`,
+  beidseitig gesetzt) und wird an genau einer Stelle ausgewertet
+  (`treeNodeBlockedBy` → `canBuyTreeNode`), damit UI, Sim und Save dieselbe Regel
+  lesen. Warum ausgerechnet diese Paare: jedes stellt eine echte Spielweise gegen
+  eine andere (Truhen-Ökonomie vs. BP-Tempo, aktiv vs. idle, Burst vs. Dauerfeuer)
+  — ein Paar aus „+20 % X" und „+20 % Y" wäre eine Rechenaufgabe, keine Entscheidung.
+- **Der Preis der Wahl ist doppelt — und das ist der Punkt.** Gehaltene HPF geben
+  +2 % globalen Schaden UND verstärken jede Seele. Ein 35-HPF-Doktrin-Kauf nimmt
+  also 70 % globalen Schaden mit. Im Headless-Beweis sieht man das direkt: der Kauf
+  der Crew-Doktrin (+25 % Crew-DPS) hebt die DPS von 734K auf 745K, senkt den
+  Klick-Schaden aber von 154K auf 125K — weil 35 gehaltene HPF fehlen. Genau
+  deshalb ist der Baum eine Reihe von Entscheidungen und keine Checkliste.
+- **Exklusiv-Knoten kosten einheitlich 35 HPF.** Teurer als jeder normale
+  Einzel-Knoten (8–25), aber unter den tiefen Stufen (75/100). Einheitlich, damit
+  die Wahl eine Build- und keine Preisfrage ist — ein Test hält beide Eigenschaften
+  fest. Die restliche Kurve setzt die bestehende fort (×2.5 je Stufe).
+- **Respec: 1 HPF Gebühr, kein neues Save-Feld.** `respecTree` erstattet die Summe
+  aller bezahlten Stufen, behält 1 HPF ein und leert `tree` — mehr braucht es nicht,
+  der Vorgang ist „Baum leeren + Konto erhöhen". `hpfLifetime` bleibt unangetastet
+  (ein Highwater, kein Konto), und das Ergebnis wird auf `hpfLifetime` gedeckelt,
+  damit die Kern-Invariante „gehalten ≤ jemals verdient" auch ein frisiertes Save
+  überlebt. Die Gebühr ist bewusst winzig: sie soll das Experimentieren nicht
+  bestrafen, sondern verhindern, dass man vor jedem Bosskampf umskillt.
+- **Bestätigung per Arm-Knopf statt `confirm()`.** Derselbe Zwei-Klick-Pfad, den
+  Himmelfahrt und Transzendieren schon benutzen (`armed`-Klasse, 4-s-Timeout,
+  „Sicher? Alle Knoten fallen"). Ein natives `confirm()` gibt es im Repo nirgends —
+  es blockiert den Loop, sieht auf dem Handy fremd aus und ließe sich nicht
+  headless fotografieren.
+- **Gestapelte Ast-Sektionen statt echter Spalten.** Das Panel lebt im
+  Bottom-Sheet, das im Portrait ~50 % der Höhe misst; drei Spalten à sechs Karten
+  wären dort unlesbar schmal. Die Äste sind stattdessen als eigene Blöcke mit
+  Kopfzeile (Icon + Name + ein Satz) gerahmt, die Exklusiv-Paare stehen in einem
+  eigenen gestrichelten Kasten mit „ODER"-Steg dazwischen. Portrait-Kontrolle:
+  Ast-Breite 385 px, kein horizontaler Scroll.
+- **Jeder Knoten hängt in einem echten Rechenpfad — kein toter Effekt.** Goldene
+  Hände → `goldMult` (also live UND offline), Pfirsich-Reife → `activateBoost`,
+  Truhen-Fokus → `rivalChestChance`-Roll, Pfirsich-Fokus → `rollNextPeachAt`-Pause
+  (multipliziert sich mit dem Mythos-Knoten „Pfirsich-Magnet"), Schwerer Bass +
+  Crew-Doktrin → `dpsOf`, Klick-Doktrin → `clickDamageOf`, Präzisions-Shake →
+  `critMultFactor` (derselbe Griff wie die Krit-Token), Gate-Crasher →
+  `withBossTimerBonus`, Beat-Gefühl → derselbe `beatBonusMs`-Term wie Beatrix/Gear
+  (weitet damit auch das A2-Schild-Fenster), Combo-Gedächtnis → derselbe
+  Reduktions-Term wie die Showmaster-Sterne, Ekstase-Doktrin → `frenzyMult`,
+  Combo-Doktrin → `comboMult`-Schritt. Drei pure Module bekamen dafür einen
+  optionalen Parameter mit unverändertem Default (`comboMult(combo, step)`,
+  `frenzyMult(state, now, mult)`, `activateBoost(now, extraMs)`) — kein Aufrufer
+  außerhalb ändert dadurch sein Verhalten.
+- **Nebenbefund mitgenommen: der Retry-Boss bekam nie einen Uhr-Bonus.** „Boss
+  herausfordern" spawnte über `challengeBoss` ohne `withBossTimerBonus`, also fielen
+  Chronilla und der Gear-Bonus dort still unter den Tisch. Mit dem Gate-Crasher
+  wäre das ein sichtbar kaputter Knoten geworden; jetzt läuft der Retry-Boss über
+  denselben Pfad wie jeder reguläre Spawn.
+- **Sim: der Bot kauft NUR, was er auch rechnet.** `SIM_TREE_PRIORITY` listet die
+  elf Knoten, deren Wirkung im Bot ankommt (Klick/Crew/Krit/Combo/BP/Truhen/
+  Pfirsich). Die Utility-Knoten fehlen bewusst: der Bot geht nie offline, zündet
+  keine Ekstase, klickt ungetaktet und modelliert Boss-Uhr-Boni nirgends — ein Kauf
+  würde ihm dort nur den +2 %/HPF-Globalmult nehmen und die Anker künstlich
+  pessimistisch machen. Das ist dieselbe Untergrenzen-Logik, mit der schon
+  Twerk-Ekstase und die Boss-Schadens-Mults draußen bleiben. Beide Seiten jedes
+  Exklusiv-Paares stehen in der Liste, die DPS-lastige zuerst — weil alle sechs
+  gleich viel kosten, entscheidet bei `cheapestTreeBuy` die Reihenfolge, und der
+  Bot fährt reproduzierbar Crew-/Combo-/Truhen-Fokus.
+- **E2-Anker-Lauf: kein einziger Wert bewegt sich — und das ist gemessen, nicht
+  gehofft.** Mit leerem Baum liefert jeder neue Getter exakt seinen neutralen Wert,
+  also sind alle Anker bit-identisch (722 Alt-Tests grün ohne eine einzige
+  Anpassung). Gemessen mit den E2-Parametern (stallSeconds 1500, 400 k s,
+  fullPrestige, seeds 1/7/12345): 15/15/15 Verbesserungen, worstRatio
+  0.93/0.84/1.86, 1 Himmelfahrt, 15/15/13 Aszensionen — Wert für Wert wie vor P4.
+  Grund: der Bot bankt an der z75-Wand genau **1 HPF** (das dokumentierte
+  F7-Residual), und der billigste gelistete Knoten kostet 12. Statt das als
+  Kommentar stehen zu lassen, gibt `ContinuousResult` jetzt `hpfHeld` +
+  `treeLevels` heraus, und der E2-Test prüft die Aussage („1 HPF gebankt, 0 Stufen
+  gekauft") als echte Messung. Die Kauf-Strategie selbst ist separat getestet
+  (`greedyTreeSpend` mit 200 und 500 HPF), damit „der Bot versteht die neuen Knoten"
+  nicht von einem minutenlangen Lauf abhängt.
+- **Warum die Kosten NICHT gesenkt wurden, damit der Bot etwas kauft.** Verlockend
+  wäre gewesen, den Einstiegsknoten auf ≤ 1 HPF zu drücken, damit der E2-Lauf den
+  Baum anfasst. Das hätte aber die Balance für den BOT gebaut statt für den
+  Spieler: 1 HPF ist der Stand nach der allerersten Himmelfahrt (~15 h), und ein
+  dauerhafter Prestige-Knoten für den Gegenwert von 2 % globalem Schaden wäre
+  geschenkt. Die Anker bleiben damit ehrliche Untergrenzen, und der Baum bleibt
+  das, was die Roadmap will: die Entscheidungs-Dichte für die LANGE Strecke
+  zwischen erster Himmelfahrt und Transzendenz.
+
 ## ROADMAP-V2 Schritt 8 — G4 Prestige-Zeremonien + G6 UI-Zahlen-Leben + X5 Audio-Lücken
 
 - **Die Zeremonie ist REIN OPTISCH — die Gutschrift läuft immer vorher.** Alle
