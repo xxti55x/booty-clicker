@@ -3,6 +3,103 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## ROADMAP-V2 Schritt 5 — A2 Boss-Gimmicks
+
+- **2026-07-26 — Der entscheidende Befund: ein Boss-Gate ist kein Regler,
+  sondern eine Klippe.** Der erste Wurf setzte die Gimmicks 1:1 nach Roadmap um
+  (Club 2×5 s ohne Crew, Synth nur im Beat-Fenster, Beach 5 %/10 s, Space
+  Combo ×1.5) — und riss die Balance-Anker komplett auf: die kumulierte
+  Bühne-75-Messung und die erste Himmelfahrt wurden von den Bots **gar nicht
+  mehr erreicht** (statt 4.75/6.94 h bzw. 18.3 h), E2 fiel von 15 auf 6
+  Verbesserungen, E3 von Bühne 75 auf 10. Ursache: Ein Gate ist eine
+  30-s-Zeitschranke. Wer 10 % Wirkung verliert, verliert nicht 10 % Tempo — er
+  verliert das Gate, fällt auf die Vor-Bühne, farmt bei gedeckeltem Einkommen
+  und wächst nur noch logarithmisch. Isoliert gemessen: die MILDESTE Variante
+  (nur Beach, +15 % nötiger Schaden) kostete allein +62 % auf t75; Spotlight
+  und Schild sperrten die casual-Anker jeweils für sich aus.
+- **Konsequenz: das Gimmick verteilt Schwierigkeit um, statt sie zu addieren
+  (`GIMMICK_HP_SCALE`).** Ein Gimmick-Boss trägt weniger Ausdauer — ziemlich
+  genau um den Anteil, den sein Trick dem Durchschnitts-Build kostet
+  (Spotlight ×0.78, Schild ×0.57, Welle ×0.87, Gravitation ×1.00). Die Wand
+  verlangt damit dieselbe Gesamt-Power wie vorher, aber eine ANDERE Verteilung:
+  ein Idle-Build zahlt am Spotlight-Gate voll (Ausgleich dort ± 0), ein
+  Klick-Build kommt ~13 % leichter durch; wer im Takt trifft, nimmt dem
+  Schild-Gate ~30 % ab; wer den Kampf in die Länge zieht, zahlt an der Welle
+  echte Prozente. Genau die Lese-Tiefe, die A2 wollte — ohne die Progression zu
+  verbiegen. Alternative „Gimmicks einfach zahnlos machen" wurde verworfen:
+  bei ≤ 4 % Wirkung wären sie Deko gewesen.
+- **Gravitation bekommt KEINEN Ausdauer-Aufschlag (×1.00), obwohl sie hilft.**
+  Erster Ansatz war ×1.05 als Gegengewicht zum Combo-Bonus. Gemessen: der
+  0.7-cps-Anker-Bot spielt ohne Combo (`juice: false`), bekommt den Bonus also
+  gar nicht — und blieb mit dem Aufschlag an Bühne 40 hängen (Himmelfahrt nie
+  erreicht). Ein Ausgleich für einen Bonus, den nicht jeder bekommt, ist eine
+  Strafe für alle anderen. Gravitation ist jetzt reine Belohnung fürs
+  Combo-Halten.
+- **Das Schild-Fenster steht in PHASEN-Einheiten, nicht in Millisekunden.**
+  `isOnBeat` misst den Zeitabstand zum nächsten Beat, aber die Beats laufen mit
+  dem Klick-„drive" schneller: bei vollem Drive (6) liegt der maximale Abstand
+  zum nächsten Onset bei ~82 ms — komplett innerhalb des ±100-ms-On-Beat-
+  Fensters. Ein in ms fixiertes Schild stünde für jeden hart klickenden Spieler
+  DAUERHAFT offen, die Mechanik wäre ein Placebo. In Phasen-Einheiten
+  (`SHIELD_WINDOW_PHASE` = ±100 ms × 1.4 bei ruhender Choreo) ist es
+  drive-invariant und lässt konstant **55.4 %** der Zeit durch. Die
+  Beat-Fenster-Boni aus Ahnen/Gear/Fähigkeiten weiten es weiterhin — der Hebel,
+  mit dem man sich gezielt gegen die Mechanik rüstet.
+- **Spotlight 2×4 s statt 2×5 s — vom Anker entschieden.** Mit vollem
+  Ausdauer-Ausgleich schob 2×5 s die erste Himmelfahrt auf 19.7 h und damit aus
+  ihrem ±25-%-Fenster (Obergrenze 19.4 h); 2×4 s landet bei 18.3 h. Der
+  0.7-cps-Bot ist der empfindlichste Anker des Pakets (idle-dominiert, lebt an
+  der Gate-Kante) und hat die Parameterwahl praktisch diktiert.
+- **Sim-Modellierung: `stepSecond` kennt jetzt Klick- und Idle-Schaden
+  getrennt.** `powerSplit` liefert beide Terme, der Boss-Schaden einer Sekunde
+  läuft durch `gimmickBossDamage` (Club: `click + idle·(1−Phasenanteil)`,
+  Synth: `(click+idle)·0.554`, Beach: unverändert + HP-Regen, Space:
+  Klick-Term auf `spaceComboBonus` gehoben). Der resultierende Faktor `k` wird
+  über die ganze Sekunde angewandt; nach einem Boss-Kill wird der Rest-Schaden
+  **zeit-proportional** zurückgerechnet (`hp/k` = wirklich verbrauchter Anteil
+  der Sekunde), damit der Übertrag auf die nächsten Rivalen ehrlich bleibt.
+  Dokumentierte Annahme: **der Bot klickt ungetaktet** (er hat keine
+  Choreo-Phase), trifft am Schild also mit derselben Fenster-Wahrscheinlichkeit
+  wie die Crew — bewusst pessimistisch, damit die Anker untere Schranken
+  bleiben. Einzige optimistische Stelle: der doppelte Combo-Verfall greift beim
+  Bot nicht (er klickt ≥ 1×/s und bleibt im 1.5-s-Gnadenfenster); gedeckelt auf
+  +8.3 % Klick-Schaden am Combo-Cap.
+- **Anker-Lauf (seeds 1/7/12345, vorher → nachher).** t10 105 → 104 s ·
+  t20 824 → 823 s · t25 2133/2144 → 2032/2044 s (−4.7 %) · Bühne 30 bleibt
+  unerreichbar · kumuliert t75 4.75/6.94 → 4.99/6.96 h · erste Himmelfahrt
+  18.26/18.81/18.19 → 18.44/18.27/18.32 h (± 3 %) · E2 15 Verbesserungen +
+  1 Himmelfahrt (unverändert) · E3 ≥ 41 Meilensteine, längste Durststrecke
+  ≤ 42 min (Anker 90) · E4 8–15 → 10–15 Bühnen Vorsprung · Gear-E4 10 → 10/11.
+  **Kein Anker musste aufgerissen werden.** Einzige Nachführung: der
+  🧩-Zeugen-Seed für „Splitter → Gear-Level" wandert 12345 → 4711 (die Gimmicks
+  verschieben, welche Bosse in ein 45-min-Fenster fallen, und damit die seeded
+  Truhen-Züge; seed 12345 bankt jetzt 7 statt 10+ 🧩). Behauptung unverändert.
+- **Der Kampf-Zustand bleibt AUSSERHALB des `CombatState`.** Spotlight-Phasen
+  und Wellen-Uhr gehören zu EINEM Kampf und überleben keinen Reload — sie
+  stehen als `GimmickRuntime` in der Glue (main.ts) bzw. im Sim-State. Kein
+  Schema-Bump, keine Migration, keine Fixture. Ein Save mitten im Boss-Kampf
+  spawnt den Boss ohnehin frisch; ein frischer Kampf ist der korrekte Zustand.
+- **Die Theme-Rotation hatte drei Kopien — jetzt eine.** `bgForZone` (main.ts),
+  `stripTheme` (ch-hud.ts) und das Gimmick brauchen dasselbe Theme;
+  `themeForZone` in `boss-gimmicks.ts` ist die einzige Quelle. `ZONES_PER_THEME`
+  steht dort bewusst LOKAL statt aus `combat.ts` importiert, damit `combat.ts`
+  seinerseits `bossHpScale` holen kann, ohne einen Import-Zyklus zu bauen; ein
+  Test pinnt `ZONES_PER_THEME === BOSS_EVERY` fest.
+- **Kein Preset-Gate für die Gimmick-Optik.** Balken-Look, Plaketten-Puls und
+  die „🛡 Klirr!"-Pop sind reines CSS/DOM auf dem bestehenden Pop-Pool — kein
+  Draw-Call, keine Partikel. Sie tragen wie das G2-Banner INFORMATION (welche
+  Regel gerade gilt), gehören also auch im low-Preset auf den Schirm. Der
+  Plaketten-Puls respektiert `prefers-reduced-motion`.
+- **Headless-Beweis (angesehen, nicht nur gelaufen).** Je Theme Banner +
+  Plakette (Bühnen 5/10/15/20, `chVs().gim` stimmt mit dem Katalog überein);
+  Club-Spotlight live gemessen: HP-Verlust IN der Phase 0.00 %, in einem gleich
+  langen Fenster DANACH 4.70 % (0.8 Sim-s, keine Klicks) — der Idle-Stopp ist
+  echt; Synth-Abpraller sichtbar, 13 von 60 Klicks prallten ab (untere
+  Schranke), die Ausdauer sinkt trotzdem von 89.8 % auf 24.5 % (das Schild
+  lässt im Takt durch); Beach-Welle 61.10 % → 65.90 % Rest-HP (+4.81 pp) mit
+  Puls-Klasse. Gemessen wird an der Sim-Uhr `chVs().t0`, weil SwiftShader
+  ~0.2× Echtzeit läuft — Wanduhr-Fenster wären hier die falsche Achse.
+
 ## ROADMAP-V2 Schritt 4 — X2+X3+G3 Ekstase-Fenster, Offline-Rückkehr, Idle-Leben
 
 - **2026-07-26 — Review-Befund (Fable): der Phase-L-Bloom lief NIE.**

@@ -161,6 +161,22 @@ export class Pops {
     this.render({ value, count: 1, crit: false, onBeat: false, x, y }, '+');
   }
 
+  /**
+   * „Klirr!" — ein Klick, der am Schild-Takt-Boss abgeprallt ist (ROADMAP-V2 A2).
+   * Bewusst unbatched und ohne Zahl: die Information ist „nichts angekommen",
+   * nicht „wie viel". Nutzt denselben Pool wie jede andere Pop.
+   */
+  blocked(x: number, y: number): void {
+    const el = this.pool.acquire();
+    el.className = 'pop blocked';
+    el.textContent = '🛡 Klirr!';
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    el.style.animation = 'none';
+    void el.offsetWidth;
+    el.style.animation = '';
+  }
+
   /** Live DOM node count (for smoke/pool-budget checks) — never exceeds the pool. */
   get liveNodes(): number {
     return this.pool.size;

@@ -79,12 +79,22 @@ import {
 import { keyDropAmount, rivalChestChance } from './ch-state';
 import { CRIT_CHANCE, CRIT_CHANCE_CAP, CRIT_MULT, COMBO_CAP, comboMult } from './click';
 import {
+  type GimmickRuntime,
+  applyWaveHeal,
+  createGimmickRuntime,
+  gimmickBossDamage,
+  gimmickForZone,
+  tickGimmick,
+  waveHealAmount,
+} from './boss-gimmicks';
+import {
   type CombatState,
   MONSTERS_PER_ZONE,
   bossHp,
   challengeBoss,
   goldFor,
   hit,
+  hpFraction,
   monsterHp,
   spawnFor,
   tickBoss,
@@ -217,6 +227,10 @@ interface Sim {
   /** Boss-Bühne eines gescheiterten Gates (0 = keins): der Bot nutzt dort den
    * „Boss herausfordern"-Button statt die Rivalen-Welle neu zu clearen. */
   retryBossZone: number;
+  /** A2: Laufzeit-Zustand des AKTUELLEN Boss-Kampfes (Spotlight-Phasen, Wellen-Timer). */
+  gimmick: GimmickRuntime;
+  /** Boss-Bühne, zu der `gimmick` gehört (0 = gerade kein Boss) — erkennt den Kampf-Wechsel. */
+  gimmickZone: number;
   /** Epoch-ms the next Golden-Peach spawns (0 = unseeded). */
   nextPeachAtMs: number;
   /** Smoothed gold/sec (EMA) feeding chest BP rewards (§6.2). */
@@ -279,6 +293,8 @@ function newSim(seed: number): Sim {
     shards: 0,
     boostUntilMs: 0,
     retryBossZone: 0,
+    gimmick: createGimmickRuntime(),
+    gimmickZone: 0,
     nextPeachAtMs: 0,
     incomePerSec: 0,
     keysEarned: 0,
@@ -348,15 +364,25 @@ function shardIdleMultFor(sim: Sim, config: SimConfig): number {
   return shardGearIdleMult(sim.shards);
 }
 
+/** Die beiden Schadens-Quellen einer Sekunde, getrennt (A2 braucht den Split). */
+interface DamageSplit {
+  /** Aktiver Klick-Schaden dieser Sekunde (Rate × Klick × Combo × Krit-EV). */
+  click: number;
+  /** Passiver Crew-/Idle-Schaden dieser Sekunde (nie gejuiced, P1). */
+  idle: number;
+}
+
 /**
  * Effective damage per second (= total power, click + idle at farm) for a given
- * crew/gilds/souls/ancients/heaven and the banked loot economy. Folds the held-soul
- * mult (HPF-amplified), the Ancient click/DPS mults, the +2 %/HPF global mult, the
- * gear mults (§5 config + `shardIdle` from banked 🧩) and the permanent crew-DPS
- * token pool (§6.2) — the same derivation as `ch-state.dpsOf`/`clickDamageOf`. Idle
- * never draws juice (P1).
+ * crew/gilds/souls/ancients/heaven and the banked loot economy, **split into the
+ * active and the passive term** (ROADMAP-V2 A2: die Boss-Gimmicks behandeln beide
+ * unterschiedlich — Club pausiert nur den Idle-Anteil, Space hebt nur den
+ * Klick-Anteil). Folds the held-soul mult (HPF-amplified), the Ancient click/DPS
+ * mults, the +2 %/HPF global mult, the gear mults (§5 config + `shardIdle` from
+ * banked 🧩) and the permanent crew-DPS token pool (§6.2) — the same derivation as
+ * `ch-state.dpsOf`/`clickDamageOf`. Idle never draws juice (P1).
  */
-function powerFor(
+function powerSplit(
   crew: Record<string, number>,
   crewUp: Record<string, number>,
   gilds: Gilds,
@@ -368,7 +394,7 @@ function powerFor(
   crit: number,
   permTokens: PermTokens,
   shardIdle: number,
-): number {
+): DamageSplit {
   const hpf = heaven.hpf;
   const sm = soulMult(souls, soulBonusEff(hpf));
   const global = heavenGlobalMult(hpf);
@@ -391,12 +417,42 @@ function powerFor(
     shardIdle *
     (econOn(config) ? permTokenDpsMult(permTokens) : 1) *
     crewSpecialBonuses(crewUp).idleMult;
-  return config.clickRate * baseClick * combo * crit + idle;
+  return { click: config.clickRate * baseClick * combo * crit, idle };
 }
 
-/** Effective damage the bot deals in one second at the current state. */
-function damagePerSecond(sim: Sim, config: SimConfig, combo: number, crit: number): number {
-  return powerFor(
+/** Total power (click + idle) — the ranking metric for `buyAncientsGreedy` + E3. */
+function powerFor(
+  crew: Record<string, number>,
+  crewUp: Record<string, number>,
+  gilds: Gilds,
+  souls: number,
+  ancients: AncientLevels,
+  heaven: HeavenState,
+  config: SimConfig,
+  combo: number,
+  crit: number,
+  permTokens: PermTokens,
+  shardIdle: number,
+): number {
+  const p = powerSplit(
+    crew,
+    crewUp,
+    gilds,
+    souls,
+    ancients,
+    heaven,
+    config,
+    combo,
+    crit,
+    permTokens,
+    shardIdle,
+  );
+  return p.click + p.idle;
+}
+
+/** Effective damage the bot deals in one second at the current state (split, A2). */
+function damageSplit(sim: Sim, config: SimConfig, combo: number, crit: number): DamageSplit {
+  return powerSplit(
     sim.crew,
     sim.crewUp,
     sim.gilds,
@@ -409,6 +465,12 @@ function damagePerSecond(sim: Sim, config: SimConfig, combo: number, crit: numbe
     sim.permTokens,
     shardIdleMultFor(sim, config),
   );
+}
+
+/** Total effective damage per second (the E3 power metric). */
+function damagePerSecond(sim: Sim, config: SimConfig, combo: number, crit: number): number {
+  const p = damageSplit(sim, config, combo, crit);
+  return p.click + p.idle;
 }
 
 // ---------------------------------------------------------------------------
@@ -527,21 +589,73 @@ function openChestsGreedy(sim: Sim, incomePerSec: number, nowMs: number): void {
  * in-game one-hit-per-frame model, which is fine at 60 fps but too coarse here). Boss
  * HP persists across seconds; the timer ticks once and a timeout drops to farming the
  * zone's rivals (never a soft-lock).
+ *
+ * **A2 Boss-Gimmicks**: gegen einen Boss zählt nicht der rohe Sekunden-Schaden,
+ * sondern der vom Theme-Gimmick gefilterte Anteil (`gimmickBossDamage`) — als EIN
+ * Faktor `k` über die Sekunde. Der Rest-Schaden nach einem Boss-Kill wird deshalb
+ * zeit-proportional zurückgerechnet (`combat.hp / k` = der wirklich verbrauchte
+ * Anteil der Sekunde), sodass der Übertrag auf die nächsten Rivalen ehrlich bleibt.
+ * Die Wellen-Heilung (Beach) läuft als HP-Regen VOR dem Schaden.
  */
 function stepSecond(
   sim: Sim,
   combat: CombatState,
-  dmg: number,
+  dmg: DamageSplit & { combo: number },
   goldMult: number,
   luck: number,
   keyMult: number,
   dropLoot: boolean,
 ): CombatState {
-  let remaining = dmg;
+  /**
+   * Der Gimmick-Faktor des laufenden Boss-Kampfes: wirksamer ÷ roher Schaden.
+   * Dreht zugleich den Kampf-Zustand weiter (Spotlight-Phasen, Wellen-Timer) und
+   * heilt — deshalb genau EIN Aufruf je Boss und Sekunde.
+   */
+  const enterBoss = (c: CombatState): { combat: CombatState; k: number } => {
+    if (c.zone !== sim.gimmickZone) {
+      sim.gimmickZone = c.zone;
+      sim.gimmick = createGimmickRuntime(); // neuer Kampf ⇒ frische Phasen/Wellen
+    }
+    const g = gimmickForZone(c.zone);
+    const tick = tickGimmick(sim.gimmick, g, hpFraction(c), 1);
+    sim.gimmick = tick.state;
+    if (tick.heals > 0) {
+      const hp = applyWaveHeal(c.hp, c.hpMax, waveHealAmount(c.hpMax, tick.heals));
+      c = { ...c, hp };
+    }
+    const raw = dmg.click + dmg.idle;
+    const eff = gimmickBossDamage(g, {
+      click: dmg.click,
+      idle: dmg.idle,
+      spotlightShare: tick.spotlightShare,
+      comboMult: dmg.combo,
+    });
+    return { combat: c, k: raw > 0 ? eff / raw : 1 };
+  };
+
+  if (!combat.boss) sim.gimmickZone = 0;
+  let k = 1;
+  if (combat.boss) {
+    const entered = enterBoss(combat);
+    combat = entered.combat;
+    k = entered.k;
+  }
+
+  let remaining = dmg.click + dmg.idle;
   let guard = 50000; // bounds a runaway burst; ×1.6/zone means it always terminates
   while (remaining > 0 && guard-- > 0) {
-    if (remaining >= combat.hp) {
-      remaining -= combat.hp;
+    // Ein Boss, der MITTEN in dieser Sekunde spawnt (die Welle fiel gerade), ist
+    // ein eigener Kampf mit eigenem Faktor — volle Ausdauer, keine Phase, keine Welle.
+    if (combat.boss && combat.zone !== sim.gimmickZone) {
+      const entered = enterBoss(combat);
+      combat = entered.combat;
+      k = entered.k;
+    }
+    const factor = combat.boss ? k : 1;
+    if (factor <= 0) break; // Spotlight ohne Klick-Schaden: diese Sekunde kommt nichts an
+    const eff = remaining * factor;
+    if (eff >= combat.hp) {
+      remaining -= combat.hp / factor;
       const wasBoss = combat.boss;
       const bossZone = combat.zone;
       const r = hit(combat, combat.hp);
@@ -574,7 +688,7 @@ function stepSecond(
         }
       }
     } else {
-      combat = hit(combat, remaining).state;
+      combat = hit(combat, eff).state;
       remaining = 0;
     }
   }
@@ -630,12 +744,12 @@ function economyStep(
   const nowMs = globalSec * 1000;
   if (econ) tickPeach(sim, nowMs);
   const crit = critFactor(config, sim.permTokens, sim.crewUp);
-  const dmg = damagePerSecond(sim, config, combo, crit);
+  const dmg = damageSplit(sim, config, combo, crit);
   const goldMult = goldMultiplierNow(sim, config, nowMs);
   const luck = ancientChestLuckBonus(sim.ancients);
   const keyMult = 1 + truhenMagnetBonus(sim.heaven);
   const goldBefore = sim.gold;
-  const next = stepSecond(sim, combat, dmg, goldMult, luck, keyMult, econ);
+  const next = stepSecond(sim, combat, { ...dmg, combo }, goldMult, luck, keyMult, econ);
   if (econ) {
     // Chest BP rewards read a steady income/sec (§6.2: "15 min of current income"),
     // so cap the per-second figure to one zone's rival gold — a single power-spike
@@ -1104,7 +1218,18 @@ export function simulateFloatGuard(config: SimConfig, opts: FloatGuardOptions): 
     const luck = ancientChestLuckBonus(sim.ancients);
     const keyMult = 1 + truhenMagnetBonus(sim.heaven);
     const goldBefore = sim.gold;
-    combat = stepSecond(sim, combat, dmg, goldMult, luck, keyMult, econOn(config));
+    // Der analytische Vorlauf zählt als KLICK-Schaden: er modelliert die Schlagkraft
+    // eines Tiefe-`front`-Spielers, nicht die Crew — so filtert ihn nur das
+    // Schild-Gimmick (Synth), Spotlight-Phasen greifen nicht ins Float-Audit ein.
+    combat = stepSecond(
+      sim,
+      combat,
+      { click: dmg, idle: 0, combo },
+      goldMult,
+      luck,
+      keyMult,
+      econOn(config),
+    );
     const earned = sim.gold - goldBefore;
     // §9.3 stall guard: track the smallest relevant additive gain ratio — the gold
     // increment vs the gold total, and the per-second damage vs the current target's

@@ -6,6 +6,7 @@ import {
   burstEstimate,
   purchaseSignature,
 } from '../game/advisor';
+import { gimmickForZone, themeForZone } from '../game/boss-gimmicks';
 import type { ChState } from '../game/ch-state';
 import { type CombatState, bossHp, bossTimeFraction, hpFraction, isBossZone } from '../game/combat';
 import { MONSTERS_PER_ZONE } from '../game/combat';
@@ -54,13 +55,10 @@ export function rivalName(zone: number, boss: boolean): string {
  * click hot-path and the per-frame loop never rebuild DOM needlessly. The moving
  * HP bar + boss timer are refreshed cheaply per frame via `frame()`.
  */
-/** Kulissen-Tier je Zone (5er-Blöcke = Boss-Gates) — Spiegel der main.ts-Rotation. */
-const STRIP_THEMES = ['club', 'synth', 'beach', 'space'] as const;
-function stripTheme(zone: number): (typeof STRIP_THEMES)[number] {
-  return STRIP_THEMES[Math.floor((zone - 1) / 5) % STRIP_THEMES.length];
-}
+/** Kulissen-Tier je Zone — dieselbe Quelle wie Kulisse + Boss-Gimmick (A2). */
+const stripTheme = themeForZone;
 /** Insel-Thumbnail-Farben je Kulisse (Oberseite / Unterseite). */
-const STRIP_COLORS: Record<(typeof STRIP_THEMES)[number], [string, string]> = {
+const STRIP_COLORS: Record<'club' | 'synth' | 'beach' | 'space', [string, string]> = {
   club: ['#8b5cf6', '#4c2f8a'],
   synth: ['#d65cd0', '#7a2f8a'],
   beach: ['#eed28a', '#3aa0c9'],
@@ -116,6 +114,7 @@ export class ChHud {
   private readonly zoneStrip = byId('zoneStrip');
   private readonly bossBtn = byId('bossChallenge');
   private readonly bossHint = byId('bossHint');
+  private readonly gimmickEl = byId('bossGimmick');
 
   // Cached last-written values (change-detection, no DOM churn).
   private cZone = '';
@@ -136,6 +135,9 @@ export class ChHud {
   private cHint = '';
   private hintSig = '';
   private hintBuy: PurchaseHint | null = null;
+  // A2: zuletzt geschriebenes Gimmick-Label + Spotlight-Look der HP-Bar.
+  private cGimmick = '';
+  private cSpotlight: boolean | null = null;
 
   private setText(el: HTMLElement, next: string, cache: string): string {
     if (next !== cache) el.textContent = next;
@@ -169,6 +171,19 @@ export class ChHud {
     }
 
     this.cRival = this.setText(this.rivalNameEl, rivalName(combat.zone, combat.boss), this.cRival);
+    // ROADMAP-V2 A2: das Gimmick-Label des Gates steht DAUERHAFT klein an der
+    // HP-Bar — das Banner sagt es einmal groß an, hier kann man es nachlesen,
+    // solange der Boss tanzt.
+    const gimmick = combat.boss ? gimmickForZone(combat.zone) : null;
+    const label = gimmick?.label ?? '';
+    if (label !== this.cGimmick) {
+      this.cGimmick = label;
+      this.gimmickEl.classList.toggle('hidden', label === '');
+      if (label !== '') {
+        this.gimmickEl.textContent = label;
+        this.gimmickEl.title = gimmick?.description ?? '';
+      }
+    }
     this.updateZoneStrip(combat.zone, combat.maxZone, state.stageStars);
     // „Boss herausfordern": nur an der Frontier-Boss-Bühne, solange ihr Gate
     // unbesiegt ist und der Boss nicht schon tanzt.
@@ -292,6 +307,30 @@ export class ChHud {
         this.cProg,
       );
     }
+  }
+
+  /**
+   * Spotlight-Look der Boss-HP-Bar (ROADMAP-V2 A2, Club): solange die Phase
+   * läuft, wechselt der Balken in den Phasen-Look und das Label pulst — der
+   * Spieler sieht am Balken selbst, dass gerade nur Klicks zählen. Change-
+   * detected, wird also gefahrlos pro Frame gerufen.
+   */
+  setSpotlight(on: boolean): void {
+    if (on === this.cSpotlight) return;
+    this.cSpotlight = on;
+    this.hpFill.classList.toggle('spotlight', on);
+    this.gimmickEl.classList.toggle('on', on);
+  }
+
+  /**
+   * Ein 🌊-Puls auf der HP-Bar (Beach): die Welle hat gerade geheilt. Die
+   * Animation wird per Reflow neu angestoßen, damit auch die dritte Welle
+   * desselben Kampfes sichtbar ist.
+   */
+  pulseHeal(): void {
+    this.hpFill.classList.remove('healed');
+    void this.hpFill.offsetWidth;
+    this.hpFill.classList.add('healed');
   }
 
   /** Combo readout with the tier name (e.g. "Combo ×27 · Heiß"). */

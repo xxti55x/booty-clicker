@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { SKINS } from '../character/skins';
 import type { BackgroundKey, SkinKey } from '../types';
+import { gimmickForZone } from './boss-gimmicks';
 import { spawnFor } from './combat';
 import { createGear, gearBonus, KULISSE_BUFFS, MAX_SKIN_LEVEL, MAX_SKIN_STARS } from './gear';
 import {
@@ -30,6 +31,22 @@ import {
 // floors (M9-AC4) and the dedicated economy suite run with the full economy ON — and
 // the E4 gap even WIDENS with it (loot compounds the active twerker's lead). See the
 // per-block notes.
+//
+// **ROADMAP-V2 A2 (Boss-Gimmicks) — Anker-Lauf.** Seit A2 rechnet der Bot die
+// Theme-Gimmicks der Boss-Gates mit (`game/boss-gimmicks.ts`): Club pausiert 2×4 s
+// den IDLE-Anteil, Synth filtert Klick+Idle auf den Beat-Anteil (0.554 — der Bot
+// klickt ungetaktet, siehe `gimmickBossDamage`), Beach heilt 5 %/10 s als HP-Regen im
+// Boss-Step, Space hebt den Combo-Anteil des Klick-Terms auf ×1.5. Damit die
+// Gimmicks die Schwierigkeit UMVERTEILEN statt sie nach oben zu schrauben, zahlt
+// jeder Gimmick-Boss seinen Trick in Ausdauer (`GIMMICK_HP_SCALE`, gemessen
+// kalibriert). Ergebnis des Anker-Laufs (seeds 1/7/12345, alle Werte vorher → nachher):
+//   · t10 105 → 104 s · t20 824 → 823 s · t25 2133/2144 → 2032/2044 s (−4.7 %),
+//     Bühne 30 bleibt außer Reichweite
+//   · kumuliert t75 (realistisch) 4.75/6.94 → 4.99/6.96 h
+//   · erste Himmelfahrt 18.26/18.81/18.19 → 18.44/18.27/18.32 h (± 3 %)
+//   · E2 15 Verbesserungen + 1 Himmelfahrt (unverändert), E3 ≥ 41 Meilensteine,
+//     E4-Abstand 8–15 → 10–15 Bühnen, Gear-E4 10 → 10/11
+// Kein Anker musste aufgerissen werden; einzig der 🧩-Zeugen-Seed wandert (s. u.).
 // ---------------------------------------------------------------------------
 const ACTIVE = { clickRate: 3, juice: true } as const; // full economy on (default)
 const ACTIVE_CAL = { clickRate: 3, juice: true, economy: false } as const; // §4.8 baseline
@@ -62,6 +79,8 @@ describe('simulateEndless — self-runtime (§9.5-AC4)', () => {
 // runs ON here. Observed v11 (all seeds): zone 75 by run 2, bank 508→1295→2074 —
 // the ramp softened from the v10 508→2074 because EVEN ability tiers are now themed
 // specials (utility, not raw output); the bot's bank still multiplies each run.
+// A2 (Boss-Gimmicks): zone 75 by run 2–3, banks 34→810→1295 — die Gates tragen jetzt
+// Mechanik, die Wand steht aber an derselben Stelle (Ausdauer-Ausgleich).
 describe('simulateEndless — pacing baseline (M9-AC4)', () => {
   for (const seed of SEEDS_HEAVY) {
     it(`seed ${seed}: run-chain reaches zone ≥ 75 and bank ≥ 500 RS in ≤ 6 runs`, () => {
@@ -101,6 +120,9 @@ describe('simulateEndless — v12 pacing target table (±25 %)', () => {
       // erste Wand rückt von ~Bühne 30–39 auf ~Bühne 25 vor, Bühne 30 ist im
       // ersten 45-min-Sitting bewusst NICHT mehr erreichbar (erst via Aszension).
       // Measured: t10 1.75 min, t20 12.7 min, t25 31.1/31.3 min (seeds 1/7).
+      // A2 (Boss-Gimmicks + Ausdauer-Ausgleich): t25 33.9/34.1 min — der
+      // gemischte Bot (57–81 % Klick-Anteil an den Gates) profitiert leicht vom
+      // Ausgleich, die Wand steht unverändert vor Bühne 30. Anker unberührt.
       expect(t10! / 60).toBeGreaterThanOrEqual(1.75 * (1 - TOL)); // 1.3 min
       expect(t10! / 60).toBeLessThanOrEqual(1.75 * (1 + TOL)); // 2.2 min
       expect(t25! / 60).toBeGreaterThanOrEqual(30 * (1 - TOL)); // 22.5 min
@@ -346,6 +368,11 @@ describe('simulateEndless — first Himmelfahrt pacing (M10-AC4)', () => {
       const hours = era.firstHimmelfahrtT / 3600;
       // v12 (Goal „a lot slower"): measured 15.3–15.5 h across seeds (was
       // 5.4–5.7 h) — the first Himmelfahrt is now a multi-session march.
+      // ROADMAP-V2 A2: 18.44/18.27/18.32 h (vorher 18.26/18.81/18.19) — der
+      // EMPFINDLICHSTE Anker des Pakets: der 0.7-cps-Bot ist idle-dominiert und
+      // lebt genau an der Gate-Kante. Er entscheidet die Gimmick-Parameter —
+      // 2×5 s Spotlight schob ihn auf 19.7 h und damit aus dem Fenster, 2×4 s
+      // hält ihn bei 18.3 h. Das Fenster selbst bleibt unverändert.
       expect(hours).toBeGreaterThanOrEqual(15.5 * 0.75); // ≈ 11.6 h
       expect(hours).toBeLessThanOrEqual(15.5 * 1.25); // ≈ 19.4 h
       let worst = 0;
@@ -388,15 +415,20 @@ describe('simulateEndless — full loot economy in the bot (§9.5, M14-AC1)', ()
   // new boss ⇒ a modest, variable sample). Asserted concretely on deterministic
   // witness seeds. v12: the slower pacing shrinks the 45-min chest sample further —
   // no single seed banks tokens AND a gear level any more, so the witness splits:
-  // seed 7 banks a permanent token + 🧩 (tokens 1, shards 8), seed 12345 converts
-  // 🧩 into a real gear level (shards 10, gear Lv 1). Every faucet stays covered.
+  // seed 7 banks a permanent token + 🧩 (tokens 1, shards 8), a second witness
+  // converts 🧩 into a real gear level. Every faucet stays covered.
   it('seed 7: token + shard faucets bank concrete loot', () => {
     const e = simulateSingleRun({ ...ACTIVE, seed: 7 }, RUN_S).econ;
     expect(e.tokensBanked).toBeGreaterThanOrEqual(1); // §6.2 permanent tokens
     expect(e.shards).toBeGreaterThan(0); // 🧩 banked
   });
-  it('seed 12345: shard→gear faucet converts into a skin level', () => {
-    const e = simulateSingleRun({ ...ACTIVE, seed: 12345 }, RUN_S).econ;
+  // ROADMAP-V2 A2 (Boss-Gimmicks): the gear-level witness moved 12345 → 4711. The
+  // gimmicks shift WHICH bosses fall inside a 45-min run by a zone or two, and with
+  // them the seeded chest draws — seed 12345 now banks 7 🧩 (one draw short of the 10
+  // a level costs) while 4711 banks 14 ⇒ Lv 1. A witness-seed swap, not a weakened
+  // claim: the assertion is unchanged and still proves 🧩 → real gear power.
+  it('seed 4711: shard→gear faucet converts into a skin level', () => {
+    const e = simulateSingleRun({ ...ACTIVE, seed: 4711 }, RUN_S).econ;
     expect(e.shards).toBeGreaterThan(0); // 🧩 banked
     expect(e.gearLevel).toBeGreaterThanOrEqual(1); // shards buy ≥ 1 skin level
   });
@@ -430,6 +462,29 @@ describe('simulateEndless — float-guard to zone 300 (M14-AC4, §9.3)', () => {
       // §9.3 assert #3: the smallest relevant additive gain stays above `wert · 2^-50`
       // (the additive-precision stall guard) — no per-tick gain underflows its total.
       expect(g.minGainRatio).toBeGreaterThan(2 ** -50);
+    });
+  }
+});
+
+// ROADMAP-V2 A2: the bot RUNS the theme gimmicks inside `stepSecond` (Spotlight
+// pauses its idle term, the Schild filters both terms, the Welle heals the boss back,
+// Gravitation lifts its combo share). The guard that matters at the sim boundary is
+// that no gimmick can soft-lock a gate: one 45-min run must walk through all four
+// themes' gates (5 club, 10 synth, 15 beach, 20 space). A future parameter tweak that
+// makes one theme unbeatable fails here instead of silently stalling the frontier.
+describe('simulateEndless — A2 Boss-Gimmicks (kein Gate sperrt)', () => {
+  for (const seed of SEEDS_HEAVY) {
+    it(`seed ${seed}: the bot beats all four themed gates in one 45-min run`, () => {
+      const r = simulateSingleRun({ ...ACTIVE, seed }, RUN_S);
+      const seen = new Set<string>();
+      for (const gate of [5, 10, 15, 20]) {
+        const g = gimmickForZone(gate);
+        expect(g).not.toBeNull();
+        seen.add(g!.id);
+        // Die Bühne HINTER dem Gate wurde erreicht ⇒ der Boss ist gefallen.
+        expect(r.timeToZone.get(gate + 1)).toBeDefined();
+      }
+      expect(seen.size).toBe(4); // je Theme genau ein eigener Twist
     });
   }
 });

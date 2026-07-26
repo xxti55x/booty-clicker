@@ -10,6 +10,7 @@
  * never buried in logic). The reducer functions (`hit`, `tickBoss`, `travelTo`)
  * are pure so the whole progression is unit-testable and deterministic.
  */
+import { bossHpScale } from './boss-gimmicks';
 
 /** Normal rivals to out-twerk before a zone is cleared. */
 export const MONSTERS_PER_ZONE = 10;
@@ -38,9 +39,15 @@ export function monsterHp(zone: number): number {
   return HP_BASE * Math.pow(HP_GROWTH, zone - 1);
 }
 
-/** Max Ausdauer (HP) of the boss guarding `zone`. */
+/**
+ * Max Ausdauer (HP) of the boss guarding `zone`. Since ROADMAP-V2 A2 every gate
+ * carries its theme's Gimmick, and the boss pays for its trick in Ausdauer
+ * (`bossHpScale`) — so a Gimmick redistributes HOW a gate is fought without
+ * moving the total power the wall demands. Off a boss zone the scale is 1, so
+ * the raw ×10 curve is unchanged.
+ */
 export function bossHp(zone: number): number {
-  return monsterHp(zone) * BOSS_HP_FACTOR;
+  return monsterHp(zone) * BOSS_HP_FACTOR * bossHpScale(zone);
 }
 
 /** BP dropped for defeating a rival (or boss) at `zone`. */

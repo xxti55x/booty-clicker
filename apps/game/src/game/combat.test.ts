@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { bossHpScale } from './boss-gimmicks';
 import {
   BOSS_TIME_S,
   bossHp,
@@ -27,7 +28,22 @@ describe('combat — zones & HP scaling', () => {
     expect(monsterHp(1)).toBe(10);
     expect(monsterHp(2)).toBeCloseTo(16, 6);
     expect(monsterHp(5)).toBeGreaterThan(monsterHp(4));
+    // Zone 1 ist kein Gate ⇒ kein Gimmick-Ausgleich, die rohe ×10-Kurve.
     expect(bossHp(1)).toBe(monsterHp(1) * 10);
+  });
+
+  // ROADMAP-V2 A2: An einem echten Gate zahlt der Boss sein Theme-Gimmick in
+  // Ausdauer (`GIMMICK_HP_SCALE`) — die Kurve bleibt exponentiell, aber jedes
+  // Theme sitzt an seiner eigenen Stufe. Der Faktor kommt aus der EINEN Quelle.
+  it('a gated boss carries its gimmick’s Ausdauer scale', () => {
+    for (const zone of [5, 10, 15, 20, 25]) {
+      expect(bossHp(zone)).toBeCloseTo(monsterHp(zone) * 10 * bossHpScale(zone), 9);
+    }
+    expect(bossHpScale(5)).toBeLessThan(1); // Spotlight kostet den Boss Ausdauer
+    expect(bossHpScale(20)).toBe(1); // Gravitation hilft dem Spieler ⇒ kein Rabatt
+    expect(bossHp(10)).toBeGreaterThan(bossHp(5)); // Kurve bleibt monoton …
+    expect(bossHp(15)).toBeGreaterThan(bossHp(10));
+    expect(bossHp(20)).toBeGreaterThan(bossHp(15));
   });
 
   it('marks every 5th zone as a boss zone', () => {

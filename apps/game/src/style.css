@@ -1201,6 +1201,46 @@ body {
     28px 100%,
     100% 100%;
 }
+/* ROADMAP-V2 A2: Spotlight-Phase (Club) — der Balken wechselt in einen kalten
+   Bühnenlicht-Look und pulst, solange nur Klicks zählen. Rein visuell. */
+.rival-hpfill.spotlight {
+  background:
+    repeating-linear-gradient(
+      -55deg,
+      rgba(255, 255, 255, 0.3) 0 7px,
+      rgba(255, 255, 255, 0) 7px 14px
+    ),
+    linear-gradient(180deg, #fffdf0 0%, #ffe9a8 55%, #e8c25a 100%);
+  background-size:
+    28px 100%,
+    100% 100%;
+  animation:
+    hpstripes 0.45s linear infinite,
+    hpspot 0.7s ease-in-out infinite;
+}
+@keyframes hpspot {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.45);
+  }
+}
+/* …und ein kurzer Rückwärts-Blitz, wenn die Welle geheilt hat (Beach). */
+.rival-hpfill.healed {
+  animation:
+    hpstripes 0.8s linear infinite,
+    hpheal 0.55s ease-out 1;
+}
+@keyframes hpheal {
+  0% {
+    filter: brightness(2.1) hue-rotate(-40deg);
+  }
+  100% {
+    filter: none;
+  }
+}
 @keyframes hpstripes {
   to {
     background-position:
@@ -1340,6 +1380,13 @@ body {
 .pop.onbeat {
   color: #ffd24d;
   text-shadow: 0 0 10px rgba(255, 210, 77, 0.85);
+}
+/* ROADMAP-V2 A2 (Synth „Schild-Takte"): abgeprallter Klick. Kalt, klein und
+   ohne Zahl — die Aussage ist „nichts angekommen", nicht „wie viel". */
+.pop.blocked {
+  color: #9fd6ff;
+  font-size: 17px;
+  text-shadow: 0 0 10px rgba(120, 190, 255, 0.75);
 }
 
 /* ---- M8: combo tiers, ability bar, crew milestone bars ---- */
@@ -2534,6 +2581,49 @@ body {
   font-weight: 800;
 }
 
+/* ---- ROADMAP-V2 A2: Gimmick-Label an der Boss-HP-Bar ---- */
+/* Eine kleine gestempelte Plakette: sie steht die GANZE Kampfzeit da, damit man
+   die Mechanik nachlesen kann, wenn das Auftritts-Banner längst weg ist. */
+.boss-gimmick {
+  align-self: center;
+  margin: 5px auto 0;
+  padding: 2px 9px 3px;
+  width: fit-content;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  color: #2a1500;
+  background: linear-gradient(180deg, #ffe9a8 0%, #f6c667 60%, #e0a344 100%);
+  border: 2px solid var(--wood-rim);
+  box-shadow: inset 0 1px 0 rgba(255, 252, 240, 0.8);
+}
+.boss-gimmick.hidden {
+  display: none; /* .hidden steht früher im Sheet — gleiche Spezifität, hier explizit */
+}
+/* Läuft die Spotlight-Phase, pulst die Plakette im selben Takt wie der Balken. */
+.boss-gimmick.on {
+  animation: gimmickPulse 0.7s ease-in-out infinite;
+}
+@keyframes gimmickPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: inset 0 1px 0 rgba(255, 252, 240, 0.8);
+  }
+  50% {
+    transform: scale(1.07);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 252, 240, 0.9),
+      0 0 14px rgba(255, 220, 120, 0.9);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boss-gimmick.on {
+    animation: none;
+  }
+}
+
 /* ---- ROADMAP-V2 G2: Boss-Auftritts-Banner ---- */
 /* Sitzt als letzte Zeile in der `.topui`-Spalte (unter der Rivalen-Karte), also
    kann es mit HUD/Karte nie kollidieren und braucht keine Pixel-Position. Der
@@ -2564,6 +2654,16 @@ body {
 }
 .boss-banner.hidden {
   display: none;
+}
+/* ROADMAP-V2 A2: die Gimmick-Zeile unter dem Bossnamen — kleiner, ruhiger,
+   im selben Goldrahmen. Sie sagt die Mechanik EINMAL groß an. */
+.bb-gimmick {
+  display: block;
+  margin-top: 1px;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.1px;
+  color: #5a3200;
 }
 @keyframes bossbanner {
   0% {

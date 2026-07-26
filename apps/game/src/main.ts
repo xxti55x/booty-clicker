@@ -89,10 +89,27 @@ import {
   tierCritMultBonus,
 } from './game/combo';
 import {
+  type BossGimmick,
+  type GimmickRuntime,
+  SPOTLIGHT_S,
+  SYNTH_IDLE_FACTOR,
+  applyWaveHeal,
+  createGimmickRuntime,
+  gimmickForZone,
+  shieldWindowMs,
+  spaceComboExtra,
+  spaceComboStep,
+  spotlightActive,
+  themeForZone,
+  tickGimmick,
+  waveHealAmount,
+} from './game/boss-gimmicks';
+import {
   challengeBoss,
   type CombatState,
   goldFor,
   hit,
+  hpFraction,
   monsterHp,
   spawnFor,
   tickBoss,
@@ -194,13 +211,12 @@ import { ISLAND_C } from './world/island';
 // choreography cadence stays here as glue.
 const MOVE_SWITCH_CLICKS = 18;
 
-const BG_BY_TIER = ['club', 'synth', 'beach', 'space'] as const;
 // Bühnen-Auto-Rotation (Goal): Das Theme wechselt ALLE 5 Bühnen — und weil jede
 // 5. Bühne ein Boss-Gate ist (BOSS_EVERY), liegt jeder Theme-Wechsel exakt
 // HINTER einem Bosskampf (5→6, 10→11, …). Manuelles Wählen gibt es nicht mehr.
-const ZONES_PER_BG = 5;
-const bgForZone = (zone: number): (typeof BG_BY_TIER)[number] =>
-  BG_BY_TIER[Math.floor((zone - 1) / ZONES_PER_BG) % BG_BY_TIER.length];
+// Die Rotation selbst lebt als EINE Quelle in `game/boss-gimmicks.themeForZone`
+// (Kulisse, Zonen-Strip und Boss-Gimmick müssen dasselbe Theme sehen).
+const bgForZone = themeForZone;
 // Wave 3: scenery recolour lap — hue-shifts each stage's palette every full
 // 20-zone tour (4 Themes × 5 Bühnen), in step with the rival's entityVariant,
 // so endless laps 2, 3, … never look identical. Purely visual.
@@ -969,9 +985,21 @@ let cineKeyInt = 0;
 let cineFillInt = 0;
 let cineHemiInt = 0;
 
-/** „👑 <Bossname>" einrollen lassen (Name aus derselben Quelle wie das HUD). */
+/**
+ * „👑 <Bossname>" einrollen lassen (Name aus derselben Quelle wie das HUD) —
+ * darunter als zweite Zeile das Gimmick-Label des Gates (ROADMAP-V2 A2), damit
+ * die Mechanik EINMAL groß angesagt wird, bevor sie zuschlägt.
+ */
 function showBossBanner(zone: number): void {
   bossBanner.textContent = rivalName(zone, true); // trägt die 👑 bereits
+  const g = gimmickForZone(zone);
+  if (g) {
+    const sub = document.createElement('span');
+    sub.className = 'bb-gimmick';
+    sub.textContent = g.label;
+    sub.title = g.description;
+    bossBanner.appendChild(sub);
+  }
   bossBanner.classList.remove('hidden');
   // Keyframes neu anstoßen (zweiter Boss in derselben Sitzung): Animation aus,
   // Reflow erzwingen, zurück auf den Stylesheet-Wert.
@@ -1030,8 +1058,25 @@ function stepCinematics(dt: number): void {
   if (k >= 1) cancelCinematics();
 }
 
+// ---------- ROADMAP-V2 A2: Boss-Gimmicks pro Theme ----------
+// Der Kampf-Zustand (welche Spotlight-Phasen liefen schon, wann rollt die
+// nächste Welle) ist bewusst NUR hier in der Glue: er gehört zu EINEM Kampf,
+// überlebt keinen Reload und hat deshalb im `CombatState` (→ Save) nichts
+// verloren. Ein frisch gespawnter Boss startet mit `createGimmickRuntime()`.
+let bossGimmick: GimmickRuntime = createGimmickRuntime();
+/** Läuft gerade eine Spotlight-Phase? (nur für den HUD-Look) */
+let spotlightOn = false;
+
+/** Das Gimmick des LAUFENDEN Kampfes (null, solange kein Boss tanzt). */
+function activeGimmick(): BossGimmick | null {
+  return combat.boss ? gimmickForZone(combat.zone) : null;
+}
+
 /** Der Boss betritt die Bühne — beide Spawn-Pfade laufen hier zusammen. */
 function bossEntrance(): void {
+  // A2: frischer Kampf ⇒ frische Phasen + Wellen-Uhr.
+  bossGimmick = createGimmickRuntime();
+  spotlightOn = false;
   // P1-Buchhaltung: Ein offener Fehlversuch gehört immer nur zu EINEM Gate.
   // Spawnt ein Boss auf einer anderen Bühne (z. B. Bühne 5 nach einer Aszension,
   // während der Timeout auf Bühne 10 liegt), ist der alte Anlauf Geschichte —
@@ -1252,9 +1297,18 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
   const wasBoss = combat.boss;
   // Glutaeus Maximus (§4.6) + Tyrann/Krönung gear (§5) + the crew's `boss`-special
   // ability tiers (v11 — Türsteher/Orbital-Station) boost damage dealt to a boss.
-  const effDmg = wasBoss
+  let effDmg = wasBoss
     ? dmg * ancientBossDmgMult(state.ancients) * bossDmgMult(state.gear) * crewSpec.bossMult
     : dmg;
+  // ROADMAP-V2 A2: Theme-Gimmick des Gates. Nur der IDLE-Anteil wird hier
+  // gefiltert — der Klick-Pfad entscheidet in `doShake` selbst (er kennt Takt und
+  // Combo und braucht das Abprall-Feedback). Spotlight: die Crew pausiert ganz.
+  // Schild: sie trommelt ungetaktet und landet nur im Beat-Fenster.
+  if (wasBoss && !fromClick) {
+    const g = gimmickForZone(combat.zone);
+    if (g?.id === 'spotlight' && spotlightActive(bossGimmick)) effDmg = 0;
+    else if (g?.id === 'shield') effDmg *= SYNTH_IDLE_FACTOR;
+  }
   const r = hit(combat, effDmg);
   // A newly-spawned boss gets Chronilla's extra timer seconds.
   combat = r.bossSpawned ? withBossTimerBonus(r.state) : r.state;
@@ -1288,18 +1342,21 @@ function doShake(x?: number, y?: number): void {
   // On-beat is judged against the CURRENT tier's (possibly widened) window,
   // before this click bumps the combo.
   const curTier = comboTier(comboState.stacks);
-  const onBeat = isOnBeat(
-    choreo.phase,
-    phaseVelocity(drive),
-    // Beatrix (§4.6) + Neon/Synth gear (§5) + DJ/KI-Cluster `beat`-specials (v11)
-    // widen the on-beat window on top of the tier bonus.
-    beatWindowMs(
-      tierBeatWindowBonusMs(curTier) +
-        ancientBeatWindowBonusMs(state.ancients) +
-        beatWindowBonus(state.gear) +
-        crewSpec.beatWindowMs,
-    ),
-  );
+  // Beatrix (§4.6) + Neon/Synth gear (§5) + DJ/KI-Cluster `beat`-specials (v11)
+  // widen the on-beat window on top of the tier bonus — dieselbe Summe weitet
+  // auch das A2-Schild-Fenster (genau der Hebel, mit dem man sich rüstet).
+  const beatBonusMs =
+    tierBeatWindowBonusMs(curTier) +
+    ancientBeatWindowBonusMs(state.ancients) +
+    beatWindowBonus(state.gear) +
+    crewSpec.beatWindowMs;
+  const pps = phaseVelocity(drive);
+  const onBeat = isOnBeat(choreo.phase, pps, beatWindowMs(beatBonusMs));
+  // A2 Synth „Schild-Takte": eigenes, drive-invariantes Fenster (siehe
+  // `shieldWindowMs`) — außerhalb prallt der Klick am Boss ab.
+  const gimmick = activeGimmick();
+  const bounced =
+    gimmick?.id === 'shield' && !isOnBeat(choreo.phase, pps, shieldWindowMs(pps, beatBonusMs));
 
   // Wackelias (§4.6) + Showmaster/Club gear (§5) + Hype-Girl/Viral-Team
   // `combo`-specials (v11) widen the combo grace window.
@@ -1353,12 +1410,26 @@ function doShake(x?: number, y?: number): void {
     critMultBonus: tierCritMultBonus(tier) + critMultBonus(state.gear) + crewSpec.critDmg,
     // Permanent „+1 % Krit-Schaden" tokens scale the whole crit multiplier (§6.2).
     critMultFactor: permTokenCritMult(state.permTokens),
-    extraMult: beatBonus(onBeat, onBeatMultBonus(state.gear)) * frenzyMult(state.ability, now),
+    extraMult:
+      beatBonus(onBeat, onBeatMultBonus(state.gear)) *
+      frenzyMult(state.ability, now) *
+      // A2 Space „Gravitations-Combo": der Combo-BONUS zählt ×1.5. `effectiveClick`
+      // trägt `comboMult(stacks)` schon in sich — dieser Faktor hebt genau ihn.
+      (gimmick?.id === 'gravity' ? spaceComboExtra(comboState.stacks) : 1),
   });
   const px = x ?? window.innerWidth / 2;
   const py = y ?? window.innerHeight / 2;
 
-  applyHit(dmg, true, px, py);
+  // A2 Synth: ein Klick daneben prallt ab — 0 Schaden, „Klirr"-Feedback statt
+  // Schadenszahl. Combo/Ekstase/Krit hat er trotzdem gezählt (er war ja ein
+  // Klick), nur der Boss steckt nichts ein.
+  if (bounced) {
+    pops.blocked(px, py);
+    audio.bossHit();
+    entity.flinch();
+  } else {
+    applyHit(dmg, true, px, py);
+  }
   lootFromClick(now);
 
   char.cheeks.forEach((c) => {
@@ -1383,7 +1454,7 @@ function doShake(x?: number, y?: number): void {
     clicksSinceSwitch = 0;
     choreo.setMove(choreo.moveIdx + 1);
   }
-  pops.damage({ value: dmg, crit, onBeat, x: px, y: py }, now);
+  if (!bounced) pops.damage({ value: dmg, crit, onBeat, x: px, y: py }, now);
   audio.click();
   const stacks = Math.floor(comboState.stacks);
   if (stacks > 2 && stacks % 5 === 0) audio.combo(stacks);
@@ -1922,6 +1993,9 @@ let t0 = 0;
       tris: number;
       deckE: number;
       deckI: number;
+      gim: string;
+      spot: boolean;
+      hpF: number;
     };
   }
 ).chVs = () => ({
@@ -1939,6 +2013,12 @@ let t0 = 0;
   // damit der Headless-Beweis den Puls MISST statt ihn aus Pixeln zu raten.
   deckE: floorMat.emissive.getHex(),
   deckI: floorMat.emissiveIntensity,
+  // ROADMAP-V2 A2: welches Gimmick am laufenden Gate greift, ob gerade eine
+  // Spotlight-Phase läuft und der Rest-HP-Anteil — damit der Beweis-Lauf die
+  // Mechanik MISST (Phasen-Trigger, Wellen-Heilung) statt sie aus Pixeln zu raten.
+  gim: activeGimmick()?.id ?? '',
+  spot: spotlightOn,
+  hpF: hpFraction(combat),
 });
 let uiTimer = 0;
 let lastRenderMs = 0;
@@ -1956,6 +2036,28 @@ function loop(nowMs: number): void {
   // Idle-DPS auf einen Rivalen einschlagen, der gar nicht auf der Bühne steht,
   // und ein Kill mitten im Wechsel könnte den nächsten Wechsel auslösen.
   const swapping = world.transitioning;
+  // ROADMAP-V2 A2: Der Kampf-Zustand des Gimmicks läuft VOR dem Idle-Schaden —
+  // sonst hinkte eine gerade gezündete Spotlight-Phase einen Frame hinterher und
+  // die Crew schlüge noch einmal durch.
+  const gimmickNow = combat.boss && !swapping ? gimmickForZone(combat.zone) : null;
+  if (combat.boss && !swapping) {
+    const g = tickGimmick(bossGimmick, gimmickNow, hpFraction(combat), dt);
+    bossGimmick = g.state;
+    spotlightOn = g.spotlight;
+    if (g.started) {
+      toasts.show('🔦', 'Spotlight!', `${SPOTLIGHT_S} s lang zählen NUR deine Klicks.`);
+      audio.bossHit();
+    }
+    if (g.heals > 0) {
+      // Wellen-Heilung: der Balken springt sichtbar zurück (`hud.pulseHeal`).
+      const hp = applyWaveHeal(combat.hp, combat.hpMax, waveHealAmount(combat.hpMax, g.heals));
+      combat = { ...combat, hp };
+      hud.pulseHeal();
+    }
+  } else if (spotlightOn) {
+    spotlightOn = false;
+  }
+  hud.setSpotlight(spotlightOn);
   // Idle DPS chips away at the current target; the Twerk-Coach auto-clicks at
   // 25 % of the click value (no crit/beat, §4.3.5) — Robo gear stars add cps (§5),
   // the same sum the offline accrual uses; boss timer ticks down.
@@ -1984,8 +2086,12 @@ function loop(nowMs: number): void {
   }
 
   // Combo soft-decay (§4.2.2, slowed by Showmaster gear §5) + tier-driven juice
-  // (music/ability bar), each frame.
-  comboState = comboStep(comboState, dt, comboDecayReduction(state.gear));
+  // (music/ability bar), each frame. A2 Space: im Gravitations-Kampf verfällt sie
+  // doppelt so schnell (das Gnaden-Fenster bleibt, nur der Verfall danach zählt ×2).
+  comboState =
+    gimmickNow?.id === 'gravity'
+      ? spaceComboStep(comboState, dt, comboDecayReduction(state.gear))
+      : comboStep(comboState, dt, comboDecayReduction(state.gear));
   const epochMs = Date.now();
   // Golden-Peach schedule (§6.1): despawn/reschedule the event, then sync the
   // on-screen 🍑 button + ×2-boost badge (clamped/despawned per B13c).
