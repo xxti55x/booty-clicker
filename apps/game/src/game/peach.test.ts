@@ -60,6 +60,10 @@ describe('peach — boost (§6.1)', () => {
   it('is ×2 income for exactly 60 s (v12 Goal-Nerf)', () => {
     const now = 5_000;
     const until = activateBoost(now);
+    // ROADMAP-V2 P4 „Pfirsich-Reife": +15 s auf genau dieses Fenster (Default 0).
+    expect(activateBoost(now, 15_000)).toBe(until + 15_000);
+    expect(activateBoost(now, -5)).toBe(until);
+    expect(activateBoost(now, Number.NaN)).toBe(until);
     expect(until).toBe(now + PEACH_BOOST_S * 1000);
     expect(PEACH_BOOST).toBe(2);
     expect(incomeMultiplier(until, now)).toBe(2);

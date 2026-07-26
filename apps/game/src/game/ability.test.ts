@@ -51,6 +51,12 @@ describe('activate / frenzy (spec §4.2.4 — ×10 for 12 s)', () => {
     expect(frenzyMult(fired, now + FRENZY_DURATION_MS - 1)).toBe(FRENZY_MULT);
     // At/after the end the multiplier drops back to 1.
     expect(frenzyMult(fired, now + FRENZY_DURATION_MS)).toBe(1);
+    // ROADMAP-V2 P4 „Ekstase-Doktrin": derselbe Fensterlauf, nur ×12.
+    expect(frenzyMult(fired, now, 12)).toBe(12);
+    expect(frenzyMult(fired, now + FRENZY_DURATION_MS, 12)).toBe(1); // abgelaufen bleibt ×1
+    // Ein kaputter Multiplikator darf die Ekstase nie zum Malus machen.
+    expect(frenzyMult(fired, now, Number.NaN)).toBe(1);
+    expect(frenzyMult(fired, now, 0.5)).toBe(1);
     expect(isFrenzyActive(fired, now + FRENZY_DURATION_MS)).toBe(false);
   });
 

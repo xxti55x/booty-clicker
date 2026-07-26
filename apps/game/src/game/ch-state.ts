@@ -40,6 +40,9 @@ import {
   type HeavenState,
   bankHimmelfahrt,
   createHeaven,
+  goldeneHandeMult,
+  heavenClickMult,
+  heavenDpsMult,
   heavenGlobalMult,
   soulBonusEff,
   truhenMagnetBonus,
@@ -322,6 +325,9 @@ export function dpsOf(state: DerivedInput): number {
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientDpsMult(state.ancients) *
     heavenGlobalMult(hpf) *
+    // ROADMAP-V2 P4 (Kampf-Ast): „Schwerer Bass" × „Crew-Doktrin" — die einzigen
+    // Himmelsbaum-Faktoren, die NUR die Idle-Seite heben (Klick hat seinen eigenen).
+    heavenDpsMult(state.heaven) *
     (state.transcend ? transcendGlobalMult(state.transcend.te) : 1) *
     (state.gear ? dpsGearMult(state.gear) : 1) *
     (state.permTokens ? permTokenDpsMult(state.permTokens) : 1) *
@@ -344,6 +350,10 @@ export function clickDamageOf(state: DerivedInput): number {
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientClickMult(state.ancients) *
     heavenGlobalMult(hpf) *
+    // ROADMAP-V2 P4 (Kampf-Ast): die „Klick-Doktrin" — Gegenstück zur „Crew-Doktrin"
+    // in `dpsOf`. Genau EINE der beiden ist je kaufbar (Exklusiv-Paar), also kann
+    // der Baum das Klick:Idle-Verhältnis immer nur in EINE Richtung kippen.
+    heavenClickMult(state.heaven) *
     (state.transcend ? transcendGlobalMult(state.transcend.te) : 1) *
     (state.gear ? clickGearMult(state.gear) : 1)
   );
@@ -355,16 +365,23 @@ export function clickDamageOf(state: DerivedInput): number {
  * bought `gold`-special ability tiers (v11). Does NOT include the transient
  * Golden-Peach ×3 income boost — the glue folds that in live via
  * `peach.incomeMultiplier` (kills) while offline accrual uses this alone.
- * `crewUp` is optional so pre-v11 callers/tests fold the neutral ×1.
+ * `crewUp`/`heaven` are optional so pre-v11 callers/tests fold the neutral ×1.
+ * `heaven` trägt seit ROADMAP-V2 P4 den Ökonomie-Knoten „Goldene Hände"
+ * (+10 %/Stufe) — er wirkt damit auf JEDE BP-Quelle, live wie offline.
  */
 export function goldMult(
-  state: Pick<ChState, 'ancients' | 'gear'> & { permTokens?: PermTokens; crewUp?: CrewUps },
+  state: Pick<ChState, 'ancients' | 'gear'> & {
+    permTokens?: PermTokens;
+    crewUp?: CrewUps;
+    heaven?: HeavenState;
+  },
 ): number {
   return (
     ancientGoldMult(state.ancients) *
     goldGearMult(state.gear) *
     (state.permTokens ? permTokenGoldMult(state.permTokens) : 1) *
-    (state.crewUp ? crewSpecialBonuses(state.crewUp).goldMult : 1)
+    (state.crewUp ? crewSpecialBonuses(state.crewUp).goldMult : 1) *
+    (state.heaven ? goldeneHandeMult(state.heaven) : 1)
   );
 }
 

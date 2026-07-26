@@ -69,9 +69,15 @@ export function isFrenzyActive(state: AbilityState, now: number): boolean {
   return now < state.frenzyUntil;
 }
 
-/** Click-damage multiplier from Ekstase: `FRENZY_MULT` while active, else 1. */
-export function frenzyMult(state: AbilityState, now: number): number {
-  return isFrenzyActive(state, now) ? FRENZY_MULT : 1;
+/**
+ * Click-damage multiplier from Ekstase: `mult` while active, else 1. `mult` defaults
+ * to `FRENZY_MULT` (×10); der Himmelsbaum-Knoten „Ekstase-Doktrin" (ROADMAP-V2 P4)
+ * reicht ×12 herein. Nicht-endliche/kleinere-als-1 Werte fallen auf ×1 zurück, damit
+ * ein kaputter Aufruf die Ekstase nie zu einem Malus macht.
+ */
+export function frenzyMult(state: AbilityState, now: number, mult: number = FRENZY_MULT): number {
+  if (!isFrenzyActive(state, now)) return 1;
+  return Number.isFinite(mult) && mult > 1 ? mult : 1;
 }
 
 /** Meter fill fraction in [0, 1] (for the ability bar), full at `chargeMax`. */

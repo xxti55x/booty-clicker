@@ -29,6 +29,18 @@ describe('comboMult', () => {
     expect(comboMult(COMBO_CAP + 50)).toBeCloseTo(1.2, 9); // > cap ⇒ still ×1.2
     expect(comboMult(10_000)).toBeCloseTo(1.2, 9);
   });
+
+  // ROADMAP-V2 P4: der Himmelsbaum-Knoten „Combo-Doktrin" reicht einen größeren
+  // Schritt herein (Cap ×1.3 statt ×1.2). Der Default bleibt zahlengleich.
+  it('nimmt einen abweichenden Schritt entgegen (P4 „Combo-Doktrin")', () => {
+    const step = 0.3 / COMBO_CAP;
+    expect(comboMult(COMBO_CAP, step)).toBeCloseTo(1.3, 9);
+    expect(comboMult(COMBO_CAP / 2, step)).toBeCloseTo(1.15, 9);
+    expect(comboMult(COMBO_CAP + 99, step)).toBeCloseTo(1.3, 9); // Cap bleibt Cap
+    // Müll fällt auf den Basis-Schritt zurück, nie auf 0/NaN.
+    expect(comboMult(COMBO_CAP, Number.NaN)).toBeCloseTo(1.2, 9);
+    expect(comboMult(COMBO_CAP, -1)).toBeCloseTo(1.2, 9);
+  });
 });
 
 describe('rollCrit', () => {

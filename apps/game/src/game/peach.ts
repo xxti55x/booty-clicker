@@ -62,9 +62,14 @@ export function rollNextPeachAt(now: number, rng: Rng, gapMult = 1): number {
   return now + delayS * 1000;
 }
 
-/** Epoch-ms until which the ×3 boost runs after catching a peach at `now`. */
-export function activateBoost(now: number): number {
-  return now + PEACH_BOOST_S * 1000;
+/**
+ * Epoch-ms until which the income boost runs after catching a peach at `now`:
+ * `PEACH_BOOST_S` plus `extraMs` (ROADMAP-V2 P4, Himmelsbaum-Knoten „Pfirsich-Reife":
+ * +15 s). Default 0 ⇒ zahlengleich zu vorher.
+ */
+export function activateBoost(now: number, extraMs = 0): number {
+  const extra = Number.isFinite(extraMs) && extraMs > 0 ? extraMs : 0;
+  return now + PEACH_BOOST_S * 1000 + extra;
 }
 
 /** Whether the peach boost is still active at `now`. */

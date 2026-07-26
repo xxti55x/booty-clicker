@@ -14,6 +14,7 @@ import {
   transcendState,
 } from '../game/ch-state';
 import { createGear } from '../game/gear';
+import { TREE_NODES, treeLevel } from '../game/heaven';
 import { createMeta, dailyQuests } from '../game/quests';
 import { createTranscend, transcendGlobalMult } from '../game/transcend';
 import { monsterHp } from '../game/combat';
@@ -342,6 +343,41 @@ describe('ch-store — v5 migration & repair (M10)', () => {
     const s = deserializeCh(JSON.stringify(raw));
     expect(s!.heaven.hpf).toBe(10); // clamped to hpfLifetime
     expect(s!.heaven.tree).toEqual({ coach: 5 });
+  });
+
+  /**
+   * ROADMAP-V2 P4: `heaven.tree` ist ein OFFENES Record — neue Baum-Knoten brauchen
+   * deshalb keinen Schema-Bump. Die bewusste Entscheidung dazu (siehe DECISIONS):
+   * unbekannte Ids ÜBERLEBEN das Laden, statt geprunt zu werden. Wer mit einem
+   * neueren Build spielt, dort einen neuen Knoten kauft und danach eine ältere
+   * Version öffnet (Itch-Build, zweites Gerät), verliert seine HPF nicht — und
+   * wirkungslos sind die fremden Ids ohnehin, weil `treeLevel` sie auf ihr
+   * Max-Level 0 deckelt. Aufgeräumt werden sie beim Respec.
+   */
+  it('lets UNKNOWN tree ids survive a load/save round-trip (P4, no schema bump)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.heaven = {
+      hpf: 30,
+      hpfLifetime: 90,
+      ascensions2: 2,
+      tree: { coach: 2, crewdoktrin: 1, knotenAusDerZukunft: 3 },
+    };
+    const s = deserializeCh(JSON.stringify(raw))!;
+    expect(s.heaven.tree).toEqual({ coach: 2, crewdoktrin: 1, knotenAusDerZukunft: 3 });
+    // …und sie bleiben wirkungslos: kein Effekt liest eine unbekannte Id.
+    expect(treeLevel(s.heaven, 'knotenAusDerZukunft')).toBe(0);
+    // Auch ein zweiter Durchlauf verliert nichts (idempotent).
+    const again = deserializeCh(serializeCh(s, 2000))!;
+    expect(again.heaven.tree).toEqual(s.heaven.tree);
+  });
+
+  it('keeps every P4 node id loadable (Alt-Save mit Doktrin bleibt intakt)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    const tree: Record<string, number> = {};
+    for (const cfg of TREE_NODES) tree[cfg.id] = 1;
+    raw.heaven = { hpf: 5, hpfLifetime: 900, ascensions2: 4, tree };
+    const s = deserializeCh(JSON.stringify(raw))!;
+    for (const cfg of TREE_NODES) expect(treeLevel(s.heaven, cfg.id)).toBe(1);
   });
 });
 

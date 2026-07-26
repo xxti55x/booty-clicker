@@ -21,6 +21,7 @@ import { createScene } from './engine/scene';
 import {
   ABILITY_CHARGE_MAX,
   FRENZY_DURATION_MS,
+  FRENZY_MULT,
   abilityOnClick,
   activate,
   canActivate,
@@ -63,6 +64,7 @@ import {
   resolveDuplicate,
 } from './game/chests';
 import {
+  PEACH_BOOST_S,
   PEACH_MAX_S,
   PEACH_VISIBLE_S,
   activateBoost,
@@ -161,13 +163,23 @@ import {
 } from './game/gear';
 import { awardGildOnZone, isGildZone } from './game/gild';
 import {
+  beatGefuhlWindowMs,
   buyTreeNode,
   canHimmelfahrt,
   coachCps,
   coachDps,
+  comboGedachtnisReduction,
+  comboStepFor,
   ekstaseBonusMs,
+  ekstaseDoktrinMult,
   fruhstarterFraction,
+  gateCrasherTimerBonus,
+  heavenCritMultFactor,
   offlineCapS,
+  pfirsichFokusGapMult,
+  pfirsichReifeBonusMs,
+  respecTree,
+  truhenFokusChestMult,
 } from './game/heaven';
 import { canAscend } from './game/ascension';
 import type { CeremonyKind } from './game/ceremony';
@@ -351,9 +363,15 @@ let runRemix = remixSeedFor(state.rng.seed, state.stats.ascensions);
 
 let combat: CombatState = spawnFor(state.zone, state.killsThisZone, state.runMaxZone, runRemix);
 
-/** Extend a freshly-spawned boss timer by Chronilla + gear bossTimer (§4.6/§5). No-op off-boss. */
+/**
+ * Extend a freshly-spawned boss timer by Chronilla + gear bossTimer (§4.6/§5) + dem
+ * Himmelsbaum-Knoten „Gate-Crasher" (+5 s, ROADMAP-V2 P4). No-op off-boss.
+ */
 function withBossTimerBonus(c: CombatState): CombatState {
-  const bonus = ancientBossTimerBonus(state.ancients) + bossTimerBonus(state.gear);
+  const bonus =
+    ancientBossTimerBonus(state.ancients) +
+    bossTimerBonus(state.gear) +
+    gateCrasherTimerBonus(state.heaven);
   return c.boss && bonus > 0 ? { ...c, bossTimer: c.bossTimer + bonus } : c;
 }
 combat = withBossTimerBonus(combat);
@@ -794,6 +812,24 @@ const heaven = new Heaven({
     audio.buy();
     hud.update(state, combat, dps, clickDmg);
     heaven.refresh();
+    persist();
+  },
+  // ROADMAP-V2 P4: Baum zurücksetzen. Kein Reset des Laufs, keine Zeremonie — es
+  // wandert nur HPF aus dem Baum zurück ins Konto (minus Gebühr). `recompute` muss
+  // trotzdem laufen: Klick-/Crew-Doktrin und der Bass hängen in dps/clickDmg.
+  onRespec: () => {
+    const r = respecTree(state.heaven);
+    if (!r.done) return;
+    state.heaven = r.heaven;
+    recompute();
+    audio.buy();
+    hud.update(state, combat, dps, clickDmg);
+    heaven.refresh();
+    toasts.show(
+      '🌳',
+      'Baum zurückgesetzt',
+      `+${fmt(r.refunded - r.fee)} 🍑 zurück (−${r.fee} Gebühr)`,
+    );
     persist();
   },
 });
@@ -1330,7 +1366,10 @@ document.getElementById('zoneStrip')?.addEventListener('click', (e) => {
 document.getElementById('bossChallenge')?.addEventListener('click', () => {
   const next = challengeBoss(combat);
   if (next === combat) return;
-  combat = next;
+  // P4: Der Retry-Boss bekommt dieselbe verlängerte Uhr wie ein regulär
+  // gespawnter (Chronilla + Gear + „Gate-Crasher") — vorher fiel der Bonus beim
+  // „Boss herausfordern"-Weg still unter den Tisch.
+  combat = withBossTimerBonus(next);
   syncEntity();
   hud.update(state, combat, dps, clickDmg);
   toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
@@ -1407,8 +1446,12 @@ function onKillProgress(
     state.meta = advanceMeta(state.meta, 'bossKills');
   } else if (r.killed) {
     // Rival kill (§6.1): a 3 % base chance — scaled by Truhen-Luck — drops a Holztruhe.
-    // A1 „Zähe Menge" verdoppelt genau diese Chance.
-    if (rng.next() < rivalChestChance(chestLuck(state)) * stage.chest) {
+    // A1 „Zähe Menge" verdoppelt genau diese Chance; der P4-Exklusiv-Knoten
+    // „Truhen-Fokus" hebt sie dauerhaft um 50 %.
+    if (
+      rng.next() <
+      rivalChestChance(chestLuck(state)) * stage.chest * truhenFokusChestMult(state.heaven)
+    ) {
       state.chests.inventory.wood += 1;
     }
   }
@@ -1565,7 +1608,10 @@ function doShake(x?: number, y?: number): void {
     tierBeatWindowBonusMs(curTier) +
     ancientBeatWindowBonusMs(state.ancients) +
     beatWindowBonus(state.gear) +
-    crewSpec.beatWindowMs;
+    crewSpec.beatWindowMs +
+    // ROADMAP-V2 P4 „Beat-Gefühl" (Ritual-Ast): +40 ms im GLEICHEN Term — er
+    // weitet damit auch das A2-Schild-Fenster, genau wie Beatrix und das Gear.
+    beatGefuhlWindowMs(state.heaven);
   const pps = phaseVelocity(drive);
   const onBeat = isOnBeat(choreo.phase, pps, beatWindowMs(beatBonusMs));
   // A2 Synth „Schild-Takte": eigenes, drive-invariantes Fenster (siehe
@@ -1628,13 +1674,17 @@ function doShake(x?: number, y?: number): void {
     // Combo-tier + Disco/Lava gear (§5) + Booty-Boss/A-Promi `critdmg`-specials
     // (v11) raise the crit multiplier; Neon-Ninja gear widens on-beat ×.
     critMultBonus: tierCritMultBonus(tier) + critMultBonus(state.gear) + crewSpec.critDmg,
-    // Permanent „+1 % Krit-Schaden" tokens scale the whole crit multiplier (§6.2).
-    critMultFactor: permTokenCritMult(state.permTokens),
+    // Permanent „+1 % Krit-Schaden" tokens scale the whole crit multiplier (§6.2) —
+    // MAL dem P4-Knoten „Präzisions-Shake" (+25 %), der genau dieselbe Skala meint.
+    critMultFactor: permTokenCritMult(state.permTokens) * heavenCritMultFactor(state.heaven),
+    // P4 „Combo-Doktrin" (Ritual-Ast): hebt den Combo-Schritt (Cap ×1.2 ⇒ ×1.3).
+    comboStep: comboStepFor(state.heaven),
     extraMult:
       // A1 „Beat-Nacht" weitet den On-Beat-Bonus additiv (×1.5 ⇒ ×2), genau wie
       // die Neon-Ninja-Sterne — eine Quelle, ein Term.
       beatBonus(onBeat, onBeatMultBonus(state.gear) + stage.beat) *
-      frenzyMult(state.ability, now) *
+      // P4 „Ekstase-Doktrin" (Ritual-Ast): dasselbe Fenster, nur ×12 statt ×10.
+      frenzyMult(state.ability, now, ekstaseDoktrinMult(state.heaven, FRENZY_MULT)) *
       // A3: der Mini-Frenzy des Truhen-Kobolds (×2 für 10 s). Bewusst ein
       // EIGENER Faktor neben `frenzyMult` — die Twerk-Ekstase behält ihren
       // Ladebalken, ihren Ring und ihren Ton für sich.
@@ -1802,12 +1852,17 @@ function updatePeachSchedule(now: number): void {
 
 /**
  * Der Pausen-Faktor des nächsten Pfirsichs: der P2-Mythos-Knoten „Pfirsich-Magnet"
- * MAL dem A1-Modifikator „Peach-Party" (beide verkürzen die Pause, also
- * multiplizieren sie sich). Gewürfelt wird beim Neuplanen — wer auf einer
- * Peach-Party-Bühne steht, plant kürzere Pausen ein: genau der Farm-Anreiz.
+ * MAL dem P4-Exklusiv-Knoten „Pfirsich-Fokus" MAL dem A1-Modifikator „Peach-Party"
+ * (alle drei verkürzen die Pause, also multiplizieren sie sich). Gewürfelt wird beim
+ * Neuplanen — wer auf einer Peach-Party-Bühne steht, plant kürzere Pausen ein: genau
+ * der Farm-Anreiz.
  */
 function peachGapMult(): number {
-  return mythosPeachGapMult(state.transcend) * stageFactors().peachGap;
+  return (
+    mythosPeachGapMult(state.transcend) *
+    pfirsichFokusGapMult(state.heaven) *
+    stageFactors().peachGap
+  );
 }
 
 /**
@@ -1819,14 +1874,17 @@ function peachGapMult(): number {
 function catchPeach(): { keys: number; boostUntil: number } | null {
   const now = Date.now();
   if (!peachVisible(now)) return null;
-  state.peach.boostUntil = activateBoost(now); // fresh ×2 60-s window
+  // P4 „Pfirsich-Reife" (Ökonomie-Ast) verlängert genau dieses Fenster um 15 s.
+  const bonusMs = pfirsichReifeBonusMs(state.heaven);
+  state.peach.boostUntil = activateBoost(now, bonusMs); // frisches ×2-Fenster
   const keys = peachKeyRoll(rng);
   earnKeys(keys);
   state.peach.nextPeachAt = rollNextPeachAt(now, rng, peachGapMult());
+  const boostS = Math.round((PEACH_BOOST_S * 1000 + bonusMs) / 1000);
   toasts.show(
     '🍑',
     'Goldener Pfirsich!',
-    keys > 0 ? '×2 Einkommen 60 s · +1 🔑' : '×2 Einkommen 60 s',
+    keys > 0 ? `×2 Einkommen ${boostS} s · +1 🔑` : `×2 Einkommen ${boostS} s`,
   );
   hud.update(state, combat, dps, clickDmg);
   persist();
@@ -2505,10 +2563,13 @@ function loop(nowMs: number): void {
   // A1 „Goldrausch" lässt sie 25 % schneller verfallen (`stageComboStep` ist bei
   // Faktor 1 zahlengleich zu `comboStep`); Gravitation und Modifikator schließen
   // sich aus, weil Boss-Bühnen keinen Modifikator tragen.
+  // P4 „Combo-Gedächtnis" (Ritual-Ast) hängt additiv im GLEICHEN Reduktions-Term
+  // wie die Showmaster-Sterne (`combo.decay` deckelt die Summe bei 1).
+  const comboRed = comboDecayReduction(state.gear) + comboGedachtnisReduction(state.heaven);
   comboState =
     gimmickNow?.id === 'gravity'
-      ? spaceComboStep(comboState, dt, comboDecayReduction(state.gear))
-      : stageComboStep(comboState, dt, comboDecayReduction(state.gear), stageFactors().comboDecay);
+      ? spaceComboStep(comboState, dt, comboRed)
+      : stageComboStep(comboState, dt, comboRed, stageFactors().comboDecay);
   const epochMs = Date.now();
   // Golden-Peach schedule (§6.1): despawn/reschedule the event, then sync the
   // on-screen 🍑 button + ×2-boost badge (clamped/despawned per B13c).

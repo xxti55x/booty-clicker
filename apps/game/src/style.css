@@ -2421,6 +2421,81 @@ body {
   color: #7a3fb8;
 }
 
+/* ---- ROADMAP-V2 P4: Himmelsbaum in drei Ästen + Exklusiv-Paare + Respec ---- */
+.hv-branch {
+  border: 1px solid rgba(255, 207, 94, 0.22);
+  border-radius: 12px;
+  padding: 9px 9px 1px;
+  margin-bottom: 12px;
+  background: rgba(255, 207, 94, 0.04);
+}
+.hv-branch-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin-bottom: 8px;
+}
+.hv-branch-nm {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--gold-base);
+}
+.hv-branch-ds {
+  font-size: 11px;
+  color: #cbbb95;
+}
+/* Exklusiv-Paar: die beiden Karten stehen als EINE Einheit, verbunden vom Steg. */
+.hv-pair {
+  border: 1px dashed rgba(255, 207, 94, 0.45);
+  border-radius: 10px;
+  padding: 8px 8px 1px;
+  margin-bottom: 10px;
+  background: rgba(255, 207, 94, 0.05);
+}
+.hv-pair .item {
+  margin-bottom: 0;
+}
+.hv-or {
+  position: relative;
+  text-align: center;
+  margin: 7px 0;
+  height: 13px;
+}
+.hv-or::before {
+  content: '';
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 50%;
+  border-top: 2px dotted rgba(255, 207, 94, 0.55);
+}
+.hv-or span {
+  position: relative;
+  padding: 0 9px;
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--gold-base);
+  background: #2a1b0d;
+  border-radius: 6px;
+}
+/* Der Verlierer der Doktrin-Wahl: ausgegraut, nicht klickbar, aber lesbar. */
+.item.hv-blocked {
+  opacity: 0.42;
+  filter: grayscale(0.6);
+  cursor: not-allowed;
+}
+.item.hv-blocked:hover {
+  background: linear-gradient(180deg, #f6ead0 0%, var(--parch) 60%, var(--parch-deep) 100%);
+  border-color: var(--parch-line);
+}
+.rebirth-info.hv-respec-info {
+  margin-top: 4px;
+}
+
 /* ---- v10: kaufbare Crew-Fähigkeiten (goal: slower progression) ---- */
 .btn.ab-buy {
   margin-top: 8px;

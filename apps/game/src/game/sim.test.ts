@@ -5,7 +5,9 @@ import type { BackgroundKey, SkinKey } from '../types';
 import { gimmickForZone } from './boss-gimmicks';
 import { spawnFor } from './combat';
 import { createGear, gearBonus, KULISSE_BUFFS, MAX_SKIN_LEVEL, MAX_SKIN_STARS } from './gear';
+import { TREE_NODES, greedyTreeSpend, treeLevel, treeNodeConfig, treeRefund } from './heaven';
 import {
+  SIM_TREE_PRIORITY,
   farmZone,
   simulateAscensionEra,
   simulateContinuous,
@@ -247,6 +249,15 @@ describe('simulateEndless — E2 (bounded soft wall, full v2 prestige stack)', (
       // ascension, and at least one real Himmelfahrt banked HPF + reset the L1 stack.
       expect(c.himmelfahrten).toBeGreaterThanOrEqual(1);
       expect(c.ascensions).toBeGreaterThanOrEqual(8);
+      // ROADMAP-V2 P4, die MESSUNG zum F7-Residual (vorher nur ein Kommentar): der
+      // Bot bankt an der z75-Wand genau 1 HPF — zu wenig für den billigsten
+      // gelisteten Baum-Knoten (12 🍑), also kauft `buyTreeGreedy` hier nichts und
+      // der Ausbau bewegt keinen einzigen E2-Wert (gemessen: 15 Verbesserungen,
+      // worstRatio 0.93/0.84/1.86 — Wert für Wert identisch zu vor P4). Wer den
+      // Baum im Bot laufen sehen will, findet die Strategie separat getestet
+      // (`SIM_TREE_PRIORITY` unten + `heaven.greedyTreeSpend`).
+      expect(c.hpfHeld).toBeGreaterThanOrEqual(1);
+      expect(c.treeLevels).toBe(0);
 
       // v10: the strict ×2 bound starts AFTER a 4-gap warm-up. The snappy click-line
       // start makes the pre-first-ascension consolidation at ~z30 look explosive
@@ -576,5 +587,75 @@ describe('simulateEndless — travel/farm clamp (M9-AC5)', () => {
     expect(farmZone(frontier, 15).zone).toBe(15);
     // Farming a lower zone preserves the frontier (maxZone) so nothing is lost.
     expect(farmZone(frontier, 8).maxZone).toBe(15);
+  });
+});
+
+// ROADMAP-V2 P4 — der Himmelsbaum IM Bot. Der `fullPrestige`-Treiber gibt frisch
+// gebankte HPF greedy im Baum aus (`SIM_TREE_PRIORITY` + `heaven.greedyTreeSpend`).
+// Weil die E2-Wand nur 1 HPF bankt, ist der Kauf dort ein No-op (dort gemessen und
+// festgehalten) — die STRATEGIE wird hier direkt geprüft, ohne einen minutenlangen
+// Lauf zu brauchen: sie kauft nur, was der Bot auch rechnet, greift bei jedem
+// Exklusiv-Paar reproduzierbar zur DPS-lastigen Seite und respektiert die Sperre.
+describe('simulateEndless — P4 Himmelsbaum-Strategie des Bots', () => {
+  it('listet nur echte Knoten — und keinen, dessen Wirkung der Bot gar nicht modelliert', () => {
+    const NOT_MODELED = [
+      'coach',
+      'fruhstarter',
+      'nachtschicht',
+      'ekstaseausdauer',
+      'gatecrasher',
+      'beatgefuhl',
+      'combogedachtnis',
+    ];
+    for (const id of SIM_TREE_PRIORITY) {
+      expect(treeNodeConfig(id), `unbekannter Knoten ${id}`).toBeDefined();
+      expect(NOT_MODELED).not.toContain(id);
+    }
+    expect(new Set(SIM_TREE_PRIORITY).size).toBe(SIM_TREE_PRIORITY.length);
+    // Beide Seiten jedes Paares stehen drin — die DPS-lastige zuerst.
+    for (const [dps, other] of [
+      ['crewdoktrin', 'klickdoktrin'],
+      ['combodoktrin', 'ekstasedoktrin'],
+      ['truhenfokus', 'pfirsichfokus'],
+    ]) {
+      expect(SIM_TREE_PRIORITY).toContain(dps);
+      expect(SIM_TREE_PRIORITY).toContain(other);
+      expect(SIM_TREE_PRIORITY.indexOf(dps)).toBeLessThan(SIM_TREE_PRIORITY.indexOf(other));
+    }
+  });
+
+  it('kauft billigste-Stufe-zuerst, wählt je Ast EINE Doktrin und bleibt deterministisch', () => {
+    // 200 🍑 reichen für die günstigen Stufen und GENAU eine 35er-Doktrin — das
+    // zeigt die Reihenfolge: erst alles Billige, dann die teuerste Entscheidung.
+    const mid = { hpf: 200, hpfLifetime: 200, ascensions2: 3, tree: {} };
+    const midBuilt = greedyTreeSpend(mid, SIM_TREE_PRIORITY);
+    expect(treeLevel(midBuilt, 'schwererbass')).toBe(2);
+    expect(treeLevel(midBuilt, 'goldenehande')).toBe(2);
+    expect(treeLevel(midBuilt, 'crewdoktrin')).toBe(1); // die DPS-lastige Seite zuerst
+    expect(treeLevel(midBuilt, 'klickdoktrin')).toBe(0);
+    expect(200 - midBuilt.hpf).toBe(treeRefund(midBuilt));
+    expect(midBuilt.hpf).toBeLessThan(35); // sonst hätte er weitergekauft
+
+    // 500 🍑 kaufen die ganze Liste — und zwar in jedem Ast nur EINE Doktrin.
+    const rich = { hpf: 500, hpfLifetime: 500, ascensions2: 5, tree: {} };
+    const built = greedyTreeSpend(rich, SIM_TREE_PRIORITY);
+    expect(treeLevel(built, 'crewdoktrin')).toBe(1);
+    expect(treeLevel(built, 'klickdoktrin')).toBe(0);
+    expect(treeLevel(built, 'combodoktrin')).toBe(1);
+    expect(treeLevel(built, 'ekstasedoktrin')).toBe(0);
+    expect(treeLevel(built, 'truhenfokus')).toBe(1);
+    expect(treeLevel(built, 'pfirsichfokus')).toBe(0);
+    expect(built.hpf).toBeGreaterThanOrEqual(0);
+    expect(500 - built.hpf).toBe(treeRefund(built));
+    expect(greedyTreeSpend(rich, SIM_TREE_PRIORITY)).toEqual(built); // deterministisch
+    // Der Bot kauft auch wirklich NUR aus seiner Liste (kein Utility-Knoten).
+    for (const cfg of TREE_NODES) {
+      if (!SIM_TREE_PRIORITY.includes(cfg.id)) expect(treeLevel(built, cfg.id)).toBe(0);
+    }
+  });
+
+  it('ein 1-HPF-Konto (die E2-Wand) kauft nichts — deshalb bewegt P4 keinen Anker', () => {
+    const wall = { hpf: 1, hpfLifetime: 1, ascensions2: 1, tree: {} };
+    expect(greedyTreeSpend(wall, SIM_TREE_PRIORITY)).toBe(wall);
   });
 });
