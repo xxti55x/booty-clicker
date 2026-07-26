@@ -3065,3 +3065,186 @@ body {
     animation: none;
   }
 }
+
+/* ---- ROADMAP-V2 G6: Kauf-Feedback, Tab-Wechsel, Leerzustände ---- */
+/* Eine fixe Overlay-Schicht über dem Shop (z 30), die NIE einen Klick abfängt.
+   Effekte leben hier statt im Panel, weil der 0.25-s-Idle-Tick das Panel-HTML
+   neu schreibt und ein Partikel darin mitten im Flug verschwände. */
+.fxlayer {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  overflow: hidden;
+}
+.fx-coin {
+  position: absolute;
+  width: 15px;
+  height: 15px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--gold-hi), var(--gold-base) 55%, #e09a2c);
+  border: 1.5px solid var(--gold-line);
+  box-shadow: 0 1px 3px rgba(20, 10, 2, 0.5);
+  opacity: 0;
+  animation: coinFly 420ms cubic-bezier(0.35, 0, 0.5, 1) forwards;
+}
+@keyframes coinFly {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.6);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(calc(var(--dx, 0px) * 0.16), calc(var(--dy, 0px) * 0.16 - 20px)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx, 0px), var(--dy, 0px)) scale(0.5);
+  }
+}
+/* Ankunfts-Puls des BP-Zählers (die Münze landet). */
+.bp span.bump {
+  display: inline-block;
+  animation: goldBump 260ms cubic-bezier(0.2, 0.9, 0.25, 1.2);
+}
+@keyframes goldBump {
+  0% {
+    transform: scale(1);
+  }
+  38% {
+    transform: scale(1.16);
+    filter: brightness(1.25);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+/* Mini-Konfetti + Stempel im Fähigkeits-Slot. */
+.fx-bit {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 1.5px;
+  background: var(--gold-base);
+  opacity: 0;
+  animation: bitPop 560ms ease-out forwards;
+}
+.fx-bit:nth-child(2n) {
+  background: var(--acc);
+}
+.fx-bit:nth-child(3n) {
+  background: var(--pink);
+}
+@keyframes bitPop {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4);
+  }
+  22% {
+    opacity: 1;
+    transform: translate(calc(var(--tx, 0px) * 0.5), calc(var(--ty, 0px) * 0.5)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--tx, 0px), calc(var(--ty, 0px) + 14px)) scale(0.7);
+  }
+}
+.fx-stamp {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border-radius: 9px;
+  color: #2e7d32;
+  background: rgba(126, 190, 90, 0.28);
+  border: 2px solid #7fae6a;
+  animation: stampBounce 560ms cubic-bezier(0.2, 0.9, 0.25, 1.35) forwards;
+}
+.fx-stamp svg {
+  width: 17px;
+  height: 17px;
+}
+@keyframes stampBounce {
+  0% {
+    opacity: 0;
+    transform: scale(2.1) rotate(-14deg);
+  }
+  35% {
+    opacity: 1;
+    transform: scale(0.86) rotate(3deg);
+  }
+  55% {
+    transform: scale(1.06) rotate(-1deg);
+  }
+  78% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.1);
+  }
+}
+/* Tab-Wechsel: 120 ms Einblenden des neuen Panel-Inhalts (nur transform +
+   opacity — kein Layout-Thrash). */
+.tabbody.tb-in {
+  animation: tabIn 120ms ease-out;
+}
+@keyframes tabIn {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+/* Leerzustand: ein Stroke-Icon + EIN Satz, in einer gestrichelten Pergament-
+   Karte — sichtbar KEINE Card, die man kaufen könnte. */
+.empty {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border: 2px dashed var(--parch-line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(242, 228, 196, 0.13), rgba(242, 228, 196, 0.05));
+}
+.empty-ic {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  fill: none;
+  stroke: var(--gold-base);
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.9;
+}
+.empty-tx {
+  font-size: 12px;
+  line-height: 1.42;
+  font-weight: 600;
+  color: #e6d7b4;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fx-coin,
+  .fx-bit,
+  .fx-stamp,
+  .bp span.bump,
+  .tabbody.tb-in {
+    animation: none;
+  }
+  .fx-coin,
+  .fx-bit,
+  .fx-stamp {
+    display: none;
+  }
+}

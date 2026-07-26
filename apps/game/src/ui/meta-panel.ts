@@ -13,6 +13,7 @@ import {
   isQuestComplete,
 } from '../game/quests';
 import type { Season } from '../game/season';
+import { emptyState } from './empty';
 import { fmt } from './format';
 
 function byId(id: string): HTMLElement {
@@ -97,6 +98,7 @@ export class Meta {
       </div>
       <div class="settings-section">
         <h3>Erfolge <span class="dim" id="metaAchCount"></span></h3>
+        <div id="metaAchEmpty"></div>
         <div class="ach-grid" id="metaAch"></div>
       </div>`;
 
@@ -214,6 +216,15 @@ export class Meta {
   private renderAchievements(): void {
     const owned = new Set(this.deps.state.achievements);
     byId('metaAchCount').textContent = `${owned.size}/${CH_ACHIEVEMENTS.length}`;
+    // ROADMAP-V2 G6: Eine Wand aus 🔒 ist der leerste Zustand des Tabs — ein
+    // Satz sagt, dass sie sich beim Spielen von selbst füllt.
+    byId('metaAchEmpty').innerHTML =
+      owned.size === 0
+        ? emptyState(
+            'goals',
+            'Erfolge schalten sich beim Spielen frei — Bühnen klettern, Bosse legen, Truhen öffnen, aszendieren.',
+          )
+        : '';
     byId('metaAch').innerHTML = CH_ACHIEVEMENTS.map((a) => {
       const on = owned.has(a.id);
       return `<div class="ach ${on ? 'on' : 'off'}" title="${a.desc}">

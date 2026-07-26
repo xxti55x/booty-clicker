@@ -20,6 +20,7 @@ import { ancientClickMult, ancientDpsMult } from '../game/ancients';
 import { clickGearMult, dpsGearMult } from '../game/gear';
 import { heavenGlobalMult, soulBonusEff } from '../game/heaven';
 import { fmt } from './format';
+import { abilityBurst, coinFly } from './fx';
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -101,13 +102,20 @@ export class Crew {
       const ab = t.closest<HTMLElement>('.ab.ready');
       if (ab?.dataset.ab) {
         const cfg = CREW.find((c) => c.id === ab.dataset.ab);
-        if (cfg) this.buyAbility(cfg);
+        // ROADMAP-V2 G6: Die Slot-Position VOR dem Kauf merken — `render()`
+        // ersetzt die Zeile, das Element ist danach ein anderes. Gefeiert wird
+        // nur ein Kauf, der auch stattgefunden hat.
+        const rect = ab.getBoundingClientRect();
+        if (cfg && this.buyAbility(cfg)) {
+          coinFly(ev.clientX, ev.clientY);
+          abilityBurst(rect);
+        }
         return; // die Zeile darunter darf NICHT zusätzlich leveln
       }
       const row = t.closest<HTMLElement>('.item');
       if (row?.dataset.id) {
         const cfg = CREW.find((c) => c.id === row.dataset.id);
-        if (cfg) this.buy(cfg);
+        if (cfg && this.buy(cfg)) coinFly(ev.clientX, ev.clientY);
       }
     });
     list.addEventListener('pointerdown', () => {
@@ -140,29 +148,32 @@ export class Crew {
     return (lvls[prev.id] ?? 0) > 0 || this.deps.state.gold >= CREW[index].baseCost;
   }
 
-  private buy(cfg: HeroConfig): void {
+  /** Level kaufen — `true`, wenn wirklich gekauft wurde (G6: Feedback-Gate). */
+  private buy(cfg: HeroConfig): boolean {
     const level = this.deps.state.crew[cfg.id] ?? 0;
     const count = Math.max(0, this.countFor(cfg, level));
-    if (count <= 0) return;
+    if (count <= 0) return false;
     const cost = bulkCost(cfg, level, count);
-    if (cost > this.deps.state.gold) return;
+    if (cost > this.deps.state.gold) return false;
     this.deps.state.gold -= cost;
     this.deps.state.crew[cfg.id] = level + count;
     this.deps.onBuy();
     this.render();
+    return true;
   }
 
   /** Buy the next unlocked ability tier for a member (in order, BP-priced). */
-  private buyAbility(cfg: HeroConfig): void {
+  private buyAbility(cfg: HeroConfig): boolean {
     const s = this.deps.state;
     const level = s.crew[cfg.id] ?? 0;
     const ups = s.crewUp[cfg.id] ?? 0;
     const ab = nextAbility(cfg, level, ups);
-    if (!ab.unlocked || ups >= abilityTiersUnlocked(level) || ab.cost > s.gold) return;
+    if (!ab.unlocked || ups >= abilityTiersUnlocked(level) || ab.cost > s.gold) return false;
     s.gold -= ab.cost;
     s.crewUp[cfg.id] = ups + 1;
     this.deps.onBuy();
     this.render();
+    return true;
   }
 
   render(): void {

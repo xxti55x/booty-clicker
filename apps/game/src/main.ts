@@ -994,10 +994,24 @@ for (const tab of Array.from(document.querySelectorAll<HTMLElement>('.tab'))) {
     const key = tab.dataset.t!;
     for (const t of Array.from(document.querySelectorAll('.tab'))) t.classList.remove('active');
     tab.classList.add('active');
+    let shown: HTMLElement | null = null;
     for (const [k, id] of Object.entries(tabBodies)) {
-      (document.getElementById(id) as HTMLElement).style.display = k === key ? '' : 'none';
+      const el = document.getElementById(id) as HTMLElement;
+      el.style.display = k === key ? '' : 'none';
+      if (k === key) shown = el;
     }
     renderActiveTab(key);
+    // ROADMAP-V2 G6: 120-ms-Einblenden des neuen Panel-Inhalts. Bewusst nur die
+    // EINBLENDE-Richtung: der alte Body wird per `display:none` weggeschaltet,
+    // ein Ausblenden bräuchte einen zweiten, verzögerten Schritt und ließe die
+    // Panels kurz übereinander liegen. Die Keyframe rührt nur `opacity` und
+    // `transform` an (kein Layout-Thrash), und der Reflow stößt sie auch beim
+    // zweiten Wechsel auf denselben Tab neu an.
+    if (shown) {
+      shown.classList.remove('tb-in');
+      void shown.offsetWidth;
+      shown.classList.add('tb-in');
+    }
   });
 }
 

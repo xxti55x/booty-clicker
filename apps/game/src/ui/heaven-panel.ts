@@ -11,6 +11,7 @@ import {
   treeNodeCost,
   treeNodeMaxLevel,
 } from '../game/heaven';
+import { emptyState } from './empty';
 import { fmt } from './format';
 
 function byId(id: string): HTMLElement {
@@ -119,8 +120,18 @@ export class Heaven {
     byId('hvTreeInfo').innerHTML =
       `Ausgegebene HPF sind <b>permanent</b> — über alle Aszensionen und Himmelfahrten hinweg.`;
 
+    // ROADMAP-V2 G6: Vor der ersten Himmelfahrt hat der Baum keinen einzigen
+    // bezahlbaren Knoten — ein Satz erklärt, was ihn wachsen lässt.
+    const treeEmpty =
+      h.hpf <= 0 && TREE_NODES.every((cfg) => treeLevel(h, cfg.id) <= 0)
+        ? emptyState(
+            'heaven',
+            'Deine erste Himmelfahrt bringt Himmelspfirsiche — erst damit wächst dieser Baum.',
+          )
+        : '';
+
     const list = byId('hvTreeList');
-    list.innerHTML = TREE_NODES.map((cfg) => this.nodeCard(cfg)).join('');
+    list.innerHTML = treeEmpty + TREE_NODES.map((cfg) => this.nodeCard(cfg)).join('');
     for (const el of Array.from(list.querySelectorAll<HTMLElement>('.item'))) {
       const id = el.dataset.id;
       if (id && TREE_NODES.some((n) => n.id === id)) {

@@ -10,6 +10,7 @@ import {
   transcendGain,
   transcendGlobalMult,
 } from '../game/transcend';
+import { emptyState } from './empty';
 import { fmt } from './format';
 
 function byId(id: string): HTMLElement {
@@ -129,8 +130,18 @@ export class Transcend {
       `Knoten sind <b>permanent</b> (überleben jede weitere Transzendenz) und es gibt <b>keinen Respec</b>. ` +
       `<span class="dim">Achtung: Ausgeben senkt den gehaltenen TE-Stand — und damit den ×3^TE-Boost. Genau das ist die Entscheidung.</span>`;
 
+    // ROADMAP-V2 G6: Ohne TE ist der Mythos-Shop eine Auslage ohne Geld — ein
+    // Satz sagt, woher es kommt.
+    const shopEmpty =
+      t.te <= 0 && MYTHOS_NODES.every((cfg) => !mythosOwned(t, cfg.id))
+        ? emptyState(
+            'transcend',
+            'Transzendente Essenz gibt es nur bei einer Transzendenz — dann kaufst du hier permanente Mythos-Knoten.',
+          )
+        : '';
+
     const list = byId('tcMythosList');
-    list.innerHTML = MYTHOS_NODES.map((cfg) => this.nodeCard(cfg)).join('');
+    list.innerHTML = shopEmpty + MYTHOS_NODES.map((cfg) => this.nodeCard(cfg)).join('');
     for (const el of Array.from(list.querySelectorAll<HTMLElement>('.item'))) {
       const id = el.dataset.id;
       if (id && MYTHOS_NODES.some((n) => n.id === id)) {

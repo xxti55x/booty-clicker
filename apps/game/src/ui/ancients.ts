@@ -10,6 +10,7 @@ import {
   canBuyAncient,
 } from '../game/ancients';
 import type { ChState } from '../game/ch-state';
+import { emptyState } from './empty';
 import { fmt } from './format';
 
 function byId(id: string): HTMLElement {
@@ -82,8 +83,19 @@ export class Ancients {
         </div>`;
     });
 
+    // ROADMAP-V2 G6: Ohne Seelen und ohne gekauften Ahnen ist der Tab eine Wand
+    // aus unbezahlbaren Karten — davor steht jetzt der Satz, der sagt, woher die
+    // Währung kommt.
+    const broke = state.souls <= 0 && Object.keys(state.ancients).length === 0;
+    const empty = broke
+      ? emptyState(
+          'ancients',
+          'Ruhm-Seelen gibt es beim Aszendieren — hier werden sie zu dauerhaften Perks, die jede Aszension überleben.',
+        )
+      : '';
+
     const list = byId('ancList');
-    list.innerHTML = rows.join('');
+    list.innerHTML = empty + rows.join('');
     for (const el of Array.from(list.querySelectorAll<HTMLElement>('.item'))) {
       const cfg = ANCIENTS.find((a) => a.id === el.dataset.id);
       if (cfg) el.addEventListener('click', () => this.buy(cfg));

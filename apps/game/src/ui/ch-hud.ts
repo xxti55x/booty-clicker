@@ -16,6 +16,7 @@ import { modForZone } from '../game/stage-mods';
 import { type StageStars, starBitsFor, starsAt } from '../game/stars';
 import { transcendGlobalMult } from '../game/transcend';
 import { fmt } from './format';
+import { shouldTween, tweenValue } from './tween';
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -153,6 +154,13 @@ export class ChHud {
   // A2: zuletzt geschriebenes Gimmick-Label + Spotlight-Look der HP-Bar.
   private cGimmick = '';
   private cSpotlight: boolean | null = null;
+  // ROADMAP-V2 G6: der weiche BP-Zähler. `goldShown` ist der zuletzt GEZEIGTE
+  // Wert (Startpunkt eines neuen Tweens), `goldTarget` der echte Kontostand.
+  private goldShown = Number.NaN;
+  private goldTarget = 0;
+  private goldFrom = 0;
+  private goldAt = 0;
+  private goldRaf = 0;
 
   private setText(el: HTMLElement, next: string, cache: string): string {
     if (next !== cache) el.textContent = next;
@@ -165,7 +173,7 @@ export class ChHud {
     // Rendered as a stamped gold chip (`.zone-kind`), so plain text reads best.
     const kind = combat.boss ? 'BOSS' : isBossZone(combat.zone) ? 'VS' : '';
     this.cKind = this.setText(this.zoneKind, kind, this.cKind);
-    this.cGold = this.setText(this.gold, fmt(state.gold), this.cGold);
+    this.setGold(state.gold);
     this.cStats = this.setText(this.stats, `DPS ${fmt(dps)} · Klick ${fmt(clickDmg)}`, this.cStats);
 
     const hpf = state.heaven.hpf;
@@ -225,6 +233,48 @@ export class ChHud {
       if (!challenge) this.setHint('');
     }
     this.frame(combat);
+  }
+
+  /**
+   * ROADMAP-V2 G6 — Der BP-Zähler zählt weich hoch statt zu springen.
+   *
+   * Die ANZEIGE-Quelle bleibt `fmt`: getweent wird nur der Wert, den `fmt`
+   * bekommt. Ein neuer Kontostand bricht den laufenden Tween ab und startet bei
+   * der aktuell gezeigten Zahl weiter (sonst zuckte der Zähler zurück), und der
+   * rAF läuft ausschließlich, solange sich wirklich etwas bewegt — winzige
+   * Idle-Ticks (`shouldTween`) und der allererste Wert werden direkt
+   * geschrieben, kosten also gar nichts.
+   */
+  private setGold(gold: number): void {
+    if (this.goldTarget === gold && !Number.isNaN(this.goldShown)) return;
+    this.goldTarget = gold;
+    if (Number.isNaN(this.goldShown) || !shouldTween(this.goldShown, gold)) {
+      this.stopGoldTween();
+      this.goldShown = gold;
+      this.cGold = this.setText(this.gold, fmt(gold), this.cGold);
+      return;
+    }
+    this.goldFrom = this.goldShown;
+    this.goldAt = performance.now();
+    if (this.goldRaf === 0) this.goldRaf = requestAnimationFrame(this.stepGold);
+  }
+
+  private stepGold = (now: number): void => {
+    const v = tweenValue(this.goldFrom, this.goldTarget, now - this.goldAt);
+    this.goldShown = v;
+    this.cGold = this.setText(this.gold, fmt(v), this.cGold);
+    if (v === this.goldTarget) {
+      this.goldRaf = 0;
+      return;
+    }
+    this.goldRaf = requestAnimationFrame(this.stepGold);
+  };
+
+  private stopGoldTween(): void {
+    if (this.goldRaf !== 0) {
+      cancelAnimationFrame(this.goldRaf);
+      this.goldRaf = 0;
+    }
   }
 
   /**
