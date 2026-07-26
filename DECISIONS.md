@@ -3,6 +3,35 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## ROADMAP-V2 Schritt 1 — X7 Save-Migrations-Matrix
+
+- **2026-07-19 — Jeder historische Save-Stand hat jetzt ein Fixture-Paar.**
+  P1 (Sterne), A1 (Modifikator-Seeds) und P4 (Baum) bumpen als Nächstes das
+  CH-Schema; vorher bekam die Ladekette ihr Netz. `ch-store-matrix.test.ts`
+  zieht JEDEN Stand v1 … v10 durch `loadCh` → `migrateCh` → `isChSave` →
+  `stateFromSave`. Aufbau: EIN Spielstand (Bühne 55, 12 345 Gold, Crew
+  boss 80 / hype 30 / legend 6, 130 RS), pro Version in der Sprache seiner
+  Ära ausgedrückt — jede Slice erscheint genau ab der Version, die sie
+  eingeführt hat. Geprüft werden beide Richtungen: Kernfelder + Ära-Slices
+  verlustfrei nach oben, jüngere Slices exakt auf ihrem dokumentierten
+  Default nach unten (`createGear`/`createChests`/`createMeta`/
+  `createTranscend`/…). Dazu pro Version EIN kaputter Alt-Save an genau den
+  Feldern DIESER Ära (fehlende Slices, Prototyp-Keys wie `skin: "toString"`,
+  negative/gebrochene Zähler, NaN-Timer): repariert wird slice-isoliert, der
+  Kern bleibt unangetastet. Und die Gegenprobe — ist ein GATE-Feld hin (gold
+  NaN, zone 0, crew-Level negativ, lastSeen weg, roh-`NaN` im JSON), fällt
+  die Kette sauber auf `null` = Frischstart und wirft NIE. Zwei Extras: ein
+  Fixpunkt-Test (Re-Save/Reload des migrierten Standes driftet kein Feld) und
+  eine Bremse für den nächsten v-Bump — `VERSIONS` wird gegen `CH_SCHEMA`
+  geprüft, ein Bump ohne neues Fixture-Paar färbt die Matrix rot. 515 → 556
+  Tests, KEINE Produktions-Änderung nötig. Eine Beobachtung fürs Protokoll:
+  `migrateChV4toV5` überschreibt ein vorhandenes `rsLifetime` mit den
+  gebankten Seelen, statt `max(rsLifetime, souls)` zu nehmen — die einzige
+  Stelle der Kette, die einen Highwater SENKEN kann. Für echte v4-Saves
+  folgenlos (bis v4 gab es keine Seelen-Senke, verdient == gehalten; auch der
+  Legacy-Import hebt `rsLifetime` immer auf ≥ `souls`), deshalb bewusst NICHT
+  angefasst; die v≤4-Fixtures halten diese Semantik jetzt explizit fest.
+
 ## Bühnen-Rücknavigation + Boss-Fallback
 
 - **2026-07-19 — „Zurück zur Vor-Bühne farmen" als echter Loop.** Drei Teile:

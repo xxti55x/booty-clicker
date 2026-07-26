@@ -1,0 +1,569 @@
+/**
+ * X7 — Save-Migrations-Matrix (ROADMAP-V2, „Save-Hygiene vor neuen Feldern").
+ *
+ * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v10). Pro Version
+ * zwei Inline-Fixtures (kein Datei-IO):
+ *
+ *   1. ein REALISTISCHER Save der jeweiligen Ära, der die volle Ladekette
+ *      (`loadCh` → `migrateCh` → `isChSave` → `stateFromSave`) verlustfrei im
+ *      aktuellen Schema erreichen muss — Kernfelder (Gold/Bühne/Crew/RS) exakt,
+ *      jede Slice der Ära exakt, jede JÜNGERE Slice auf ihrem Default;
+ *   2. ein KAPUTTER Save derselben Ära (fehlende Felder, falsche Typen, NaN),
+ *      den die Kette reparieren muss, ohne echten Fortschritt zu nuken.
+ *
+ * Dazu die Gegenprobe: ist ein GATE-Feld (gold/zone/crew/souls/lastSeen …) kaputt,
+ * ist nichts mehr zu retten — die Kette fällt sauber auf `null` (frischer Start)
+ * zurück und wirft NIE.
+ *
+ * Die narrativen Einzel-Migrationstests bleiben in `ch-store.test.ts` (dort steht
+ * das WARUM je Schema-Bump); diese Datei ist das Netz darunter. Bumpt ein neues
+ * Feld das Schema (P1/A1/P4), schlägt `deckt jede historische Schema-Version ab`
+ * fehl und erzwingt ein neues Fixture-Paar, BEVOR die Migration als fertig gilt.
+ */
+import { describe, expect, it } from 'vitest';
+
+import { ABILITY_CHARGE_MAX, createAbility } from '../game/ability';
+import {
+  type ChState,
+  createChests,
+  createComboSave,
+  createPeach,
+  createStats,
+} from '../game/ch-state';
+import { createGear } from '../game/gear';
+import { createHeaven } from '../game/heaven';
+import { createMeta } from '../game/quests';
+import { createTranscend } from '../game/transcend';
+import { CH_SAVE_KEY, CH_SCHEMA, type ChStorage, deserializeCh, loadCh, saveCh } from './ch-store';
+
+function memStorage(): ChStorage & { map: Map<string, string> } {
+  const map = new Map<string, string>();
+  return {
+    map,
+    getItem: (k) => map.get(k) ?? null,
+    setItem: (k, v) => void map.set(k, v),
+    removeItem: (k) => void map.delete(k),
+  };
+}
+
+/** Every historical CH schema version, oldest first — the spine of the matrix. */
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
+type SchemaVersion = (typeof VERSIONS)[number];
+
+const LAST_SEEN = 1_752_800_000_000;
+
+// ---------------------------------------------------------------------------
+// Fixture-Bausteine: EIN Spielstand, in der Sprache jeder Ära ausgedrückt
+// ---------------------------------------------------------------------------
+
+/** The gameplay core every version has carried since v1 (the MVP shape). */
+const CORE = {
+  gold: 12_345,
+  zone: 55,
+  killsThisZone: 4,
+  runMaxZone: 55,
+  crew: { boss: 80, hype: 30, legend: 6 },
+  souls: 130,
+  lifetimeMaxZone: 55,
+  totalClicks: 4_321,
+} as const;
+
+/** v2 (M7): seedable RNG stream, lifetime counters, legacy-import latch. */
+const RNG = { seed: 20_260_719, cursor: 512 };
+const STATS_V2 = {
+  crits: 900,
+  onBeatClicks: 310,
+  bossKills: 40,
+  bossTimeouts: 3,
+  goldLifetime: 987_654,
+  playTimeS: 7_200,
+};
+/** v8 (M13) added six more counters to the SAME stats slice (§7.5). */
+const STATS_V8 = {
+  ascensions: 12,
+  chestsOpened: 21,
+  maxCombo: 140,
+  bossStreak: 4,
+  maxBossStreak: 19,
+  keysEarned: 55,
+};
+
+/** v3 (M8): Ekstase + combo stacks. */
+const ABILITY = {
+  charge: 40,
+  frenzyUntil: 1_752_800_060_000,
+  cooldowns: { beatDrop: 1_752_800_090_000 },
+};
+const COMBO = { stacks: 42 };
+
+/** v4 (M9): Vergoldungen + the lifetime-RS highwater. */
+const GILDS = { boss: 5, legend: 2 };
+/**
+ * v5+ (M10) macht Ahnen zur ersten echten Seelen-SENKE, also darf „je verdient"
+ * hier über „gehalten" liegen (130 auf Ahnen ausgegeben). Bis v4 gab es keine
+ * Senke — earned == held —, und `migrateChV4toV5` setzt genau das an (RS = souls).
+ * Die v≤4-Fixtures tragen deshalb bewusst `rsLifetime === souls`.
+ */
+const RS_LIFETIME_SPENT = 260;
+const ANCIENTS = { twerkules: 14, cheeksana: 6 };
+const HEAVEN = { hpf: 6, hpfLifetime: 20, ascensions2: 3, tree: { coach: 4, nachtschicht: 2 } };
+
+/** v6 (M11): Gear/Kulisse + der Legacy-Tyrann-Latch. */
+const GEAR = {
+  skin: 'disco',
+  bg: 'synth',
+  bgAuto: false,
+  skinLevels: { disco: 12, classic: 4 },
+  skinStars: { disco: 2 },
+  shards: 640,
+  sugarPeaches: 3,
+  nextSugarAt: 1_752_886_400_000,
+  crafted: ['neon'],
+  zoneEver: 55,
+};
+
+/** v7 (M12): Truhen/Schlüssel/Pity/Truhen-Skins, Perm-Tokens, Goldener Pfirsich. */
+const CHESTS = {
+  keys: 7,
+  inventory: { wood: 3, gold: 2, diamond: 1, mythic: 0 },
+  pity: { wood: 2, gold: 5, diamond: 1, mythic: 0 },
+  skins: ['gold-royal', 'diamond-frost'],
+};
+const PERM_TOKENS = { critDmg: 9, goldPct: 4 };
+const PEACH = { nextPeachAt: 1_752_800_300_000, boostUntil: 1_752_800_120_000 };
+
+/** v8 (M13): Tages-Quests/Streak + Achievements. */
+const META = {
+  day: 20_289,
+  questIds: ['combo-t3', 'boss-4', 'onbeat-500'],
+  questProgress: { 'boss-4': 2 },
+  questsClaimed: ['combo-t3'],
+  rerollsUsed: 1,
+  streak: 5,
+  lastLoginDay: 20_289,
+  streakProtectWeek: 2898,
+};
+const ACHIEVEMENTS = ['zone-10', 'zone-25', 'boss-1'];
+
+/** v9 (M15): Transzendenz (L3). */
+const TRANSCEND = { te: 4, teLifetime: 6, transcendences: 2, mythos: { diamantBooty: 2 } };
+
+/** v10: gekaufte Crew-Fähigkeiten — boss Lv 80 ⇒ 2 Stufen, hype Lv 30 ⇒ 1 Stufe. */
+const CREW_UP = { boss: 2, hype: 1 };
+
+/**
+ * Der eine Spielstand, ausgedrückt im Schema-Stand `v`: jede Slice erscheint
+ * genau ab der Version, die sie eingeführt hat — so sieht die Kette exakt das,
+ * was ein echter Save dieser Ära im localStorage hinterlassen hätte.
+ */
+function saveAt(v: SchemaVersion): Record<string, unknown> {
+  const raw: Record<string, unknown> = {
+    v,
+    lastSeen: LAST_SEEN,
+    gold: CORE.gold,
+    zone: CORE.zone,
+    killsThisZone: CORE.killsThisZone,
+    runMaxZone: CORE.runMaxZone,
+    crew: { ...CORE.crew },
+    souls: CORE.souls,
+    lifetimeMaxZone: CORE.lifetimeMaxZone,
+    totalClicks: CORE.totalClicks,
+  };
+  if (v >= 2) {
+    raw.rng = { ...RNG };
+    raw.stats = v >= 8 ? { ...STATS_V2, ...STATS_V8 } : { ...STATS_V2 };
+    raw.legacyImported = true;
+  }
+  if (v >= 3) {
+    raw.ability = { ...ABILITY, cooldowns: { ...ABILITY.cooldowns } };
+    raw.combo = { ...COMBO };
+  }
+  if (v >= 4) {
+    raw.gilds = { ...GILDS };
+    // Bis v4 ohne Seelen-Senke: verdient == gehalten (siehe RS_LIFETIME_SPENT).
+    raw.rsLifetime = v >= 5 ? RS_LIFETIME_SPENT : CORE.souls;
+  }
+  if (v >= 5) {
+    raw.ancients = { ...ANCIENTS };
+    raw.heaven = { ...HEAVEN, tree: { ...HEAVEN.tree } };
+  }
+  if (v >= 6) {
+    raw.gear = { ...GEAR, skinLevels: { ...GEAR.skinLevels }, skinStars: { ...GEAR.skinStars } };
+    raw.legacyTyrann = true;
+  }
+  if (v >= 7) {
+    raw.chests = { ...CHESTS, inventory: { ...CHESTS.inventory }, pity: { ...CHESTS.pity } };
+    raw.permTokens = { ...PERM_TOKENS };
+    raw.peach = { ...PEACH };
+  }
+  if (v >= 8) {
+    raw.meta = { ...META, questProgress: { ...META.questProgress } };
+    raw.achievements = [...ACHIEVEMENTS];
+  }
+  if (v >= 9) raw.transcend = { ...TRANSCEND, mythos: { ...TRANSCEND.mythos } };
+  if (v >= 10) raw.crewUp = { ...CREW_UP };
+  return raw;
+}
+
+/** The v1 core must arrive byte-for-byte, whatever the save's era. */
+function expectCore(s: ChState): void {
+  expect(s.gold).toBe(CORE.gold);
+  expect(s.zone).toBe(CORE.zone);
+  expect(s.killsThisZone).toBe(CORE.killsThisZone);
+  expect(s.runMaxZone).toBe(CORE.runMaxZone);
+  expect(s.crew).toEqual(CORE.crew);
+  expect(s.souls).toBe(CORE.souls);
+  expect(s.lifetimeMaxZone).toBe(CORE.lifetimeMaxZone);
+  expect(s.totalClicks).toBe(CORE.totalClicks);
+}
+
+/**
+ * Jede Slice entweder mit ihrem Fixture-Wert (die Ära kannte sie) oder auf dem
+ * dokumentierten Default (die Ära kannte sie noch nicht) — das ist die eigentliche
+ * Matrix-Zeile: „verlustfrei nach oben, sauber defaultet nach unten".
+ */
+function expectSlices(s: ChState, v: SchemaVersion): void {
+  // v2 — RNG-Strom, Lifetime-Zähler, Legacy-Flag.
+  if (v >= 2) {
+    expect(s.rng).toEqual(RNG);
+    expect(s.legacyImported).toBe(true);
+  } else {
+    expect(s.rng.cursor).toBe(0);
+    expect(Number.isInteger(s.rng.seed)).toBe(true);
+    expect(s.legacyImported).toBe(false);
+  }
+  const stats =
+    v >= 8
+      ? { ...createStats(), ...STATS_V2, ...STATS_V8 }
+      : v >= 2
+        ? { ...createStats(), ...STATS_V2 }
+        : createStats();
+  expect(s.stats).toEqual(stats);
+  // v3 — Ekstase + Combo.
+  expect(s.ability).toEqual(v >= 3 ? ABILITY : createAbility());
+  expect(s.combo).toEqual(v >= 3 ? COMBO : createComboSave());
+  // v4 — Vergoldungen + RS-Highwater (bis v4 == gebankte Seelen).
+  expect(s.gilds).toEqual(v >= 4 ? GILDS : {});
+  expect(s.rsLifetime).toBe(v >= 5 ? RS_LIFETIME_SPENT : CORE.souls);
+  // v5 — Ahnen + Himmel.
+  expect(s.ancients).toEqual(v >= 5 ? ANCIENTS : {});
+  expect(s.heaven).toEqual(v >= 5 ? HEAVEN : createHeaven());
+  // v6 — Gear + Legacy-Tyrann.
+  expect(s.gear).toEqual(v >= 6 ? GEAR : createGear());
+  expect(s.legacyTyrann).toBe(v >= 6);
+  // v7 — Truhen/Tokens/Pfirsich.
+  expect(s.chests).toEqual(v >= 7 ? CHESTS : createChests());
+  expect(s.permTokens).toEqual(v >= 7 ? PERM_TOKENS : {});
+  expect(s.peach).toEqual(v >= 7 ? PEACH : createPeach());
+  // v8 — Retention-Meta + Achievements.
+  expect(s.meta).toEqual(v >= 8 ? META : createMeta());
+  expect(s.achievements).toEqual(v >= 8 ? ACHIEVEMENTS : []);
+  // v9 — Transzendenz.
+  expect(s.transcend).toEqual(v >= 9 ? TRANSCEND : createTranscend());
+  // v10 — gekaufte Crew-Fähigkeiten.
+  expect(s.crewUp).toEqual(v >= 10 ? CREW_UP : {});
+}
+
+// ---------------------------------------------------------------------------
+// Kaputte Alt-Saves: EINER pro Version, jeweils an den Feldern DIESER Ära
+// ---------------------------------------------------------------------------
+
+interface BrokenCase {
+  /** Kurzbeschreibung des Schadens (Testnamen-Suffix). */
+  readonly what: string;
+  /** Beschädigt einen gesunden Save derselben Version in-place. */
+  readonly damage: (raw: Record<string, unknown>) => void;
+  /** Worauf die Kette ihn repariert haben muss. */
+  readonly check: (s: ChState) => void;
+}
+
+const BROKEN: Record<SchemaVersion, BrokenCase> = {
+  1: {
+    what: 'Highwater unter der aktuellen Bühne + unbekannte Müll-Felder',
+    damage: (raw) => {
+      raw.runMaxZone = 1; // stale invariant: Lauf-/Lifetime-Rekord < zone
+      raw.lifetimeMaxZone = 1;
+      raw.junk = { nested: Number.NaN };
+      raw.souls = 130.0; // ganzzahlig geschrieben, bleibt gültig
+    },
+    check: (s) => {
+      // Beide Highwater werden auf die aktuelle Bühne gehoben, nicht genullt.
+      expect(s.runMaxZone).toBe(CORE.zone);
+      expect(s.lifetimeMaxZone).toBe(CORE.zone);
+      // Unbekannte Felder kommen NIE im State an (stateFromSave baut explizit).
+      expect(Object.keys(s)).not.toContain('junk');
+    },
+  },
+  2: {
+    what: 'RNG-Müll, negative/typfalsche Zähler, nicht-boolesches Legacy-Flag',
+    damage: (raw) => {
+      raw.rng = 'garbage';
+      raw.stats = { crits: -5, bossKills: 'x', goldLifetime: Number.NaN, playTimeS: 7_200 };
+      raw.legacyImported = 'yes';
+    },
+    check: (s) => {
+      expect(s.rng.cursor).toBe(0);
+      expect(Number.isInteger(s.rng.seed)).toBe(true);
+      // Nur der heile Zähler überlebt; der Rest fällt einzeln auf 0.
+      expect(s.stats).toEqual({ ...createStats(), playTimeS: 7_200 });
+      expect(s.legacyImported).toBe(false);
+    },
+  },
+  3: {
+    what: 'Ekstase außerhalb der Range + fehlender Combo-Slice',
+    damage: (raw) => {
+      raw.ability = { charge: 9_999, frenzyUntil: -5, cooldowns: { beatDrop: 42, junk: 'x' } };
+      delete raw.combo;
+    },
+    check: (s) => {
+      expect(s.ability.charge).toBe(ABILITY_CHARGE_MAX);
+      expect(s.ability.frenzyUntil).toBe(0);
+      expect(s.ability.cooldowns).toEqual({ beatDrop: 42 });
+      expect(s.combo).toEqual(createComboSave());
+    },
+  },
+  4: {
+    what: 'Gild-Müll + NaN-RS-Highwater',
+    damage: (raw) => {
+      raw.gilds = { boss: -2, dj: 1.5, legend: 3, junk: 'x' };
+      raw.rsLifetime = Number.NaN; // JSON ⇒ null
+    },
+    check: (s) => {
+      expect(s.gilds).toEqual({ legend: 3 });
+      // Verdient kann nie unter „gehalten" fallen: repariert auf die Seelen-Untergrenze.
+      expect(s.rsLifetime).toBe(CORE.souls);
+    },
+  },
+  5: {
+    what: 'Ahnen-Müll + Himmel über dem Lebenszeit-Total',
+    damage: (raw) => {
+      raw.ancients = { twerkules: -3, cheeksana: 1.5, glutaeus: 4, junk: 'x' };
+      raw.heaven = {
+        hpf: 99,
+        hpfLifetime: 20,
+        ascensions2: Number.NaN,
+        tree: { coach: 4, j: 'x' },
+      };
+    },
+    check: (s) => {
+      expect(s.ancients).toEqual({ glutaeus: 4 });
+      // Gehaltene HPF werden auf das je verdiente Total geklemmt (Gegenrichtung zu TE).
+      expect(s.heaven).toEqual({ hpf: 20, hpfLifetime: 20, ascensions2: 0, tree: { coach: 4 } });
+    },
+  },
+  6: {
+    what: 'Gear mit Prototyp-Keys, NaN-Timer und Müll-Maps',
+    damage: (raw) => {
+      raw.gear = {
+        skin: 'toString', // kein echter SkinKey (Object.hasOwn-Disziplin)
+        bg: 'nope',
+        bgAuto: 'yes',
+        skinLevels: { disco: 12, junk: 'x', neg: -3 },
+        skinStars: 42,
+        shards: -50,
+        sugarPeaches: 2.9,
+        nextSugarAt: Number.NaN,
+        crafted: ['neon', 'toString', 7, 'neon'],
+        zoneEver: -7,
+      };
+      raw.legacyTyrann = 1;
+    },
+    check: (s) => {
+      expect(s.gear.skin).toBe('classic');
+      expect(s.gear.bg).toBe('club');
+      expect(s.gear.bgAuto).toBe(true);
+      expect(s.gear.skinLevels).toEqual({ disco: 12 }); // echter Fortschritt bleibt
+      expect(s.gear.skinStars).toEqual({});
+      expect(s.gear.shards).toBe(0);
+      expect(s.gear.sugarPeaches).toBe(2);
+      expect(s.gear.nextSugarAt).toBe(0); // Glue sät neu
+      expect(s.gear.crafted).toEqual(['neon']);
+      expect(s.gear.zoneEver).toBe(1);
+      expect(s.legacyTyrann).toBe(false);
+    },
+  },
+  7: {
+    what: 'Truhen-/Token-/Pfirsich-Slices mit negativen, gebrochenen und NaN-Werten',
+    damage: (raw) => {
+      raw.chests = {
+        keys: -3,
+        inventory: { wood: 2.9, gold: -1, diamond: 'x', mythic: 4 },
+        pity: { gold: -5, diamond: 3, junk: 'x' },
+        skins: ['gold-royal', 'not-a-skin', 42, 'gold-royal'],
+      };
+      raw.permTokens = { critDmg: 9, bad: -2, junk: 'x', frac: 1.5 };
+      raw.peach = { nextPeachAt: -10, boostUntil: Number.NaN };
+    },
+    check: (s) => {
+      expect(s.chests.keys).toBe(0);
+      expect(s.chests.inventory).toEqual({ wood: 2, gold: 0, diamond: 0, mythic: 4 });
+      expect(s.chests.pity).toEqual({ wood: 0, gold: 0, diamond: 3, mythic: 0 });
+      expect(s.chests.skins).toEqual(['gold-royal']);
+      expect(s.permTokens).toEqual({ critDmg: 9 });
+      expect(s.peach).toEqual(createPeach());
+    },
+  },
+  8: {
+    what: 'Quest-Meta mit Fake-Ids/Range-Bruch + Achievements als Nicht-Array',
+    damage: (raw) => {
+      raw.meta = {
+        day: Number.NaN,
+        questIds: ['combo-t3', 'nope', 99, 'combo-t3'],
+        questProgress: { 'combo-t3': 4, 'boss-4': -1, junk: 'x' },
+        questsClaimed: ['combo-t3', 'not-a-quest'],
+        rerollsUsed: 9,
+        streak: -4,
+        lastLoginDay: 20_355,
+        streakProtectWeek: 1.5,
+      };
+      raw.achievements = 'garbage';
+    },
+    check: (s) => {
+      expect(s.meta).toEqual({
+        day: -1,
+        questIds: ['combo-t3'],
+        questProgress: { 'combo-t3': 4 },
+        questsClaimed: ['combo-t3'],
+        rerollsUsed: 1, // MAX_REROLLS
+        streak: 0,
+        lastLoginDay: 20_355,
+        streakProtectWeek: -1,
+      });
+      expect(s.achievements).toEqual([]);
+    },
+  },
+  9: {
+    what: 'TE über dem Lebenszeit-Total, negative Transzendenzen, Mythos-Müll',
+    damage: (raw) => {
+      raw.transcend = {
+        te: 9,
+        teLifetime: 2,
+        transcendences: -2,
+        mythos: { diamantBooty: 2.7, bad: -1, junk: 'x' },
+      };
+    },
+    check: (s) => {
+      // Gehaltene TE bleiben; der Highwater wird GEHOBEN (nie Macht nuken).
+      expect(s.transcend.te).toBe(9);
+      expect(s.transcend.teLifetime).toBe(9);
+      expect(s.transcend.transcendences).toBe(0);
+      expect(s.transcend.mythos).toEqual({ diamantBooty: 2 });
+    },
+  },
+  10: {
+    what: 'Fähigkeits-Ledger über den freigeschalteten Stufen (gebastelter Save)',
+    damage: (raw) => {
+      raw.crewUp = { boss: 99, hype: -3, dj: 5, junk: 2 };
+    },
+    check: (s) => {
+      // boss Lv 80 ⇒ 2 Stufen; hype negativ ⇒ raus; dj Lv 0 ⇒ 0; junk kein Crew-Mitglied.
+      expect(s.crewUp).toEqual({ boss: 2 });
+    },
+  },
+};
+
+/**
+ * Gate-kritischer Schaden: `isChSave` lehnt ab, die Kette liefert `null` und der
+ * Boot startet frisch. Gilt in JEDER Ära, weil diese Felder seit v1 existieren.
+ */
+const FATAL: readonly { readonly what: string; readonly patch: Record<string, unknown> }[] = [
+  { what: 'gold NaN (JSON ⇒ null)', patch: { gold: Number.NaN } },
+  { what: 'gold negativ', patch: { gold: -1 } },
+  { what: 'zone 0', patch: { zone: 0 } },
+  { what: 'crew kein Objekt', patch: { crew: 'garbage' } },
+  { what: 'crew-Level negativ', patch: { crew: { boss: -1 } } },
+  { what: 'crew-Level gebrochen', patch: { crew: { boss: 1.5 } } },
+  { what: 'souls gebrochen', patch: { souls: 1.5 } },
+  { what: 'killsThisZone als String', patch: { killsThisZone: '3' } },
+  { what: 'lifetimeMaxZone fehlt', patch: { lifetimeMaxZone: undefined } },
+  { what: 'lastSeen fehlt', patch: { lastSeen: undefined } },
+  { what: 'lastSeen 0', patch: { lastSeen: 0 } },
+];
+
+// ---------------------------------------------------------------------------
+// Die Matrix
+// ---------------------------------------------------------------------------
+
+describe('ch-store — X7 Migrations-Matrix', () => {
+  it('deckt jede historische Schema-Version ab (Bremse für den nächsten v-Bump)', () => {
+    expect(VERSIONS).toEqual(Array.from({ length: CH_SCHEMA }, (_, i) => i + 1));
+    expect(VERSIONS[VERSIONS.length - 1]).toBe(CH_SCHEMA);
+    for (const v of VERSIONS) expect(Object.hasOwn(BROKEN, v)).toBe(true);
+  });
+});
+
+describe('ch-store — X7 Matrix: gesunde Alt-Saves laufen verlustfrei hoch', () => {
+  for (const v of VERSIONS) {
+    it(`v${v} → v${CH_SCHEMA}: Kernfelder exakt, jüngere Slices auf Default`, () => {
+      const store = memStorage();
+      store.setItem(CH_SAVE_KEY, JSON.stringify(saveAt(v)));
+      const loaded = loadCh(store);
+      expect(loaded).not.toBeNull();
+      expect(loaded!.lastSeen).toBe(LAST_SEEN);
+      expectCore(loaded!.state);
+      expectSlices(loaded!.state, v);
+    });
+  }
+});
+
+describe('ch-store — X7 Matrix: der migrierte Stand ist ein Fixpunkt', () => {
+  for (const v of VERSIONS) {
+    it(`v${v}: Re-Save/Reload ändert nichts mehr (kein Feld-Drift)`, () => {
+      const store = memStorage();
+      store.setItem(CH_SAVE_KEY, JSON.stringify(saveAt(v)));
+      const first = loadCh(store)!.state;
+      saveCh(first, LAST_SEEN, store);
+      const stored = JSON.parse(store.map.get(CH_SAVE_KEY)!) as Record<string, unknown>;
+      expect(stored.v).toBe(CH_SCHEMA);
+      const second = loadCh(store)!;
+      expect(second.state).toEqual(first);
+      expect(second.lastSeen).toBe(LAST_SEEN);
+    });
+  }
+});
+
+describe('ch-store — X7 Matrix: EIN kaputter Alt-Save pro Version', () => {
+  for (const v of VERSIONS) {
+    const c = BROKEN[v];
+    it(`v${v}: ${c.what} — repariert, Fortschritt bleibt`, () => {
+      const store = memStorage();
+      const raw = saveAt(v);
+      c.damage(raw);
+      const json = JSON.stringify(raw);
+      let loaded: ReturnType<typeof loadCh> = null;
+      expect(() => {
+        store.setItem(CH_SAVE_KEY, json);
+        loaded = loadCh(store);
+      }).not.toThrow();
+      expect(loaded).not.toBeNull();
+      const s = loaded!.state;
+      // „Reparieren, nicht nuken": der Kern überlebt jede Slice-Reparatur.
+      expectCore(s);
+      c.check(s);
+      // Und der reparierte Stand ist sofort wieder speicher-/ladbar.
+      expect(deserializeCh(JSON.stringify({ ...s, v: CH_SCHEMA, lastSeen: LAST_SEEN }))).toEqual(s);
+    });
+  }
+});
+
+describe('ch-store — X7 Matrix: kaputte Gate-Felder ⇒ sauberer Frischstart', () => {
+  for (const v of VERSIONS) {
+    it(`v${v}: unreparierbarer Kern fällt auf null zurück, ohne zu werfen`, () => {
+      const store = memStorage();
+      for (const f of FATAL) {
+        const json = JSON.stringify({ ...saveAt(v), ...f.patch });
+        let loaded: ReturnType<typeof loadCh> = null;
+        expect(() => {
+          store.setItem(CH_SAVE_KEY, json);
+          loaded = loadCh(store);
+        }).not.toThrow();
+        expect(loaded, `v${v}: ${f.what}`).toBeNull();
+      }
+      // Roh-NaN im JSON (kein gültiges JSON) ⇒ Parse-Fehler ⇒ ebenfalls null.
+      const rawNaN = JSON.stringify(saveAt(v)).replace(`"gold":${CORE.gold}`, '"gold":NaN');
+      expect(() => store.setItem(CH_SAVE_KEY, rawNaN)).not.toThrow();
+      expect(loadCh(store)).toBeNull();
+      expect(deserializeCh(rawNaN)).toBeNull();
+    });
+  }
+});
