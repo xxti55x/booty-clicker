@@ -12,6 +12,7 @@ import { type CombatState, bossHp, bossTimeFraction, hpFraction, isBossZone } fr
 import { MONSTERS_PER_ZONE } from '../game/combat';
 import { comboTierName } from '../game/combo';
 import { soulBonusEff } from '../game/heaven';
+import { modForZone } from '../game/stage-mods';
 import { type StageStars, starBitsFor, starsAt } from '../game/stars';
 import { transcendGlobalMult } from '../game/transcend';
 import { fmt } from './format';
@@ -82,6 +83,17 @@ function islandSvg(zone: number): string {
  * gefüllt oder leer. Bewusst Text-Glyphen statt SVG: sie sitzen als eine Zeile
  * unter der Bühnen-Nummer und kosten weder Draw-Call noch Layout-Sprung.
  */
+/**
+ * Das Modifikator-Icon eines Strip-Slots (ROADMAP-V2 A1) — klein über der
+ * Bühnen-Nummer, leer auf jeder Bühne ohne Hausregel (< 11 und alle Boss-Gates).
+ * Bewusst nur das EMOJI: der Strip-Slot ist 46 px breit, ein Name passt dort
+ * nicht; der ganze Satz steht auf der Bühnen-Card und im `title` des Slots.
+ */
+function modBadge(zone: number, remix: number): string {
+  const m = modForZone(zone, remix);
+  return m ? `<span class="zs-mod">${m.icon}</span>` : '';
+}
+
 function starPips(zone: number, stars: StageStars): string {
   const mask = starsAt(stars, zone);
   const pips = starBitsFor(zone)
@@ -115,6 +127,7 @@ export class ChHud {
   private readonly bossBtn = byId('bossChallenge');
   private readonly bossHint = byId('bossHint');
   private readonly gimmickEl = byId('bossGimmick');
+  private readonly stageModEl = byId('stageMod');
 
   // Cached last-written values (change-detection, no DOM churn).
   private cZone = '';
@@ -135,6 +148,8 @@ export class ChHud {
   private cHint = '';
   private hintSig = '';
   private hintBuy: PurchaseHint | null = null;
+  // A1: zuletzt geschriebener Bühnen-Modifikator (Icon + Name).
+  private cMod = '';
   // A2: zuletzt geschriebenes Gimmick-Label + Spotlight-Look der HP-Bar.
   private cGimmick = '';
   private cSpotlight: boolean | null = null;
@@ -184,7 +199,20 @@ export class ChHud {
         this.gimmickEl.title = gimmick?.description ?? '';
       }
     }
-    this.updateZoneStrip(combat.zone, combat.maxZone, state.stageStars);
+    this.updateZoneStrip(combat.zone, combat.maxZone, state.stageStars, combat.remix);
+    // ROADMAP-V2 A1: die Hausregel der aktuellen Bühne auf der Bühnen-Card —
+    // Icon + Name + der eine Satz. Im Bosskampf schweigt sie (Boss-Bühnen tragen
+    // keinen Modifikator, und die Card gehört dort dem Gimmick).
+    const mod = combat.boss ? null : modForZone(combat.zone, combat.remix);
+    const modTxt = mod ? `${mod.icon} ${mod.name}` : '';
+    if (modTxt !== this.cMod) {
+      this.cMod = modTxt;
+      this.stageModEl.classList.toggle('hidden', modTxt === '');
+      if (mod) {
+        this.stageModEl.innerHTML = `<b>${mod.icon} ${mod.name}</b><span>${mod.description}</span>`;
+        this.stageModEl.title = mod.description;
+      }
+    }
     // „Boss herausfordern": nur an der Frontier-Boss-Bühne, solange ihr Gate
     // unbesiegt ist und der Boss nicht schon tanzt.
     const challenge = atFrontierGate(combat);
@@ -245,7 +273,7 @@ export class ChHud {
    * aktive markiert, Boss-Gates (×5) mit Gold-Rand, kommende Zonen gedimmt.
    * Unter jeder Nummer die P1-Stern-Pips der Bühne.
    */
-  private updateZoneStrip(zone: number, frontier: number, stars: StageStars): void {
+  private updateZoneStrip(zone: number, frontier: number, stars: StageStars, remix: number): void {
     // Nur ERREICHTE Bühnen zeigen (nichts Zukünftiges spoilern): das Fenster
     // endet an der Frontier und jede Bühne ist klickbar — zurückreisen zum
     // Farmen, wieder vor zur Boss-Bühne.
@@ -255,7 +283,7 @@ export class ChHud {
     // bliebe ein frisch verdienter Pip bis zur nächsten Bühnen-Änderung leer.
     let starSig = '';
     for (let z = start; z <= end; z++) starSig += `${starsAt(stars, z)},`;
-    const sig = `${start}|${end}|${zone}|${frontier}|${starSig}${starsAt(stars, frontier)}`;
+    const sig = `${start}|${end}|${zone}|${frontier}|${remix}|${starSig}${starsAt(stars, frontier)}`;
     if (sig === this.cStrip) return;
     this.cStrip = sig;
     const slot = (z: number): string => {
@@ -263,9 +291,13 @@ export class ChHud {
         .filter(Boolean)
         .join(' ');
       const label = z % 5 === 0 ? `Boss-Bühne ${z}` : `Bühne ${z}`;
-      const title = z === zone ? label : `Zu ${label} reisen`;
+      const m = modForZone(z, remix);
+      // Der Modifikator gehört in den Tooltip: so wählt man die Farm-Bühne
+      // schon im Strip, ohne erst hinreisen zu müssen.
+      const title =
+        (z === zone ? label : `Zu ${label} reisen`) + (m ? ` · ${m.icon} ${m.name}` : '');
       return `<button type="button" class="${cls}" data-z="${z}"
-           title="${title}">${islandSvg(z)}<span>${z}</span>${starPips(z, stars)}</button>`;
+           title="${title}">${modBadge(z, remix)}${islandSvg(z)}<span>${z}</span>${starPips(z, stars)}</button>`;
     };
     const slots: string[] = [];
     for (let z = start; z <= end; z++) slots.push(slot(z));

@@ -87,6 +87,9 @@
             <span class="rival-prog" id="zoneProgress">0 / 10</span>
             <span class="rival-timer hidden" id="rivalTimer">30</span>
           </div>
+          <!-- ROADMAP-V2 A1: Hausregel der Bühne — Icon + Name + ein Satz.
+               Nur auf Nicht-Boss-Bühnen ab Bühne 11. -->
+          <div class="stage-mod hidden" id="stageMod"></div>
           <!-- ROADMAP-V2 A2: Theme-Gimmick des Bosses — steht klein an der
                HP-Bar, solange der Boss tanzt (das Banner sagt es einmal groß an). -->
           <div class="boss-gimmick hidden" id="bossGimmick"></div>
@@ -145,6 +148,14 @@
         />
       </svg>
     </button>
+    <!-- ROADMAP-V2 A3: Truhen-Kobold — hoppelt 8 s über die Insel, 5 Klicks
+         fangen ihn. Eigener Look (👺 + Truhe), eigener Mini-Frenzy-Badge. -->
+    <button class="goblinBtn hidden" id="goblinBtn" type="button" title="Truhen-Kobold fangen!">
+      <span class="gb-face" aria-hidden="true">👺</span>
+      <span class="gb-chest" aria-hidden="true">🎁</span>
+      <span class="gb-count" id="goblinCount">5</span>
+    </button>
+    <div class="goblinBadge hidden" id="goblinBadge">×2 Klick</div>
     <div class="boostBadge hidden" id="boostBadge">
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path

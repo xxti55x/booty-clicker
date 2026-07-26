@@ -3,6 +3,113 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## ROADMAP-V2 Schritt 7 — A1 Bühnen-Modifikatoren + A4 Choreo-Sets + A3 Truhen-Kobold
+
+- **Der Modifikator-SEED reist im `CombatState`, nicht der fertige Faktor — und
+  deshalb bleibt `monsterHp` unangetastet.** Drei Wege standen zur Wahl: (a) ein
+  Hook in `monsterHp` (tabu: Advisor, Offline-Ertrag und der Float-Guard lesen
+  dieselbe Kurve und dürfen keinen Seed kennen), (b) ein Faktor an der Stelle,
+  wo die Ausdauer VERBRAUCHT wird (also im Schadenspfad, wie es P2 beim
+  „Boss-Brecher" gemacht hat), oder (c) `spawnFor` bekommt den Seed. Gewählt:
+  **(c)**. Grund ist `hit`/`tickBoss`/`travelTo`: die spawnen das NÄCHSTE Ziel
+  selbst, ein nur von außen gereichter Faktor wäre beim ersten Kill wieder weg.
+  Getragen wird der Seed (nicht der Faktor), weil der Modifikator an der BÜHNE
+  hängt und die mit jedem Spawn wechselt. Der Gewinn gegenüber (b): **eine
+  Quelle** — Spiel, HUD und Bot lesen dieselbe `hpMax`, der Balken zeigt die
+  echte Zahl, und die Sim musste für die HP-Seite gar nichts nachbauen.
+  `REMIX_OFF` (0) ist der Default der Signatur, also rechnen alle Alt-Tests und
+  `simulateFloatGuard` byte-gleich weiter.
+- **Kein Save-Bump — der Remix-Seed wird abgeleitet, nicht gespeichert.**
+  `remixSeedFor(rng.seed, stats.ascensions)`: beide Felder liegen seit Langem im
+  Save und überleben jede Prestige-Schicht. Die Aszensions-Zahl wird durch einen
+  splitmix-Mixer gedreht statt addiert — eine Addition hätte die Karte nur um
+  Bühnen VERSCHOBEN (Bühne 12 bekäme, was eben Bühne 11 hatte); der Roadmap-Satz
+  „Aszension remixt" verlangt eine neue Karte, kein Karussell. Save bleibt bei
+  **v11**, keine Migration, keine neue Fixture. Auch der Kobold (A3) und die
+  Choreo-Sets (A4) sind reine Laufzeit: der Kobold-Zustand lebt wie der
+  A2-`GimmickRuntime` nur in der Glue, ein Reload würfelt seine nächste Runde neu.
+- **Boss-Bühnen tragen NIE einen Modifikator.** Das ist die direkte Lehre aus
+  A2: ein Gate ist eine 30-s-Klippe, kein Regler — dort kostete schon ein
+  Zehntel Wirkungsverlust ganze Bühnen. Die Gates tragen außerdem seit A2 bereits
+  eine eigene Regel-Ebene (Theme-Gimmick); ein zweiter Würfel obendrauf wäre
+  unlesbar. A1 wirkt deshalb ausschließlich auf der Farm-Strecke — und genau
+  dort, wo die Rückreise stattfindet, die es strategisch machen soll.
+- **Zwei Parameter gegenüber der Roadmap gezähmt — vom empfindlichsten Anker
+  entschieden.** Mit den Roadmap-Rohwerten („Zähe Menge" +30 % Ausdauer, „Nebel"
+  −20 % Crew-DPS) lief der 0.7-cps-Bot auf seed 7 mit **20.35 h** aus dem
+  Himmelfahrts-Fenster (Obergrenze 19.38 h) — derselbe idle-dominierte Anker,
+  der schon die A2-Spotlight-Dauer diktiert hat. Mit **+20 %** bzw. **−15 %**
+  landet er bei 19.06 h. Alles andere blieb wie in der Roadmap skizziert.
+- **Was der Bot faltet und was bewusst neutral bleibt.** Gefaltet: `gold`
+  (Kill-BP), `hp` (über `spawnFor`), `click`/`dps` getrennt über
+  `stageDamageFactor` (der Bot rechnet mit EINEM Sekundenbetrag, „Nebel" trifft
+  aber beide Anteile gegenläufig), `crit` im gedeckelten Krit-Stack und `chest`.
+  Neutral: `beat` (der Bot klickt ungetaktet und holt den On-Beat-Bonus nie ab),
+  `ekstase` (im Bot ohnehin nicht modelliert) und `peachGap` (der Bot reist nicht
+  zum Farmen). Alle drei können den ECHTEN Spieler nur beschleunigen — die Anker
+  bleiben damit Untergrenzen, wie schon bei Ekstase und den Boss-Schadens-Mults.
+- **Anker-Lauf (seeds 1/7/12345, vorher → nachher).** t10 104 → 104 s (Bühne 10
+  liegt unter `MOD_MIN_ZONE`, per Konstruktion gleich); t25 2032/2044/2033 →
+  2147/2035/1643 s (Mittel −4.6 %), Bühne 30 bleibt außer Reichweite; erste
+  Himmelfahrt 18.44/18.27/18.32 → 17.36/19.06/17.17 h (Mittel 18.34 → 17.86 h,
+  −2.6 %); kumuliert t75 1.66/2.32/2.36 → 1.61/1.73/1.59 h; E2/E3/E4, Gear-E4 und
+  der Float-Guard unverändert. **Die Streuung je Seed wächst auf ± 10 % (vorher
+  ± 3 %) — das ist die Mechanik, nicht ihr Fehler**: jeder Lauf würfelt eine
+  andere Karte, jede Aszension würfelt neu. Der MITTELWERT bewegt sich kaum, also
+  wandert keine Wand; ein neuer Test pinnt genau das fest (Σ Tiefe über fünf
+  Seeds, mods an gegen mods aus, Grenze 15 %). Kein Fenster musste aufgerissen
+  werden; der Token-Zeugen-Seed wandert 7 → 5 (dieselbe Sorte Zeugen-Tausch wie
+  bei A2 — die Modifikatoren verschieben, welche Truhen-Lose in 45 min gezogen
+  werden).
+- **Der Kobold zieht im BOT aus einem Seiten-Strom.** Im Spiel hängt er am
+  gemeinsamen persistierten `rng` (wie der Pfirsich). Im Bot bekäme dadurch jede
+  Truhen-/Krit-/Gild-Ziehung aller Alt-Seeds einen Versatz — zwei Anker fielen
+  allein daran, ohne dass sich die Balance geändert hätte. `sim.goblinRng` ist
+  aus demselben Seed abgeleitet: gleiche Verteilung, gleiche Kadenz, aber die
+  Alt-Anker messen weiter Balance statt Strom-Versatz. Ertrag im Bot: eine
+  Holztruhe je Fang bei **80 % Fangquote** (`GOBLIN_SIM_CATCH` — 5 Klicks in 8 s
+  sind trivial, die Quote bildet ab, dass man ihn übersieht); der 10-s-×2-Klick-
+  Buff bleibt UNMODELLIERT (≈ +3 % Klick im Mittel, dieselbe Untergrenzen-Logik).
+- **Der Kobold-Buff ist NICHT das Ekstase-System.** `ability.ts` trägt EIN
+  ×10-Fenster mit Ladebalken, HUD-Ring und Ton. Den Kobold dort einzuhängen hätte
+  entweder den Ring falsch angezeigt oder die Ekstase-Dauer heimlich verlängert.
+  Stattdessen ein eigener, winziger Zeit-Buff (`goblinBuffMult`) als eigener
+  Faktor im `extraMult` — zwei Buffs, zwei Zustände, ein Klick-Pfad.
+- **A4 fasst `moves.ts`-Mathematik nicht an.** Neu ist nur eine Auswahl-Ebene:
+  `Choreographer.useSet(indices)` + `advance()`. Die Intensitäts-Tabelle
+  (`MOVE_INTENSITY`) ist paarweise verschieden, damit „die zwei intensivsten"
+  ohne Gleichstands-Regel eindeutig sind; ein Test pinnt sie gegen die echten
+  `MOVES`-Namen, damit ein neuer Move nicht stumm als Intensität 0 durchrutscht.
+  Der Sieges-Diva-Turn ist ein FLAG (`victoryDance`), kein direkter `setMove`:
+  derselbe Kill stellt unmittelbar danach das Set der neuen Bühne, der Sieges-Move
+  muss also zuletzt kommen. Dass er „einmalig" ist, fällt ohne Extra-Zustand
+  heraus — `advance()` von einem Move AUSSERHALB des Sets springt auf dessen
+  ersten Eintrag.
+- **Beweis (Headless, Port 4188, Save v11, seed 424242).**
+  `a1-a-strip-und-card.png` — Bühne 11 mit 🎉-Abzeichen im Strip-Slot und der
+  Card-Zeile „Konfetti-Regen · Die Twerk-Ekstase lädt 50 % schneller auf.";
+  Slot 9 (< 11) und die Slots 10/40 (Boss-Gates) tragen bewusst KEIN Abzeichen.
+  `a1-b-andere-buehne-anderer-mod.png` — Bühne 12, 💰 „Goldrausch", anderer Satz.
+  `a3-c-kobold-auf-der-buehne.png` — der Kobold hoppelt mit Rest-Klick-Zähler
+  über die Insel. `a3-d-kobold-gefangen.png` — nach fünf ECHTEN Button-Klicks
+  (der Beweis nimmt den Spieler-Pfad, nicht die Logik): Holztruhen-Bestand 6 → 7
+  und der Toast „Kobold gefangen! · 🪵 Holztruhe · ×2 Klick-Schaden für 10
+  Sekunden". `a3-e-mini-frenzy-badge.png` — nach dem Toast steht das
+  „×2 Klick · 5s"-Badge allein über dem Ekstase-Knopf.
+  `a4-e-buehne13-BootySlam.png` / `a4-f-buehne18-DivaTurn.png` /
+  `a4-g-boss15-Twerk.png` — drei klar verschiedene Silhouetten mit den Sets
+  [Booty-Slam · Bounce · Hip Circles] / [Diva-Turn · Welle · Drop It Low] /
+  [Twerk · Drop It Low] (Boss ⇒ nur die zwei intensivsten, und keine Mod-Card).
+- **Drei Dinge fielen erst im Bild auf und wurden nachgezogen.** (1) Das
+  Strip-Abzeichen saß außerhalb des Slots (`top: -6px`) und wurde auf der um 1.16
+  skalierten AKTIVEN Bühne vom Panel-Rand abgeschnitten ⇒ nach innen gerückt.
+  (2) Der Kobold hoppelte über die volle Fensterbreite, im 50/50-Layout also
+  quer über die Crew-Liste ⇒ auf die Bühnen-Hälfte und die untere Bildhälfte
+  begrenzt (er soll über die INSEL laufen und keine Knöpfe verdecken). (3) Das
+  ×2-Badge lag zuerst oben auf dem Zonen-Strip ⇒ über den Ekstase-Knopf gesetzt,
+  wo der Klick-Buff hingehört. Kobold und Badge können sich nie überlappen — mit
+  dem Fang verschwindet er.
+
 ## ROADMAP-V2 Schritt 6 — P2 Transzendenz-Teaser + TE-Sink
 
 - **`mythos` war seit M14 ein leerer Slot — genau dafür gebaut, also KEIN

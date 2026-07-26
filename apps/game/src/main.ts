@@ -9,7 +9,8 @@ import { buildEntity, entityVariant, type EntityInstance } from './character/ent
 import { DT, renderCheeks, stepPhysics } from './character/physics';
 import { applyAccents, createAccents, stepAccents, triggerClickAccent } from './character/accents';
 import { SKINS } from './character/skins';
-import { Choreographer } from './choreo/moves';
+import { Choreographer, MOVES } from './choreo/moves';
+import { VICTORY_MOVE, activeSet } from './choreo/sets';
 import { createControls, frameCamera } from './engine/camera';
 import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
@@ -82,7 +83,6 @@ import {
   COMBO_WINDOW_S,
   createCombo,
   comboOnClick,
-  comboStep,
   comboTier,
   tierBeatWindowBonusMs,
   tierCritChanceBonus,
@@ -104,6 +104,31 @@ import {
   tickGimmick,
   waveHealAmount,
 } from './game/boss-gimmicks';
+import {
+  type StageMod,
+  type StageModFactors,
+  factorsForZone,
+  modForZone,
+  remixSeedFor,
+  stageComboStep,
+  stageEkstaseChargeRed,
+} from './game/stage-mods';
+import {
+  GOBLIN_BUFF_S,
+  GOBLIN_CHESTS,
+  GOBLIN_DEFER_S,
+  GOBLIN_HITS,
+  type GoblinState,
+  createGoblin,
+  goblinBuffLeft,
+  goblinBuffMult,
+  goblinExpired,
+  goblinHit,
+  goblinPos,
+  goblinSpawnAllowed,
+  goblinVisible,
+  rollNextGoblinAt,
+} from './game/goblin';
 import {
   challengeBoss,
   type CombatState,
@@ -314,7 +339,15 @@ let rng = new Rng(state.rng);
   state.peach.boostUntil = clampBoostUntil(state.peach.boostUntil, bootNow);
 }
 
-let combat: CombatState = spawnFor(state.zone, state.killsThisZone, state.runMaxZone);
+/**
+ * ROADMAP-V2 A1: Der Remix-Seed der Bühnen-Modifikatoren. Abgeleitet aus dem
+ * bereits persistierten `rng.seed` + der Aszensions-Zahl — kein neues Save-Feld,
+ * und eine Aszension würfelt die Karte neu (`remixSeedFor`). Er wandert über
+ * `spawnFor` in den `CombatState` und von dort in jeden Re-Spawn.
+ */
+let runRemix = remixSeedFor(state.rng.seed, state.stats.ascensions);
+
+let combat: CombatState = spawnFor(state.zone, state.killsThisZone, state.runMaxZone, runRemix);
 
 /** Extend a freshly-spawned boss timer by Chronilla + gear bossTimer (§4.6/§5). No-op off-boss. */
 function withBossTimerBonus(c: CombatState): CombatState {
@@ -322,6 +355,16 @@ function withBossTimerBonus(c: CombatState): CombatState {
   return c.boss && bonus > 0 ? { ...c, bossTimer: c.bossTimer + bonus } : c;
 }
 combat = withBossTimerBonus(combat);
+
+/**
+ * Ein frischer Lauf nach einer Prestige-Schicht: Bühne 1, neue Modifikator-Karte
+ * (die Aszensions-Zahl ist zu diesem Zeitpunkt schon hochgezählt). EINE Quelle
+ * für alle drei Reset-Pfade, damit keiner den Remix vergisst.
+ */
+function newRunCombat(): CombatState {
+  runRemix = remixSeedFor(state.rng.seed, state.stats.ascensions);
+  return withBossTimerBonus(spawnFor(1, 0, 1, runRemix));
+}
 
 let dps = 0;
 let clickDmg = 1;
@@ -364,7 +407,10 @@ function ekstaseChargeMax(): number {
     0.9,
     ancientEkstaseChargeReduction(state.ancients) +
       frenzyChargeReduction(state.gear) +
-      crewSpec.ekstaseChargeRed,
+      crewSpec.ekstaseChargeRed +
+      // A1 „Konfetti-Regen": die Bühne selbst lädt die Ekstase schneller. Sie
+      // hängt im GLEICHEN, gedeckelten Reduktions-Stack — kein Sonderweg.
+      stageEkstaseChargeRed(stageFactors()),
   );
   return ABILITY_CHARGE_MAX * (1 - reduction);
 }
@@ -456,8 +502,33 @@ let entity: EntityInstance = buildEntity(scene, bgForZone(combat.zone), {
   boss: combat.boss,
   variant: entityVariant(combat.zone),
 });
+// ---------- ROADMAP-V2 A4: Choreo-Set der Bühne ----------
+/**
+ * Nach einem Boss-Sieg EINMALIG den Diva-Turn tanzen. Als Flag statt als
+ * direktem `setMove`, weil derselbe Kill unmittelbar danach das Set der NEUEN
+ * Bühne stellt — der Sieges-Move muss also zuletzt kommen, sonst überschriebe
+ * ihn der Bühnen-Wechsel im selben Frame.
+ */
+let victoryDance = false;
+
+/**
+ * Das Move-Set der aktuellen Bühne setzen (Bosskampf ⇒ die zwei intensivsten).
+ * Hängt an denselben Übergängen wie `syncEntity` — jeder Bühnen-/Boss-Wechsel
+ * läuft dort durch, also kann die Choreo nicht auf einer alten Bühne hängen
+ * bleiben. Reine AUSWAHL: die Pose-Mathematik in `moves.ts` ist unberührt.
+ */
+function syncChoreoSet(): void {
+  choreo.useSet(activeSet(combat.zone, combat.remix, combat.boss));
+  if (victoryDance) {
+    victoryDance = false;
+    choreo.setMove(VICTORY_MOVE);
+  }
+}
+
 /** Rebuild the rival entity only when its look actually changes (cheap check). */
 function syncEntity(): void {
+  // A4: derselbe Übergang, dieselbe Stelle — Bühne/Boss gewechselt ⇒ neues Set.
+  syncChoreoSet();
   const theme = bgForZone(combat.zone);
   const variant = entityVariant(combat.zone);
   if (entity.theme !== theme || entity.boss !== combat.boss || entity.variant !== variant) {
@@ -473,7 +544,7 @@ if (state.gear.bgAuto) state.gear.bg = currentBg;
 world.setBackground(currentBg, currentBgVariant);
 audio.setBackground(currentBg);
 recompute(); // fold the (possibly view-synced) kulisse buff into the derived numbers
-choreo.setMove(0);
+syncChoreoSet(); // A4: das Set der Start-Bühne statt eines festen Move 0
 
 const hud = new ChHud();
 const toasts = new Toasts();
@@ -631,7 +702,7 @@ const prestige = new Prestige({
     Object.assign(state, ascendState(state)); // mutate in place — panels hold this ref
     applyFruhstarter(prevCrew);
     applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
-    combat = withBossTimerBonus(spawnFor(1, 0, 1));
+    combat = newRunCombat();
     comboState = createCombo(state.combo.stacks); // run-scoped juice resets
     comboT3KeyAwardedThisRun = false; // the combo-Tier-3 key is once per run (§6.1)
     lastShakeTier = 0;
@@ -669,7 +740,7 @@ const heaven = new Heaven({
     syncMaxZones();
     Object.assign(state, himmelfahrtState(state)); // mutate in place
     applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
-    combat = withBossTimerBonus(spawnFor(1, 0, 1));
+    combat = newRunCombat();
     comboState = createCombo(state.combo.stacks);
     comboT3KeyAwardedThisRun = false; // once per run (§6.1)
     lastShakeTier = 0;
@@ -721,7 +792,7 @@ if (transcendEnabled) {
       Object.assign(state, transcendState(state)); // mutate in place (banks TE, wipes L1+L2)
       applyMythosFruhstart(); // P2: der Knoten überlebt den tiefsten Reset und greift hier
       // ---- re-seed, mirroring the Himmelfahrt handler exactly (L2-wipe hazard) ----
-      combat = withBossTimerBonus(spawnFor(1, 0, 1)); // zone/front travel reset to Bühne 1
+      combat = newRunCombat(); // zone/front travel reset to Bühne 1
       comboState = createCombo(state.combo.stacks); // run-scoped combo juice reset
       comboT3KeyAwardedThisRun = false; // the combo-Tier-3 key is once per run (§6.1)
       lastShakeTier = 0;
@@ -1122,12 +1193,35 @@ function stepCinematics(dt: number): void {
 // überlebt keinen Reload und hat deshalb im `CombatState` (→ Save) nichts
 // verloren. Ein frisch gespawnter Boss startet mit `createGimmickRuntime()`.
 let bossGimmick: GimmickRuntime = createGimmickRuntime();
+/**
+ * ROADMAP-V2 A3: Der Truhen-Kobold. Genau wie der Gimmick-Kampfzustand ist er
+ * TRANSIENT — der ganze Zustand (nächster Spawn, Treffer, Buff-Fenster) lebt nur
+ * hier in der Glue. Ein Reload würfelt seine nächste Runde neu, dafür kostet das
+ * Event weder Schema-Bump noch Migration, und ein verpasster Kobold lässt sich
+ * nicht per Reload zurückholen.
+ */
+let goblin: GoblinState = createGoblin();
 /** Läuft gerade eine Spotlight-Phase? (nur für den HUD-Look) */
 let spotlightOn = false;
 
 /** Das Gimmick des LAUFENDEN Kampfes (null, solange kein Boss tanzt). */
 function activeGimmick(): BossGimmick | null {
   return combat.boss ? gimmickForZone(combat.zone) : null;
+}
+
+// ---------- ROADMAP-V2 A1: Bühnen-Modifikatoren ----------
+// Der Seed reist im `CombatState` mit (`combat.remix`), also fragt die Glue
+// IMMER den Kampf-Zustand — nie eine zweite Kopie. Auf Boss-Bühnen liefert
+// `modForZone` per Definition `null`, die Faktoren sind dort neutral.
+
+/** Der Modifikator der Bühne, auf der gerade gekämpft wird (null = keiner). */
+function activeMod(): StageMod | null {
+  return modForZone(combat.zone, combat.remix);
+}
+
+/** Die Faktoren der aktuellen Bühne — neutral, wo kein Modifikator liegt. */
+function stageFactors(): StageModFactors {
+  return factorsForZone(combat.zone, combat.remix);
 }
 
 /** Der Boss betritt die Bühne — beide Spawn-Pfade laufen hier zusammen. */
@@ -1253,7 +1347,13 @@ function onKillProgress(
   // Golden-Peach ×2 income boost (§6.1, v12) multiply kill gold — the boost thus lifts
   // ALL income (click + idle + coach kills) uniformly for its 60-s window.
   const now = Date.now();
-  const gold = Math.floor(r.gold * goldMult(state) * peachIncomeMult(state, now));
+  // ROADMAP-V2 A1: der BP-Faktor der Bühne, auf der der Kill LANDETE — bei einem
+  // Vorstoß ist das die eben verlassene, sonst die aktuelle (dieselbe Regel wie
+  // beim P1-Combo-Stern unten). Boss-Bühnen tragen keinen Modifikator, ein
+  // Boss-Kill zahlt also unverändert.
+  const killZone = r.advancedZone ? combat.zone - 1 : combat.zone;
+  const stage = factorsForZone(killZone, combat.remix);
+  const gold = Math.floor(r.gold * goldMult(state) * peachIncomeMult(state, now) * stage.gold);
   state.gold += gold;
   state.stats.goldLifetime += gold;
   if (wasBoss) {
@@ -1265,7 +1365,10 @@ function onKillProgress(
     state.meta = advanceMeta(state.meta, 'bossKills');
   } else if (r.killed) {
     // Rival kill (§6.1): a 3 % base chance — scaled by Truhen-Luck — drops a Holztruhe.
-    if (rng.next() < rivalChestChance(chestLuck(state))) state.chests.inventory.wood += 1;
+    // A1 „Zähe Menge" verdoppelt genau diese Chance.
+    if (rng.next() < rivalChestChance(chestLuck(state)) * stage.chest) {
+      state.chests.inventory.wood += 1;
+    }
   }
   // P1-Stern 3 („Combo"): ein Kill, der mit heißer Combo LANDET. Bewusst nur für
   // Klick-Kills — Idle-DPS zieht weder Combo noch Krit (P1), ein Crew-Tick, der
@@ -1336,6 +1439,7 @@ function onKillProgress(
         `${chestEmoji(tier)} · +${keys} 🔑 · +${shards} 🧩 (Bühne ${combat.zone})`,
       );
       audio.bossWin();
+      victoryDance = true; // A4: der Sieges-Move, einmalig (siehe `syncChoreoSet`)
       bossConfetti(); // G2: Sieg-Beat über der Bühne
       if (effects.screenShake) shakeMag = Math.max(shakeMag, SHAKE_BOSS_KILL);
       haptics.boss(effects.haptics);
@@ -1374,6 +1478,11 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
     if (g?.id === 'spotlight' && spotlightActive(bossGimmick)) effDmg = 0;
     else if (g?.id === 'shield') effDmg *= SYNTH_IDLE_FACTOR;
   }
+  // ROADMAP-V2 A1: Der CREW-Faktor der Bühne („Nebel" −15 %) gehört hierher, weil
+  // hier jeder Nicht-Klick-Schaden ankommt (Idle-DPS UND Twerk-Coach). Der
+  // KLICK-Faktor sitzt dagegen in `doShake` im `extraMult` — dort kennt die
+  // Pipeline Takt und Combo, und die angezeigte Schadenszahl bleibt ehrlich.
+  if (!wasBoss && !fromClick) effDmg *= stageFactors().dps;
   const r = hit(combat, effDmg);
   // A newly-spawned boss gets Chronilla's extra timer seconds.
   combat = r.bossSpawned ? withBossTimerBonus(r.state) : r.state;
@@ -1420,6 +1529,8 @@ function doShake(x?: number, y?: number): void {
   // A2 Synth „Schild-Takte": eigenes, drive-invariantes Fenster (siehe
   // `shieldWindowMs`) — außerhalb prallt der Klick am Boss ab.
   const gimmick = activeGimmick();
+  // ROADMAP-V2 A1: die Hausregel dieser Bühne (neutral auf jeder Boss-Bühne).
+  const stage = stageFactors();
   const bounced =
     gimmick?.id === 'shield' && !isOnBeat(choreo.phase, pps, shieldWindowMs(pps, beatBonusMs));
 
@@ -1446,7 +1557,9 @@ function doShake(x?: number, y?: number): void {
         ancientCritChanceBonus(state.ancients) +
         critChanceBonus(state.gear) +
         permTokenCritChance(state.permTokens) +
-        crewSpec.critChance,
+        crewSpec.critChance +
+        // A1 „Krit-Funken": +5 pp, durch DENSELBEN 40-%-Deckel wie alles andere.
+        stage.crit,
     ),
   );
   if (crit) {
@@ -1476,8 +1589,16 @@ function doShake(x?: number, y?: number): void {
     // Permanent „+1 % Krit-Schaden" tokens scale the whole crit multiplier (§6.2).
     critMultFactor: permTokenCritMult(state.permTokens),
     extraMult:
-      beatBonus(onBeat, onBeatMultBonus(state.gear)) *
+      // A1 „Beat-Nacht" weitet den On-Beat-Bonus additiv (×1.5 ⇒ ×2), genau wie
+      // die Neon-Ninja-Sterne — eine Quelle, ein Term.
+      beatBonus(onBeat, onBeatMultBonus(state.gear) + stage.beat) *
       frenzyMult(state.ability, now) *
+      // A3: der Mini-Frenzy des Truhen-Kobolds (×2 für 10 s). Bewusst ein
+      // EIGENER Faktor neben `frenzyMult` — die Twerk-Ekstase behält ihren
+      // Ladebalken, ihren Ring und ihren Ton für sich.
+      goblinBuffMult(goblin.buffUntil, now) *
+      // A1: der Klick-Faktor der Bühne („Nebel" +30 %).
+      stage.click *
       // A2 Space „Gravitations-Combo": der Combo-BONUS zählt ×1.5. `effectiveClick`
       // trägt `comboMult(stacks)` schon in sich — dieser Faktor hebt genau ihn.
       (gimmick?.id === 'gravity' ? spaceComboExtra(comboState.stacks) : 1),
@@ -1517,7 +1638,7 @@ function doShake(x?: number, y?: number): void {
   haptics.pulse(now, effects.haptics, crit);
   if (++clicksSinceSwitch >= MOVE_SWITCH_CLICKS) {
     clicksSinceSwitch = 0;
-    choreo.setMove(choreo.moveIdx + 1);
+    choreo.advance(); // A4: im Bühnen-Set kreisen statt stur durch alle Moves
   }
   if (!bounced) pops.damage({ value: dmg, crit, onBeat, x: px, y: py }, now);
   audio.click();
@@ -1633,8 +1754,18 @@ function peachVisible(now: number): boolean {
 function updatePeachSchedule(now: number): void {
   const at = state.peach.nextPeachAt;
   if (at <= 0 || now >= at + PEACH_VISIBLE_S * 1000) {
-    state.peach.nextPeachAt = rollNextPeachAt(now, rng, mythosPeachGapMult(state.transcend));
+    state.peach.nextPeachAt = rollNextPeachAt(now, rng, peachGapMult());
   }
+}
+
+/**
+ * Der Pausen-Faktor des nächsten Pfirsichs: der P2-Mythos-Knoten „Pfirsich-Magnet"
+ * MAL dem A1-Modifikator „Peach-Party" (beide verkürzen die Pause, also
+ * multiplizieren sie sich). Gewürfelt wird beim Neuplanen — wer auf einer
+ * Peach-Party-Bühne steht, plant kürzere Pausen ein: genau der Farm-Anreiz.
+ */
+function peachGapMult(): number {
+  return mythosPeachGapMult(state.transcend) * stageFactors().peachGap;
 }
 
 /**
@@ -1649,7 +1780,7 @@ function catchPeach(): { keys: number; boostUntil: number } | null {
   state.peach.boostUntil = activateBoost(now); // fresh ×2 60-s window
   const keys = peachKeyRoll(rng);
   earnKeys(keys);
-  state.peach.nextPeachAt = rollNextPeachAt(now, rng, mythosPeachGapMult(state.transcend));
+  state.peach.nextPeachAt = rollNextPeachAt(now, rng, peachGapMult());
   toasts.show(
     '🍑',
     'Goldener Pfirsich!',
@@ -1768,6 +1899,18 @@ interface LootGlue {
   open: (tier) => openChestFromInventory(tier),
   catchPeach,
   peachVisible: () => peachVisible(Date.now()),
+};
+
+// ROADMAP-V2 A3: dieselbe winzige Beweis-Oberfläche für den Truhen-Kobold
+// (gleicher Geist wie `chLoot`): den nächsten Spawn auf JETZT ziehen und den
+// Zustand lesen. Der Fang selbst läuft über den echten Button-Klick — der
+// Headless-Beweis nimmt also exakt den Spieler-Pfad, nichts wird umgangen.
+(window as unknown as { chGob: { spawn(): void; state(): GoblinState } }).chGob = {
+  spawn: () => {
+    goblin = { ...goblin, nextAt: Date.now(), hits: 0 };
+    goblinSpawnId = 0;
+  },
+  state: () => ({ ...goblin }),
 };
 
 // ---------- M13: leaderboard + retention meta (§7) ----------
@@ -1996,6 +2139,114 @@ peachBtn.addEventListener('click', () => {
   }
 });
 
+// ---------- ROADMAP-V2 A3: Truhen-Kobold (Button + Mini-Frenzy-Badge) ----------
+const goblinBtn = document.getElementById('goblinBtn') as HTMLButtonElement;
+const goblinBadge = document.getElementById('goblinBadge') as HTMLElement;
+const goblinCount = document.getElementById('goblinCount') as HTMLElement;
+/** Kantenlänge des Kobold-Buttons (deckungsgleich mit `.goblinBtn` in style.css). */
+const GOBLIN_SIZE = 64;
+/** Unterer Sperrstreifen (Ekstase-Knopf + Hinweiszeile + Mini-Frenzy-Badge). */
+const GOBLIN_BOTTOM_SAFE = 120;
+/** Der `nextAt`, zu dem der aktuell sichtbare Kobold gehört (0 = keiner). */
+let goblinSpawnId = 0;
+
+/** Die Spawn-Sperren des Events, aus der Live-Glue gelesen. */
+function goblinGate(): { hidden: boolean; boss: boolean; transitioning: boolean } {
+  return { hidden: document.hidden, boss: combat.boss, transitioning: world.transitioning };
+}
+
+/**
+ * Kobold-Zeitplan + Button, einmal pro Frame (dasselbe Muster wie der Pfirsich).
+ *
+ *  · ungeseedet ⇒ erste Runde würfeln,
+ *  · Fenster abgelaufen ⇒ verpasst, nächste Runde würfeln (er kommt nicht wieder),
+ *  · fällig, darf aber gerade NICHT auf die Bühne (Hintergrund-Tab, Bosskampf,
+ *    Bühnen-Wechsel) ⇒ um `GOBLIN_DEFER_S` vertagen, ohne einen RNG-Zug zu
+ *    verbrennen. Steht er schon auf der Bühne, bleibt er dort — ein mitten im
+ *    Fenster startender Boss soll ihn nicht wegzaubern.
+ */
+function updateGoblin(now: number): void {
+  const onStage = goblinSpawnId === goblin.nextAt && goblin.nextAt > 0;
+  if (goblin.nextAt <= 0) {
+    goblin = { ...goblin, nextAt: rollNextGoblinAt(now, rng), hits: 0 };
+  } else if (goblinExpired(goblin, now)) {
+    goblin = { ...goblin, nextAt: rollNextGoblinAt(now, rng), hits: 0 };
+  } else if (!onStage && now >= goblin.nextAt && !goblinSpawnAllowed(goblinGate())) {
+    goblin = { ...goblin, nextAt: now + GOBLIN_DEFER_S * 1000, hits: 0 };
+  }
+
+  const spawned = goblinVisible(goblin, now);
+  const show = spawned && !(isNarrow() && shopOpen());
+  if (spawned && goblinSpawnId !== goblin.nextAt) {
+    goblinSpawnId = goblin.nextAt;
+    goblinBtn.classList.remove('hit');
+  }
+  if (show) {
+    // Hoppel-Bahn quer über die Bühne (pur in `goblinPos`, hier nur Pixel).
+    const p = goblinPos(goblin, now);
+    // Im 50/50-Layout ist die BÜHNE die rechte Hälfte — der Kobold hoppelt über
+    // die Insel, nicht über die Crew-Liste (im Portrait-Layout füllt die Bühne
+    // den ganzen Bildschirm, dort gilt der volle Rand).
+    const minX = isNarrow() ? PEACH_MARGIN : Math.round(window.innerWidth * 0.5) + PEACH_MARGIN;
+    const maxX = Math.max(minX, window.innerWidth - GOBLIN_SIZE - PEACH_MARGIN);
+    // Vertikal bleibt er in der UNTEREN Bildhälfte — dort liegt die Insel. Oben
+    // stünde er auf dem Zonen-Strip und der Rivalen-Card und verdeckte genau die
+    // Bühnen-Info, die A1 gerade dorthin geschrieben hat.
+    const minY = Math.max(PEACH_TOP_SAFE, Math.round(window.innerHeight * 0.5));
+    // …und über dem Ekstase-Knopf: `GOBLIN_BOTTOM_SAFE` deckt Ability-Bar +
+    // Hinweiszeile ab, damit der Kobold nie einen Knopf verdeckt.
+    const maxY = Math.max(minY, window.innerHeight - GOBLIN_SIZE - GOBLIN_BOTTOM_SAFE);
+    goblinBtn.style.left = `${Math.round(minX + p.x * (maxX - minX))}px`;
+    goblinBtn.style.top = `${Math.round(minY + p.y * (maxY - minY))}px`;
+    const left = GOBLIN_HITS - goblin.hits;
+    if (goblinCount.textContent !== String(left)) goblinCount.textContent = String(left);
+  }
+  goblinBtn.classList.toggle('hidden', !show);
+  const buff = goblinBuffLeft(goblin.buffUntil, now);
+  goblinBadge.classList.toggle('hidden', buff <= 0);
+  if (buff > 0) {
+    const txt = `×2 Klick · ${Math.ceil(buff)}s`;
+    if (goblinBadge.textContent !== txt) goblinBadge.textContent = txt;
+  }
+}
+
+goblinBtn.addEventListener('click', () => {
+  audio.unlock();
+  const now = Date.now();
+  const r = goblinHit(goblin, now);
+  if (!r.counted) return;
+  goblin = r.state;
+  audio.click();
+  if (!r.caught) {
+    // Treffer-Feedback: der Kobold zuckt (Animation per Reflow neu angestoßen,
+    // damit auch der vierte Treffer sichtbar ist).
+    goblinBtn.classList.remove('hit');
+    void goblinBtn.offsetWidth;
+    goblinBtn.classList.add('hit');
+    goblinCount.textContent = String(GOBLIN_HITS - goblin.hits);
+    return;
+  }
+  // Gefangen: Holztruhe + Mini-Frenzy, und die nächste Runde wird gewürfelt
+  // (`goblinHit` hat `nextAt` bewusst auf 0 gesetzt — der Wurf gehört der Glue,
+  // weil nur sie den seeded `Rng` hält).
+  goblin = { ...goblin, nextAt: rollNextGoblinAt(now, rng) };
+  goblinSpawnId = 0;
+  state.chests.inventory.wood += GOBLIN_CHESTS;
+  goblinBtn.classList.add('hidden');
+  toasts.show(
+    '👺',
+    'Kobold gefangen!',
+    `🪵 Holztruhe · ×2 Klick-Schaden für ${GOBLIN_BUFF_S} Sekunden`,
+  );
+  audio.unlockJingle();
+  if (effects.screenShake) shakeMag = Math.max(shakeMag, SHAKE_CRIT);
+  haptics.boss(effects.haptics);
+  hud.update(state, combat, dps, clickDmg);
+  const activeTab = document.querySelector('.tab.active') as HTMLElement | null;
+  if (activeTab?.dataset.t) renderActiveTab(activeTab.dataset.t); // die Truhe sofort zeigen
+  persist();
+});
+
 // ---------- resize ----------
 function resize(): void {
   // G2: `frameCamera` rechnet die Distanz aus dem FOV — ein laufender Punch-In
@@ -2061,6 +2312,15 @@ let t0 = 0;
       gim: string;
       spot: boolean;
       hpF: number;
+      mod: string;
+      zone: number;
+      remix: number;
+      move: string;
+      set: string;
+      gobOn: boolean;
+      gobHits: number;
+      gobBuff: number;
+      gobCaught: number;
     };
   }
 ).chVs = () => ({
@@ -2084,6 +2344,17 @@ let t0 = 0;
   gim: activeGimmick()?.id ?? '',
   spot: spotlightOn,
   hpF: hpFraction(combat),
+  // ROADMAP-V2 A1/A4/A3: Bühnen-Modifikator, Choreo-Set und Kobold-Zustand —
+  // der Beweis-Lauf liest sie, statt sie aus Pixeln zu raten.
+  mod: activeMod()?.id ?? '',
+  zone: combat.zone,
+  remix: combat.remix,
+  move: choreo.current.name,
+  set: choreo.moveSet.map((i) => MOVES[i].name).join(' · '),
+  gobOn: goblinVisible(goblin, Date.now()),
+  gobHits: goblin.hits,
+  gobBuff: goblinBuffLeft(goblin.buffUntil, Date.now()),
+  gobCaught: goblin.caught,
 });
 let uiTimer = 0;
 let lastRenderMs = 0;
@@ -2153,15 +2424,21 @@ function loop(nowMs: number): void {
   // Combo soft-decay (§4.2.2, slowed by Showmaster gear §5) + tier-driven juice
   // (music/ability bar), each frame. A2 Space: im Gravitations-Kampf verfällt sie
   // doppelt so schnell (das Gnaden-Fenster bleibt, nur der Verfall danach zählt ×2).
+  // A1 „Goldrausch" lässt sie 25 % schneller verfallen (`stageComboStep` ist bei
+  // Faktor 1 zahlengleich zu `comboStep`); Gravitation und Modifikator schließen
+  // sich aus, weil Boss-Bühnen keinen Modifikator tragen.
   comboState =
     gimmickNow?.id === 'gravity'
       ? spaceComboStep(comboState, dt, comboDecayReduction(state.gear))
-      : comboStep(comboState, dt, comboDecayReduction(state.gear));
+      : stageComboStep(comboState, dt, comboDecayReduction(state.gear), stageFactors().comboDecay);
   const epochMs = Date.now();
   // Golden-Peach schedule (§6.1): despawn/reschedule the event, then sync the
   // on-screen 🍑 button + ×2-boost badge (clamped/despawned per B13c).
   updatePeachSchedule(epochMs);
   updatePeachButton(epochMs);
+  // A3: Kobold-Zeitplan + Hoppel-Position (kein Spawn im Hintergrund-Tab, im
+  // Bosskampf oder während der Bühnen-Wechsel läuft).
+  updateGoblin(epochMs);
   const tier = comboTier(comboState.stacks);
   const frenzy = isFrenzyActive(state.ability, epochMs);
   hud.setCombo(comboState.stacks, tier);

@@ -2114,6 +2114,94 @@ body {
   display: none;
 }
 
+/* ---- ROADMAP-V2 A3: Truhen-Kobold (hoppelnder Fang-Button + Mini-Frenzy) ---- */
+/* Bewusst ANDERS als der Pfirsich: eckig statt rund, grün statt orange, mit
+   Rest-Klick-Zähler — er ist ein Gegner, kein Sammelstück. */
+.goblinBtn {
+  position: fixed;
+  left: 16px;
+  top: 76px;
+  width: 64px;
+  height: 64px;
+  z-index: 41;
+  display: grid;
+  place-items: center;
+  border: 2px solid rgba(0, 0, 0, 0.55);
+  border-radius: 16px;
+  background: radial-gradient(circle at 38% 28%, #b6ec7a, #4e9a3a 72%);
+  box-shadow:
+    0 4px 0 rgba(30, 70, 20, 0.85),
+    0 0 0 4px rgba(168, 232, 49, 0.22);
+  cursor: pointer;
+  line-height: 1;
+  transition: transform 0.08s;
+}
+.goblinBtn .gb-face {
+  font-size: 34px;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.45));
+}
+.goblinBtn .gb-chest {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  font-size: 20px;
+}
+.goblinBtn .gb-count {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  min-width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #141021;
+  border: 2px solid var(--gold-base);
+  color: var(--gold-hi);
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 800;
+}
+.goblinBtn.hit {
+  animation: goblinHit 0.18s ease-out;
+}
+.goblinBtn.hidden {
+  display: none;
+}
+@keyframes goblinHit {
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  40% {
+    transform: scale(0.86) rotate(-9deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+.goblinBadge {
+  /* Direkt ÜBER dem Ekstase-Knopf statt oben: der Mini-Frenzy ist ein
+     Klick-Buff und gehört zum Klick-Bereich — oben läge er auf dem Zonen-Strip. */
+  position: fixed;
+  bottom: calc(132px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%) rotate(1.5deg);
+  z-index: 26;
+  background: rgba(120, 210, 80, 0.95);
+  color: #0e2a06;
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 800;
+  padding: 5px 12px 4px;
+  border: 2px solid rgba(0, 0, 0, 0.5);
+  border-radius: 20px;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+.goblinBadge.hidden {
+  display: none;
+}
+
 /* ---- M13: 📋 Ziele tab (daily/streak, quests, achievements, season) ---- */
 .meta-season {
   display: flex;
@@ -2352,6 +2440,7 @@ body {
   .hintbar,
   .toasts,
   .boostBadge,
+  .goblinBadge,
   .coach {
     left: 75%;
   }
@@ -2359,7 +2448,8 @@ body {
     left: 73.5%; /* nicht mit dem Crew-Button oben rechts kollidieren */
     width: min(420px, 44vw);
   }
-  .peachBtn {
+  .peachBtn,
+  .goblinBtn {
     left: calc(50% + 20px);
   }
 }
@@ -2553,12 +2643,55 @@ body {
   color: var(--gold-hi);
   text-shadow: 0 0 3px rgba(255, 200, 90, 0.85);
 }
+/* ---- ROADMAP-V2 A1: Modifikator-Icon im Strip-Slot ---- */
+/* Sitzt als kleines Abzeichen oben links am Insel-Thumbnail: man sieht schon im
+   Strip, welche Bühne welche Hausregel trägt — die Farm-Wahl beginnt hier. */
+.zs-mod {
+  position: absolute;
+  /* INNERHALB des Slots: die aktive Bühne ist um 1.16 skaliert, ein nach außen
+     ragendes Abzeichen würde dort am Panel-Rand abgeschnitten. */
+  top: 1px;
+  left: 1px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 1px 2px;
+  border-radius: 7px;
+  background: rgba(20, 16, 33, 0.86);
+  border: 1px solid rgba(255, 210, 120, 0.5);
+  pointer-events: none;
+}
 .zs-gap {
   align-self: center;
   font-weight: 800;
   color: var(--parch);
   opacity: 0.6;
   padding: 0 2px;
+}
+/* ---- ROADMAP-V2 A1: Hausregel der Bühne auf der Bühnen-Card ---- */
+.stage-mod {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 6px;
+  padding: 5px 9px;
+  border-radius: 9px;
+  background: rgba(139, 92, 246, 0.16);
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  text-align: left;
+}
+.stage-mod b {
+  font-family: var(--display);
+  font-size: 12px;
+  color: var(--gold-hi);
+  letter-spacing: 0.2px;
+}
+.stage-mod span {
+  font-size: 10.5px;
+  line-height: 1.3;
+  color: #d9d3ea;
+}
+.stage-mod.hidden {
+  display: none;
 }
 .boss-challenge {
   display: block;
