@@ -101,6 +101,14 @@ import {
   travelTo,
 } from './combat';
 import { MAX_SKIN_LEVEL, shardCost } from './gear';
+import { GOBLIN_CHESTS, GOBLIN_SIM_CATCH, rollNextGoblinAt } from './goblin';
+import {
+  REMIX_OFF,
+  type StageModFactors,
+  factorsForZone,
+  remixSeedFor,
+  stageDamageFactor,
+} from './stage-mods';
 import { awardGildOnZone, type Gilds, isGildZone } from './gild';
 import {
   type HeavenState,
@@ -157,6 +165,14 @@ export interface SimConfig {
    * `sim.test.ts` by deriving both values from the live `SKINS` data.
    */
   clickGearMult?: number;
+  /**
+   * Whether the **Bühnen-Modifikatoren** (ROADMAP-V2 A1) are modeled. **Defaults to
+   * `true`** — every anchor plays the same stage map a real save would roll. Set
+   * `false` to run the pre-A1 baseline; that is the A/B knob the calibration used
+   * (and the dedicated A1 test still uses) to prove the catalog stays net-neutral
+   * over a run instead of quietly moving the walls.
+   */
+  stageMods?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +212,11 @@ function econOn(config: SimConfig): boolean {
   return config.economy !== false;
 }
 
+/** Whether the A1 stage modifiers are modeled for this config (default on). */
+function modsOn(config: SimConfig): boolean {
+  return config.stageMods !== false;
+}
+
 /** The mutable bot state that persists across ascensions within a chain. */
 interface Sim {
   gold: number;
@@ -233,6 +254,24 @@ interface Sim {
   gimmickZone: number;
   /** Epoch-ms the next Golden-Peach spawns (0 = unseeded). */
   nextPeachAtMs: number;
+  /** A3: Epoch-ms the next Truhen-Kobold hops across the stage (0 = unseeded). */
+  nextGoblinAtMs: number;
+  /**
+   * A3: EIGENER seeded Strom für den Kobold-Faucet. Im Spiel zieht der Kobold aus
+   * demselben persistierten `rng` wie alles andere; im Bot bekommt er bewusst einen
+   * abgeleiteten Nebenstrom, damit ein NEUES Event nicht rückwirkend jede
+   * Truhen-/Krit-/Gild-Ziehung aller Anker-Seeds verschiebt. Dieselbe Verteilung,
+   * dieselbe Kadenz — nur ohne die Alt-Anker mit reinem Strom-Versatz zu brechen.
+   */
+  goblinRng: Rng;
+  /**
+   * A1: Remix-Seed der Bühnen-Modifikatoren dieses Laufs. Der Bot spielt damit
+   * DIESELBE Karte, die ein Spieler mit diesem Save-Seed sähe — die Anker messen
+   * also die Regel, nicht ihre Abwesenheit.
+   */
+  remix: number;
+  /** L1-Aszensionen dieses Laufs — treibt (nur) den Remix der Modifikator-Karte. */
+  ascensions: number;
   /** Smoothed gold/sec (EMA) feeding chest BP rewards (§6.2). */
   incomePerSec: number;
   // ---- Economy tallies (diagnostics for the "all systems in the bot" test) ----
@@ -242,6 +281,8 @@ interface Sim {
   chestsOpened: number;
   /** Golden-Peaches caught lifetime. */
   peachesCaught: number;
+  /** A3: Truhen-Kobolde gefangen (lifetime). */
+  goblinsCaught: number;
   rng: Rng;
 }
 
@@ -253,6 +294,8 @@ export interface EconSummary {
   chestsOpened: number;
   /** Golden-Peaches caught. */
   peachesCaught: number;
+  /** Truhen-Kobolde caught (A3 faucet — each pays a Holztruhe). */
+  goblinsCaught: number;
   /** Permanent tokens banked (Σ over the crit/gold/DPS pool, §6.2). */
   tokensBanked: number;
   /** 🧩-shards banked → gear levels (§5.4). */
@@ -269,13 +312,14 @@ function econSummary(sim: Sim): EconSummary {
     keysEarned: sim.keysEarned,
     chestsOpened: sim.chestsOpened,
     peachesCaught: sim.peachesCaught,
+    goblinsCaught: sim.goblinsCaught,
     tokensBanked,
     shards: sim.shards,
     gearLevel: shardSkinLevel(sim.shards),
   };
 }
 
-function newSim(seed: number): Sim {
+function newSim(seed: number, mods = true): Sim {
   return {
     gold: 0,
     crew: {},
@@ -296,12 +340,29 @@ function newSim(seed: number): Sim {
     gimmick: createGimmickRuntime(),
     gimmickZone: 0,
     nextPeachAtMs: 0,
+    nextGoblinAtMs: 0,
+    goblinRng: new Rng({ seed: (seed ^ 0x4b0b1e5d) | 0, cursor: 0 }),
+    remix: mods ? remixSeedFor(seed, 0) : REMIX_OFF,
+    ascensions: 0,
     incomePerSec: 0,
     keysEarned: 0,
     chestsOpened: 0,
     peachesCaught: 0,
+    goblinsCaught: 0,
     rng: new Rng({ seed, cursor: 0 }),
   };
+}
+
+/**
+ * A1: Eine Aszension VERWÜRFELT die Modifikator-Karte (`remixSeedFor`). Der Bot
+ * zieht damit über eine Aszensions-Kette hinweg viele verschiedene Karten — die
+ * Anker messen also den DURCHSCHNITT des Katalogs, nicht einen Glücksgriff.
+ * Jeder Ascend-Pfad ruft das genau einmal, direkt bevor der neue Lauf spawnt.
+ */
+function remixOnAscend(sim: Sim): void {
+  if (sim.remix === REMIX_OFF) return; // A/B-Lauf ohne Modifikatoren
+  sim.ascensions += 1;
+  sim.remix = remixSeedFor(sim.rng.seed, sim.ascensions);
 }
 
 /** The sustained combo multiplier for a config (×2 at cap when juiced, §4.8). */
@@ -320,6 +381,7 @@ function critFactor(
   config: SimConfig,
   permTokens: PermTokens,
   crewUp: Record<string, number> = {},
+  stageCrit = 0,
 ): number {
   if (!config.juice) return 1;
   const econ = econOn(config);
@@ -327,9 +389,14 @@ function critFactor(
   const spec = crewSpecialBonuses(crewUp);
   // Crit chance is hard-capped at 40 % in the real click pipeline (`click.critChance`,
   // §4.2.1); mirror the cap here so a fat token pool can't lift the EV past the game.
+  // `stageCrit` ist der A1-Modifikator „Krit-Funken" (+5 pp) der aktuellen Bühne —
+  // er läuft durch DENSELBEN Deckel wie im Spiel.
   const chance = Math.min(
     CRIT_CHANCE_CAP,
-    CRIT_CHANCE + spec.critChance + (econ ? permTokenCritChance(permTokens) : 0),
+    CRIT_CHANCE +
+      spec.critChance +
+      Math.max(0, stageCrit) +
+      (econ ? permTokenCritChance(permTokens) : 0),
   );
   const mult = (CRIT_MULT + spec.critDmg) * (econ ? permTokenCritMult(permTokens) : 1);
   return 1 + chance * (mult - 1);
@@ -501,6 +568,32 @@ function tickPeach(sim: Sim, nowMs: number): void {
 }
 
 /**
+ * **A3 Truhen-Kobold als kleiner Faucet.** Alle 4–7 min hoppelt einer über die
+ * Bühne; der Bot fängt ihn mit `GOBLIN_SIM_CATCH` (80 %, dokumentierte Annahme in
+ * `goblin.ts`) und bucht dann `GOBLIN_CHESTS` Holztruhe(n) in denselben
+ * Truhen-Backlog, den `openChestsGreedy` leert.
+ *
+ * Der 10-s-Mini-Frenzy (×2 Klick) wird BEWUSST NICHT modelliert — dieselbe
+ * Untergrenzen-Logik wie bei Twerk-Ekstase und den Boss-Schadens-Mults: er kann
+ * den Bot nur schneller machen, sein Weglassen hält die Anker ehrlich niedrig.
+ * (Größenordnung: ~10 s ×2 Klick alle ~5.5 min ⇒ ≈ +3 % Klick-Schaden im Mittel.)
+ * Die Spawn-Sperren des Spiels (Hintergrund-Tab, Bosskampf, Bühnen-Wechsel)
+ * stecken pauschal in der 80-%-Quote statt als eigene Zustandsmaschine.
+ */
+function tickGoblin(sim: Sim, nowMs: number): void {
+  if (sim.nextGoblinAtMs <= 0) sim.nextGoblinAtMs = rollNextGoblinAt(nowMs, sim.goblinRng);
+  let guard = 64;
+  while (nowMs >= sim.nextGoblinAtMs && guard-- > 0) {
+    const spawnedAt = sim.nextGoblinAtMs;
+    if (sim.goblinRng.next() < GOBLIN_SIM_CATCH) {
+      sim.chestInv.wood += GOBLIN_CHESTS;
+      sim.goblinsCaught += 1;
+    }
+    sim.nextGoblinAtMs = rollNextGoblinAt(spawnedAt, sim.goblinRng);
+  }
+}
+
+/**
  * Full BP (gold) multiplier this second: Peachiel × gold-tokens × live peach ×3 ×
  * the crew's `gold`-special ability tiers (v11 — part of the core crew layer, so
  * it folds even in the no-economy calibration configs, exactly as the game does).
@@ -596,6 +689,12 @@ function openChestsGreedy(sim: Sim, incomePerSec: number, nowMs: number): void {
  * zeit-proportional zurückgerechnet (`combat.hp / k` = der wirklich verbrauchte
  * Anteil der Sekunde), sodass der Übertrag auf die nächsten Rivalen ehrlich bleibt.
  * Die Wellen-Heilung (Beach) läuft als HP-Regen VOR dem Schaden.
+ *
+ * **A1 Bühnen-Modifikatoren**: gegen einen RIVALEN gilt analog `stageDamageFactor`
+ * (Klick- und Crew-Anteil werden unterschiedlich skaliert — „Nebel" hebt den
+ * einen und senkt den anderen), und sein BP-Ertrag trägt den `gold`-Faktor
+ * derselben Bühne. Die Ausdauer-Seite (`hp`) rechnet `combat.spawnFor` über
+ * `combat.remix` — eine Quelle für Spiel und Bot, hier ist nichts zu tun.
  */
 function stepSecond(
   sim: Sim,
@@ -641,6 +740,12 @@ function stepSecond(
     k = entered.k;
   }
 
+  /** A1: Faktoren + Schadens-Verhältnis der Bühne, auf der gerade gekämpft wird. */
+  const stageAt = (zone: number): { f: StageModFactors; factor: number } => {
+    const f = factorsForZone(zone, combat.remix);
+    return { f, factor: stageDamageFactor(f, dmg.click, dmg.idle) };
+  };
+
   let remaining = dmg.click + dmg.idle;
   let guard = 50000; // bounds a runaway burst; ×1.6/zone means it always terminates
   while (remaining > 0 && guard-- > 0) {
@@ -651,7 +756,8 @@ function stepSecond(
       combat = entered.combat;
       k = entered.k;
     }
-    const factor = combat.boss ? k : 1;
+    const stage = combat.boss ? null : stageAt(combat.zone);
+    const factor = combat.boss ? k : stage!.factor;
     if (factor <= 0) break; // Spotlight ohne Klick-Schaden: diese Sekunde kommt nichts an
     const eff = remaining * factor;
     if (eff >= combat.hp) {
@@ -659,7 +765,7 @@ function stepSecond(
       const wasBoss = combat.boss;
       const bossZone = combat.zone;
       const r = hit(combat, combat.hp);
-      sim.gold += Math.floor(r.gold * goldMult);
+      sim.gold += Math.floor(r.gold * goldMult * (stage?.f.gold ?? 1));
       combat = r.state;
       if (wasBoss && r.advancedZone) sim.retryBossZone = 0; // Gate besiegt
       let onFrontier = false;
@@ -683,7 +789,8 @@ function stepSecond(
           sim.keys += dropped;
           sim.keysEarned += dropped;
           sim.chestInv[chestTierForBoss(bossZone)] += 1;
-        } else if (sim.rng.next() < rivalChestChance(luck)) {
+        } else if (sim.rng.next() < rivalChestChance(luck) * (stage?.f.chest ?? 1)) {
+          // A1 „Zähe Menge": doppelte Truhen-Chance auf dieser Bühne.
           sim.chestInv.wood += 1;
         }
       }
@@ -742,8 +849,14 @@ function economyStep(
 ): CombatState {
   const econ = econOn(config);
   const nowMs = globalSec * 1000;
-  if (econ) tickPeach(sim, nowMs);
-  const crit = critFactor(config, sim.permTokens, sim.crewUp);
+  if (econ) {
+    tickPeach(sim, nowMs);
+    tickGoblin(sim, nowMs); // A3 — kleiner Truhen-Faucet (80 % Fangquote)
+  }
+  // A1: „Krit-Funken" der Bühne, auf der gerade gekämpft wird. Auf einer
+  // Boss-Bühne (und für jeden no-juice-Anker) ist der Zusatz 0.
+  const stageCrit = combat.boss ? 0 : factorsForZone(combat.zone, combat.remix).crit;
+  const crit = critFactor(config, sim.permTokens, sim.crewUp, stageCrit);
   const dmg = damageSplit(sim, config, combo, crit);
   const goldMult = goldMultiplierNow(sim, config, nowMs);
   const luck = ancientChestLuckBonus(sim.ancients);
@@ -790,7 +903,7 @@ function runOnce(
   tOffset = 0,
 ): RunResult {
   const combo = comboFactor(config);
-  let combat = spawnFor(1, 0, 1);
+  let combat = spawnFor(1, 0, 1, sim.remix);
   const timeToZone = new Map<number, number>([[1, 0]]);
   for (let t = 1; t <= seconds; t++) {
     const prevFrontier = combat.maxZone;
@@ -830,7 +943,7 @@ export interface ChainResult {
  * each new best zone for the endless-wall criterion (E2) and the §4.8 Bühne-80 target.
  */
 export function simulateRunChain(config: SimConfig, runs: number, runSeconds: number): ChainResult {
-  const sim = newSim(config.seed ?? 1);
+  const sim = newSim(config.seed ?? 1, modsOn(config));
   const summaries: RunSummary[] = [];
   const timeToLifetime = new Map<number, number>();
   let globalT = 0;
@@ -855,6 +968,7 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
     sim.souls = asc.souls;
     sim.lifetimeMaxZone = asc.lifetimeMaxZone;
     sim.rsLifetime = asc.rsLifetime;
+    remixOnAscend(sim); // A1: neue Aszension, neue Modifikator-Karte
     summaries.push({
       run: r + 1,
       bestZone: res.bestZone,
@@ -868,7 +982,7 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
 
 /** Play a single fresh run (0 souls); the E4 active-vs-casual comparison unit. */
 export function simulateSingleRun(config: SimConfig, seconds: number): RunResult {
-  return runOnce(newSim(config.seed ?? 1), seconds, config);
+  return runOnce(newSim(config.seed ?? 1, modsOn(config)), seconds, config);
 }
 
 /** Options for the adaptive-ascension continuous sim (the E2 measurement). */
@@ -918,9 +1032,9 @@ export interface ContinuousResult {
  * plateau (souls stop growing) — the honest crew+gild+soul-only ceiling.
  */
 export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): ContinuousResult {
-  const sim = newSim(config.seed ?? 1);
+  const sim = newSim(config.seed ?? 1, modsOn(config));
   const combo = comboFactor(config);
-  let combat = spawnFor(1, 0, 1);
+  let combat = spawnFor(1, 0, 1, sim.remix);
   const timeToLifetime = new Map<number, number>();
   let globalT = 0;
   let lastAdvanceT = 0;
@@ -951,7 +1065,8 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
       sim.gold = 0;
       sim.crew = {};
       sim.crewUp = {};
-      combat = spawnFor(1, 0, 1);
+      remixOnAscend(sim); // A1: neue Aszension, neue Modifikator-Karte
+      combat = spawnFor(1, 0, 1, sim.remix);
       lastAdvanceT = globalT;
       ascensions++;
       if (opts.fullPrestige) {
@@ -1092,9 +1207,9 @@ export interface EraResult {
  * anti-plateau of §4.6.
  */
 export function simulateAscensionEra(config: SimConfig, opts: EraOptions): EraResult {
-  const sim = newSim(config.seed ?? 1);
+  const sim = newSim(config.seed ?? 1, modsOn(config));
   const combo = comboFactor(config);
-  let combat = spawnFor(1, 0, 1);
+  let combat = spawnFor(1, 0, 1, sim.remix);
   let globalT = 0;
   let lastAdvanceT = 0;
   let ascensions = 0;
@@ -1138,7 +1253,8 @@ export function simulateAscensionEra(config: SimConfig, opts: EraOptions): EraRe
       sim.crew = {};
       sim.crewUp = {};
       buyAncientsGreedy(sim, config, combo, crit); // spend the freshly-earned souls
-      combat = spawnFor(1, 0, 1);
+      remixOnAscend(sim); // A1: neue Aszension, neue Modifikator-Karte
+      combat = spawnFor(1, 0, 1, sim.remix);
       lastAdvanceT = globalT;
       ascensions++;
     }
@@ -1190,7 +1306,7 @@ export interface FloatGuardResult {
  * every value well under 1.8e308 to Bühne 300 (HP ~1e58+), the M9/M14 float-guard.
  */
 export function simulateFloatGuard(config: SimConfig, opts: FloatGuardOptions): FloatGuardResult {
-  const sim = newSim(config.seed ?? 1);
+  const sim = newSim(config.seed ?? 1, modsOn(config));
   const combo = comboFactor(config);
   let combat = spawnFor(1, 0, 1);
   let maxMagnitude = 0;

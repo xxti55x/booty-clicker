@@ -47,6 +47,37 @@ import {
 //   · E2 15 Verbesserungen + 1 Himmelfahrt (unverändert), E3 ≥ 41 Meilensteine,
 //     E4-Abstand 8–15 → 10–15 Bühnen, Gear-E4 10 → 10/11
 // Kein Anker musste aufgerissen werden; einzig der 🧩-Zeugen-Seed wandert (s. u.).
+//
+// **ROADMAP-V2 A1 (Bühnen-Modifikatoren) + A3 (Truhen-Kobold) — Anker-Lauf.** Der Bot
+// spielt jetzt dieselbe seeded Modifikator-Karte, die ein Save mit diesem Seed rollen
+// würde (`stageMods`, Default an; `false` fährt die Vor-A1-Basis für den A/B). Gefaltet
+// sind die Faktoren, die auf echte Bot-Terme treffen — `gold` (Kill-BP), `hp`
+// (`spawnFor`, also EINE Quelle mit dem Spiel), `click`/`dps` (getrennt über
+// `stageDamageFactor`), `crit` (im gedeckelten Krit-Stack) und `chest`
+// (Rivalen-Truhen-Chance). Bewusst NEUTRAL bleiben `beat` (der Bot klickt ungetaktet
+// und holt den On-Beat-Bonus nie ab), `ekstase` (die Ekstase ist im Bot ohnehin nicht
+// modelliert) und `peachGap` (der Bot reist nicht zum Farmen, sieht die Bühne also nur
+// im Vorbeigehen) — alle drei können den ECHTEN Spieler nur beschleunigen, die Anker
+// bleiben damit Untergrenzen. A3 hängt als kleiner Faucet daran: alle 4–7 min ein
+// Kobold, 80 % Fangquote (`GOBLIN_SIM_CATCH`), Ertrag eine Holztruhe; sein 10-s-
+// ×2-Klick-Buff ist NICHT modelliert (dieselbe Untergrenzen-Logik wie Twerk-Ekstase).
+// Der Kobold zieht im Bot aus einem eigenen Seiten-Strom, damit ein neues Event nicht
+// rückwirkend jede Truhen-/Krit-Ziehung aller Alt-Seeds verschiebt.
+//
+// Ergebnis des Anker-Laufs (seeds 1/7/12345, jeweils vorher → nachher):
+//   · t10 104 → 104 s (Bühne 10 liegt UNTER `MOD_MIN_ZONE`, per Konstruktion gleich)
+//   · t25 2032/2044/2033 → 2147/2035/1643 s (Mittel 2036 → 1942 s, −4.6 %),
+//     Bühne 30 bleibt außer Reichweite
+//   · erste Himmelfahrt 18.44/18.27/18.32 → 17.36/19.06/17.17 h
+//     (Mittel 18.34 → 17.86 h, −2.6 %; Fenster unverändert)
+//   · kumuliert t75 1.66/2.32/2.36 → 1.61/1.73/1.59 h
+//   · E2/E3/E4, Gear-E4 und der Float-Guard unverändert grün
+// Die STREUUNG je Seed wächst spürbar (± 10 % statt ± 3 %) — das ist der Punkt der
+// Mechanik: jeder Lauf würfelt eine andere Karte, und eine Aszension würfelt neu. Der
+// MITTELWERT bewegt sich kaum, also verschiebt A1 keine Wand. Zwei Parameter wurden
+// dafür gezähmt (siehe DECISIONS): „Zähe Menge" +30 % → +20 % Ausdauer und „Nebel"
+// −20 % → −15 % Crew-DPS; mit den Roadmap-Rohwerten lief der empfindlichste Anker
+// (0.7-cps-Bot, seed 7) mit 20.35 h aus seinem Fenster.
 // ---------------------------------------------------------------------------
 const ACTIVE = { clickRate: 3, juice: true } as const; // full economy on (default)
 const ACTIVE_CAL = { clickRate: 3, juice: true, economy: false } as const; // §4.8 baseline
@@ -415,10 +446,14 @@ describe('simulateEndless — full loot economy in the bot (§9.5, M14-AC1)', ()
   // new boss ⇒ a modest, variable sample). Asserted concretely on deterministic
   // witness seeds. v12: the slower pacing shrinks the 45-min chest sample further —
   // no single seed banks tokens AND a gear level any more, so the witness splits:
-  // seed 7 banks a permanent token + 🧩 (tokens 1, shards 8), a second witness
-  // converts 🧩 into a real gear level. Every faucet stays covered.
-  it('seed 7: token + shard faucets bank concrete loot', () => {
-    const e = simulateSingleRun({ ...ACTIVE, seed: 7 }, RUN_S).econ;
+  // a token witness and a gear-level witness. Every faucet stays covered.
+  // ROADMAP-V2 A1: der Token-Zeuge wandert 7 → 5. Die Bühnen-Modifikatoren
+  // verschieben, WELCHE Bühnen in 45 min fallen (und „Zähe Menge" verdoppelt die
+  // Rivalen-Truhen-Chance) — damit verschieben sich die gezogenen Truhen-Lose.
+  // Seed 7 bankt jetzt 11 🧩 aber keinen Token mehr, Seed 5 einen Token + 10 🧩.
+  // Zeugen-Tausch, keine abgeschwächte Behauptung: die Zusicherung ist unverändert.
+  it('seed 5: token + shard faucets bank concrete loot', () => {
+    const e = simulateSingleRun({ ...ACTIVE, seed: 5 }, RUN_S).econ;
     expect(e.tokensBanked).toBeGreaterThanOrEqual(1); // §6.2 permanent tokens
     expect(e.shards).toBeGreaterThan(0); // 🧩 banked
   });
@@ -490,6 +525,46 @@ describe('simulateEndless — A2 Boss-Gimmicks (kein Gate sperrt)', () => {
 });
 
 // M9-AC5 / §4.4-AC2: farming via the pure travelTo clamps to 1..maxZone.
+// ---------------------------------------------------------------------------
+// ROADMAP-V2 A1 + A3: der Bot rechnet die Bühnen-Modifikatoren und den
+// Kobold-Faucet — und beides verschiebt die Wände nicht.
+// ---------------------------------------------------------------------------
+describe('simulateEndless — A1 Bühnen-Modifikatoren + A3 Kobold', () => {
+  it('die Modifikatoren wirken im Bot (mods on ≠ mods off), ohne die Tiefe zu kippen', () => {
+    let differs = 0;
+    for (const seed of SEEDS) {
+      const on = simulateSingleRun({ ...ACTIVE, seed, stageMods: true }, RUN_S);
+      const off = simulateSingleRun({ ...ACTIVE, seed, stageMods: false }, RUN_S);
+      if (on.bestZone !== off.bestZone) differs++;
+      // Kein Seed darf durch die Karte einbrechen oder davonlaufen: ±2 Boss-Gates.
+      expect(Math.abs(on.bestZone - off.bestZone)).toBeLessThanOrEqual(10);
+    }
+    // …aber SPÜRBAR sein müssen sie: mindestens ein Seed landet woanders.
+    expect(differs).toBeGreaterThanOrEqual(1);
+  });
+
+  it('der Modifikator-Mittelwert bleibt netto neutral (Σ Tiefe über alle Seeds)', () => {
+    let on = 0;
+    let off = 0;
+    for (const seed of SEEDS) {
+      on += simulateSingleRun({ ...ACTIVE, seed, stageMods: true }, RUN_S).bestZone;
+      off += simulateSingleRun({ ...ACTIVE, seed, stageMods: false }, RUN_S).bestZone;
+    }
+    // Über fünf Seeds gemittelt darf der Katalog die Progression um höchstens
+    // 15 % bewegen — die Guardrail-Grenze der Roadmap („Wände dürfen nicht wandern").
+    expect(Math.abs(on - off) / off).toBeLessThanOrEqual(0.15);
+  });
+
+  it('A3: der Kobold-Faucet feuert (~1 alle 4–7 min, 80 % Fangquote)', () => {
+    for (const seed of SEEDS) {
+      const e = simulateSingleRun({ ...ACTIVE, seed }, RUN_S).econ;
+      // 45 min ÷ ~5.5 min ≈ 8 Spawns, davon 80 % gefangen ⇒ ≥ 4 ist die sichere Schranke.
+      expect(e.goblinsCaught).toBeGreaterThanOrEqual(4);
+      expect(e.goblinsCaught).toBeLessThanOrEqual(12);
+    }
+  });
+});
+
 describe('simulateEndless — travel/farm clamp (M9-AC5)', () => {
   it('travelTo (farmZone) never leaves 1..maxZone', () => {
     const frontier = spawnFor(15, 3, 15); // maxZone 15
