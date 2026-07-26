@@ -12,8 +12,9 @@ import { type CombatState, bossHp, bossTimeFraction, hpFraction, isBossZone } fr
 import { MONSTERS_PER_ZONE } from '../game/combat';
 import { comboTierName } from '../game/combo';
 import { soulBonusEff } from '../game/heaven';
-import { modForZone } from '../game/stage-mods';
+import type { StageMod } from '../game/stage-mods';
 import { type StageStars, starBitsFor, starsAt } from '../game/stars';
+import { isWeeklyZone, stageModsFor } from '../game/weekly';
 import { transcendGlobalMult } from '../game/transcend';
 import { fmt } from './format';
 import { shouldTween, tweenValue } from './tween';
@@ -90,9 +91,19 @@ function islandSvg(zone: number): string {
  * Bewusst nur das EMOJI: der Strip-Slot ist 46 px breit, ein Name passt dort
  * nicht; der ganze Satz steht auf der Bühnen-Card und im `title` des Slots.
  */
-function modBadge(zone: number, remix: number): string {
-  const m = modForZone(zone, remix);
+function modBadge(zone: number, remix: number, week: number): string {
+  // A5: Auf der Bühne der Woche steht EIN 📅 statt zweier Mod-Icons. Zwei Emojis
+  // nebeneinander wären im 46-px-Slot Matsch, und das Kalenderblatt ist die
+  // Information, die man im Strip sucht („wo ist die Wochen-Bühne?"); WELCHE
+  // zwei Regeln dort liegen, sagen Tooltip und Bühnen-Card.
+  if (isWeeklyZone(zone, week)) return '<span class="zs-mod zs-week">📅</span>';
+  const m = stageModsFor(zone, remix, week)[0];
   return m ? `<span class="zs-mod">${m.icon}</span>` : '';
+}
+
+/** „💰 Goldrausch + ⚡ Krit-Funken" — die Regeln einer Bühne als eine Zeile. */
+function modLabel(mods: readonly StageMod[]): string {
+  return mods.map((m) => `${m.icon} ${m.name}`).join(' + ');
 }
 
 function starPips(zone: number, stars: StageStars): string {
@@ -207,18 +218,24 @@ export class ChHud {
         this.gimmickEl.title = gimmick?.description ?? '';
       }
     }
-    this.updateZoneStrip(combat.zone, combat.maxZone, state.stageStars, combat.remix);
-    // ROADMAP-V2 A1: die Hausregel der aktuellen Bühne auf der Bühnen-Card —
-    // Icon + Name + der eine Satz. Im Bosskampf schweigt sie (Boss-Bühnen tragen
-    // keinen Modifikator, und die Card gehört dort dem Gimmick).
-    const mod = combat.boss ? null : modForZone(combat.zone, combat.remix);
-    const modTxt = mod ? `${mod.icon} ${mod.name}` : '';
+    this.updateZoneStrip(combat.zone, combat.maxZone, state.stageStars, combat.remix, combat.week);
+    // ROADMAP-V2 A1/A5: die Hausregeln der aktuellen Bühne auf der Bühnen-Card —
+    // je Regel Icon + Name + der eine Satz, auf der Wochen-Bühne also ZWEI Zeilen
+    // unter einer 📅-Überschrift. Im Bosskampf schweigt die Card (Boss-Bühnen
+    // tragen keine Regel, und die Card gehört dort dem Gimmick).
+    const mods = combat.boss ? [] : stageModsFor(combat.zone, combat.remix, combat.week);
+    const weekly = !combat.boss && isWeeklyZone(combat.zone, combat.week);
+    const modTxt = (weekly ? '📅' : '') + modLabel(mods);
     if (modTxt !== this.cMod) {
       this.cMod = modTxt;
-      this.stageModEl.classList.toggle('hidden', modTxt === '');
-      if (mod) {
-        this.stageModEl.innerHTML = `<b>${mod.icon} ${mod.name}</b><span>${mod.description}</span>`;
-        this.stageModEl.title = mod.description;
+      this.stageModEl.classList.toggle('hidden', mods.length === 0);
+      this.stageModEl.classList.toggle('weekly', weekly);
+      if (mods.length > 0) {
+        const head = weekly ? '<b class="sm-week">📅 Bühne der Woche</b>' : '';
+        this.stageModEl.innerHTML =
+          head +
+          mods.map((m) => `<b>${m.icon} ${m.name}</b><span>${m.description}</span>`).join('');
+        this.stageModEl.title = mods.map((m) => m.description).join(' · ');
       }
     }
     // „Boss herausfordern": nur an der Frontier-Boss-Bühne, solange ihr Gate
@@ -323,7 +340,13 @@ export class ChHud {
    * aktive markiert, Boss-Gates (×5) mit Gold-Rand, kommende Zonen gedimmt.
    * Unter jeder Nummer die P1-Stern-Pips der Bühne.
    */
-  private updateZoneStrip(zone: number, frontier: number, stars: StageStars, remix: number): void {
+  private updateZoneStrip(
+    zone: number,
+    frontier: number,
+    stars: StageStars,
+    remix: number,
+    week: number,
+  ): void {
     // Nur ERREICHTE Bühnen zeigen (nichts Zukünftiges spoilern): das Fenster
     // endet an der Frontier und jede Bühne ist klickbar — zurückreisen zum
     // Farmen, wieder vor zur Boss-Bühne.
@@ -333,21 +356,29 @@ export class ChHud {
     // bliebe ein frisch verdienter Pip bis zur nächsten Bühnen-Änderung leer.
     let starSig = '';
     for (let z = start; z <= end; z++) starSig += `${starsAt(stars, z)},`;
-    const sig = `${start}|${end}|${zone}|${frontier}|${remix}|${starSig}${starsAt(stars, frontier)}`;
+    const sig = `${start}|${end}|${zone}|${frontier}|${remix}|${week}|${starSig}${starsAt(stars, frontier)}`;
     if (sig === this.cStrip) return;
     this.cStrip = sig;
     const slot = (z: number): string => {
-      const cls = ['zs', z === zone ? 'active' : 'go', z % 5 === 0 ? 'boss' : '']
+      const weekly = isWeeklyZone(z, week);
+      const cls = [
+        'zs',
+        z === zone ? 'active' : 'go',
+        z % 5 === 0 ? 'boss' : '',
+        weekly ? 'wk' : '',
+      ]
         .filter(Boolean)
         .join(' ');
       const label = z % 5 === 0 ? `Boss-Bühne ${z}` : `Bühne ${z}`;
-      const m = modForZone(z, remix);
-      // Der Modifikator gehört in den Tooltip: so wählt man die Farm-Bühne
-      // schon im Strip, ohne erst hinreisen zu müssen.
+      const mods = stageModsFor(z, remix, week);
+      // Die Regeln gehören in den Tooltip: so wählt man die Farm-Bühne schon im
+      // Strip, ohne erst hinreisen zu müssen — auf der Wochen-Bühne beide.
       const title =
-        (z === zone ? label : `Zu ${label} reisen`) + (m ? ` · ${m.icon} ${m.name}` : '');
+        (z === zone ? label : `Zu ${label} reisen`) +
+        (weekly ? ' · 📅 Bühne der Woche' : '') +
+        (mods.length > 0 ? ` · ${modLabel(mods)}` : '');
       return `<button type="button" class="${cls}" data-z="${z}"
-           title="${title}">${modBadge(z, remix)}${islandSvg(z)}<span>${z}</span>${starPips(z, stars)}</button>`;
+           title="${title}">${modBadge(z, remix, week)}${islandSvg(z)}<span>${z}</span>${starPips(z, stars)}</button>`;
     };
     const slots: string[] = [];
     for (let z = start; z <= end; z++) slots.push(slot(z));

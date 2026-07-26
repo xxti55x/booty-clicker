@@ -51,7 +51,7 @@ import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 11;
+export const CH_SCHEMA = 12;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -81,7 +81,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (v11, Bühnen-Sterne): ChState + envelope. */
+/** The current persisted shape (v12, Wochen-Bestzone): ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -389,6 +389,11 @@ function repairMeta(v: unknown): MetaState {
     streak,
     lastLoginDay: int(v.lastLoginDay, def.lastLoginDay),
     streakProtectWeek: int(v.streakProtectWeek, def.streakProtectWeek),
+    // A5 (v12): das Wochen-Paar. Beide Felder werden hier nur auf „ganze Zahl"
+    // repariert — ein Index aus der Zukunft (verstellte Uhr) ist harmlos, weil
+    // `noteWeeklyBest` beim nächsten Vergleich schlicht die Woche wechselt.
+    weekIndex: int(v.weekIndex, def.weekIndex),
+    weekBestZone: Math.max(0, int(v.weekBestZone, def.weekBestZone)),
   };
 }
 
@@ -672,6 +677,32 @@ function migrateChV10toV11(raw: Record<string, unknown>): Record<string, unknown
   };
 }
 
+/**
+ * v11 → v12: das Wochen-Paar der „Bühne der Woche" (ROADMAP-V2 A5) in den
+ * bestehenden Meta-Slice — `weekIndex: -1` („noch keine Woche gezählt") und
+ * `weekBestZone: 0`.
+ *
+ * Warum ins `meta` und nicht als eigene Slice: dort liegt bereits der einzige
+ * andere Wochen-Zustand des Spiels (`streakProtectWeek`), und mehr als zwei
+ * Zahlen wird die Wochen-Bestzone nie brauchen — eine eigene Slice wäre eine
+ * Schachtel um zwei Ints. Warum trotzdem ein Bump, obwohl `repairMeta` fehlende
+ * Felder ohnehin auf ihren Default zöge: die Versionsnummer ist das einzige
+ * ehrliche Signal, dass sich die persistierte FORM geändert hat, und die
+ * X7-Matrix hängt genau daran (sie erzwingt ein v11-Fixture-Paar, bevor der Bump
+ * als fertig gilt). Ein Alt-Save startet die Wochen-Bestzone bewusst bei 0 statt
+ * bei `lifetimeMaxZone`: die Zahl behauptet „diese Woche erreicht", und das
+ * wüsste ein v11-Save nicht — sie füllt sich beim ersten Tick von selbst.
+ * Für jedes bestehende Feld verlustfrei.
+ */
+function migrateChV11toV12(raw: Record<string, unknown>): Record<string, unknown> {
+  const meta = isRecord(raw.meta) ? { ...raw.meta } : createMeta();
+  return {
+    ...raw,
+    v: 12,
+    meta: { ...meta, weekIndex: -1, weekBestZone: 0 },
+  };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
@@ -683,6 +714,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
   8: migrateChV8toV9,
   9: migrateChV9toV10,
   10: migrateChV10toV11,
+  11: migrateChV11toV12,
 };
 
 /**

@@ -621,6 +621,8 @@ describe('ch-store — v8 migration & repair (M13)', () => {
         streak: 5,
         lastLoginDay: 20_289,
         streakProtectWeek: 2898,
+        weekIndex: 2951,
+        weekBestZone: 30,
       },
       achievements: ['zone-10', 'boss-1'],
     };

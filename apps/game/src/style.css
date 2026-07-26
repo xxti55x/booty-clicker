@@ -2229,6 +2229,53 @@ body {
   font-weight: 800;
 }
 
+/* ---- ROADMAP-V2 A5: Wochen-Karte im Ziele-Tab ---- */
+.week-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.14), rgba(139, 92, 246, 0.1));
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.week-card .wk-head {
+  font-family: var(--display);
+  font-size: 14px;
+  color: #e8e3f5;
+}
+.week-card .wk-head b {
+  color: #7dd3fc;
+}
+.week-card .wk-mods {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.week-card .wk-mod {
+  font-size: 11.5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(20, 16, 33, 0.6);
+  border: 1px solid rgba(255, 210, 120, 0.4);
+  color: var(--gold-hi);
+}
+.week-card .wk-plus {
+  font-weight: 800;
+  opacity: 0.7;
+}
+.week-card .wk-best {
+  font-size: 12px;
+  color: #d9d3ea;
+}
+.week-card .wk-act .btn {
+  width: 100%;
+}
+#metaWeekSec.hidden {
+  display: none;
+}
+
 .streak-row {
   display: flex;
   gap: 6px;
@@ -2767,6 +2814,29 @@ body {
 }
 .stage-mod.hidden {
   display: none;
+}
+/* ---- ROADMAP-V2 A5: die Bühne der Woche hebt sich vom A1-Alltag ab ---- */
+.stage-mod.weekly {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.55);
+}
+.stage-mod .sm-week {
+  color: #7dd3fc;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+/* Die zweite Regel bekommt etwas Luft, damit zwei Blöcke lesbar bleiben. */
+.stage-mod.weekly b + span + b {
+  margin-top: 4px;
+}
+/* Das 📅-Abzeichen der Wochen-Bühne im Strip — blau statt gold, damit es sich
+   vom Modifikator-Abzeichen unterscheidet, ohne ein zweites Icon zu brauchen. */
+.zs-mod.zs-week {
+  border-color: rgba(56, 189, 248, 0.85);
+  background: rgba(12, 42, 66, 0.9);
+}
+.zs.wk {
+  border-color: rgba(56, 189, 248, 0.5);
 }
 .boss-challenge {
   display: block;

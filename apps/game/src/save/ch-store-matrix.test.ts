@@ -1,7 +1,7 @@
 /**
  * X7 — Save-Migrations-Matrix (ROADMAP-V2, „Save-Hygiene vor neuen Feldern").
  *
- * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v10). Pro Version
+ * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v11). Pro Version
  * zwei Inline-Fixtures (kein Datei-IO):
  *
  *   1. ein REALISTISCHER Save der jeweiligen Ära, der die volle Ladekette
@@ -47,7 +47,7 @@ function memStorage(): ChStorage & { map: Map<string, string> } {
 }
 
 /** Every historical CH schema version, oldest first — the spine of the matrix. */
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 type SchemaVersion = (typeof VERSIONS)[number];
 
 const LAST_SEEN = 1_752_800_000_000;
@@ -146,6 +146,17 @@ const META = {
 };
 const ACHIEVEMENTS = ['zone-10', 'zone-25', 'boss-1'];
 
+/**
+ * v12 (A5): das Wochen-Paar im SELBEN Meta-Slice — ISO-Wochen-Index plus die
+ * Frontier-Bestzone dieser Woche. Ältere Ären kannten die Woche nicht; ihre
+ * Bestzone startet deshalb bewusst bei 0 statt bei `lifetimeMaxZone` (ein
+ * v11-Save weiß nicht, WANN die 55 erreicht wurde — die Zahl füllt sich beim
+ * ersten Tick von selbst).
+ */
+const META_V12 = { weekIndex: 2951, weekBestZone: 58 };
+/** Was ein Save VOR v12 nach der Migration im Wochen-Paar stehen haben muss. */
+const META_PRE_V12 = { weekIndex: -1, weekBestZone: 0 };
+
 /** v9 (M15): Transzendenz (L3). */
 const TRANSCEND = { te: 4, teLifetime: 6, transcendences: 2, mythos: { diamantBooty: 2 } };
 
@@ -208,7 +219,11 @@ function saveAt(v: SchemaVersion): Record<string, unknown> {
     raw.peach = { ...PEACH };
   }
   if (v >= 8) {
-    raw.meta = { ...META, questProgress: { ...META.questProgress } };
+    raw.meta = {
+      ...META,
+      questProgress: { ...META.questProgress },
+      ...(v >= 12 ? META_V12 : {}),
+    };
     raw.achievements = [...ACHIEVEMENTS];
   }
   if (v >= 9) raw.transcend = { ...TRANSCEND, mythos: { ...TRANSCEND.mythos } };
@@ -271,8 +286,10 @@ function expectSlices(s: ChState, v: SchemaVersion): void {
   expect(s.chests).toEqual(v >= 7 ? CHESTS : createChests());
   expect(s.permTokens).toEqual(v >= 7 ? PERM_TOKENS : {});
   expect(s.peach).toEqual(v >= 7 ? PEACH : createPeach());
-  // v8 — Retention-Meta + Achievements.
-  expect(s.meta).toEqual(v >= 8 ? META : createMeta());
+  // v8 — Retention-Meta + Achievements (v12 legt das A5-Wochen-Paar dazu).
+  expect(s.meta).toEqual(
+    v >= 8 ? { ...META, ...(v >= 12 ? META_V12 : META_PRE_V12) } : createMeta(),
+  );
   expect(s.achievements).toEqual(v >= 8 ? ACHIEVEMENTS : []);
   // v9 — Transzendenz.
   expect(s.transcend).toEqual(v >= 9 ? TRANSCEND : createTranscend());
@@ -450,6 +467,8 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
         streak: 0,
         lastLoginDay: 20_355,
         streakProtectWeek: -1,
+        // v12-Felder: die v8-Ära kannte sie nicht ⇒ Default aus der Migration.
+        ...META_PRE_V12,
       });
       expect(s.achievements).toEqual([]);
     },
@@ -501,6 +520,23 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
       expect(s.stageStars).toEqual({ '5': 7, '7': 5 });
       expect(s.starsAwarded).toBe(15);
       expect(s.bossFoulZone).toBe(0);
+    },
+  },
+  12: {
+    what: 'Wochen-Paar mit krummem Index und negativer Bestzone (A5)',
+    damage: (raw) => {
+      const meta = raw.meta as Record<string, unknown>;
+      meta.weekIndex = 2951.7; // krumm ⇒ kein gültiger Wochen-Schlüssel
+      meta.weekBestZone = -12; // negativ ⇒ 0 (eine Bestzone ist nie negativ)
+    },
+    check: (s) => {
+      // Ein krummer Index fällt auf „noch keine Woche gezählt" zurück; der
+      // nächste Tick setzt das Paar sowieso frisch (`noteWeeklyBest`).
+      expect(s.meta.weekIndex).toBe(-1);
+      expect(s.meta.weekBestZone).toBe(0);
+      // Der restliche Meta-Slice bleibt unangetastet — der Schaden ist lokal.
+      expect(s.meta.streak).toBe(META.streak);
+      expect(s.meta.streakProtectWeek).toBe(META.streakProtectWeek);
     },
   },
 };

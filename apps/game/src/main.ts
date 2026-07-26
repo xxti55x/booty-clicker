@@ -109,12 +109,19 @@ import {
 import {
   type StageMod,
   type StageModFactors,
-  factorsForZone,
-  modForZone,
   remixSeedFor,
   stageComboStep,
   stageEkstaseChargeRed,
 } from './game/stage-mods';
+import {
+  type WeeklyStage,
+  noteWeeklyBest,
+  stageFactorsFor,
+  stageModsFor,
+  weekIndexOf,
+  weeklyBestZone,
+  weeklyStage,
+} from './game/weekly';
 import {
   GOBLIN_BUFF_S,
   GOBLIN_CHESTS,
@@ -361,7 +368,24 @@ let rng = new Rng(state.rng);
  */
 let runRemix = remixSeedFor(state.rng.seed, state.stats.ascensions);
 
-let combat: CombatState = spawnFor(state.zone, state.killsThisZone, state.runMaxZone, runRemix);
+/**
+ * ROADMAP-V2 A5: Der laufende ISO-Wochen-Index. Er kommt aus der Uhr (nicht aus
+ * dem Save) und wird beim Tages-Roll neu gelesen, damit eine Session, die über
+ * einen Montag läuft, ohne Reload auf die neue Wochen-Bühne umschaltet. Wie der
+ * Remix reist er im `CombatState` mit.
+ */
+let runWeek = weekIndexOf(Date.now());
+
+/** Die Wochen-Bühne der laufenden Woche (Karte, Strip-Badge, Board-Schlüssel). */
+let weekStage: WeeklyStage | null = weeklyStage(Date.now());
+
+let combat: CombatState = spawnFor(
+  state.zone,
+  state.killsThisZone,
+  state.runMaxZone,
+  runRemix,
+  runWeek,
+);
 
 /**
  * Extend a freshly-spawned boss timer by Chronilla + gear bossTimer (§4.6/§5) + dem
@@ -383,7 +407,7 @@ combat = withBossTimerBonus(combat);
  */
 function newRunCombat(): CombatState {
   runRemix = remixSeedFor(state.rng.seed, state.stats.ascensions);
-  return withBossTimerBonus(spawnFor(1, 0, 1, runRemix));
+  return withBossTimerBonus(spawnFor(1, 0, 1, runRemix, runWeek));
 }
 
 let dps = 0;
@@ -595,6 +619,11 @@ function syncMaxZones(): void {
   // Himmelfahrt (which drops lifetimeMaxZone to 1, §4.5.2/§5.3).
   state.gear.zoneEver = Math.max(state.gear.zoneEver, state.lifetimeMaxZone);
   state.rsLifetime = Math.max(state.rsLifetime, state.souls); // lifetime-RS highwater (§4.5.2)
+  // ROADMAP-V2 A5: Die Wochen-Bestzone ist der Frontier-Highwater INNERHALB der
+  // laufenden Woche. Sie hier zu ziehen (statt an den Kill-Pfad zu hängen) ist
+  // die billigste ehrliche Stelle: `runMaxZone` steht eine Zeile darüber fertig,
+  // und jeder Weg, auf dem die Frontier wächst, läuft durch `syncMaxZones`.
+  state.meta = noteWeeklyBest(state.meta, runWeek, state.runMaxZone);
   state.rng = rng.toState(); // fold the live RNG cursor back into the save
   state.combo = { stacks: comboState.stacks }; // ability is mutated on state in place
 }
@@ -920,7 +949,13 @@ const chSettings = new ChSettings({
   applyImported: (imported) => {
     Object.assign(state, imported); // mutate in place — panels hold this ref
     rng = new Rng(state.rng); // resume the imported save's RNG stream
-    combat = withBossTimerBonus(spawnFor(state.zone, state.killsThisZone, state.runMaxZone));
+    // Der importierte Save bringt seinen EIGENEN Seed + Aszensions-Stand mit, also
+    // gehört die Modifikator-Karte neu abgeleitet (vorher fiel sie hier still auf
+    // `REMIX_OFF` zurück — der Import spielte bis zum nächsten Reload regelfrei).
+    runRemix = remixSeedFor(state.rng.seed, state.stats.ascensions);
+    combat = withBossTimerBonus(
+      spawnFor(state.zone, state.killsThisZone, state.runMaxZone, runRemix, runWeek),
+    );
     comboState = createCombo(state.combo.stacks);
     comboT3KeyAwardedThisRun = false; // fresh run context for the imported save (§6.1)
     lastShakeTier = 0;
@@ -1287,19 +1322,20 @@ function activeGimmick(): BossGimmick | null {
   return combat.boss ? gimmickForZone(combat.zone) : null;
 }
 
-// ---------- ROADMAP-V2 A1: Bühnen-Modifikatoren ----------
-// Der Seed reist im `CombatState` mit (`combat.remix`), also fragt die Glue
-// IMMER den Kampf-Zustand — nie eine zweite Kopie. Auf Boss-Bühnen liefert
-// `modForZone` per Definition `null`, die Faktoren sind dort neutral.
+// ---------- ROADMAP-V2 A1 + A5: Bühnen-Modifikatoren ----------
+// Seed UND Wochen-Index reisen im `CombatState` mit (`combat.remix`,
+// `combat.week`), also fragt die Glue IMMER den Kampf-Zustand — nie eine zweite
+// Kopie. `stageModsFor` trägt die Präzedenz-Regel: auf der Bühne der Woche die
+// ZWEI Wochen-Regeln, sonst die EINE A1-Regel, auf Boss-Bühnen keine.
 
-/** Der Modifikator der Bühne, auf der gerade gekämpft wird (null = keiner). */
-function activeMod(): StageMod | null {
-  return modForZone(combat.zone, combat.remix);
+/** Die Regeln der Bühne, auf der gerade gekämpft wird (0, 1 oder 2). */
+function activeMods(): readonly StageMod[] {
+  return stageModsFor(combat.zone, combat.remix, combat.week);
 }
 
-/** Die Faktoren der aktuellen Bühne — neutral, wo kein Modifikator liegt. */
+/** Die Faktoren der aktuellen Bühne — neutral, wo keine Regel liegt. */
 function stageFactors(): StageModFactors {
-  return factorsForZone(combat.zone, combat.remix);
+  return stageFactorsFor(combat.zone, combat.remix, combat.week);
 }
 
 /** Der Boss betritt die Bühne — beide Spawn-Pfade laufen hier zusammen. */
@@ -1347,11 +1383,13 @@ function bossConfetti(): void {
 // Bühnen (nichts Zukünftiges) und ist klickbar: zurückreisen zum Farmen, wieder
 // vor bis zur Frontier. Scheitert ein Boss, wirft er auf die Vor-Bühne zurück —
 // dort BP farmen, Upgrades kaufen und den Boss per Button erneut herausfordern.
-document.getElementById('zoneStrip')?.addEventListener('click', (e) => {
-  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-z]');
-  if (!el) return;
-  const z = Number(el.dataset.z);
-  if (!Number.isFinite(z) || z === combat.zone || z > combat.maxZone || z < 1) return;
+/**
+ * Auf eine erreichte Bühne reisen — EINE Stelle für alle Wege dorthin (Zonen-Strip
+ * und die A5-Wochen-Karte im Ziele-Tab). Die Frontier-Regel steht hier und nur
+ * hier: alles über `combat.maxZone` wird still verworfen, es gibt keine Abkürzung.
+ */
+function travelToZone(z: number): boolean {
+  if (!Number.isFinite(z) || z === combat.zone || z > combat.maxZone || z < 1) return false;
   const back = z < combat.zone;
   combat = travelTo(combat, z);
   updateBackground();
@@ -1362,6 +1400,12 @@ document.getElementById('zoneStrip')?.addEventListener('click', (e) => {
     `Bühne ${combat.zone}`,
     back ? 'Farm-Modus — vorwärts geht’s jederzeit wieder.' : 'Zurück an der Front!',
   );
+  return true;
+}
+document.getElementById('zoneStrip')?.addEventListener('click', (e) => {
+  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-z]');
+  if (!el) return;
+  travelToZone(Number(el.dataset.z));
 });
 document.getElementById('bossChallenge')?.addEventListener('click', () => {
   const next = challengeBoss(combat);
@@ -1433,7 +1477,7 @@ function onKillProgress(
   // beim P1-Combo-Stern unten). Boss-Bühnen tragen keinen Modifikator, ein
   // Boss-Kill zahlt also unverändert.
   const killZone = r.advancedZone ? combat.zone - 1 : combat.zone;
-  const stage = factorsForZone(killZone, combat.remix);
+  const stage = stageFactorsFor(killZone, combat.remix, combat.week);
   const gold = Math.floor(r.gold * goldMult(state) * peachIncomeMult(state, now) * stage.gold);
   state.gold += gold;
   state.stats.goldLifetime += gold;
@@ -2144,6 +2188,26 @@ function grantLoginReward(reward: LoginReward): void {
 }
 
 /**
+ * ROADMAP-V2 A5: Rollt die ISO-Woche (Montag 00:00 UTC), zieht die Wochen-Bühne
+ * nach und hängt den laufenden Kampf an den neuen Wochen-Index. Läuft im selben
+ * 0.25-s-Tick wie der Tages-Roll, eine Session über den Montag hinweg schaltet
+ * also ohne Reload um.
+ *
+ * Der LAUFENDE Gegner behält seine Ausdauer (er wurde unter der alten Woche
+ * gespawnt) — erst der nächste Spawn rechnet mit der neuen Regel. Alles andere
+ * hieße, einem Spieler mitten im Schlag die HP-Leiste zu verschieben.
+ */
+function maybeNewWeek(): void {
+  const week = weekIndexOf(Date.now());
+  if (week === runWeek) return;
+  runWeek = week;
+  weekStage = weeklyStage(Date.now());
+  combat = { ...combat, week };
+  hud.update(state, combat, dps, clickDmg);
+  metaPanel.render(true);
+}
+
+/**
  * Roll the daily quests + process the login for the current day (§7.1/§7.2). Called
  * on boot and each tick, so a session that crosses UTC midnight rolls fresh quests
  * and grants the next login without a reload. Clock-neutral (part 1): a backward
@@ -2151,6 +2215,7 @@ function grantLoginReward(reward: LoginReward): void {
  */
 function maybeNewDay(): void {
   const day = dayNumber(Date.now());
+  maybeNewWeek();
   // Forward-clock repair (§9.2.2): a save stamped under a far-future clock must
   // not freeze dailies until reality catches up — clamp the high-waters to today
   // (neutral: nothing is re-granted today, everything resumes tomorrow).
@@ -2196,6 +2261,13 @@ const metaPanel = new Meta({
   openTop: () => void leaderboard.openTop(),
   openSubmit: () => leaderboard.openSubmit(lbPayload()),
   season: () => currentSeason,
+  // A5: Die Wochen-Karte liest dieselbe Wahrheit wie Strip und Kampf.
+  weekly: () => weekStage,
+  weekBest: () => weeklyBestZone(state.meta, runWeek),
+  frontier: () => Math.max(state.runMaxZone, combat.maxZone),
+  travel: (zone) => {
+    if (travelToZone(zone)) metaPanel.render(true);
+  },
 });
 
 // ---------- Golden-Peach on-screen button + ×2-boost badge (§6.1, B13c) ----------
@@ -2479,9 +2551,17 @@ let t0 = 0;
   hpF: hpFraction(combat),
   // ROADMAP-V2 A1/A4/A3: Bühnen-Modifikator, Choreo-Set und Kobold-Zustand —
   // der Beweis-Lauf liest sie, statt sie aus Pixeln zu raten.
-  mod: activeMod()?.id ?? '',
+  mod: activeMods()
+    .map((m) => m.id)
+    .join('+'),
   zone: combat.zone,
   remix: combat.remix,
+  // ROADMAP-V2 A5: Wochen-Index, Wochen-Bühne + Wochen-Bestzone — der Beweis-Lauf
+  // liest die Wochen-Wahrheit, statt sie aus Pixeln zu raten.
+  week: combat.week,
+  weekZone: weekStage?.zone ?? 0,
+  weekMods: weekStage?.mods.map((m) => m.id).join('+') ?? '',
+  weekBest: weeklyBestZone(state.meta, runWeek),
   move: choreo.current.name,
   set: choreo.moveSet.map((i) => MOVES[i].name).join(' · '),
   gobOn: goblinVisible(goblin, Date.now()),

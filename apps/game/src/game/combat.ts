@@ -11,7 +11,8 @@
  * are pure so the whole progression is unit-testable and deterministic.
  */
 import { bossHpScale } from './boss-gimmicks';
-import { REMIX_OFF, stageHpScale } from './stage-mods';
+import { REMIX_OFF } from './stage-mods';
+import { WEEK_OFF, weeklyHpScale } from './weekly';
 
 /** Normal rivals to out-twerk before a zone is cleared. */
 export const MONSTERS_PER_ZONE = 10;
@@ -84,6 +85,18 @@ export interface CombatState {
    * wird nie persistiert — das Save trägt weiterhin nur `zone`/`killsThisZone`.
    */
   remix: number;
+  /**
+   * Der ISO-Wochen-Index der „Bühne der Woche" (ROADMAP-V2 A5; `WEEK_OFF` = aus).
+   *
+   * Er reist aus demselben Grund wie `remix` im Kampf-Zustand mit: die Re-Spawns
+   * passieren hier drin, und auf der Wochen-Bühne haben die Rivalen eine ANDERE
+   * Ausdauer (die zwei Wochen-Regeln ersetzen dort die A1-Regel). Getragen wird
+   * wieder nur der INDEX — die Bühne und ihre Modifikatoren fallen pur daraus
+   * ({@link weeklyHpScale}), es gibt also keine zweite Kopie der Wochen-Wahrheit
+   * und nichts, was zwischen HUD und Kampf auseinanderlaufen könnte. Reine
+   * Laufzeit-Konfiguration, nie persistiert.
+   */
+  week: number;
 }
 
 /**
@@ -96,15 +109,21 @@ export interface CombatState {
  * der Float-Guard lesen sie weiter roh), und Bosse sind per Definition außen vor
  * (`bossHp` fragt `stageHpScale` nicht — Boss-Bühnen tragen keinen Modifikator).
  * Default `REMIX_OFF` ⇒ Verhalten byte-gleich zu vorher.
+ *
+ * `week` (ROADMAP-V2 A5) schaltet die Präzedenz-Regel scharf: auf der Bühne der
+ * Woche skaliert {@link weeklyHpScale} mit den ZWEI Wochen-Modifikatoren statt
+ * mit dem A1-Modifikator. Default `WEEK_OFF` ⇒ exakt `stageHpScale`, also
+ * byte-gleich zu A1.
  */
 export function spawnFor(
   zone: number,
   killsThisZone: number,
   maxZone: number,
   remix: number = REMIX_OFF,
+  week: number = WEEK_OFF,
 ): CombatState {
   const boss = isBossZone(zone) && killsThisZone >= MONSTERS_PER_ZONE;
-  const hpMax = boss ? bossHp(zone) : monsterHp(zone) * stageHpScale(zone, remix);
+  const hpMax = boss ? bossHp(zone) : monsterHp(zone) * weeklyHpScale(zone, remix, week);
   return {
     zone,
     maxZone: Math.max(maxZone, zone),
@@ -114,12 +133,17 @@ export function spawnFor(
     boss,
     bossTimer: boss ? BOSS_TIME_S : 0,
     remix,
+    week,
   };
 }
 
 /** A fresh run: zone 1, no kills. */
-export function createCombat(maxZone = 1, remix: number = REMIX_OFF): CombatState {
-  return spawnFor(1, 0, Math.max(1, maxZone), remix);
+export function createCombat(
+  maxZone = 1,
+  remix: number = REMIX_OFF,
+  week: number = WEEK_OFF,
+): CombatState {
+  return spawnFor(1, 0, Math.max(1, maxZone), remix, week);
 }
 
 export interface HitResult {
@@ -156,21 +180,21 @@ export function hit(state: CombatState, dmg: number): HitResult {
   const gold = goldFor(state.zone, state.boss);
 
   if (state.boss) {
-    const next = spawnFor(state.zone + 1, 0, state.maxZone, state.remix);
+    const next = spawnFor(state.zone + 1, 0, state.maxZone, state.remix, state.week);
     return { state: next, killed: true, gold, advancedZone: true, bossSpawned: false };
   }
 
   const kills = state.killsThisZone + 1;
   if (kills >= MONSTERS_PER_ZONE) {
     if (isBossZone(state.zone)) {
-      const boss = spawnFor(state.zone, kills, state.maxZone, state.remix);
+      const boss = spawnFor(state.zone, kills, state.maxZone, state.remix, state.week);
       return { state: boss, killed: true, gold, advancedZone: false, bossSpawned: true };
     }
-    const next = spawnFor(state.zone + 1, 0, state.maxZone, state.remix);
+    const next = spawnFor(state.zone + 1, 0, state.maxZone, state.remix, state.week);
     return { state: next, killed: true, gold, advancedZone: true, bossSpawned: false };
   }
 
-  const same = spawnFor(state.zone, kills, state.maxZone, state.remix);
+  const same = spawnFor(state.zone, kills, state.maxZone, state.remix, state.week);
   return { state: same, killed: true, gold, advancedZone: false, bossSpawned: false };
 }
 
@@ -191,7 +215,7 @@ export function tickBoss(state: CombatState, dt: number): BossTickResult {
   const bossTimer = state.bossTimer - dt;
   if (bossTimer <= 0) {
     return {
-      state: spawnFor(Math.max(1, state.zone - 1), 0, state.maxZone, state.remix),
+      state: spawnFor(Math.max(1, state.zone - 1), 0, state.maxZone, state.remix, state.week),
       failed: true,
     };
   }
@@ -206,7 +230,7 @@ export function tickBoss(state: CombatState, dt: number): BossTickResult {
  */
 export function challengeBoss(state: CombatState): CombatState {
   if (!isBossZone(state.zone) || state.boss || state.zone !== state.maxZone) return state;
-  return spawnFor(state.zone, MONSTERS_PER_ZONE, state.maxZone, state.remix);
+  return spawnFor(state.zone, MONSTERS_PER_ZONE, state.maxZone, state.remix, state.week);
 }
 
 /** Fraction of the boss timer remaining (1..0), for the timer bar. */
@@ -222,5 +246,5 @@ export function hpFraction(state: CombatState): number {
 /** Travel to a cleared zone to farm gold. Clamped to 1..maxZone; spawns a rival. */
 export function travelTo(state: CombatState, zone: number): CombatState {
   const target = Math.max(1, Math.min(state.maxZone, Math.floor(zone)));
-  return spawnFor(target, 0, state.maxZone, state.remix);
+  return spawnFor(target, 0, state.maxZone, state.remix, state.week);
 }
