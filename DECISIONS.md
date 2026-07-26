@@ -29,8 +29,10 @@ here (spec §7).
   gebankten Seelen, statt `max(rsLifetime, souls)` zu nehmen — die einzige
   Stelle der Kette, die einen Highwater SENKEN kann. Für echte v4-Saves
   folgenlos (bis v4 gab es keine Seelen-Senke, verdient == gehalten; auch der
-  Legacy-Import hebt `rsLifetime` immer auf ≥ `souls`), deshalb bewusst NICHT
-  angefasst; die v≤4-Fixtures halten diese Semantik jetzt explizit fest.
+  Legacy-Import hebt `rsLifetime` immer auf ≥ `souls`). Review-Entscheid
+  (Fable): trotzdem gehärtet — `max(prior, souls)`, ein Highwater darf durch
+  die Kette NIE sinken, auch nicht für Hand-Edits; ein Monotonie-Testfall
+  pinnt das (556 → 557 Tests).
 
 ## Bühnen-Rücknavigation + Boss-Fallback
 

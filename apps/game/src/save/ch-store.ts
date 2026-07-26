@@ -522,10 +522,14 @@ function migrateChV3toV4(raw: Record<string, unknown>): Record<string, unknown> 
  * spent souls, so earned == held == `souls`. (Deliberately NOT lifted to
  * `soulsForMaxZone(lifetimeMaxZone)` — a player who reached a deep zone but hasn't
  * ascended there has NOT earned those souls yet, and over-lifting would erase the
- * souls still pending on their next ascension.)
+ * souls still pending on their next ascension.) A v4 save already carries an
+ * `rsLifetime` (since v3→v4): keep the MAX of both — a lifetime highwater must
+ * never shrink through the chain, whatever a hand-edited blob claims.
  */
 function migrateChV4toV5(raw: Record<string, unknown>): Record<string, unknown> {
-  const rsLifetime = isNonNegInt(raw.souls) ? raw.souls : 0;
+  const prior = isNonNegInt(raw.rsLifetime) ? raw.rsLifetime : 0;
+  const banked = isNonNegInt(raw.souls) ? raw.souls : 0;
+  const rsLifetime = Math.max(prior, banked);
   return {
     ...raw,
     v: 5,

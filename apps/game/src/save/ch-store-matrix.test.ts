@@ -101,7 +101,8 @@ const GILDS = { boss: 5, legend: 2 };
 /**
  * v5+ (M10) macht Ahnen zur ersten echten Seelen-SENKE, also darf „je verdient"
  * hier über „gehalten" liegen (130 auf Ahnen ausgegeben). Bis v4 gab es keine
- * Senke — earned == held —, und `migrateChV4toV5` setzt genau das an (RS = souls).
+ * Senke — earned == held —, und `migrateChV4toV5` setzt `max(rsLifetime, souls)`
+ * an (Review-Härtung X7: ein Highwater darf durch die Kette nie sinken).
  * Die v≤4-Fixtures tragen deshalb bewusst `rsLifetime === souls`.
  */
 const RS_LIFETIME_SPENT = 260;
@@ -504,6 +505,17 @@ describe('ch-store — X7 Matrix: gesunde Alt-Saves laufen verlustfrei hoch', ()
       expectSlices(loaded!.state, v);
     });
   }
+});
+
+describe('ch-store — X7 Matrix: Highwater bleibt monoton (Review-Härtung)', () => {
+  it('v4-Blob mit rsLifetime ÜBER den gebankten Seelen behält den Highwater', () => {
+    const storage = memStorage();
+    const blob = { ...saveAt(4), rsLifetime: 500 }; // Hand-Edit/Drittquelle
+    storage.setItem(CH_SAVE_KEY, JSON.stringify(blob));
+    const s = loadCh(storage);
+    expect(s).not.toBeNull();
+    expect(s!.state.rsLifetime).toBe(500); // max(500, souls=130) — nie gesenkt
+  });
 });
 
 describe('ch-store — X7 Matrix: der migrierte Stand ist ein Fixpunkt', () => {
