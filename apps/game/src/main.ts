@@ -141,6 +141,16 @@ import {
   rollDay,
 } from './game/quests';
 import { type Season, seasonFor } from './game/season';
+import {
+  STAR_CLEARED,
+  STAR_COMBO,
+  STAR_NO_TIMEOUT,
+  addStar,
+  comboStarQualifies,
+  milestoneChests,
+  milestoneHighwater,
+  totalStars,
+} from './game/stars';
 import { canTranscend, transcendGlobalMult } from './game/transcend';
 import { isTranscendEnabled } from './game/flags';
 import { shouldShakeOnKey } from './game/input';
@@ -937,6 +947,12 @@ function stepCinematics(dt: number): void {
 
 /** Der Boss betritt die Bühne — beide Spawn-Pfade laufen hier zusammen. */
 function bossEntrance(): void {
+  // P1-Buchhaltung: Ein offener Fehlversuch gehört immer nur zu EINEM Gate.
+  // Spawnt ein Boss auf einer anderen Bühne (z. B. Bühne 5 nach einer Aszension,
+  // während der Timeout auf Bühne 10 liegt), ist der alte Anlauf Geschichte —
+  // das nächste Mal an Bühne 10 zählt wieder als sauberer erster Anlauf. Spawnt
+  // er auf DERSELBEN Bühne (der Retry nach dem Rückwurf), bleibt der Makel.
+  if (state.bossFoulZone !== combat.zone) state.bossFoulZone = 0;
   showBossBanner(combat.zone);
   startCinematics();
   audio.bossIntro();
@@ -1013,6 +1029,31 @@ const CHEST_EMOJI = Object.fromEntries(CHEST_TIERS.map((c) => [c.tier, c.emoji])
 >;
 const chestEmoji = (tier: ChestTier): string => CHEST_EMOJI[tier];
 
+// ---------- ROADMAP-V2 P1: Bühnen-Sterne ----------
+/**
+ * Einen Stern auf einer Bühne setzen. `addStar` gibt dieselbe Referenz zurück,
+ * wenn der Stern schon hängt ODER auf dieser Bühne gar nicht möglich ist (der
+ * Timeout-Stern existiert nur an Boss-Gates) — dann passiert hier nichts. Ist er
+ * NEU, prüft die Funktion den Sammel-Meilenstein: alle `STAR_MILESTONE` Sterne
+ * fällt EINE Holztruhe, gegen einen persistierten Highwater abgerechnet, damit
+ * ein Reload nie doppelt auszahlt.
+ */
+function awardStar(zone: number, bit: number): void {
+  const next = addStar(state.stageStars, zone, bit);
+  if (next === state.stageStars) return;
+  state.stageStars = next;
+  const total = totalStars(next);
+  const chests = milestoneChests(total, state.starsAwarded);
+  if (chests <= 0) return;
+  state.chests.inventory.wood += chests;
+  state.starsAwarded = milestoneHighwater(total, state.starsAwarded);
+  toasts.show(
+    '⭐',
+    `${state.starsAwarded} Sterne — Truhe!`,
+    chests > 1 ? `${chests} Holztruhen für die Sammlung` : 'Holztruhe für die Sammlung',
+  );
+}
+
 function onKillProgress(
   r: ReturnType<typeof hit>,
   fromClick: boolean,
@@ -1038,6 +1079,13 @@ function onKillProgress(
     // Rival kill (§6.1): a 3 % base chance — scaled by Truhen-Luck — drops a Holztruhe.
     if (rng.next() < rivalChestChance(chestLuck(state))) state.chests.inventory.wood += 1;
   }
+  // P1-Stern 3 („Combo"): ein Kill, der mit heißer Combo LANDET. Bewusst nur für
+  // Klick-Kills — Idle-DPS zieht weder Combo noch Krit (P1), ein Crew-Tick, der
+  // zufällig in ein heißes Fenster fällt, hat den Stern nicht verdient. Die
+  // Bühne des Kills: bei einem Vorstoß die eben verlassene, sonst die aktuelle.
+  if (fromClick && comboStarQualifies(comboState.stacks)) {
+    awardStar(r.advancedZone ? combat.zone - 1 : combat.zone, STAR_COMBO);
+  }
   if (r.bossSpawned) {
     toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
     bossEntrance(); // G2: Banner + Licht-Dim + Kamera-Punch + Bass-Drop
@@ -1048,6 +1096,10 @@ function onKillProgress(
     // a seeded-random member. `lifetimeMaxZone` is the highwater, so a re-clear after
     // ascension never double-awards. Gilds survive ascension (anti-plateau, P3).
     const clearedZone = combat.zone - 1;
+    // P1-Stern 1 („geclert"): die Bühne ist durch — auf einer normalen Bühne mit
+    // der letzten Rivalin, auf einer Boss-Bühne mit dem Boss (nur er schiebt sie
+    // weiter). Einmalig und lebenslang, auch beim Re-Clear nach einer Aszension.
+    awardStar(clearedZone, STAR_CLEARED);
     // Reaching a NEW lifetime-best zone (§7.2 quest metric): the deepest we've ever
     // been is `state.lifetimeMaxZone` (synced at the end of this fn), so advancing
     // past it is a genuine record — fires the „neue Bestzone" quest once.
@@ -1072,6 +1124,12 @@ function onKillProgress(
     // was the kill a boss? (advanced from a boss target)
     if (combat.zone % 5 === 1 && combat.zone > 1) {
       const bossZone = combat.zone - 1;
+      // P1-Stern 2 („ohne Timeout"): das Gate fiel, ohne dass seit dem ersten
+      // Boss-Spawn DIESES Anlaufs die Uhr abgelaufen ist. `bossFoulZone` trägt
+      // genau einen offenen Fehlversuch; er wird mit dem Kill des Gates gelöscht,
+      // damit ein späterer Anlauf (nach einer Aszension) wieder sauber startet.
+      if (state.bossFoulZone !== bossZone) awardStar(bossZone, STAR_NO_TIMEOUT);
+      else state.bossFoulZone = 0;
       // §6.1: a boss kill guarantees 1 🔑 (whole part guaranteed, the Truhen-Magnet/
       // gear key-drop bonus adds a seeded probabilistic extra) + a tier-appropriate
       // chest (§6.2) into the inventory.
@@ -1808,11 +1866,15 @@ function loop(nowMs: number): void {
   const cps = coachCps(state.heaven) + coachCpsBonus(state.gear);
   if (cps > 0 && !swapping) applyHit(coachDps(clickDmg, cps) * dt, false);
   if (combat.boss && !swapping) {
+    const gateZone = combat.zone; // vor dem möglichen Rückwurf festhalten (P1)
     const bt = tickBoss(combat, dt);
     combat = bt.state;
     if (bt.failed) {
       state.stats.bossTimeouts += 1;
       state.stats.bossStreak = 0; // a timeout breaks the no-timeout boss streak (§7.3)
+      // P1: Dieses Gate ist für den laufenden Anlauf „nicht mehr sauber" — der
+      // Timeout-Stern bleibt dort verschlossen, bis der Boss gefallen ist.
+      state.bossFoulZone = gateZone;
       toasts.show(
         '⏱',
         'Zeit um!',

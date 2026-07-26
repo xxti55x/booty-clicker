@@ -47,7 +47,7 @@ function memStorage(): ChStorage & { map: Map<string, string> } {
 }
 
 /** Every historical CH schema version, oldest first — the spine of the matrix. */
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const;
 type SchemaVersion = (typeof VERSIONS)[number];
 
 const LAST_SEEN = 1_752_800_000_000;
@@ -153,6 +153,16 @@ const TRANSCEND = { te: 4, teLifetime: 6, transcendences: 2, mythos: { diamantBo
 const CREW_UP = { boss: 2, hype: 1 };
 
 /**
+ * v11 (P1): Bühnen-Sterne. Bühne 5 voll (Boss-Gate: geclert + ohne Timeout +
+ * Combo), Bühne 10 halb, Bühne 7 als Nicht-Boss-Bühne mit ihren zwei möglichen
+ * Sternen — Summe 3 + 2 + 2 = 7, also noch kein Meilenstein (15) fällig.
+ */
+const STAGE_STARS = { '5': 7, '7': 5, '10': 3 };
+const STARS_AWARDED = 0;
+/** Run-Zustand: an Bühne 10 lief eben die Uhr ab (der Timeout-Stern bleibt zu). */
+const BOSS_FOUL_ZONE = 10;
+
+/**
  * Der eine Spielstand, ausgedrückt im Schema-Stand `v`: jede Slice erscheint
  * genau ab der Version, die sie eingeführt hat — so sieht die Kette exakt das,
  * was ein echter Save dieser Ära im localStorage hinterlassen hätte.
@@ -203,6 +213,11 @@ function saveAt(v: SchemaVersion): Record<string, unknown> {
   }
   if (v >= 9) raw.transcend = { ...TRANSCEND, mythos: { ...TRANSCEND.mythos } };
   if (v >= 10) raw.crewUp = { ...CREW_UP };
+  if (v >= 11) {
+    raw.stageStars = { ...STAGE_STARS };
+    raw.starsAwarded = STARS_AWARDED;
+    raw.bossFoulZone = BOSS_FOUL_ZONE;
+  }
   return raw;
 }
 
@@ -263,6 +278,12 @@ function expectSlices(s: ChState, v: SchemaVersion): void {
   expect(s.transcend).toEqual(v >= 9 ? TRANSCEND : createTranscend());
   // v10 — gekaufte Crew-Fähigkeiten.
   expect(s.crewUp).toEqual(v >= 10 ? CREW_UP : {});
+  // v11 — Bühnen-Sterne (P1). Ältere Ären starten die Sammlung bewusst leer:
+  // „geclert" wäre aus `lifetimeMaxZone` zwar ableitbar, „ohne Timeout"/„Combo"
+  // nicht — eine halb gefüllte Sammlung wäre irreführender als eine frische.
+  expect(s.stageStars).toEqual(v >= 11 ? STAGE_STARS : {});
+  expect(s.starsAwarded).toBe(v >= 11 ? STARS_AWARDED : 0);
+  expect(s.bossFoulZone).toBe(v >= 11 ? BOSS_FOUL_ZONE : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -459,6 +480,27 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
     check: (s) => {
       // boss Lv 80 ⇒ 2 Stufen; hype negativ ⇒ raus; dj Lv 0 ⇒ 0; junk kein Crew-Mitglied.
       expect(s.crewUp).toEqual({ boss: 2 });
+    },
+  },
+  11: {
+    what: 'Sterne mit unmöglichen Bits, Müll-Keys und krummem Meilenstein-Highwater',
+    damage: (raw) => {
+      raw.stageStars = {
+        '5': 15, // Bit 8 existiert nicht ⇒ auf die Vollmaske 7 gestutzt
+        '7': 7, // Nicht-Boss-Bühne: der Timeout-Stern fällt weg ⇒ 5
+        '9': 0, // leer ⇒ gar nicht erst aufnehmen
+        '12': -4, // negativ ⇒ raus
+        '3.5': 3, // keine Bühnen-Nummer
+        junk: 7,
+        '20': Number.NaN, // JSON ⇒ null ⇒ raus
+      };
+      raw.starsAwarded = 22.7; // auf den vollen 15er-Block abgerundet
+      raw.bossFoulZone = 'x';
+    },
+    check: (s) => {
+      expect(s.stageStars).toEqual({ '5': 7, '7': 5 });
+      expect(s.starsAwarded).toBe(15);
+      expect(s.bossFoulZone).toBe(0);
     },
   },
 };

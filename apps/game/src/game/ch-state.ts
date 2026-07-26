@@ -55,6 +55,7 @@ import {
 } from './heroes';
 import { incomeMultiplier } from './peach';
 import { type MetaState, createMeta } from './quests';
+import { type StageStars, createStageStars } from './stars';
 import {
   type TranscendState,
   bankTranscendence,
@@ -235,6 +236,25 @@ export interface ChState {
    * all of L1 AND L2 but PRESERVES this slice (`transcendState`). Survives everything.
    */
   transcend: TranscendState;
+  /**
+   * Bühnen-Sterne (CH-save v11, ROADMAP-V2 P1): pro Bühne eine 3-Bit-Maske
+   * (geclert / Boss ohne Timeout / heiße Combo). Rein kosmetisch-sammelnd und
+   * eine LEBENSZEIT-Sammlung: sie überlebt jede Prestige-Schicht, sonst würde ein
+   * Reset das Sammelziel entwerten.
+   */
+  stageStars: StageStars;
+  /**
+   * Sterne, die bereits eine Meilenstein-Truhe gezahlt haben (Highwater, immer ein
+   * Vielfaches von `STAR_MILESTONE`) — verhindert doppelte Auszahlung über Reloads.
+   */
+  starsAwarded: number;
+  /**
+   * Die Boss-Bühne, an der zuletzt ein Timeout kassiert wurde (0 = keine). RUN-
+   * Zustand, kein Meta: Er entscheidet allein darüber, ob der laufende Anlauf an
+   * DIESEM Gate noch „ohne Timeout" ist, und wird beim Kill des Gates gelöscht.
+   * Persistiert, damit ein Reload mitten im Retry den Fehlversuch nicht vergisst.
+   */
+  bossFoulZone: number;
 }
 
 /** A brand-new run/profile. */
@@ -266,6 +286,9 @@ export function createChState(): ChState {
     meta: createMeta(),
     achievements: [],
     transcend: createTranscend(),
+    stageStars: createStageStars(),
+    starsAwarded: 0,
+    bossFoulZone: 0,
   };
 }
 
@@ -488,6 +511,11 @@ export function ascendState(state: ChState): ChState {
     // acquisitions, never reset by prestige.
     meta: state.meta,
     achievements: state.achievements,
+    // Bühnen-Sterne (P1) sind eine Lebenszeit-SAMMLUNG wie Achievements — ein
+    // Reset der Tour darf sie nie einkassieren (`bossFoulZone` ist Run-Zustand
+    // und fällt bewusst auf 0 zurück).
+    stageStars: state.stageStars,
+    starsAwarded: state.starsAwarded,
   };
 }
 
@@ -524,6 +552,9 @@ export function himmelfahrtState(state: ChState): ChState {
     // Retention meta (§7) survives a Himmelfahrt too (lifetime acquisitions).
     meta: state.meta,
     achievements: state.achievements,
+    // Bühnen-Sterne (P1) — Lebenszeit-Sammlung, überlebt auch L2.
+    stageStars: state.stageStars,
+    starsAwarded: state.starsAwarded,
   };
 }
 
@@ -567,5 +598,8 @@ export function transcendState(state: ChState): ChState {
     // Retention meta (§7) survives (lifetime acquisitions).
     meta: state.meta,
     achievements: state.achievements,
+    // Bühnen-Sterne (P1) — Lebenszeit-Sammlung, überlebt auch L3.
+    stageStars: state.stageStars,
+    starsAwarded: state.starsAwarded,
   };
 }

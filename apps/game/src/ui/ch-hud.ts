@@ -3,6 +3,7 @@ import { type CombatState, bossTimeFraction, hpFraction, isBossZone } from '../g
 import { MONSTERS_PER_ZONE } from '../game/combat';
 import { comboTierName } from '../game/combo';
 import { soulBonusEff } from '../game/heaven';
+import { type StageStars, starBitsFor, starsAt } from '../game/stars';
 import { transcendGlobalMult } from '../game/transcend';
 import { fmt } from './format';
 
@@ -69,6 +70,20 @@ function islandSvg(zone: number): string {
   );
 }
 
+/**
+ * Die Stern-Pips einer Bühne (ROADMAP-V2 P1): ein ★ je auf DIESER Bühne
+ * möglichem Stern — Boss-Bühnen drei, normale zwei (ohne Timeout-Stern) —,
+ * gefüllt oder leer. Bewusst Text-Glyphen statt SVG: sie sitzen als eine Zeile
+ * unter der Bühnen-Nummer und kosten weder Draw-Call noch Layout-Sprung.
+ */
+function starPips(zone: number, stars: StageStars): string {
+  const mask = starsAt(stars, zone);
+  const pips = starBitsFor(zone)
+    .map((bit) => `<i class="${(mask & bit) !== 0 ? 'on' : ''}">★</i>`)
+    .join('');
+  return `<span class="zs-stars">${pips}</span>`;
+}
+
 export class ChHud {
   private readonly zone = byId('zone');
   private readonly zoneKind = byId('zoneKind');
@@ -132,7 +147,7 @@ export class ChHud {
     }
 
     this.cRival = this.setText(this.rivalNameEl, rivalName(combat.zone, combat.boss), this.cRival);
-    this.updateZoneStrip(combat.zone, combat.maxZone);
+    this.updateZoneStrip(combat.zone, combat.maxZone, state.stageStars);
     // „Boss herausfordern": nur an der Frontier-Boss-Bühne, solange ihr Gate
     // unbesiegt ist und der Boss nicht schon tanzt.
     const challenge = isBossZone(combat.zone) && !combat.boss && combat.zone === combat.maxZone;
@@ -147,14 +162,19 @@ export class ChHud {
    * Bühnen-Bildleiste (Goal-Umbau: reine ANZEIGE, nicht klickbar — die Bühnen
    * wählt das Spiel selbst): fünf Insel-Thumbnails um die aktuelle Zone, die
    * aktive markiert, Boss-Gates (×5) mit Gold-Rand, kommende Zonen gedimmt.
+   * Unter jeder Nummer die P1-Stern-Pips der Bühne.
    */
-  private updateZoneStrip(zone: number, frontier: number): void {
+  private updateZoneStrip(zone: number, frontier: number, stars: StageStars): void {
     // Nur ERREICHTE Bühnen zeigen (nichts Zukünftiges spoilern): das Fenster
     // endet an der Frontier und jede Bühne ist klickbar — zurückreisen zum
     // Farmen, wieder vor zur Boss-Bühne.
     const end = Math.min(frontier, Math.max(zone + 2, 5));
     const start = Math.max(1, end - 4);
-    const sig = `${start}|${end}|${zone}|${frontier}`;
+    // Die Sterne der SICHTBAREN Bühnen gehören in die Change-Detection: sonst
+    // bliebe ein frisch verdienter Pip bis zur nächsten Bühnen-Änderung leer.
+    let starSig = '';
+    for (let z = start; z <= end; z++) starSig += `${starsAt(stars, z)},`;
+    const sig = `${start}|${end}|${zone}|${frontier}|${starSig}${starsAt(stars, frontier)}`;
     if (sig === this.cStrip) return;
     this.cStrip = sig;
     const slot = (z: number): string => {
@@ -164,7 +184,7 @@ export class ChHud {
       const label = z % 5 === 0 ? `Boss-Bühne ${z}` : `Bühne ${z}`;
       const title = z === zone ? label : `Zu ${label} reisen`;
       return `<button type="button" class="${cls}" data-z="${z}"
-           title="${title}">${islandSvg(z)}<span>${z}</span></button>`;
+           title="${title}">${islandSvg(z)}<span>${z}</span>${starPips(z, stars)}</button>`;
     };
     const slots: string[] = [];
     for (let z = start; z <= end; z++) slots.push(slot(z));

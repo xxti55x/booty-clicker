@@ -2371,6 +2371,27 @@ body {
   border: 5px solid transparent;
   border-top-color: var(--gold-base);
 }
+/* ---- ROADMAP-V2 P1: Bühnen-Sterne als Mini-Pips ---- */
+/* Eine Zeile unter der Bühnen-Nummer: gefüllte Sterne leuchten gold, offene
+   bleiben als dunkler Platzhalter stehen (man sieht, was noch zu holen ist).
+   Boss-Bühnen tragen drei, normale zwei (kein Timeout-Stern ohne Gate). */
+.zs-stars {
+  display: flex;
+  gap: 1px;
+  line-height: 1;
+  height: 8px;
+}
+.zs-stars i {
+  font-style: normal;
+  font-size: 8px;
+  line-height: 1;
+  color: rgba(255, 236, 200, 0.22);
+  text-shadow: none;
+}
+.zs-stars i.on {
+  color: var(--gold-hi);
+  text-shadow: 0 0 3px rgba(255, 200, 90, 0.85);
+}
 .zs-gap {
   align-self: center;
   font-weight: 800;

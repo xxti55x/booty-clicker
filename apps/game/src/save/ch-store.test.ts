@@ -4,11 +4,14 @@ import { ABILITY_CHARGE_MAX, createAbility } from '../game/ability';
 import { pendingSouls, soulsForMaxZone } from '../game/ascension';
 import {
   type ChState,
+  ascendState,
   createChState,
   createChests,
   createComboSave,
   createPeach,
   createStats,
+  himmelfahrtState,
+  transcendState,
 } from '../game/ch-state';
 import { createGear } from '../game/gear';
 import { createMeta, dailyQuests } from '../game/quests';
@@ -1210,5 +1213,84 @@ describe('ch-store — v10 migration & repair (kaufbare Crew-Fähigkeiten)', () 
     expect(s).not.toBeNull();
     expect(s!.crewUp).toEqual({});
     expect(s!.souls).toBe(44);
+  });
+});
+
+describe('ch-store — v11 migration & repair (Bühnen-Sterne, P1)', () => {
+  it('migrates a v10 blob into v11 with an empty star collection', () => {
+    // Ein realistischer v10-Save: tief gereist, aber ohne Sterne-Felder.
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 10;
+    delete raw.stageStars;
+    delete raw.starsAwarded;
+    delete raw.bossFoulZone;
+    raw.gold = 4242;
+    raw.zone = 37;
+    raw.runMaxZone = 37;
+    raw.lifetimeMaxZone = 37;
+    const store = memStorage();
+    store.setItem(CH_SAVE_KEY, JSON.stringify(raw));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    expect(s.gold).toBe(4242);
+    expect(s.zone).toBe(37);
+    // Bewusst NICHT rückwirkend vergeben (siehe `migrateChV10toV11`): die Sammlung
+    // startet leer, obwohl `lifetimeMaxZone` 36 geclerte Bühnen belegt.
+    expect(s.stageStars).toEqual({});
+    expect(s.starsAwarded).toBe(0);
+    expect(s.bossFoulZone).toBe(0);
+  });
+
+  it('round-trips a star collection and masks impossible bits away', () => {
+    const s: ChState = {
+      ...createChState(),
+      stageStars: { '5': 7, '7': 5 },
+      starsAwarded: 15,
+      bossFoulZone: 10,
+    };
+    const round = deserializeCh(serializeCh(s, 1000));
+    expect(round!.stageStars).toEqual({ '5': 7, '7': 5 });
+    expect(round!.starsAwarded).toBe(15);
+    expect(round!.bossFoulZone).toBe(10);
+
+    // Gebastelter Save: der Timeout-Stern auf einer Nicht-Boss-Bühne (Bit 2) und
+    // ein erfundenes viertes Bit werden weggestutzt, echte Sterne bleiben.
+    const raw = JSON.parse(serializeCh(s, 1000)) as Record<string, unknown>;
+    raw.stageStars = { '5': 255, '7': 7, '11': 2, junk: 7 };
+    const repaired = deserializeCh(JSON.stringify(raw));
+    expect(repaired!.stageStars).toEqual({ '5': 7, '7': 5 });
+  });
+
+  it('repairs a wholly corrupt star slice without touching other progress', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.stageStars = 'garbage';
+    raw.starsAwarded = Number.NaN;
+    raw.souls = 21;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.stageStars).toEqual({});
+    expect(s!.starsAwarded).toBe(0);
+    expect(s!.souls).toBe(21);
+  });
+
+  it('keeps the star collection across all three prestige layers', () => {
+    const base: ChState = {
+      ...createChState(),
+      runMaxZone: 60,
+      lifetimeMaxZone: 60,
+      rsLifetime: 500,
+      souls: 500,
+      heaven: { hpf: 0, hpfLifetime: 200, ascensions2: 1, tree: {} },
+      stageStars: { '5': 7, '7': 5 },
+      starsAwarded: 15,
+      bossFoulZone: 10,
+    };
+    for (const next of [ascendState(base), himmelfahrtState(base), transcendState(base)]) {
+      expect(next.stageStars).toEqual({ '5': 7, '7': 5 });
+      expect(next.starsAwarded).toBe(15);
+      // Der offene Fehlversuch ist Run-Zustand — jeder Reset startet sauber.
+      expect(next.bossFoulZone).toBe(0);
+    }
   });
 });

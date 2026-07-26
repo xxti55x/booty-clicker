@@ -44,13 +44,14 @@ import {
   isQuestId,
 } from '../game/quests';
 import { isAchievementId } from '../game/ch-achievements';
+import { type StageStars, STAR_MILESTONE, createStageStars, starMaskFor } from '../game/stars';
 import { type TranscendState, createTranscend } from '../game/transcend';
 import { SKINS } from '../character/skins';
 import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 10;
+export const CH_SCHEMA = 11;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -80,7 +81,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (v10, kaufbare Crew-Fähigkeiten): ChState + envelope. */
+/** The current persisted shape (v11, Bühnen-Sterne): ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -108,11 +109,12 @@ function isFiniteNumber(v: unknown): v is number {
  * Never-throw validation of a stored CH save (the v5 guard). The gameplay-
  * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
  * The meta/juice fields (rng/stats/legacyImported/ability/combo/gilds/rsLifetime/
- * ancients/heaven/gear/chests/permTokens/peach/meta/achievements/transcend) are
+ * ancients/heaven/gear/chests/permTokens/peach/meta/achievements/transcend/
+ * stageStars) are
  * deliberately NOT gated here: they are runtime bookkeeping and get repaired (fresh
  * seed / zeroed stats / false flag / default ability+combo / pruned gilds / clamped
  * highwater / sanitised ancients+heaven+gear / defaulted loot slices / defaulted
- * meta / pruned achievements / sanitised transcend) in `stateFromSave` — the same
+ * meta / pruned achievements / sanitised transcend / masked star bits) in `stateFromSave` — the same
  * "repair, don't nuke progress" spirit as
  * the runMaxZone invariant. Per-field type+range checks for them live in the `repair*`
  * helpers below.
@@ -441,10 +443,44 @@ function repairCrewUps(v: unknown, crew: Record<string, number>): CrewUps {
   return out;
 }
 
+/**
+ * Repair the Bühnen-Sterne slice (v11, P1): keep only entries whose KEY is a real
+ * zone number (positive integer) and mask each value down to the bits that zone can
+ * actually carry (`starMaskFor` — a Nicht-Boss-Bühne has no timeout star), dropping
+ * empty/junk entries entirely. So a hand-edited „alle Bühnen 7 Sterne"-Blob keeps at
+ * most what the rules allow, and a corrupt slice repairs to an empty collection
+ * instead of nuking anything else. Never throws.
+ */
+function repairStageStars(v: unknown): StageStars {
+  if (!isRecord(v)) return createStageStars();
+  const out: StageStars = {};
+  for (const [key, raw] of Object.entries(v)) {
+    const zone = Number(key);
+    if (!Number.isInteger(zone) || zone < 1 || String(zone) !== key) continue;
+    if (!isFiniteNumber(raw) || raw <= 0) continue;
+    const mask = Math.floor(raw) & starMaskFor(zone);
+    if (mask > 0) out[key] = mask;
+  }
+  return out;
+}
+
+/**
+ * Repair the milestone highwater (v11, P1): a non-negative integer, floored to a
+ * whole `STAR_MILESTONE` block (the glue only ever writes multiples). Deliberately
+ * NOT clamped down to what the stored stars justify — an inflated highwater only
+ * costs its own owner chests, while clamping it would re-pay milestones a crafted
+ * save already collected.
+ */
+function repairStarsAwarded(v: unknown): number {
+  if (!isFiniteNumber(v) || v <= 0) return 0;
+  return Math.floor(v / STAR_MILESTONE) * STAR_MILESTONE;
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
 function stateFromSave(save: ChSaveLatest): ChState {
   const souls = save.souls;
   const lifetimeMaxZone = Math.max(save.lifetimeMaxZone, save.runMaxZone, save.zone);
+  const stageStars = repairStageStars(save.stageStars);
   return {
     gold: save.gold,
     zone: save.zone,
@@ -475,6 +511,10 @@ function stateFromSave(save: ChSaveLatest): ChState {
     meta: repairMeta(save.meta),
     achievements: repairAchievements(save.achievements),
     transcend: repairTranscend(save.transcend),
+    stageStars,
+    starsAwarded: repairStarsAwarded(save.starsAwarded),
+    // Reiner Run-Zustand: eine gültige Bühnen-Nummer oder 0 (kein offener Fehlversuch).
+    bossFoulZone: isNonNegInt(save.bossFoulZone) ? save.bossFoulZone : 0,
   };
 }
 
@@ -612,6 +652,26 @@ function migrateChV9toV10(raw: Record<string, unknown>): Record<string, unknown>
   };
 }
 
+/**
+ * v10 → v11: fill the Bühnen-Sterne defaults (ROADMAP-V2 P1) — eine leere
+ * Sammlung, ein bei 0 stehender Meilenstein-Highwater und kein offener Boss-
+ * Fehlversuch. Bewusst NICHT rückwirkend vergeben: `lifetimeMaxZone` würde zwar
+ * verraten, welche Bühnen ein Alt-Save schon geclert hat, aber weder „ohne
+ * Timeout" noch „mit heißer Combo" lassen sich rekonstruieren — eine halb
+ * gefüllte Sammlung wäre irreführender als eine frische. Die Sterne sind rein
+ * kosmetisch, es geht also keine Macht verloren. Für jedes bestehende Feld
+ * verlustfrei.
+ */
+function migrateChV10toV11(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    v: 11,
+    stageStars: createStageStars(),
+    starsAwarded: 0,
+    bossFoulZone: 0,
+  };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
@@ -622,6 +682,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
   7: migrateChV7toV8,
   8: migrateChV8toV9,
   9: migrateChV9toV10,
+  10: migrateChV10toV11,
 };
 
 /**
