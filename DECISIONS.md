@@ -3,6 +3,85 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## ROADMAP-V2 Schritt 3 — P1+P3 Bühnen-Sterne & Wand-Telemetrie
+
+- **2026-07-26 — Stern 2 gibt es nur an Boss-Gates; Nicht-Boss-Bühnen tragen
+  zwei Sterne.** Die Roadmap schreibt „3 ⭐ pro Bühne", aber zwei der drei
+  Kriterien hängen am Gate: „ohne Timeout" setzt einen Timer voraus, den eine
+  normale Bühne nicht hat. Die Alternativen wären ein erfundenes Ersatzkriterium
+  („keine Rivalin überlebt 60 s") oder ein für immer unerreichbarer Slot —
+  beides schlechter als die ehrliche Variante: `starBitsFor(zone)` liefert die
+  BITS, die eine Bühne überhaupt tragen kann, die Pips zeigen genau so viele
+  Slots (Boss 3, sonst 2), und `totalStars` zählt nur, was die Regeln hergeben.
+  Ein gebastelter Save mit „7" auf einer Nicht-Boss-Bühne wird beim Laden auf 5
+  maskiert, kann die Meilenstein-Truhen also nicht erschleichen.
+- **Combo-Schwelle ×1.1 = 25 Stacks = Tier „Heiß".** Die Roadmap sprach von
+  „≥ ×3-Combo" — diese Skala existiert seit dem v12-Nerf nicht mehr:
+  `comboMult = 1 + min(stacks, 50)·0,004` deckelt bei ×1.2. ×1.1 ist damit exakt
+  die halbe Strecke zum Cap und fällt mit der Tier-2-Grenze zusammen: bei ~5
+  Klicks/s in gut fünf Sekunden erreicht, aber sofort weg, wenn man die Combo im
+  Shop verfallen lässt. `STAR_COMBO_STACKS` wird aus der echten Kurve abgeleitet
+  (Schleife über `comboMult`), nie als zweite Zahl gepflegt — ändert sich die
+  Balance, wandert die Grenze automatisch mit. Der Stern zählt nur bei
+  KLICK-Kills: Idle-DPS zieht weder Combo noch Krit (P1), ein Crew-Tick, der
+  zufällig in ein heißes Fenster fällt, hat ihn nicht verdient.
+- **Der Fehlversuch ist EIN Skalar, kein Set.** „Ohne Timeout" heißt: zwischen
+  dem ersten Boss-Spawn dieses Anlaufs und dem Kill lag kein Timeout. Man kämpft
+  immer nur an einem Gate, also reicht `bossFoulZone` (0 = sauber). Gesetzt beim
+  Timeout, gelöscht beim Kill DIESES Gates — und verworfen, sobald ein Boss auf
+  einer anderen Bühne spawnt: nach einer Aszension ist der Anlauf auf Bühne 10
+  ein neuer, kein ewig verdorbener. Persistiert (Run-Zustand, überlebt kein
+  Prestige), damit ein Reload mitten im Retry den Fehlversuch nicht vergisst;
+  ohne Persistenz wäre F5 der billigste Stern-Exploit des Spiels.
+- **Save v10 → v11 vergibt bewusst NICHTS rückwirkend.** `lifetimeMaxZone`
+  würde verraten, welche Bühnen ein Alt-Save geclert hat — „ohne Timeout" und
+  „Combo" lassen sich aber nicht rekonstruieren. Eine halb gefüllte Sammlung
+  (jede Bühne genau ein Stern) wäre irreführender als eine frische, und weil die
+  Sterne rein kosmetisch sind, geht dabei keine Macht verloren. Neu im Schema:
+  `stageStars` (Zone → 3-Bit-Maske), `starsAwarded` (Meilenstein-Highwater) und
+  `bossFoulZone`; die Sterne überleben alle drei Prestige-Schichten (Sammlung
+  wie Achievements), der Fehlversuch nicht. Die X7-Matrix ist um v11 gewachsen
+  (gesundes + kaputtes Fixture) — genau die Bremse, die X7 dafür gebaut hat.
+- **Meilenstein gegen einen Highwater, nicht gegen einen Zähler.** Alle 15
+  Sterne fällt eine Holztruhe. Ein „schon ausgezahlt"-Flag pro Block wäre
+  fragil; stattdessen speichert `starsAwarded` die Sterne, die bereits gezahlt
+  haben (immer ein Vielfaches von 15), und `milestoneChests(total, awarded)`
+  rechnet die Differenz aus. Ein Reload zahlt damit nie doppelt, ein Import mit
+  46 Sternen zahlt alle drei offenen Truhen auf einmal.
+- **P3: Die Greedy-ROI-Rangfolge zieht in `heroes.ts` um — eine Quelle für Bot
+  und Tipp.** `sim.buyCrewGreedy` trug die Rangfolge (nächstes Level vs. nächste
+  Fähigkeit, Special-Stufen als KLAMMER zur folgenden Power-Stufe gepreist) als
+  private Schleife. Für den Spiel-Tipp wäre eine Kopie das Schlimmste gewesen:
+  Bot und Ratschlag würden lautlos auseinanderlaufen. Jetzt ist es
+  `heroes.bestCrewBuy(levels, ups, gilds, budget)` — pur, getestet, vom Sim mit
+  `budget = gold` und vom Advisor mit `budget = 3 × gold` aufgerufen. Die
+  Sim-Anker (E1–E4, Himmelfahrts-Fenster, Pacing-Tabelle) sind unverändert grün,
+  die Extraktion ist verhaltensgleich.
+- **Das ×3-Budget des Tipps ist Absicht.** Genau an der Wand ist oft NICHTS
+  bezahlbar; ein „spar auf Türsteher Lv 121" ist dort die nützlichere Antwort
+  als Schweigen. Weiter als das Dreifache greift der Tipp nie (Invariante im
+  Test: `cost ≤ 3 × gold`), sonst empfiehlt er Träume statt des nächsten
+  Schritts. `affordable` unterscheidet in der Zeile „jetzt kaufen" von „(sparen)".
+- **Burst-Annahmen: konservativ und benannt.** 30-s-Fenster (`BOSS_TIME_S`, ohne
+  Chronilla/Gear-Verlängerung), 5 Klicks/s als realistische Dauerrate (der
+  Balance-Bot rechnet mit 3/s), Combo-Mittel ×1.1 (halbe Strecke zum Cap — bei 5
+  Klicks/s stünde man nach ~10 s am Cap, aber Anlauf und Shop-Griffe drücken den
+  Schnitt), Krit-EV ×1.8 aus den BASIS-Konstanten (dieselbe Annahme, mit der
+  §4.8 kalibriert ist). VOLL eingerechnet wird nur der Boss-Schadens-Stack
+  (Glutaeus, Tyrann-Gear, `boss`-Specials) — Macht, die sicher da ist und nur im
+  Bosskampf zählt. Draußen bleiben On-Beat ×1.5, Ekstase ×10 und der Coach: alles
+  davon macht den echten Burst nur größer, die Schätzung bleibt eine Untergrenze
+  und der Tipp verspricht nie zu viel. Schwelle für die Zeile: Lücke > 20 %
+  (`bossGap < 0.8`) — knappe Kämpfe sind der spannende Normalfall und brauchen
+  keinen Ratschlag.
+- **Throttle: rechnen im 0.25-s-Tick, verstecken sofort.** `hud.advise` läuft
+  nur aus dem gedrosselten Tick (die Kauf-Rangfolge scannt die ganze Crew und
+  hat im Klick-Pfad nichts verloren) und hinter einer Cache-Signatur aus
+  Gold/Leveln/Fähigkeiten. Das VERSCHWINDEN hängt dagegen an der
+  Change-Detection von `hud.update`: Sichtbarkeit teilt sich die Bedingung mit
+  dem „Boss herausfordern"-Button (`atFrontierGate`), also ist die Zeile in dem
+  Moment weg, in dem der Boss die Bühne betritt — ohne auf den Tick zu warten.
+
 ## ROADMAP-V2 Schritt 2 — G1+G2 Bühnen-Wechsel & Boss-Auftritt
 
 - **2026-07-26 — Aus zwei Cuts werden zwei Momente.** G1: `World.setBackground`

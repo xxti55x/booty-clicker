@@ -102,17 +102,7 @@ import {
   soulBonusEff,
   truhenMagnetBonus,
 } from './heaven';
-import {
-  CREW,
-  abilityMult,
-  abilityTiersUnlocked,
-  clickDamageRaw,
-  crewSpecialBonuses,
-  heroDps,
-  nextAbility,
-  nextLevelCost,
-  totalRawDps,
-} from './heroes';
+import { bestCrewBuy, clickDamageRaw, crewSpecialBonuses, totalRawDps } from './heroes';
 import {
   activateBoost,
   clampBoostUntil,
@@ -604,79 +594,22 @@ function stepSecond(
 }
 
 /**
- * Spend gold ROI-greedy: repeatedly buy the best marginal-output-per-BP option,
- * comparing next LEVELS and unlocked-but-unbought ABILITIES (v10) across the
- * whole crew. The Boss click line uses `heroClickValue` (its output is click
- * damage — weighted like DPS here, which matches how the drivers click ~always).
- *
- * v11: special ability tiers carry no direct output of their own (gold/crit/idle
- * feed the economy via `goldMultiplierNow`/`critFactor`/`powerFor` instead), so a
- * special's marginal output is 0. Since abilities buy strictly in order, specials
- * would dead-lock the member's lane for a pure output-greedy bot — they are
- * therefore valued as the GATE to the following power tier: the bundle (all
- * consecutive specials + the next power tier — v11.1 rhythms have up to TWO
- * specials in a row) is priced together against the power tier's output gain, and
- * when that bundle wins the ROI race the first special is bought (the rest follow
- * in later greedy iterations). Utility value of the specials themselves is
- * deliberately NOT credited here — the bot stays an honest lower bound.
+ * Spend gold ROI-greedy: repeatedly buy the best marginal-output-per-BP option
+ * the current bank affords. The ranking itself (next LEVELS vs. unlocked-but-
+ * unbought ABILITIES, with the v11 special tiers priced as the GATE to their
+ * following power tier) lives as ONE pure function in `heroes.bestCrewBuy` —
+ * the in-game Kauf-Tipp (ROADMAP-V2 P3, `game/advisor.ts`) reads the exact same
+ * ranking, so bot and hint can never drift apart.
  */
 function buyCrewGreedy(sim: Sim): void {
-  const outputAt = (cfg: (typeof CREW)[number], lvl: number, ups: number): number => {
-    const g = sim.gilds[cfg.id] ?? 0;
-    // Click hero's line counts as output too — the sim drivers click constantly,
-    // so 1 click-damage ≈ CLICKS_PER_SEC dps; ROI-comparing them 1:1 is close
-    // enough for a greedy bot and keeps this loop hero-agnostic.
-    if (cfg.click)
-      return lvl <= 0 ? 0 : cfg.baseDps * lvl * abilityMult(cfg, ups) * Math.pow(1.25, g);
-    return heroDps(cfg, lvl, g, ups);
-  };
   let guard = 5000;
   for (;;) {
     if (guard-- <= 0) break;
-    let bestBuy: { kind: 'level' | 'ability'; id: string; cost: number } | null = null;
-    let bestRoi = 0;
-    for (const cfg of CREW) {
-      const lvl = sim.crew[cfg.id] ?? 0;
-      const ups = sim.crewUp[cfg.id] ?? 0;
-      const cost = nextLevelCost(cfg, lvl);
-      if (cost <= sim.gold) {
-        const gain = outputAt(cfg, lvl + 1, ups) - outputAt(cfg, lvl, ups);
-        const roi = gain / cost;
-        if (roi > bestRoi) {
-          bestRoi = roi;
-          bestBuy = { kind: 'level', id: cfg.id, cost };
-        }
-      }
-      const ab = nextAbility(cfg, lvl, ups);
-      if (ab.unlocked && ab.cost <= sim.gold && ups < abilityTiersUnlocked(lvl)) {
-        const direct = outputAt(cfg, lvl, ups + 1) - outputAt(cfg, lvl, ups);
-        let roi = direct / ab.cost;
-        if (direct <= 0) {
-          // Special tier(s): bundle forward through the lane until the next
-          // power tier lands (rhythm patterns cap consecutive specials at 2;
-          // the scan bound of 4 is pure safety).
-          let costSum = ab.cost;
-          for (let k = ups + 1; k - ups <= 4; k++) {
-            const nxt = nextAbility(cfg, lvl, k);
-            if (!nxt.unlocked || k >= abilityTiersUnlocked(lvl)) break;
-            costSum += nxt.cost;
-            const gain = outputAt(cfg, lvl, k + 1) - outputAt(cfg, lvl, ups);
-            if (gain > 0) {
-              if (costSum <= sim.gold) roi = gain / costSum;
-              break;
-            }
-          }
-        }
-        if (roi > bestRoi) {
-          bestRoi = roi;
-          bestBuy = { kind: 'ability', id: cfg.id, cost: ab.cost };
-        }
-      }
-    }
-    if (bestBuy === null) break;
-    sim.gold -= bestBuy.cost;
-    if (bestBuy.kind === 'level') sim.crew[bestBuy.id] = (sim.crew[bestBuy.id] ?? 0) + 1;
-    else sim.crewUp[bestBuy.id] = (sim.crewUp[bestBuy.id] ?? 0) + 1;
+    const buy = bestCrewBuy(sim.crew, sim.crewUp, sim.gilds, sim.gold);
+    if (buy === null) break;
+    sim.gold -= buy.cost;
+    if (buy.kind === 'level') sim.crew[buy.id] = (sim.crew[buy.id] ?? 0) + 1;
+    else sim.crewUp[buy.id] = (sim.crewUp[buy.id] ?? 0) + 1;
   }
 }
 

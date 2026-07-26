@@ -2429,6 +2429,27 @@ body {
   box-shadow: 0 0 0 #8a5a16;
 }
 
+/* ---- ROADMAP-V2 P3: Wand-Telemetrie unter dem Boss-Button ---- */
+/* Eine ruhige Zeile, kein Alarm: Sie erklärt die Lücke, statt sie anzuschreien. */
+.boss-hint {
+  margin-top: 4px;
+  padding: 0 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--parch);
+  opacity: 0.92;
+  text-align: center;
+  text-shadow: 1px 1px 0 rgba(40, 22, 6, 0.7);
+}
+.boss-hint.hidden {
+  display: none; /* .hidden steht früher im Sheet — gleiche Spezifität, hier explizit */
+}
+.boss-hint b {
+  color: var(--gold-base);
+  font-weight: 800;
+}
+
 /* ---- ROADMAP-V2 G2: Boss-Auftritts-Banner ---- */
 /* Sitzt als letzte Zeile in der `.topui`-Spalte (unter der Rivalen-Karte), also
    kann es mit HUD/Karte nie kollidieren und braucht keine Pixel-Position. Der

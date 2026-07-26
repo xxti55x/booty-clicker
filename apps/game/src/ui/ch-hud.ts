@@ -1,5 +1,13 @@
+import {
+  HINT_GAP_MAX,
+  type PurchaseHint,
+  bestPurchaseHint,
+  bossGap,
+  burstEstimate,
+  purchaseSignature,
+} from '../game/advisor';
 import type { ChState } from '../game/ch-state';
-import { type CombatState, bossTimeFraction, hpFraction, isBossZone } from '../game/combat';
+import { type CombatState, bossHp, bossTimeFraction, hpFraction, isBossZone } from '../game/combat';
 import { MONSTERS_PER_ZONE } from '../game/combat';
 import { comboTierName } from '../game/combo';
 import { soulBonusEff } from '../game/heaven';
@@ -84,6 +92,15 @@ function starPips(zone: number, stars: StageStars): string {
   return `<span class="zs-stars">${pips}</span>`;
 }
 
+/**
+ * Steht der Spieler an der Frontier-Boss-Bühne, deren Gate noch offen ist (und
+ * der Boss tanzt noch nicht)? Die gemeinsame Bedingung von „Boss herausfordern"
+ * und der P3-Telemetrie-Zeile — EINE Quelle, damit beide nie auseinanderlaufen.
+ */
+function atFrontierGate(combat: CombatState): boolean {
+  return isBossZone(combat.zone) && !combat.boss && combat.zone === combat.maxZone;
+}
+
 export class ChHud {
   private readonly zone = byId('zone');
   private readonly zoneKind = byId('zoneKind');
@@ -98,6 +115,7 @@ export class ChHud {
   private readonly timer = byId('rivalTimer');
   private readonly zoneStrip = byId('zoneStrip');
   private readonly bossBtn = byId('bossChallenge');
+  private readonly bossHint = byId('bossHint');
 
   // Cached last-written values (change-detection, no DOM churn).
   private cZone = '';
@@ -114,6 +132,10 @@ export class ChHud {
   private cCombo = '';
   private cStrip = '';
   private cChallenge: boolean | null = null;
+  // P3-Telemetrie: zuletzt geschriebene Zeile + Cache des Kauf-Tipps.
+  private cHint = '';
+  private hintSig = '';
+  private hintBuy: PurchaseHint | null = null;
 
   private setText(el: HTMLElement, next: string, cache: string): string {
     if (next !== cache) el.textContent = next;
@@ -150,12 +172,56 @@ export class ChHud {
     this.updateZoneStrip(combat.zone, combat.maxZone, state.stageStars);
     // „Boss herausfordern": nur an der Frontier-Boss-Bühne, solange ihr Gate
     // unbesiegt ist und der Boss nicht schon tanzt.
-    const challenge = isBossZone(combat.zone) && !combat.boss && combat.zone === combat.maxZone;
+    const challenge = atFrontierGate(combat);
     if (challenge !== this.cChallenge) {
       this.cChallenge = challenge;
       this.bossBtn.classList.toggle('hidden', !challenge);
+      // P3: Die Telemetrie-Zeile teilt die Sichtbarkeits-Bedingung des Buttons —
+      // sobald der Boss tanzt (oder man wegreist), verschwindet sie SOFORT, ohne
+      // auf den 0.25-s-Tick zu warten. Nur das Rechnen hängt am Tick.
+      if (!challenge) this.setHint('');
     }
     this.frame(combat);
+  }
+
+  /**
+   * Wand-Telemetrie (ROADMAP-V2 P3) — NUR aus dem 0.25-s-Tick aufrufen, nie pro
+   * Frame und nie aus dem Klick-Pfad: `bossGap`/`burstEstimate` sind billig, aber
+   * die Kauf-Rangfolge scannt die ganze Crew. Sie wird zusätzlich hinter einer
+   * Cache-Signatur (Gold/Level/Fähigkeiten) gehalten, läuft also nur nach einer
+   * echten Konto- oder Crew-Änderung erneut.
+   */
+  advise(state: ChState, combat: CombatState, dps: number, clickDmg: number): void {
+    if (!atFrontierGate(combat)) {
+      this.setHint('');
+      return;
+    }
+    const gap = bossGap(state, combat, dps, clickDmg);
+    if (!(gap < HINT_GAP_MAX)) {
+      this.setHint(''); // Lücke zu (oder unbekannt) ⇒ kein ungefragter Ratschlag
+      return;
+    }
+    const sig = purchaseSignature(state);
+    if (sig !== this.hintSig) {
+      this.hintSig = sig;
+      this.hintBuy = bestPurchaseHint(state);
+    }
+    const burst = fmt(burstEstimate(state, dps, clickDmg));
+    const boss = fmt(bossHp(combat.zone));
+    const tip = this.hintBuy
+      ? ` — Tipp: <b>${this.hintBuy.label}</b> · ${fmt(this.hintBuy.cost)} BP${
+          this.hintBuy.affordable ? '' : ' (sparen)'
+        }`
+      : '';
+    this.setHint(`Dein Burst ~${burst} · Boss ${boss}${tip}`);
+  }
+
+  /** Telemetrie-Zeile schreiben/verstecken (change-detected, kein DOM-Churn). */
+  private setHint(html: string): void {
+    if (html === this.cHint) return;
+    this.cHint = html;
+    this.bossHint.classList.toggle('hidden', html === '');
+    if (html !== '') this.bossHint.innerHTML = html;
   }
 
   /**

@@ -1977,6 +1977,10 @@ function loop(nowMs: number): void {
     checkAchievements();
     maybeLeaderboardPrompt();
     hud.update(state, combat, dps, clickDmg);
+    // ROADMAP-V2 P3: Wand-Telemetrie an der Frontier-Boss-Bühne. Bewusst NUR
+    // hier im 0.25-s-Tick — die Kauf-Rangfolge scannt die Crew und hat im
+    // Klick-Pfad nichts verloren; das Ausblenden im Kampf erledigt `hud.update`.
+    hud.advise(state, combat, dps, clickDmg);
     syncTabVisibility(); // reveal a tab the instant its layer becomes reachable
     // keep the open shop tab's affordability/previews fresh while idling
     const active = document.querySelector('.tab.active') as HTMLElement | null;
