@@ -2857,3 +2857,211 @@ body {
     animation: none;
   }
 }
+
+/* ---- ROADMAP-V2 G4: Prestige-Zeremonien ---- */
+/* Vollbild-Blende über dem Canvas. Sie fängt ihre Zeiger selbst ab, also kann
+   während der 1.5–2 s kein Klick auf die Bühne durchrutschen — und ein Tap
+   irgendwo beendet sie sofort (die Gutschrift war ohnehin vorher). */
+.ceremony {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  animation: cerFade var(--cer-ms, 1500ms) ease-out forwards;
+}
+.ceremony.hidden {
+  display: none;
+}
+/* Drei Schichten, drei Handschriften: hell-lime (Aszension), warm-gold und
+   deutlich tiefer (Himmelfahrt), mystisch-violett (Transzendenz). */
+.ceremony.k-ascend {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(220, 255, 170, 0.5), rgba(12, 22, 6, 0.8) 68%),
+    rgba(6, 10, 4, 0.62);
+}
+.ceremony.k-himmelfahrt {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 186, 110, 0.46), rgba(28, 8, 4, 0.92) 66%),
+    rgba(10, 3, 1, 0.86);
+}
+.ceremony.k-transcend {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(176, 118, 255, 0.42), rgba(8, 3, 22, 0.94) 62%),
+    rgba(4, 1, 12, 0.9);
+}
+.cer-sprites {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.cer-sprites i {
+  position: absolute;
+  font-style: normal;
+  line-height: 1;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+.k-ascend .cer-sprites i,
+.k-himmelfahrt .cer-sprites i {
+  animation-name: cerRain;
+  animation-timing-function: ease-in;
+  animation-fill-mode: forwards;
+}
+.k-transcend .cer-sprites i {
+  animation-name: cerImplode;
+  animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.4);
+  animation-fill-mode: forwards;
+}
+@keyframes cerRain {
+  0% {
+    opacity: 0;
+    transform: translateY(-16vh) rotate(0deg);
+  }
+  14% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(108vh) rotate(var(--rot, 20deg));
+  }
+}
+@keyframes cerImplode {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(1.15);
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--tx, 0), var(--ty, 0)) scale(0.15);
+  }
+}
+.cer-core {
+  position: relative;
+  text-align: center;
+  padding: 0 20px;
+  animation: cerCore var(--cer-ms, 1500ms) cubic-bezier(0.2, 0.9, 0.25, 1.1) forwards;
+}
+.cer-title {
+  font-family: var(--display);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--parch);
+  text-shadow: var(--outline-ink);
+}
+.cer-count {
+  font-family: var(--display);
+  font-size: 58px;
+  font-weight: 800;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold-base);
+  text-shadow: var(--outline-ink);
+}
+.k-ascend .cer-count {
+  color: #e6ff9a;
+}
+.k-himmelfahrt .cer-count {
+  color: #ffcf8a;
+}
+.k-transcend .cer-count {
+  color: #d9b6ff;
+}
+.cer-sub {
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: rgba(242, 228, 196, 0.86);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.7);
+}
+/* „Neustart"-Sweep: fährt einmal über die Bühne, während die Blende ausgeht. */
+.cer-sweep {
+  position: absolute;
+  inset: -25% -70%;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 42%,
+    rgba(255, 255, 255, 0.42) 50%,
+    transparent 58%
+  );
+  transform: translateX(-120%);
+  animation: cerSweep 430ms ease-in forwards;
+}
+@keyframes cerSweep {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+.cer-skip {
+  position: absolute;
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: rgba(242, 228, 196, 0.6);
+}
+@keyframes cerFade {
+  0% {
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  82% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes cerCore {
+  0% {
+    opacity: 0;
+    transform: scale(0.78);
+  }
+  16% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  26% {
+    transform: scale(1);
+  }
+  84% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Kein Regen, kein Sweep — Titel, Zahl und Satz stehen einfach da (die
+     Information der Zeremonie geht also nicht verloren). */
+  .cer-sprites,
+  .cer-sweep {
+    display: none;
+  }
+  .ceremony,
+  .cer-core {
+    animation: none;
+  }
+}

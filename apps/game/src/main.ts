@@ -170,6 +170,7 @@ import {
   offlineCapS,
 } from './game/heaven';
 import { canAscend } from './game/ascension';
+import type { CeremonyKind } from './game/ceremony';
 import { CREW, type CrewLevels, type CrewSpecialBonuses, crewSpecialBonuses } from './game/heroes';
 import { buildAchievementCtx, newlyUnlocked } from './game/ch-achievements';
 import {
@@ -214,6 +215,7 @@ import { loadGame } from './save/store';
 import { Rng } from './util/rng';
 import { AbilityBar } from './ui/ability-bar';
 import { Ancients } from './ui/ancients';
+import { Ceremony } from './ui/ceremony';
 import { ChHud, rivalName } from './ui/ch-hud';
 import { ChSettings } from './ui/ch-settings';
 import { Chests } from './ui/chest-panel';
@@ -548,6 +550,8 @@ syncChoreoSet(); // A4: das Set der Start-Bühne statt eines festen Move 0
 
 const hud = new ChHud();
 const toasts = new Toasts();
+// ROADMAP-V2 G4: die Vollbild-Blende der drei Prestige-Schichten (rein optisch).
+const ceremony = new Ceremony();
 const particles = new ParticleSystem(scene);
 const pops = new Pops();
 const haptics = new Haptics();
@@ -689,6 +693,19 @@ function applyMythosFruhstart(): void {
   );
 }
 
+/**
+ * ROADMAP-V2 G4 — Die Zeremonie einer Prestige-Schicht anstoßen.
+ *
+ * Sie läuft IMMER erst, nachdem der Reset-Handler gebucht, zurückgesetzt und
+ * persistiert hat: das Overlay ist reine Optik, es darf also nichts gewähren und
+ * nichts blockieren. `preset.cinematics` ist das Preset-Gate — im low-Preset
+ * bleibt es beim Toast von früher, der ohnehin in jedem Fall feuert.
+ */
+function playCeremony(kind: CeremonyKind, amount: number): void {
+  if (!preset.cinematics) return;
+  ceremony.play(kind, amount, preset.confetti);
+}
+
 const prestige = new Prestige({
   state,
   getRunMaxZone: () => Math.max(state.runMaxZone, combat.maxZone),
@@ -699,6 +716,9 @@ const prestige = new Prestige({
     state.stats.ascensions += 1;
     state.meta = advanceMeta(state.meta, 'ascend');
     const prevCrew = { ...state.crew };
+    // G4: der Betrag für den Zahlen-Aufzähler — die DIFFERENZ der Gutschrift, die
+    // unmittelbar danach gebucht wird. Die Zeremonie zeigt sie nur, sie rechnet nichts.
+    const soulsBefore = state.souls;
     Object.assign(state, ascendState(state)); // mutate in place — panels hold this ref
     applyFruhstarter(prevCrew);
     applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
@@ -720,6 +740,7 @@ const prestige = new Prestige({
     checkAchievements(); // ascension / soul milestones (§7.3)
     audio.unlockJingle();
     persist();
+    playCeremony('ascend', state.souls - soulsBefore); // G4: erst buchen, dann feiern
   },
 });
 
@@ -738,6 +759,7 @@ const heaven = new Heaven({
   state,
   onHimmelfahrt: () => {
     syncMaxZones();
+    const hpfBefore = state.heaven.hpf; // G4: Betrag für den Aufzähler (nur Anzeige)
     Object.assign(state, himmelfahrtState(state)); // mutate in place
     applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
     combat = newRunCombat();
@@ -758,6 +780,7 @@ const heaven = new Heaven({
     checkAchievements(); // Himmelfahrt / HPF milestones (§7.3)
     audio.unlockJingle();
     persist();
+    playCeremony('himmelfahrt', state.heaven.hpf - hpfBefore); // G4
   },
   onBuyNode: (id) => {
     const r = buyTreeNode(state.heaven, id);
@@ -789,6 +812,7 @@ if (transcendEnabled) {
       // but guard here too so a stray call can never wipe L1+L2 for nothing).
       if (!canTranscend(state.transcend, state.heaven.hpfLifetime)) return;
       syncMaxZones(); // fold live combat maxzones + RNG cursor + combo into state first
+      const teBefore = state.transcend.te; // G4: Betrag für den Aufzähler (nur Anzeige)
       Object.assign(state, transcendState(state)); // mutate in place (banks TE, wipes L1+L2)
       applyMythosFruhstart(); // P2: der Knoten überlebt den tiefsten Reset und greift hier
       // ---- re-seed, mirroring the Himmelfahrt handler exactly (L2-wipe hazard) ----
@@ -815,6 +839,7 @@ if (transcendEnabled) {
       checkAchievements(); // Transzendenz / TE milestones (§7.3)
       audio.unlockJingle();
       persist();
+      playCeremony('transcend', state.transcend.te - teBefore); // G4
     },
     // ROADMAP-V2 P2 — Mythos-Shop: gehaltenes TE gegen einen permanenten Wahl-Knoten.
     // Der Kauf senkt `te` und damit den ×3^TE-Boost, deshalb muss der HUD-Multiplikator
@@ -2321,6 +2346,7 @@ let t0 = 0;
       gobHits: number;
       gobBuff: number;
       gobCaught: number;
+      cer: boolean;
     };
   }
 ).chVs = () => ({
@@ -2355,6 +2381,9 @@ let t0 = 0;
   gobHits: goblin.hits,
   gobBuff: goblinBuffLeft(goblin.buffUntil, Date.now()),
   gobCaught: goblin.caught,
+  // ROADMAP-V2 G4: läuft gerade eine Prestige-Blende? (Der Beweis-Lauf timet
+  // den Peak daran, statt ihn aus Pixeln zu raten.)
+  cer: ceremony.active,
 });
 let uiTimer = 0;
 let lastRenderMs = 0;
