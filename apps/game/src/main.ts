@@ -702,6 +702,12 @@ function applyMythosFruhstart(): void {
  * bleibt es beim Toast von früher, der ohnehin in jedem Fall feuert.
  */
 function playCeremony(kind: CeremonyKind, amount: number): void {
+  // ROADMAP-V2 X5: Der Stinger läuft in JEDEM Preset — er kostet keine
+  // Bildrate, und im low-Preset ist er der einzige Moment, der den Reset
+  // überhaupt markiert (dort bleibt es sonst beim Toast). Er ersetzt das
+  // generische `unlockJingle`, das vorher alle drei Schichten gleich klingen
+  // ließ; die Blende darüber hängt weiter an `preset.cinematics`.
+  audio.ceremony(kind);
   if (!preset.cinematics) return;
   ceremony.play(kind, amount, preset.confetti);
 }
@@ -738,7 +744,6 @@ const prestige = new Prestige({
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     toasts.show('✨', 'Ruhm eingeheimst!', `Jetzt ${fmt(state.souls)} Seelen`);
     checkAchievements(); // ascension / soul milestones (§7.3)
-    audio.unlockJingle();
     persist();
     playCeremony('ascend', state.souls - soulsBefore); // G4: erst buchen, dann feiern
   },
@@ -778,7 +783,6 @@ const heaven = new Heaven({
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     toasts.show('🌈', 'Himmelfahrt!', `${fmt(state.heaven.hpf)} Himmelspfirsiche`);
     checkAchievements(); // Himmelfahrt / HPF milestones (§7.3)
-    audio.unlockJingle();
     persist();
     playCeremony('himmelfahrt', state.heaven.hpf - hpfBefore); // G4
   },
@@ -837,7 +841,6 @@ if (transcendEnabled) {
         `${fmt(state.transcend.te)} TE · ×${fmt(transcendGlobalMult(state.transcend.te))} Boost`,
       );
       checkAchievements(); // Transzendenz / TE milestones (§7.3)
-      audio.unlockJingle();
       persist();
       playCeremony('transcend', state.transcend.te - teBefore); // G4
     },
@@ -1944,6 +1947,35 @@ interface LootGlue {
 // (gleicher Geist wie `chLoot`): den nächsten Spawn auf JETZT ziehen und den
 // Zustand lesen. Der Fang selbst läuft über den echten Button-Klick — der
 // Headless-Beweis nimmt also exakt den Spieler-Pfad, nichts wird umgangen.
+/**
+ * ROADMAP-V2 X5: Die Beweis-Oberfläche fürs Audio (gleicher Geist wie `chLoot`
+ * und `chGob`). Headless lässt sich Klang nicht fotografieren — also ruft der
+ * Smoke die neuen Funktionen HIER auf, im echten WebAudio-Graph des laufenden
+ * Spiels, und liest über `debug` nach, ob der Kontext läuft und was der
+ * Mute-Schalter mit dem Master-Regler macht.
+ */
+(
+  window as unknown as {
+    chAudio: {
+      unlock(): void;
+      ceremony(kind: CeremonyKind): void;
+      goblinSpawn(): void;
+      goblinCatch(): void;
+      ekstase(on: boolean): void;
+      mute(on: boolean): void;
+      debug(): { ctx: string; master: number; muted: boolean };
+    };
+  }
+).chAudio = {
+  unlock: () => audio.unlock(),
+  ceremony: (kind) => audio.ceremony(kind),
+  goblinSpawn: () => audio.goblinSpawn(),
+  goblinCatch: () => audio.goblinCatch(),
+  ekstase: (on) => audio.setEkstase(on),
+  mute: (on) => audio.setMuted(on),
+  debug: () => audio.debug,
+};
+
 (window as unknown as { chGob: { spawn(): void; state(): GoblinState } }).chGob = {
   spawn: () => {
     goblin = { ...goblin, nextAt: Date.now(), hits: 0 };
@@ -2219,6 +2251,9 @@ function updateGoblin(now: number): void {
   if (spawned && goblinSpawnId !== goblin.nextAt) {
     goblinSpawnId = goblin.nextAt;
     goblinBtn.classList.remove('hit');
+    // X5: das freche „hehe" beim Auftauchen — einmal je Kobold, an derselben
+    // Kante wie der Button-Reset (ein Kobold, ein Ton).
+    audio.goblinSpawn();
   }
   if (show) {
     // Hoppel-Bahn quer über die Bühne (pur in `goblinPos`, hier nur Pixel).
@@ -2277,7 +2312,7 @@ goblinBtn.addEventListener('click', () => {
     'Kobold gefangen!',
     `🪵 Holztruhe · ×2 Klick-Schaden für ${GOBLIN_BUFF_S} Sekunden`,
   );
-  audio.unlockJingle();
+  audio.goblinCatch(); // X5: eigener Erfolgs-Plink statt des generischen Jingles
   if (effects.screenShake) shakeMag = Math.max(shakeMag, SHAKE_CRIT);
   haptics.boss(effects.haptics);
   hud.update(state, combat, dps, clickDmg);
@@ -2486,6 +2521,11 @@ function loop(nowMs: number): void {
   const frenzy = isFrenzyActive(state.ability, epochMs);
   hud.setCombo(comboState.stacks, tier);
   audio.setIntensity(intensityFor(tier, frenzy));
+  // ROADMAP-V2 X5: die zweite Instrumenten-Lage des Themes hängt am EKSTASE-
+  // Fenster, nicht an der Intensitätsstufe — die erreicht auch eine heiße Combo
+  // (`intensityFor` gibt bei Tier 4 ebenfalls 3 zurück), das Fenster soll aber
+  // seinen eigenen Klang haben.
+  audio.setEkstase(frenzy);
   abilityBar.update(state.ability, epochMs, ekstaseChargeMax());
   pops.frame(epochMs); // flush any trailing damage batch (B7)
 
