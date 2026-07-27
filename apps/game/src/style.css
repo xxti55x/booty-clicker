@@ -1122,7 +1122,9 @@ body {
     left: 50%;
   }
   .topui {
-    top: calc(60px + env(safe-area-inset-top, 0px));
+    /* X6: 68 statt 60 px — im Portrait ist der Crew-Knopf höher gepolstert
+       (12 px statt 8 px), seine Unterkante stieß sonst in die HUD-Karte. */
+    top: calc(68px + env(safe-area-inset-top, 0px));
     width: min(440px, 96vw);
     gap: 6px;
   }
@@ -1143,6 +1145,24 @@ body {
   .hintbar {
     font-size: 11px;
     width: 92%;
+    /* X6: Die Zeile lief bei 92 % Breite unter den Mute-Knopf (44×13 px
+       Überdeckung). Sie steigt über die Ekstase-Leiste, statt schmaler zu
+       werden — so bleibt sie einzeilig lesbar. */
+    bottom: calc(112px + env(safe-area-inset-bottom, 0px));
+  }
+  /* X6: Touch-Ziele auf 44 px. Gemessen lagen darunter: Kauf-Mengen (36),
+     Kulissen-Wahl (29), Skin-Knöpfe (20/26), „Boss herausfordern" (37) und
+     der Board-Wechsler des Leaderboards (26). Der Zonen-Strip war mit
+     46×51 px schon in Ordnung und bleibt unberührt. */
+  .amt,
+  .kbtn,
+  .sc-equip,
+  .lb-board,
+  .boss-challenge {
+    min-height: 44px;
+  }
+  .sc-btn {
+    min-height: 40px;
   }
 }
 
@@ -1623,6 +1643,15 @@ body {
 .tabs .tab {
   flex: 1 0 auto;
   min-width: 56px;
+}
+/* X6: Auf dem Telefon ergaben 56 px × neun Reiter 448 px — mehr als das Blatt
+   breit ist, „⚙️ Mehr" verschwand hinter einem Seitwärts-Scroll OHNE Balken
+   (`scrollbar-width: none`). 44 px passen alle neun nebeneinander und bleiben
+   ein volles Touch-Ziel; die Beschriftungen (max. „Himmel", 9.5 px) passen. */
+@media (max-width: 640px) {
+  .tabs .tab {
+    min-width: 44px;
+  }
 }
 
 .gear-bal {
@@ -3160,7 +3189,10 @@ body {
   font-family: var(--display);
   font-size: 58px;
   font-weight: 800;
-  line-height: 1.05;
+  /* X6: 1.05 war zu eng — die Emoji-Ersatzschrift (✨/🍑/🔮) zeichnet höher als
+     die Zeilenbox, gemessen 76 px Inhalt in 61 px Box. Sie drängte damit in die
+     Unterzeile. 1.25 fängt den Überstand auf, ohne den Zähler zu verkleinern. */
+  line-height: 1.25;
   font-variant-numeric: tabular-nums;
   color: var(--gold-base);
   text-shadow: var(--outline-ink);
@@ -3442,5 +3474,133 @@ body {
   .fx-bit,
   .fx-stamp {
     display: none;
+  }
+}
+
+/* ---- ROADMAP-V2 X6: flache Viewports (Landscape-Telefone, z. B. 740×360) ----
+   Bei 360 px HÖHE stapelte das Layout HUD-Karte, Rivalen-Karte, Ekstase-Leiste
+   und Hinweiszeile übereinander (gemessen bei 740×360: Ekstase ✕ Rivalen-Karte
+   280×42 px, Crew-Knopf ✕ Zonen-Strip 33×33 px, Rivalen-Karte 26 px unter der
+   Falz). Diese Abfrage schnürt die Kopf-Spalte zusammen und legt die
+   Bedien-Elemente wieder NEBEN- statt übereinander. Rein metrisch — kein
+   Element verschwindet, das im Hochformat trägt (Ausnahme: die Tutorial-Zeile,
+   die ohnehin nach 26 s ausblendet). */
+@media (max-height: 480px) {
+  .topui {
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    gap: 4px;
+  }
+  .hud-card {
+    padding: 4px 12px 6px;
+    border-radius: 12px;
+  }
+  .zonestrip {
+    gap: 3px;
+    margin-bottom: 4px;
+  }
+  .zs {
+    width: 40px; /* Touch-Untergrenze, nicht darunter */
+    padding: 2px 1px 1px;
+  }
+  .zs svg {
+    width: 30px;
+    height: 17px;
+  }
+  .zone {
+    font-size: 13px;
+  }
+  .bp {
+    font-size: 24px;
+  }
+  .stats {
+    font-size: 10.5px;
+  }
+  .combo {
+    height: 0;
+    margin-top: 0;
+  }
+  .rival-card {
+    padding: 4px 12px 6px;
+  }
+  .rival-name {
+    font-size: 13px;
+    margin-bottom: 3px;
+  }
+  .rival-hpbar {
+    height: 12px;
+  }
+  .rival-row {
+    margin-top: 3px;
+    font-size: 11px;
+  }
+  .stage-mod {
+    margin-top: 4px;
+    padding: 3px 7px;
+  }
+  .stage-mod b {
+    font-size: 11px;
+  }
+  .stage-mod span {
+    font-size: 9.5px;
+  }
+  .boss-challenge {
+    margin-top: 4px;
+    padding: 4px 8px;
+    min-height: 40px;
+  }
+  .boss-hint {
+    margin-top: 3px;
+    font-size: 9.5px;
+  }
+  /* Ekstase an den unteren Rand und schmaler: so berührt sie weder die
+     Rivalen-Karte über ihr noch den Mute-Knopf rechts. */
+  .abilitybar {
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+  .ability-btn {
+    width: min(240px, 40vw);
+    height: 40px; /* Touch-Untergrenze */
+    border-radius: 20px;
+  }
+  .muteBtn {
+    width: 40px;
+    height: 40px;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+  .toggleShop {
+    padding: 6px 11px;
+    font-size: 12px;
+    min-height: 40px;
+  }
+  /* Auch hier gilt die Touch-Untergrenze: die Kauf-Mengen, die Kulissen-Wahl,
+     die Skin-Knöpfe und der Board-Wechsler stehen im Panel dicht beieinander. */
+  .amt,
+  .kbtn,
+  .sc-equip,
+  .sc-btn,
+  .lb-board {
+    min-height: 40px;
+  }
+  /* Auf 360 px Höhe ist die Tutorial-Zeile reines Rauschen — und sie lag
+     quer über der Rivalen-Karte. Der Onboarding-Coach unterrichtet ohnehin. */
+  .hintbar {
+    display: none;
+  }
+}
+
+/* Und die horizontale Hälfte: über 640 px Breite liegt die Bühne rechts, die
+   Overlay-Spalte stand auf 75 % — genau unter dem Crew-Knopf. 66 % schiebt sie
+   an ihm vorbei, ohne die Bühne zu verlassen (sie beginnt bei 50 %). */
+@media (min-width: 641px) and (max-height: 480px) {
+  .topui,
+  .abilitybar,
+  .toasts,
+  .boostBadge,
+  .goblinBadge,
+  .coach {
+    left: 66%;
+  }
+  .topui {
+    width: min(340px, 42vw);
   }
 }
