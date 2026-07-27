@@ -3,6 +3,105 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## ROADMAP-V2 Nachzügler — G5 Gesichter leben
+
+- **Verstecken heißt `scale ≈ 0`, nicht `visible = false` — sonst frisst der
+  Export die neuen Meshes.** Lider und O-Mund ruhen 99 % der Zeit unsichtbar;
+  der naheliegende Weg wäre `visible = false` gewesen. Der `models/`-Export
+  (`dev/export-models.ts`) fährt aber `GLTFExporter` mit dessen Vorgabewert
+  `onlyVisible: true` — unsichtbare Knoten wären STILL aus den 22 .glb-Dateien
+  gefallen, und niemand hätte es gemerkt, weil der Export weiter „✓" meldet.
+  Also bleiben die Meshes sichtbar und ruhen auf `REST_SCALE = 0.001`
+  (sub-pixel im Bild, vollwertiger Knoten in der Datei). Nachgewiesen im
+  exportierten `character-classic.glb`: die Knoten `lidL`/`lidR`/`mouth-o`
+  stehen mit Matrix (Skalierung 0.001) und Material-Index in der glTF-JSON.
+- **Das Lid fällt von OBEN, weil die Geometrie versetzt ist — nicht der Pivot.**
+  Ein Lid, das aus der Augenmitte heraus wächst, sieht aus wie ein Zwinkern,
+  nicht wie ein Blinzeln. Statt dafür eine Zwischen-Group (und damit einen
+  Quasi-Bone) einzuziehen, wird die Kugel-Geometrie einmalig um ihre halbe Höhe
+  nach unten verschoben (`geometry.translate`): der Objekt-Ursprung sitzt damit
+  am oberen Lidrand, `scale.y` fährt das Lid herunter wie ein echtes Lid. Kein
+  neuer Bone, kein neuer Knoten im Skelett — der Physik-Kontrakt bleibt
+  wortgleich (`stepPhysics`/`applyPose`/`renderCheeks` schreiben nur Bones,
+  G5 nur deren Kind-Meshes, und zwar NACH dem Physik-Schritt).
+- **Bei geschlossenem Lid verschwindet die Pupille — Tiefen-Sortierung ist hier
+  kein Verlass.** Das Lid steht bei z = 0.30 vor der Pupillen-Kuppe (0.349),
+  aber Kopf-Neigung, Kamera-Winkel und die Cel-Outline machen aus zwei
+  Millimetern schnell einen sichtbaren Durchstich. Ab `lidClose ≥ 0.6` fährt
+  die Pupille deshalb auf `REST_SCALE` — der billigste mögliche Anti-Glitch,
+  und weil das Lid dann ohnehin fast zu ist, sieht es niemand verschwinden.
+- **Die Pupillen tracken eine RICHTUNG, keinen Punkt.** `aimPupils` rechnet die
+  Weltposition des Rivalen per `worldToLocal` in den Kopf und normiert sie; erst
+  daraus wird der Versatz (`× 0.06`, geklemmt auf ±0.02). Damit ist der Blick
+  unabhängig von der Entfernung (Boss steht weiter hinten, Rivale näher) und
+  kann bei einer 360°-Drehung nicht überschießen. Gezielt wird auf
+  `entity.root` + 2.2 (`RIVAL_AIM_UP`) — der Wurzelpunkt des Rivalen steht auf
+  dem BODEN, ohne den Aufschlag starrte die Tänzerin ihm auf die Füße.
+  Nachgezogen wird exponentiell (6/s), das ist der ganze Laufzeit-Aufwand.
+- **Grimasse schlägt Ekstase.** Beide wollen den Mund. Ein Boss-Timeout wirft
+  einen aus dem Kampf zurück — dass das ×10-Fenster technisch noch offen ist,
+  interessiert im Gesicht niemanden. `faceView` entscheidet in dieser
+  Reihenfolge, ein Test hält sie fest.
+- **Die gedrehte Mundkurve muss auch FALLEN — das hat erst der Beweis-Lauf
+  gezeigt.** „Torus um 180° drehen" allein ergibt eine Grimasse, die aussieht
+  wie ein Schnurrbart: der Halb-Torus wölbt sich um seinen eigenen Radius nach
+  OBEN und legt sich um die Nase. Die Grimasse senkt den Bogen deshalb
+  zusätzlich um genau diesen Radius (`frownY = smileY − grin`) — dann liegen die
+  herabgezogenen Mundwinkel dort, wo vorher die Lächel-Enden saßen. Ohne den
+  Screenshot wäre das nie aufgefallen; die Zahlen (Rotation gedreht, Timer
+  läuft) waren die ganze Zeit korrekt.
+- **Alles wird ABSOLUT aus der Ruhelage geschrieben, nie inkrementell.**
+  Brauen-Rotation = `baseZ + side · GRIMACE_BROW · brow`, Mund-Drehung/-Höhe =
+  `smileZ`/`smileY` bzw. `frownZ`/`frownY`, Pupille = `base + Versatz`. Nach der Grimasse steht die Braue damit BYTE-gleich
+  wieder auf ihrem Bau-Wert (im Test mit `toBe`, nicht `toBeCloseTo`, geprüft) —
+  ein additiver Effekt hätte über Stunden gedriftet, weil hier — anders als bei
+  den Klick-Akzenten — kein Physik-Schritt hinterherräumt.
+- **Robo und Ninja haben kein Gesicht — und bekommen auch keins.** Beide bauen
+  `face()` gar nicht auf (Visor bzw. Maskenschlitz). Die `FaceRig`-Listen
+  bleiben dort leer, `applyFace` ist ein No-op. EINE Ausnahme, weil sie zwei
+  Zeilen kostet: der Robo registriert seine zwei Visor-Pixel und fährt sie im
+  Blinzel-Takt auf 15 % Höhe zusammen — ein Maschinen-Blinken. Der Ninja bleibt
+  bewusst starr; glühende Maskenaugen, die blinzeln, sähen aus wie ein Wackel-
+  kontakt.
+- **Kein Quality-Schalter, bewusst.** Die Guardrail „jeder neue Effekt hängt an
+  `engine/quality.ts`" zielt auf Kosten; G5 hat keine: die Meshes entstehen mit
+  dem Kopf (zwei Lider + ein Ring, dieselben Materialien wie das übrige Gesicht,
+  also KEIN zusätzlicher Draw-Call-Batch), und pro Frame laufen ein Timer, ein
+  Lerp und ~8 Schreibvorgänge auf `scale`/`position`/`rotation`. Das Abfragen
+  eines Presets wäre teurer als der Effekt. Auch `low` blinzelt und trackt.
+- **Der wichtigste BEFUND des Pakets steht nicht im Code: die Tänzerin zeigt der
+  Kamera fast immer den Rücken.** Das Rig schaut in +z, die Diorama-Kamera steht
+  bei −z — das ist Absicht (die Kernanimation ist das Twerken). Ihr GESICHT
+  sieht man nur im Show-Spin: alle 12 s dreht sich die Figur 0.9 s lang einmal
+  um sich selbst. G5 ist damit ein Effekt für diesen Moment (und für die
+  models/-Exporte, die die Gesichter frontal zeigen) — die Beweis-Serie musste
+  entsprechend AUF den Spin getimt werden. Wer mehr Gesicht will, braucht einen
+  eigenen Anlass (z. B. Zuwenden bei Boss-Auftritt/Kill), nicht mehr
+  Gesichts-Zustände.
+- **Beweis-Handwerk: Screencast statt Einzelbild, und `chFace` misst statt
+  rät.** Unter SwiftShader läuft das Spiel ~0.5 fps, die Spielzeit ist über den
+  `dt`-Deckel (0.05 s) an die FRAMES gekoppelt: ein 0.9-s-Spin besteht aus genau
+  ~18 Frames, und `Page.captureScreenshot` kostet je ~5 davon — jedes Einzelbild
+  rutschte am frontalen Moment vorbei. Also: `Page.startScreencast` schneidet
+  das ganze Fenster mit, eine Zustands-Spur (`window.chFace.state()`) läuft
+  parallel, und jeder Frame trägt seine gemessenen Zahlen (Lid-Schluss,
+  Pupillen-Versatz, Mund) im Dateinamen. Gewartet wird im 260-px-Viewport
+  (schnelle Frames ⇒ die Spielzeit rast), aufgenommen im großen — das ändert
+  nichts am Spiel, nur an der Füllrate. `Emulation.setVirtualTimePolicy` taugt
+  dabei NUR als Standbild-Taste: `pause` friert das Spiel sauber ein (der
+  Screenshot zeigt dann garantiert den Zustand, den `chFace` gemeldet hat — so
+  entstand das Bild mit geschlossenen Lidern), aber ein Budget-Vorlauf erzeugt
+  KEINE neuen rAF-Frames (die hängen am Compositor). Frame für Frame durch den
+  Spin steppen geht damit nicht.
+- **Gemessen, nicht behauptet.** Boss-Timeout auf dem ECHTEN Weg (kein
+  Debug-Hook): bei Spielzeit 30.1 s meldet `tickBoss` den Fehlschlag, das Spiel
+  wirft auf Bühne 4 zurück, der Toast „⏱ Zeit um!" steht, `chFace` liest
+  `mouth: frown`, Rest-Grimasse 1.35 s — und 1.5 s Spielzeit später wieder
+  `smile`. Pupillen über einen ganzen Spin: +0.020 → −0.014 → +0.019, die
+  Klemme ±0.02 wird nie verletzt. Handle-Abdeckung über alle zehn Skins:
+  7 × zwei Lider, Pirat 1 (Augenklappe!), Robo + Gyrator 0 Lider und je zwei
+  Visor-Pixel, Neon (Ninja) 0/0.
+
 ## ROADMAP-V2 Schritt 11 — X6 Mobile-QA + P5 Balance-Ritual
 
 - **Der schlimmste Mobil-Befund war kein Telefon im Hochformat, sondern das

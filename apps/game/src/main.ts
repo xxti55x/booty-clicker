@@ -8,6 +8,17 @@ import { buildCharacter, type CharacterInstance } from './character/rig';
 import { buildEntity, entityVariant, type EntityInstance } from './character/entity';
 import { DT, renderCheeks, stepPhysics } from './character/physics';
 import { applyAccents, createAccents, stepAccents, triggerClickAccent } from './character/accents';
+import {
+  RIVAL_AIM_UP,
+  aimPupils,
+  applyFace,
+  createFaceState,
+  faceView,
+  forceBlink,
+  lidClose,
+  stepFace,
+  triggerGrimace,
+} from './character/face-life';
 import { SKINS } from './character/skins';
 import { Choreographer, MOVES } from './choreo/moves';
 import { VICTORY_MOVE, activeSet } from './choreo/sets';
@@ -527,6 +538,11 @@ const audio = new AudioEngine();
 const beatTracker = new BeatTracker();
 const choreo = new Choreographer();
 const accents = createAccents(); // Klick→Pose-Akzente (transient, nie persistiert)
+// ROADMAP-V2 G5: Gesichts-Leben (Blinzeln, Pupillen, Mund-Zustand) — derselbe
+// Schnitt wie die Akzente: ein transienter Zustand, den die Loop tickt. Er
+// überlebt einen Skin-Wechsel (die HANDLES kommen frisch mit dem neuen Rig).
+const faceState = createFaceState();
+const faceAim = new THREE.Vector3();
 // The equipped skin drives the 3D rig now (§5) — no longer always classic.
 let char: CharacterInstance = buildCharacter(scene, SKINS[state.gear.skin]);
 // Show-Spin (Goal: „der Spieler dreht sich manchmal, wie die Gegner"): applyPose
@@ -2582,6 +2598,43 @@ let t0 = 0;
   // den Peak daran, statt ihn aus Pixeln zu raten.)
   cer: ceremony.active,
 });
+// ROADMAP-V2 G5: Gesichts-Hook für die Beweis-Serie — `blink()`/`grimace()`
+// zünden die beiden getakteten Zustände sofort (sonst wartet ein Screenshot
+// unter Software-GL minutenlang auf ein 120-ms-Fenster), `state()` liest den
+// Zustand als ZAHLEN, statt ihn aus Pixeln zu raten. Rein visuell, keine
+// Spielregel dahinter — dieselbe Familie wie `chVs`/`chGob`.
+(
+  window as unknown as {
+    chFace: {
+      blink(): void;
+      grimace(): void;
+      state(): {
+        lid: number;
+        px: number;
+        py: number;
+        mouth: string;
+        grim: number;
+        eyes: number;
+        visor: number;
+      };
+    };
+  }
+).chFace = {
+  blink: () => forceBlink(faceState),
+  grimace: () => triggerGrimace(faceState),
+  state: () => {
+    const v = faceView(faceState, isFrenzyActive(state.ability, Date.now()));
+    return {
+      lid: lidClose(faceState),
+      px: faceState.px,
+      py: faceState.py,
+      mouth: v.mouth,
+      grim: faceState.grimaceLeft,
+      eyes: char.face.lids.length, // 0 = Visor-/Masken-Stil ohne Gesicht
+      visor: char.face.visorPixels.length,
+    };
+  },
+};
 let uiTimer = 0;
 let lastRenderMs = 0;
 let firstFrame = true;
@@ -2642,6 +2695,7 @@ function loop(nowMs: number): void {
         `Zurück auf Bühne ${combat.zone} — farm BP, kauf Upgrades, dann fordere den Boss erneut.`,
       );
       audio.bossLose();
+      triggerGrimace(faceState); // G5: 1.5 s Grimasse — der Verlust steht im Gesicht
       updateBackground(); // eine Bühne zurück kann ein Theme zurück bedeuten
       syncEntity(); // the boss bounced us — back to the normal rival body
     }
@@ -2704,6 +2758,14 @@ function loop(nowMs: number): void {
     char.rig.root.updateMatrixWorld(true);
   }
   renderCheeks(char.rig, char.cheeks);
+  // ROADMAP-V2 G5: Gesichts-Leben. NACH dem Physik-/Akzent-Block, weil die
+  // Blickrichtung die frische Kopf-Matrix braucht; die Meshes selbst hängen
+  // unter dem head-Bone, der Physik-Kontrakt bleibt unberührt. Ziel ist der
+  // Rivale auf Augenhöhe (sein `root` steht auf dem Boden).
+  entity.root.getWorldPosition(faceAim); // Weltposition, auch falls er je umgehängt wird
+  faceAim.y += RIVAL_AIM_UP;
+  stepFace(faceState, dt, aimPupils(char.rig.head, faceAim));
+  applyFace(char.face, faceView(faceState, frenzy));
   particles.update(dt);
 
   const beatV = Math.max(0, Math.sin(choreo.phase * 2.2));
