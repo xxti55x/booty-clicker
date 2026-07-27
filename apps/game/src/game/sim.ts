@@ -32,10 +32,13 @@
  *    faucet the bot already models, so they are omitted rather than approximated.
  *  · **The heaven layer (L2)** is inert in most drivers (`sim.heaven` stays at hpf 0,
  *    so `heavenGlobalMult`/`soulBonusEff`/`truhenMagnetBonus`/the Twerk-Coach idle tick
- *    all fold as ×1) — EXCEPT the E2 soft-wall driver (`simulateContinuous` with
- *    `fullPrestige`, M15), which greedily buys Twerk-Ahnen AND performs real
- *    Ruhmes-Himmelfahrten (`bankHimmelfahrt`) to lift the M9 wall, exercising the full
- *    v2 prestige stack. The Transzendenz layer (L3, §4.5.3) stays at te = 0 in every
+ *    AND every ROADMAP-V2-P4-Baumknoten all fold as ×1) — EXCEPT the E2 soft-wall
+ *    driver (`simulateContinuous` with `fullPrestige`, M15), which greedily buys
+ *    Twerk-Ahnen, performs real Ruhmes-Himmelfahrten (`bankHimmelfahrt`) to lift the
+ *    M9 wall AND gibt die gebankten HPF im **Himmelsbaum** aus (`buyTreeGreedy` +
+ *    `SIM_TREE_PRIORITY`, P4) — der volle v2-Prestige-Stack. Gemessen reicht der Bot
+ *    an der z75-Wand allerdings nur für 1 HPF, kauft dort also (noch) keinen Knoten;
+ *    die Kauf-Strategie selbst ist separat getestet (siehe `SIM_TREE_PRIORITY`). The Transzendenz layer (L3, §4.5.3) stays at te = 0 in every
  *    driver — its ×3^TE global mult is P1-neutral and never gated, so folding it would
  *    only scale both bots equally; no sim drives a Transzendenz.
  *    Likewise Twerk-Ekstase (§4.3), the boss-damage mults, the Chronilla timer and
@@ -79,39 +82,59 @@ import {
 import { keyDropAmount, rivalChestChance } from './ch-state';
 import { CRIT_CHANCE, CRIT_CHANCE_CAP, CRIT_MULT, COMBO_CAP, comboMult } from './click';
 import {
+  type GimmickRuntime,
+  applyWaveHeal,
+  createGimmickRuntime,
+  gimmickBossDamage,
+  gimmickForZone,
+  tickGimmick,
+  waveHealAmount,
+} from './boss-gimmicks';
+import {
   type CombatState,
   MONSTERS_PER_ZONE,
   bossHp,
+  challengeBoss,
   goldFor,
   hit,
+  hpFraction,
   monsterHp,
   spawnFor,
   tickBoss,
   travelTo,
 } from './combat';
 import { MAX_SKIN_LEVEL, shardCost } from './gear';
+import { GOBLIN_CHESTS, GOBLIN_SIM_CATCH, rollNextGoblinAt } from './goblin';
+import {
+  REMIX_OFF,
+  type StageModFactors,
+  factorsForZone,
+  remixSeedFor,
+  stageDamageFactor,
+} from './stage-mods';
 import { awardGildOnZone, type Gilds, isGildZone } from './gild';
 import {
   type HeavenState,
+  TREE_NODES,
   bankHimmelfahrt,
   canHimmelfahrt,
+  comboStepFor,
   createHeaven,
+  goldeneHandeMult,
+  greedyTreeSpend,
+  heavenClickMult,
+  heavenCritMultFactor,
+  heavenDpsMult,
   heavenGlobalMult,
   hpfForRsLifetime,
+  pfirsichFokusGapMult,
+  pfirsichReifeBonusMs,
   soulBonusEff,
+  treeLevel,
+  truhenFokusChestMult,
   truhenMagnetBonus,
 } from './heaven';
-import {
-  CREW,
-  abilityMult,
-  abilityTiersUnlocked,
-  clickDamageRaw,
-  crewSpecialBonuses,
-  heroDps,
-  nextAbility,
-  nextLevelCost,
-  totalRawDps,
-} from './heroes';
+import { bestCrewBuy, clickDamageRaw, crewSpecialBonuses, totalRawDps } from './heroes';
 import {
   activateBoost,
   clampBoostUntil,
@@ -156,7 +179,39 @@ export interface SimConfig {
    * `sim.test.ts` by deriving both values from the live `SKINS` data.
    */
   clickGearMult?: number;
+  /**
+   * Whether the **Bühnen-Modifikatoren** (ROADMAP-V2 A1) are modeled. **Defaults to
+   * `true`** — every anchor plays the same stage map a real save would roll. Set
+   * `false` to run the pre-A1 baseline; that is the A/B knob the calibration used
+   * (and the dedicated A1 test still uses) to prove the catalog stays net-neutral
+   * over a run instead of quietly moving the walls.
+   */
+  stageMods?: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// ROADMAP-V2 P5 — die Bot-Profile der Anker, EINMAL definiert
+// ---------------------------------------------------------------------------
+// Die Anker-Tests (`sim.test.ts`) und das Balance-Ritual (`npm run balance`,
+// `scripts/balance.mjs`) müssen dieselben Kennlinien messen. Wären die Profile
+// zweimal getippt, driftete das Ritual irgendwann still von den Ankern weg —
+// also stehen sie hier, und beide Seiten importieren sie.
+
+/** Der §4.8-„aktive Spieler": 3 Klicks/s mit Juice, volle Loot-Ökonomie. */
+export const SIM_ACTIVE: SimConfig = { clickRate: 3, juice: true };
+
+/**
+ * Derselbe Bot unter den §4.8-KALIBRIER-Bedingungen: ohne Loot-Ökonomie. Die
+ * Pacing-Tabelle wurde unter genau diesen Annahmen gemessen (der Goldene
+ * Pfirsich und die Truhen sind ein bewusst zusätzlicher Beschleuniger).
+ */
+export const SIM_ACTIVE_CAL: SimConfig = { clickRate: 3, juice: true, economy: false };
+
+/** Die feste Lauflänge der Messungen: 45 min = 2700 Ein-Sekunden-Schritte. */
+export const SIM_RUN_S = 2700;
+
+/** Die Seeds der Langhorizont-Anker (E2/E3/erste Himmelfahrt). */
+export const SIM_SEEDS_HEAVY: readonly number[] = [1, 7, 12345];
 
 // ---------------------------------------------------------------------------
 // Loot-economy balancing (named constants, spec §5/§6) — data, not logic
@@ -195,6 +250,11 @@ function econOn(config: SimConfig): boolean {
   return config.economy !== false;
 }
 
+/** Whether the A1 stage modifiers are modeled for this config (default on). */
+function modsOn(config: SimConfig): boolean {
+  return config.stageMods !== false;
+}
+
 /** The mutable bot state that persists across ascensions within a chain. */
 interface Sim {
   gold: number;
@@ -223,8 +283,33 @@ interface Sim {
   shards: number;
   /** Epoch-ms until which the Golden-Peach ×3 income boost runs (§6.1). */
   boostUntilMs: number;
+  /** Boss-Bühne eines gescheiterten Gates (0 = keins): der Bot nutzt dort den
+   * „Boss herausfordern"-Button statt die Rivalen-Welle neu zu clearen. */
+  retryBossZone: number;
+  /** A2: Laufzeit-Zustand des AKTUELLEN Boss-Kampfes (Spotlight-Phasen, Wellen-Timer). */
+  gimmick: GimmickRuntime;
+  /** Boss-Bühne, zu der `gimmick` gehört (0 = gerade kein Boss) — erkennt den Kampf-Wechsel. */
+  gimmickZone: number;
   /** Epoch-ms the next Golden-Peach spawns (0 = unseeded). */
   nextPeachAtMs: number;
+  /** A3: Epoch-ms the next Truhen-Kobold hops across the stage (0 = unseeded). */
+  nextGoblinAtMs: number;
+  /**
+   * A3: EIGENER seeded Strom für den Kobold-Faucet. Im Spiel zieht der Kobold aus
+   * demselben persistierten `rng` wie alles andere; im Bot bekommt er bewusst einen
+   * abgeleiteten Nebenstrom, damit ein NEUES Event nicht rückwirkend jede
+   * Truhen-/Krit-/Gild-Ziehung aller Anker-Seeds verschiebt. Dieselbe Verteilung,
+   * dieselbe Kadenz — nur ohne die Alt-Anker mit reinem Strom-Versatz zu brechen.
+   */
+  goblinRng: Rng;
+  /**
+   * A1: Remix-Seed der Bühnen-Modifikatoren dieses Laufs. Der Bot spielt damit
+   * DIESELBE Karte, die ein Spieler mit diesem Save-Seed sähe — die Anker messen
+   * also die Regel, nicht ihre Abwesenheit.
+   */
+  remix: number;
+  /** L1-Aszensionen dieses Laufs — treibt (nur) den Remix der Modifikator-Karte. */
+  ascensions: number;
   /** Smoothed gold/sec (EMA) feeding chest BP rewards (§6.2). */
   incomePerSec: number;
   // ---- Economy tallies (diagnostics for the "all systems in the bot" test) ----
@@ -234,6 +319,8 @@ interface Sim {
   chestsOpened: number;
   /** Golden-Peaches caught lifetime. */
   peachesCaught: number;
+  /** A3: Truhen-Kobolde gefangen (lifetime). */
+  goblinsCaught: number;
   rng: Rng;
 }
 
@@ -245,6 +332,8 @@ export interface EconSummary {
   chestsOpened: number;
   /** Golden-Peaches caught. */
   peachesCaught: number;
+  /** Truhen-Kobolde caught (A3 faucet — each pays a Holztruhe). */
+  goblinsCaught: number;
   /** Permanent tokens banked (Σ over the crit/gold/DPS pool, §6.2). */
   tokensBanked: number;
   /** 🧩-shards banked → gear levels (§5.4). */
@@ -261,13 +350,14 @@ function econSummary(sim: Sim): EconSummary {
     keysEarned: sim.keysEarned,
     chestsOpened: sim.chestsOpened,
     peachesCaught: sim.peachesCaught,
+    goblinsCaught: sim.goblinsCaught,
     tokensBanked,
     shards: sim.shards,
     gearLevel: shardSkinLevel(sim.shards),
   };
 }
 
-function newSim(seed: number): Sim {
+function newSim(seed: number, mods = true): Sim {
   return {
     gold: 0,
     crew: {},
@@ -284,18 +374,42 @@ function newSim(seed: number): Sim {
     pity: createPity(),
     shards: 0,
     boostUntilMs: 0,
+    retryBossZone: 0,
+    gimmick: createGimmickRuntime(),
+    gimmickZone: 0,
     nextPeachAtMs: 0,
+    nextGoblinAtMs: 0,
+    goblinRng: new Rng({ seed: (seed ^ 0x4b0b1e5d) | 0, cursor: 0 }),
+    remix: mods ? remixSeedFor(seed, 0) : REMIX_OFF,
+    ascensions: 0,
     incomePerSec: 0,
     keysEarned: 0,
     chestsOpened: 0,
     peachesCaught: 0,
+    goblinsCaught: 0,
     rng: new Rng({ seed, cursor: 0 }),
   };
 }
 
-/** The sustained combo multiplier for a config (×2 at cap when juiced, §4.8). */
-function comboFactor(config: SimConfig): number {
-  return config.juice ? comboMult(COMBO_CAP) : 1;
+/**
+ * A1: Eine Aszension VERWÜRFELT die Modifikator-Karte (`remixSeedFor`). Der Bot
+ * zieht damit über eine Aszensions-Kette hinweg viele verschiedene Karten — die
+ * Anker messen also den DURCHSCHNITT des Katalogs, nicht einen Glücksgriff.
+ * Jeder Ascend-Pfad ruft das genau einmal, direkt bevor der neue Lauf spawnt.
+ */
+function remixOnAscend(sim: Sim): void {
+  if (sim.remix === REMIX_OFF) return; // A/B-Lauf ohne Modifikatoren
+  sim.ascensions += 1;
+  sim.remix = remixSeedFor(sim.rng.seed, sim.ascensions);
+}
+
+/**
+ * The sustained combo multiplier for a config (×1.2 at cap when juiced, §4.8).
+ * `heaven` trägt seit ROADMAP-V2 P4 die „Combo-Doktrin" (Cap ×1.3) — ohne den
+ * Knoten ist der Wert zahlengleich zu vorher, deshalb bewegt sich kein Alt-Anker.
+ */
+function comboFactor(config: SimConfig, heaven: HeavenState = createHeaven()): number {
+  return config.juice ? comboMult(COMBO_CAP, comboStepFor(heaven)) : 1;
 }
 
 /**
@@ -309,6 +423,8 @@ function critFactor(
   config: SimConfig,
   permTokens: PermTokens,
   crewUp: Record<string, number> = {},
+  stageCrit = 0,
+  heaven: HeavenState = createHeaven(),
 ): number {
   if (!config.juice) return 1;
   const econ = econOn(config);
@@ -316,11 +432,21 @@ function critFactor(
   const spec = crewSpecialBonuses(crewUp);
   // Crit chance is hard-capped at 40 % in the real click pipeline (`click.critChance`,
   // §4.2.1); mirror the cap here so a fat token pool can't lift the EV past the game.
+  // `stageCrit` ist der A1-Modifikator „Krit-Funken" (+5 pp) der aktuellen Bühne —
+  // er läuft durch DENSELBEN Deckel wie im Spiel.
   const chance = Math.min(
     CRIT_CHANCE_CAP,
-    CRIT_CHANCE + spec.critChance + (econ ? permTokenCritChance(permTokens) : 0),
+    CRIT_CHANCE +
+      spec.critChance +
+      Math.max(0, stageCrit) +
+      (econ ? permTokenCritChance(permTokens) : 0),
   );
-  const mult = (CRIT_MULT + spec.critDmg) * (econ ? permTokenCritMult(permTokens) : 1);
+  // P4 „Präzisions-Shake": derselbe multiplikative Griff wie die Krit-Token (×1
+  // ohne Knoten), deshalb hängt er auch außerhalb der Loot-Ökonomie im Term.
+  const mult =
+    (CRIT_MULT + spec.critDmg) *
+    (econ ? permTokenCritMult(permTokens) : 1) *
+    heavenCritMultFactor(heaven);
   return 1 + chance * (mult - 1);
 }
 
@@ -353,14 +479,67 @@ function shardIdleMultFor(sim: Sim, config: SimConfig): number {
   return shardGearIdleMult(sim.shards);
 }
 
+/** Die beiden Schadens-Quellen einer Sekunde, getrennt (A2 braucht den Split). */
+interface DamageSplit {
+  /** Aktiver Klick-Schaden dieser Sekunde (Rate × Klick × Combo × Krit-EV). */
+  click: number;
+  /** Passiver Crew-/Idle-Schaden dieser Sekunde (nie gejuiced, P1). */
+  idle: number;
+}
+
 /**
  * Effective damage per second (= total power, click + idle at farm) for a given
- * crew/gilds/souls/ancients/heaven and the banked loot economy. Folds the held-soul
- * mult (HPF-amplified), the Ancient click/DPS mults, the +2 %/HPF global mult, the
- * gear mults (§5 config + `shardIdle` from banked 🧩) and the permanent crew-DPS
- * token pool (§6.2) — the same derivation as `ch-state.dpsOf`/`clickDamageOf`. Idle
- * never draws juice (P1).
+ * crew/gilds/souls/ancients/heaven and the banked loot economy, **split into the
+ * active and the passive term** (ROADMAP-V2 A2: die Boss-Gimmicks behandeln beide
+ * unterschiedlich — Club pausiert nur den Idle-Anteil, Space hebt nur den
+ * Klick-Anteil). Folds the held-soul mult (HPF-amplified), the Ancient click/DPS
+ * mults, the +2 %/HPF global mult, the gear mults (§5 config + `shardIdle` from
+ * banked 🧩) and the permanent crew-DPS token pool (§6.2) — the same derivation as
+ * `ch-state.dpsOf`/`clickDamageOf`. Idle never draws juice (P1).
  */
+function powerSplit(
+  crew: Record<string, number>,
+  crewUp: Record<string, number>,
+  gilds: Gilds,
+  souls: number,
+  ancients: AncientLevels,
+  heaven: HeavenState,
+  config: SimConfig,
+  combo: number,
+  crit: number,
+  permTokens: PermTokens,
+  shardIdle: number,
+): DamageSplit {
+  const hpf = heaven.hpf;
+  const sm = soulMult(souls, soulBonusEff(hpf));
+  const global = heavenGlobalMult(hpf);
+  // Click gear (§5) multiplies the click term only (P1: the strongest gear is click).
+  const baseClick =
+    clickDamageRaw(crew, gilds, crewUp) *
+    sm *
+    ancientClickMult(ancients) *
+    global *
+    // P4 Kampf-Ast: „Klick-Doktrin" hebt NUR den Klick-Term (×1 ohne Knoten).
+    heavenClickMult(heaven) *
+    (config.clickGearMult ?? 1);
+  // Idle gear (§5) + the permanent DPS-token pool (§6.2) + the crew's
+  // `idle`-special tiers (v11.1 Groove) multiply crew DPS only — never the
+  // click term (P1, M11-AC5).
+  const idle =
+    totalRawDps(crew, gilds, crewUp) *
+    sm *
+    ancientDpsMult(ancients) *
+    global *
+    // P4 Kampf-Ast: „Schwerer Bass" × „Crew-Doktrin" — nur die Idle-Seite (×1 ohne).
+    heavenDpsMult(heaven) *
+    (config.idleGearMult ?? 1) *
+    shardIdle *
+    (econOn(config) ? permTokenDpsMult(permTokens) : 1) *
+    crewSpecialBonuses(crewUp).idleMult;
+  return { click: config.clickRate * baseClick * combo * crit, idle };
+}
+
+/** Total power (click + idle) — the ranking metric for `buyAncientsGreedy` + E3. */
 function powerFor(
   crew: Record<string, number>,
   crewUp: Record<string, number>,
@@ -374,34 +553,25 @@ function powerFor(
   permTokens: PermTokens,
   shardIdle: number,
 ): number {
-  const hpf = heaven.hpf;
-  const sm = soulMult(souls, soulBonusEff(hpf));
-  const global = heavenGlobalMult(hpf);
-  // Click gear (§5) multiplies the click term only (P1: the strongest gear is click).
-  const baseClick =
-    clickDamageRaw(crew, gilds, crewUp) *
-    sm *
-    ancientClickMult(ancients) *
-    global *
-    (config.clickGearMult ?? 1);
-  // Idle gear (§5) + the permanent DPS-token pool (§6.2) + the crew's
-  // `idle`-special tiers (v11.1 Groove) multiply crew DPS only — never the
-  // click term (P1, M11-AC5).
-  const idle =
-    totalRawDps(crew, gilds, crewUp) *
-    sm *
-    ancientDpsMult(ancients) *
-    global *
-    (config.idleGearMult ?? 1) *
-    shardIdle *
-    (econOn(config) ? permTokenDpsMult(permTokens) : 1) *
-    crewSpecialBonuses(crewUp).idleMult;
-  return config.clickRate * baseClick * combo * crit + idle;
+  const p = powerSplit(
+    crew,
+    crewUp,
+    gilds,
+    souls,
+    ancients,
+    heaven,
+    config,
+    combo,
+    crit,
+    permTokens,
+    shardIdle,
+  );
+  return p.click + p.idle;
 }
 
-/** Effective damage the bot deals in one second at the current state. */
-function damagePerSecond(sim: Sim, config: SimConfig, combo: number, crit: number): number {
-  return powerFor(
+/** Effective damage the bot deals in one second at the current state (split, A2). */
+function damageSplit(sim: Sim, config: SimConfig, combo: number, crit: number): DamageSplit {
+  return powerSplit(
     sim.crew,
     sim.crewUp,
     sim.gilds,
@@ -414,6 +584,12 @@ function damagePerSecond(sim: Sim, config: SimConfig, combo: number, crit: numbe
     sim.permTokens,
     shardIdleMultFor(sim, config),
   );
+}
+
+/** Total effective damage per second (the E3 power metric). */
+function damagePerSecond(sim: Sim, config: SimConfig, combo: number, crit: number): number {
+  const p = damageSplit(sim, config, combo, crit);
+  return p.click + p.idle;
 }
 
 // ---------------------------------------------------------------------------
@@ -429,17 +605,47 @@ function damagePerSecond(sim: Sim, config: SimConfig, combo: number, crit: numbe
  * (`nowMs = t·1000`) via the real `peach` module.
  */
 function tickPeach(sim: Sim, nowMs: number): void {
-  if (sim.nextPeachAtMs <= 0) sim.nextPeachAtMs = rollNextPeachAt(nowMs, sim.rng);
+  // P4 „Pfirsich-Fokus" verkürzt die Pause, „Pfirsich-Reife" verlängert das Fenster
+  // — beide sind ×1 / +0 ohne Knoten, der Zufallsstrom bleibt also identisch.
+  const gap = pfirsichFokusGapMult(sim.heaven);
+  const extraMs = pfirsichReifeBonusMs(sim.heaven);
+  if (sim.nextPeachAtMs <= 0) sim.nextPeachAtMs = rollNextPeachAt(nowMs, sim.rng, gap);
   let guard = 64;
   while (nowMs >= sim.nextPeachAtMs && guard-- > 0) {
     const caughtAt = sim.nextPeachAtMs;
-    const extended = Math.max(sim.boostUntilMs, activateBoost(caughtAt));
+    const extended = Math.max(sim.boostUntilMs, activateBoost(caughtAt, extraMs));
     sim.boostUntilMs = clampBoostUntil(extended, nowMs);
     const key = peachKeyRoll(sim.rng);
     sim.keys += key;
     sim.keysEarned += key;
     sim.peachesCaught += 1;
-    sim.nextPeachAtMs = rollNextPeachAt(caughtAt, sim.rng);
+    sim.nextPeachAtMs = rollNextPeachAt(caughtAt, sim.rng, gap);
+  }
+}
+
+/**
+ * **A3 Truhen-Kobold als kleiner Faucet.** Alle 4–7 min hoppelt einer über die
+ * Bühne; der Bot fängt ihn mit `GOBLIN_SIM_CATCH` (80 %, dokumentierte Annahme in
+ * `goblin.ts`) und bucht dann `GOBLIN_CHESTS` Holztruhe(n) in denselben
+ * Truhen-Backlog, den `openChestsGreedy` leert.
+ *
+ * Der 10-s-Mini-Frenzy (×2 Klick) wird BEWUSST NICHT modelliert — dieselbe
+ * Untergrenzen-Logik wie bei Twerk-Ekstase und den Boss-Schadens-Mults: er kann
+ * den Bot nur schneller machen, sein Weglassen hält die Anker ehrlich niedrig.
+ * (Größenordnung: ~10 s ×2 Klick alle ~5.5 min ⇒ ≈ +3 % Klick-Schaden im Mittel.)
+ * Die Spawn-Sperren des Spiels (Hintergrund-Tab, Bosskampf, Bühnen-Wechsel)
+ * stecken pauschal in der 80-%-Quote statt als eigene Zustandsmaschine.
+ */
+function tickGoblin(sim: Sim, nowMs: number): void {
+  if (sim.nextGoblinAtMs <= 0) sim.nextGoblinAtMs = rollNextGoblinAt(nowMs, sim.goblinRng);
+  let guard = 64;
+  while (nowMs >= sim.nextGoblinAtMs && guard-- > 0) {
+    const spawnedAt = sim.nextGoblinAtMs;
+    if (sim.goblinRng.next() < GOBLIN_SIM_CATCH) {
+      sim.chestInv.wood += GOBLIN_CHESTS;
+      sim.goblinsCaught += 1;
+    }
+    sim.nextGoblinAtMs = rollNextGoblinAt(spawnedAt, sim.goblinRng);
   }
 }
 
@@ -450,12 +656,16 @@ function tickPeach(sim: Sim, nowMs: number): void {
  */
 function goldMultiplierNow(sim: Sim, config: SimConfig, nowMs: number): number {
   const crewGold = crewSpecialBonuses(sim.crewUp).goldMult;
-  if (!econOn(config)) return ancientGoldMult(sim.ancients) * crewGold;
+  // P4 „Goldene Hände" (+10 %/Stufe) trifft JEDE BP-Quelle, also auch die
+  // Kalibrier-Läufe ohne Loot-Ökonomie (×1 ohne Knoten).
+  const hande = goldeneHandeMult(sim.heaven);
+  if (!econOn(config)) return ancientGoldMult(sim.ancients) * crewGold * hande;
   return (
     ancientGoldMult(sim.ancients) *
     permTokenGoldMult(sim.permTokens) *
     incomeMultiplier(sim.boostUntilMs, nowMs) *
-    crewGold
+    crewGold *
+    hande
   );
 }
 
@@ -532,26 +742,92 @@ function openChestsGreedy(sim: Sim, incomePerSec: number, nowMs: number): void {
  * in-game one-hit-per-frame model, which is fine at 60 fps but too coarse here). Boss
  * HP persists across seconds; the timer ticks once and a timeout drops to farming the
  * zone's rivals (never a soft-lock).
+ *
+ * **A2 Boss-Gimmicks**: gegen einen Boss zählt nicht der rohe Sekunden-Schaden,
+ * sondern der vom Theme-Gimmick gefilterte Anteil (`gimmickBossDamage`) — als EIN
+ * Faktor `k` über die Sekunde. Der Rest-Schaden nach einem Boss-Kill wird deshalb
+ * zeit-proportional zurückgerechnet (`combat.hp / k` = der wirklich verbrauchte
+ * Anteil der Sekunde), sodass der Übertrag auf die nächsten Rivalen ehrlich bleibt.
+ * Die Wellen-Heilung (Beach) läuft als HP-Regen VOR dem Schaden.
+ *
+ * **A1 Bühnen-Modifikatoren**: gegen einen RIVALEN gilt analog `stageDamageFactor`
+ * (Klick- und Crew-Anteil werden unterschiedlich skaliert — „Nebel" hebt den
+ * einen und senkt den anderen), und sein BP-Ertrag trägt den `gold`-Faktor
+ * derselben Bühne. Die Ausdauer-Seite (`hp`) rechnet `combat.spawnFor` über
+ * `combat.remix` — eine Quelle für Spiel und Bot, hier ist nichts zu tun.
  */
 function stepSecond(
   sim: Sim,
   combat: CombatState,
-  dmg: number,
+  dmg: DamageSplit & { combo: number },
   goldMult: number,
   luck: number,
   keyMult: number,
   dropLoot: boolean,
 ): CombatState {
-  let remaining = dmg;
+  /**
+   * Der Gimmick-Faktor des laufenden Boss-Kampfes: wirksamer ÷ roher Schaden.
+   * Dreht zugleich den Kampf-Zustand weiter (Spotlight-Phasen, Wellen-Timer) und
+   * heilt — deshalb genau EIN Aufruf je Boss und Sekunde.
+   */
+  const enterBoss = (c: CombatState): { combat: CombatState; k: number } => {
+    if (c.zone !== sim.gimmickZone) {
+      sim.gimmickZone = c.zone;
+      sim.gimmick = createGimmickRuntime(); // neuer Kampf ⇒ frische Phasen/Wellen
+    }
+    const g = gimmickForZone(c.zone);
+    const tick = tickGimmick(sim.gimmick, g, hpFraction(c), 1);
+    sim.gimmick = tick.state;
+    if (tick.heals > 0) {
+      const hp = applyWaveHeal(c.hp, c.hpMax, waveHealAmount(c.hpMax, tick.heals));
+      c = { ...c, hp };
+    }
+    const raw = dmg.click + dmg.idle;
+    const eff = gimmickBossDamage(g, {
+      click: dmg.click,
+      idle: dmg.idle,
+      spotlightShare: tick.spotlightShare,
+      comboMult: dmg.combo,
+    });
+    return { combat: c, k: raw > 0 ? eff / raw : 1 };
+  };
+
+  if (!combat.boss) sim.gimmickZone = 0;
+  let k = 1;
+  if (combat.boss) {
+    const entered = enterBoss(combat);
+    combat = entered.combat;
+    k = entered.k;
+  }
+
+  /** A1: Faktoren + Schadens-Verhältnis der Bühne, auf der gerade gekämpft wird. */
+  const stageAt = (zone: number): { f: StageModFactors; factor: number } => {
+    const f = factorsForZone(zone, combat.remix);
+    return { f, factor: stageDamageFactor(f, dmg.click, dmg.idle) };
+  };
+
+  let remaining = dmg.click + dmg.idle;
   let guard = 50000; // bounds a runaway burst; ×1.6/zone means it always terminates
   while (remaining > 0 && guard-- > 0) {
-    if (remaining >= combat.hp) {
-      remaining -= combat.hp;
+    // Ein Boss, der MITTEN in dieser Sekunde spawnt (die Welle fiel gerade), ist
+    // ein eigener Kampf mit eigenem Faktor — volle Ausdauer, keine Phase, keine Welle.
+    if (combat.boss && combat.zone !== sim.gimmickZone) {
+      const entered = enterBoss(combat);
+      combat = entered.combat;
+      k = entered.k;
+    }
+    const stage = combat.boss ? null : stageAt(combat.zone);
+    const factor = combat.boss ? k : stage!.factor;
+    if (factor <= 0) break; // Spotlight ohne Klick-Schaden: diese Sekunde kommt nichts an
+    const eff = remaining * factor;
+    if (eff >= combat.hp) {
+      remaining -= combat.hp / factor;
       const wasBoss = combat.boss;
       const bossZone = combat.zone;
       const r = hit(combat, combat.hp);
-      sim.gold += Math.floor(r.gold * goldMult);
+      sim.gold += Math.floor(r.gold * goldMult * (stage?.f.gold ?? 1));
       combat = r.state;
+      if (wasBoss && r.advancedZone) sim.retryBossZone = 0; // Gate besiegt
       let onFrontier = false;
       if (r.advancedZone && combat.zone > sim.lifetimeMaxZone) {
         const cleared = combat.zone - 1;
@@ -573,92 +849,52 @@ function stepSecond(
           sim.keys += dropped;
           sim.keysEarned += dropped;
           sim.chestInv[chestTierForBoss(bossZone)] += 1;
-        } else if (sim.rng.next() < rivalChestChance(luck)) {
+        } else if (
+          sim.rng.next() <
+          rivalChestChance(luck) * (stage?.f.chest ?? 1) * truhenFokusChestMult(sim.heaven)
+        ) {
+          // A1 „Zähe Menge": doppelte Truhen-Chance auf dieser Bühne. P4
+          // „Truhen-Fokus": dauerhaft ×1.5 obendrauf (×1 ohne Knoten).
           sim.chestInv.wood += 1;
         }
       }
     } else {
-      combat = hit(combat, remaining).state;
+      combat = hit(combat, eff).state;
       remaining = 0;
     }
   }
-  return combat.boss ? tickBoss(combat, 1).state : combat;
+  if (combat.boss) {
+    const bossZone = combat.zone;
+    const bt = tickBoss(combat, 1);
+    if (bt.failed) sim.retryBossZone = bossZone; // Fallback auf die Vor-Bühne (Kern)
+    combat = bt.state;
+  }
+  // Retry wie ein Spieler: nach einem Fail zurück an der Boss-Bühne angekommen,
+  // den Boss per `challengeBoss` direkt herausfordern (Welle überspringen).
+  if (sim.retryBossZone === combat.zone && !combat.boss) {
+    combat = challengeBoss(combat);
+    if (combat.boss) sim.retryBossZone = 0;
+  }
+  return combat;
 }
 
 /**
- * Spend gold ROI-greedy: repeatedly buy the best marginal-output-per-BP option,
- * comparing next LEVELS and unlocked-but-unbought ABILITIES (v10) across the
- * whole crew. The Boss click line uses `heroClickValue` (its output is click
- * damage — weighted like DPS here, which matches how the drivers click ~always).
- *
- * v11: special ability tiers carry no direct output of their own (gold/crit/idle
- * feed the economy via `goldMultiplierNow`/`critFactor`/`powerFor` instead), so a
- * special's marginal output is 0. Since abilities buy strictly in order, specials
- * would dead-lock the member's lane for a pure output-greedy bot — they are
- * therefore valued as the GATE to the following power tier: the bundle (all
- * consecutive specials + the next power tier — v11.1 rhythms have up to TWO
- * specials in a row) is priced together against the power tier's output gain, and
- * when that bundle wins the ROI race the first special is bought (the rest follow
- * in later greedy iterations). Utility value of the specials themselves is
- * deliberately NOT credited here — the bot stays an honest lower bound.
+ * Spend gold ROI-greedy: repeatedly buy the best marginal-output-per-BP option
+ * the current bank affords. The ranking itself (next LEVELS vs. unlocked-but-
+ * unbought ABILITIES, with the v11 special tiers priced as the GATE to their
+ * following power tier) lives as ONE pure function in `heroes.bestCrewBuy` —
+ * the in-game Kauf-Tipp (ROADMAP-V2 P3, `game/advisor.ts`) reads the exact same
+ * ranking, so bot and hint can never drift apart.
  */
 function buyCrewGreedy(sim: Sim): void {
-  const outputAt = (cfg: (typeof CREW)[number], lvl: number, ups: number): number => {
-    const g = sim.gilds[cfg.id] ?? 0;
-    // Click hero's line counts as output too — the sim drivers click constantly,
-    // so 1 click-damage ≈ CLICKS_PER_SEC dps; ROI-comparing them 1:1 is close
-    // enough for a greedy bot and keeps this loop hero-agnostic.
-    if (cfg.click)
-      return lvl <= 0 ? 0 : cfg.baseDps * lvl * abilityMult(cfg, ups) * Math.pow(1.25, g);
-    return heroDps(cfg, lvl, g, ups);
-  };
   let guard = 5000;
   for (;;) {
     if (guard-- <= 0) break;
-    let bestBuy: { kind: 'level' | 'ability'; id: string; cost: number } | null = null;
-    let bestRoi = 0;
-    for (const cfg of CREW) {
-      const lvl = sim.crew[cfg.id] ?? 0;
-      const ups = sim.crewUp[cfg.id] ?? 0;
-      const cost = nextLevelCost(cfg, lvl);
-      if (cost <= sim.gold) {
-        const gain = outputAt(cfg, lvl + 1, ups) - outputAt(cfg, lvl, ups);
-        const roi = gain / cost;
-        if (roi > bestRoi) {
-          bestRoi = roi;
-          bestBuy = { kind: 'level', id: cfg.id, cost };
-        }
-      }
-      const ab = nextAbility(cfg, lvl, ups);
-      if (ab.unlocked && ab.cost <= sim.gold && ups < abilityTiersUnlocked(lvl)) {
-        const direct = outputAt(cfg, lvl, ups + 1) - outputAt(cfg, lvl, ups);
-        let roi = direct / ab.cost;
-        if (direct <= 0) {
-          // Special tier(s): bundle forward through the lane until the next
-          // power tier lands (rhythm patterns cap consecutive specials at 2;
-          // the scan bound of 4 is pure safety).
-          let costSum = ab.cost;
-          for (let k = ups + 1; k - ups <= 4; k++) {
-            const nxt = nextAbility(cfg, lvl, k);
-            if (!nxt.unlocked || k >= abilityTiersUnlocked(lvl)) break;
-            costSum += nxt.cost;
-            const gain = outputAt(cfg, lvl, k + 1) - outputAt(cfg, lvl, ups);
-            if (gain > 0) {
-              if (costSum <= sim.gold) roi = gain / costSum;
-              break;
-            }
-          }
-        }
-        if (roi > bestRoi) {
-          bestRoi = roi;
-          bestBuy = { kind: 'ability', id: cfg.id, cost: ab.cost };
-        }
-      }
-    }
-    if (bestBuy === null) break;
-    sim.gold -= bestBuy.cost;
-    if (bestBuy.kind === 'level') sim.crew[bestBuy.id] = (sim.crew[bestBuy.id] ?? 0) + 1;
-    else sim.crewUp[bestBuy.id] = (sim.crewUp[bestBuy.id] ?? 0) + 1;
+    const buy = bestCrewBuy(sim.crew, sim.crewUp, sim.gilds, sim.gold);
+    if (buy === null) break;
+    sim.gold -= buy.cost;
+    if (buy.kind === 'level') sim.crew[buy.id] = (sim.crew[buy.id] ?? 0) + 1;
+    else sim.crewUp[buy.id] = (sim.crewUp[buy.id] ?? 0) + 1;
   }
 }
 
@@ -672,19 +908,28 @@ function economyStep(
   sim: Sim,
   combat: CombatState,
   config: SimConfig,
-  combo: number,
   globalSec: number,
 ): CombatState {
   const econ = econOn(config);
   const nowMs = globalSec * 1000;
-  if (econ) tickPeach(sim, nowMs);
-  const crit = critFactor(config, sim.permTokens, sim.crewUp);
-  const dmg = damagePerSecond(sim, config, combo, crit);
+  // P4: Der Combo-Faktor wird je Sekunde aus dem AKTUELLEN Himmelsbaum gelesen —
+  // die „Combo-Doktrin" kann mitten in einem Lauf gekauft werden (nach einer
+  // Himmelfahrt), und ein einmal vor der Schleife berechneter Wert wäre dann stale.
+  const combo = comboFactor(config, sim.heaven);
+  if (econ) {
+    tickPeach(sim, nowMs);
+    tickGoblin(sim, nowMs); // A3 — kleiner Truhen-Faucet (80 % Fangquote)
+  }
+  // A1: „Krit-Funken" der Bühne, auf der gerade gekämpft wird. Auf einer
+  // Boss-Bühne (und für jeden no-juice-Anker) ist der Zusatz 0.
+  const stageCrit = combat.boss ? 0 : factorsForZone(combat.zone, combat.remix).crit;
+  const crit = critFactor(config, sim.permTokens, sim.crewUp, stageCrit, sim.heaven);
+  const dmg = damageSplit(sim, config, combo, crit);
   const goldMult = goldMultiplierNow(sim, config, nowMs);
   const luck = ancientChestLuckBonus(sim.ancients);
   const keyMult = 1 + truhenMagnetBonus(sim.heaven);
   const goldBefore = sim.gold;
-  const next = stepSecond(sim, combat, dmg, goldMult, luck, keyMult, econ);
+  const next = stepSecond(sim, combat, { ...dmg, combo }, goldMult, luck, keyMult, econ);
   if (econ) {
     // Chest BP rewards read a steady income/sec (§6.2: "15 min of current income"),
     // so cap the per-second figure to one zone's rival gold — a single power-spike
@@ -724,12 +969,11 @@ function runOnce(
   onFrontier?: (zone: number, globalSec: number) => void,
   tOffset = 0,
 ): RunResult {
-  const combo = comboFactor(config);
-  let combat = spawnFor(1, 0, 1);
+  let combat = spawnFor(1, 0, 1, sim.remix);
   const timeToZone = new Map<number, number>([[1, 0]]);
   for (let t = 1; t <= seconds; t++) {
     const prevFrontier = combat.maxZone;
-    combat = economyStep(sim, combat, config, combo, tOffset + t);
+    combat = economyStep(sim, combat, config, tOffset + t);
     if (combat.maxZone > prevFrontier) {
       for (let z = prevFrontier + 1; z <= combat.maxZone; z++) {
         if (!timeToZone.has(z)) timeToZone.set(z, t);
@@ -765,7 +1009,7 @@ export interface ChainResult {
  * each new best zone for the endless-wall criterion (E2) and the §4.8 Bühne-80 target.
  */
 export function simulateRunChain(config: SimConfig, runs: number, runSeconds: number): ChainResult {
-  const sim = newSim(config.seed ?? 1);
+  const sim = newSim(config.seed ?? 1, modsOn(config));
   const summaries: RunSummary[] = [];
   const timeToLifetime = new Map<number, number>();
   let globalT = 0;
@@ -790,6 +1034,7 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
     sim.souls = asc.souls;
     sim.lifetimeMaxZone = asc.lifetimeMaxZone;
     sim.rsLifetime = asc.rsLifetime;
+    remixOnAscend(sim); // A1: neue Aszension, neue Modifikator-Karte
     summaries.push({
       run: r + 1,
       bestZone: res.bestZone,
@@ -803,7 +1048,7 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
 
 /** Play a single fresh run (0 souls); the E4 active-vs-casual comparison unit. */
 export function simulateSingleRun(config: SimConfig, seconds: number): RunResult {
-  return runOnce(newSim(config.seed ?? 1), seconds, config);
+  return runOnce(newSim(config.seed ?? 1, modsOn(config)), seconds, config);
 }
 
 /** Options for the adaptive-ascension continuous sim (the E2 measurement). */
@@ -834,6 +1079,10 @@ export interface ContinuousResult {
   ascensions: number;
   /** Ruhmes-Himmelfahrten performed (0 unless `fullPrestige`). */
   himmelfahrten: number;
+  /** Gehaltene HPF am Ende — was der Himmelsbaum in diesem Lauf überhaupt zu sehen bekam (P4). */
+  hpfHeld: number;
+  /** Σ im Himmelsbaum gekaufter Stufen (P4) — 0, solange die HPF für keinen Knoten reichen. */
+  treeLevels: number;
   maxBestZone: number;
   finalBank: number;
   /** Whether the run stopped because souls stopped growing (the M9 wall, N1). */
@@ -853,9 +1102,8 @@ export interface ContinuousResult {
  * plateau (souls stop growing) — the honest crew+gild+soul-only ceiling.
  */
 export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): ContinuousResult {
-  const sim = newSim(config.seed ?? 1);
-  const combo = comboFactor(config);
-  let combat = spawnFor(1, 0, 1);
+  const sim = newSim(config.seed ?? 1, modsOn(config));
+  let combat = spawnFor(1, 0, 1, sim.remix);
   const timeToLifetime = new Map<number, number>();
   let globalT = 0;
   let lastAdvanceT = 0;
@@ -868,7 +1116,7 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
   while (globalT < opts.maxSeconds) {
     globalT++;
     const prevFrontier = combat.maxZone;
-    combat = economyStep(sim, combat, config, combo, globalT);
+    combat = economyStep(sim, combat, config, globalT);
     if (combat.maxZone > prevFrontier) {
       lastAdvanceT = globalT;
       for (let z = prevFrontier + 1; z <= combat.maxZone; z++) {
@@ -886,11 +1134,13 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
       sim.gold = 0;
       sim.crew = {};
       sim.crewUp = {};
-      combat = spawnFor(1, 0, 1);
+      remixOnAscend(sim); // A1: neue Aszension, neue Modifikator-Karte
+      combat = spawnFor(1, 0, 1, sim.remix);
       lastAdvanceT = globalT;
       ascensions++;
       if (opts.fullPrestige) {
-        const crit = critFactor(config, sim.permTokens, sim.crewUp);
+        const combo = comboFactor(config, sim.heaven);
+        const crit = critFactor(config, sim.permTokens, sim.crewUp, 0, sim.heaven);
         buyAncientsGreedy(sim, config, combo, crit); // §4.6 soul sink → deeper re-climbs
       }
       if (gained <= 0) {
@@ -901,6 +1151,9 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
         // true endgame ceiling that stops the run.
         if (opts.fullPrestige && canHimmelfahrt(sim.heaven, sim.rsLifetime)) {
           sim.heaven = bankHimmelfahrt(sim.heaven, sim.rsLifetime);
+          // P4: frisch gebankte HPF wandern (greedy, deterministisch) in den
+          // Himmelsbaum — solange sie für den billigsten gelisteten Knoten reichen.
+          buyTreeGreedy(sim);
           sim.souls = 0;
           sim.rsLifetime = 0;
           sim.ancients = {};
@@ -924,6 +1177,8 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
     timeToLifetime,
     ascensions,
     himmelfahrten,
+    hpfHeld: sim.heaven.hpf,
+    treeLevels: TREE_NODES.reduce((n, cfg) => n + treeLevel(sim.heaven, cfg.id), 0),
     maxBestZone: maxBest,
     finalBank: sim.souls,
     plateaued,
@@ -995,6 +1250,55 @@ function buyAncientsGreedy(sim: Sim, config: SimConfig, combo: number, crit: num
   }
 }
 
+/**
+ * **Der Himmelsbaum-Einkaufszettel des Bots (ROADMAP-V2 P4).** Nach jeder
+ * Himmelfahrt kauft der `fullPrestige`-Treiber greedy die GÜNSTIGSTE gerade
+ * verfügbare Stufe aus dieser Liste (`cheapestTreeBuy`), bis nichts mehr bezahlbar
+ * ist. Zwei bewusste Entscheidungen stecken darin:
+ *
+ * 1. **Nur modellierte Knoten.** Gelistet ist genau, was der Bot auch RECHNET —
+ *    Klick/Crew-Faktoren, Krit, Combo, BP, Truhen-/Pfirsich-Takt. Die Utility-Knoten
+ *    (Nachtschicht/Offline-Cap, Ekstase-Ausdauer, Frühstarter, Gate-Crasher/Boss-Uhr,
+ *    Beat-Gefühl, Combo-Gedächtnis, Twerk-Coach) fehlen absichtlich: ihre Wirkung ist
+ *    im Bot ×1 (er geht nie offline, zündet keine Ekstase, klickt ungetaktet und
+ *    modelliert die Boss-Uhr-Boni nirgends), ein Kauf würde also nur den
+ *    +2 %/HPF-Globalmult wegnehmen und die Anker künstlich pessimistisch machen.
+ *    Dieselbe Untergrenzen-Logik wie bei Twerk-Ekstase und den Boss-Schadens-Mults
+ *    (siehe Modul-Kopf): weglassen darf nur, was den echten Spieler beschleunigt.
+ * 2. **Deterministische Doktrin-Wahl.** Beide Seiten jedes Exklusiv-Paares stehen
+ *    drin, aber die DPS-lastige zuerst — bei gleichem Preis (35/35) entscheidet die
+ *    Reihenfolge in `cheapestTreeBuy`, also greift der Bot reproduzierbar zur
+ *    Crew-Doktrin (+25 % Crew-DPS), zur Combo-Doktrin (Cap ×1.3, der einzige der
+ *    beiden Ritual-Knoten, den er überhaupt spürt) und zum Truhen-Fokus (Truhen →
+ *    Token → DPS, während der Pfirsich nur BP beschleunigt). Der jeweils andere
+ *    Knoten ist danach durch die Exklusiv-Sperre ohnehin zu — der Bot fährt also
+ *    einen echten Build, nicht das ganze Board.
+ */
+export const SIM_TREE_PRIORITY: readonly string[] = [
+  'crewdoktrin',
+  'klickdoktrin',
+  'combodoktrin',
+  'ekstasedoktrin',
+  'truhenfokus',
+  'pfirsichfokus',
+  'schwererbass',
+  'goldenehande',
+  'praezisionsshake',
+  'truhenmagnet',
+  'pfirsichreife',
+];
+
+/**
+ * Spend held HPF on the Himmelsbaum: cheapest affordable level first, exclusive
+ * pairs resolved deterministically (see `SIM_TREE_PRIORITY`). Bounded; a no-op while
+ * the bot holds too few HPF for the cheapest node — which is exactly what happens at
+ * the E2 wall (1 HPF), so the anchors stay where they were until a run gets deep
+ * enough to actually afford a node.
+ */
+function buyTreeGreedy(sim: Sim): void {
+  sim.heaven = greedyTreeSpend(sim.heaven, SIM_TREE_PRIORITY);
+}
+
 /** Options for the ascension-era sim (the E3 + first-Himmelfahrt measurement). */
 export interface EraOptions {
   /** Seconds without a frontier advance before the bot ascends (hits the wall). */
@@ -1027,9 +1331,8 @@ export interface EraResult {
  * anti-plateau of §4.6.
  */
 export function simulateAscensionEra(config: SimConfig, opts: EraOptions): EraResult {
-  const sim = newSim(config.seed ?? 1);
-  const combo = comboFactor(config);
-  let combat = spawnFor(1, 0, 1);
+  const sim = newSim(config.seed ?? 1, modsOn(config));
+  let combat = spawnFor(1, 0, 1, sim.remix);
   let globalT = 0;
   let lastAdvanceT = 0;
   let ascensions = 0;
@@ -1042,14 +1345,15 @@ export function simulateAscensionEra(config: SimConfig, opts: EraOptions): EraRe
   while (globalT < opts.maxSeconds && ascensions < opts.maxAscensions) {
     globalT++;
     const prevFrontier = combat.maxZone;
-    combat = economyStep(sim, combat, config, combo, globalT);
+    combat = economyStep(sim, combat, config, globalT);
     // Reset the stall timer whenever THIS run's frontier advances (incl. re-climbing
     // a cleared zone), not only on a new lifetime record — otherwise the bot ascends
     // mid-climb and never gets deep.
     if (combat.maxZone > prevFrontier) lastAdvanceT = globalT;
     if (combat.maxZone > maxBestZone) maxBestZone = combat.maxZone;
 
-    const crit = critFactor(config, sim.permTokens, sim.crewUp);
+    const combo = comboFactor(config, sim.heaven);
+    const crit = critFactor(config, sim.permTokens, sim.crewUp, 0, sim.heaven);
     const power = damagePerSecond(sim, config, combo, crit);
     maxPower = Math.max(maxPower, power);
     if (milestonePower <= 0) {
@@ -1073,7 +1377,8 @@ export function simulateAscensionEra(config: SimConfig, opts: EraOptions): EraRe
       sim.crew = {};
       sim.crewUp = {};
       buyAncientsGreedy(sim, config, combo, crit); // spend the freshly-earned souls
-      combat = spawnFor(1, 0, 1);
+      remixOnAscend(sim); // A1: neue Aszension, neue Modifikator-Karte
+      combat = spawnFor(1, 0, 1, sim.remix);
       lastAdvanceT = globalT;
       ascensions++;
     }
@@ -1125,7 +1430,7 @@ export interface FloatGuardResult {
  * every value well under 1.8e308 to Bühne 300 (HP ~1e58+), the M9/M14 float-guard.
  */
 export function simulateFloatGuard(config: SimConfig, opts: FloatGuardOptions): FloatGuardResult {
-  const sim = newSim(config.seed ?? 1);
+  const sim = newSim(config.seed ?? 1, modsOn(config));
   const combo = comboFactor(config);
   let combat = spawnFor(1, 0, 1);
   let maxMagnitude = 0;
@@ -1153,7 +1458,18 @@ export function simulateFloatGuard(config: SimConfig, opts: FloatGuardOptions): 
     const luck = ancientChestLuckBonus(sim.ancients);
     const keyMult = 1 + truhenMagnetBonus(sim.heaven);
     const goldBefore = sim.gold;
-    combat = stepSecond(sim, combat, dmg, goldMult, luck, keyMult, econOn(config));
+    // Der analytische Vorlauf zählt als KLICK-Schaden: er modelliert die Schlagkraft
+    // eines Tiefe-`front`-Spielers, nicht die Crew — so filtert ihn nur das
+    // Schild-Gimmick (Synth), Spotlight-Phasen greifen nicht ins Float-Audit ein.
+    combat = stepSecond(
+      sim,
+      combat,
+      { click: dmg, idle: 0, combo },
+      goldMult,
+      luck,
+      keyMult,
+      econOn(config),
+    );
     const earned = sim.gold - goldBefore;
     // §9.3 stall guard: track the smallest relevant additive gain ratio — the gold
     // increment vs the gold total, and the per-second damage vs the current target's

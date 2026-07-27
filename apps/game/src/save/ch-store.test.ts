@@ -4,13 +4,17 @@ import { ABILITY_CHARGE_MAX, createAbility } from '../game/ability';
 import { pendingSouls, soulsForMaxZone } from '../game/ascension';
 import {
   type ChState,
+  ascendState,
   createChState,
   createChests,
   createComboSave,
   createPeach,
   createStats,
+  himmelfahrtState,
+  transcendState,
 } from '../game/ch-state';
 import { createGear } from '../game/gear';
+import { TREE_NODES, treeLevel } from '../game/heaven';
 import { createMeta, dailyQuests } from '../game/quests';
 import { createTranscend, transcendGlobalMult } from '../game/transcend';
 import { monsterHp } from '../game/combat';
@@ -340,6 +344,41 @@ describe('ch-store — v5 migration & repair (M10)', () => {
     expect(s!.heaven.hpf).toBe(10); // clamped to hpfLifetime
     expect(s!.heaven.tree).toEqual({ coach: 5 });
   });
+
+  /**
+   * ROADMAP-V2 P4: `heaven.tree` ist ein OFFENES Record — neue Baum-Knoten brauchen
+   * deshalb keinen Schema-Bump. Die bewusste Entscheidung dazu (siehe DECISIONS):
+   * unbekannte Ids ÜBERLEBEN das Laden, statt geprunt zu werden. Wer mit einem
+   * neueren Build spielt, dort einen neuen Knoten kauft und danach eine ältere
+   * Version öffnet (Itch-Build, zweites Gerät), verliert seine HPF nicht — und
+   * wirkungslos sind die fremden Ids ohnehin, weil `treeLevel` sie auf ihr
+   * Max-Level 0 deckelt. Aufgeräumt werden sie beim Respec.
+   */
+  it('lets UNKNOWN tree ids survive a load/save round-trip (P4, no schema bump)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.heaven = {
+      hpf: 30,
+      hpfLifetime: 90,
+      ascensions2: 2,
+      tree: { coach: 2, crewdoktrin: 1, knotenAusDerZukunft: 3 },
+    };
+    const s = deserializeCh(JSON.stringify(raw))!;
+    expect(s.heaven.tree).toEqual({ coach: 2, crewdoktrin: 1, knotenAusDerZukunft: 3 });
+    // …und sie bleiben wirkungslos: kein Effekt liest eine unbekannte Id.
+    expect(treeLevel(s.heaven, 'knotenAusDerZukunft')).toBe(0);
+    // Auch ein zweiter Durchlauf verliert nichts (idempotent).
+    const again = deserializeCh(serializeCh(s, 2000))!;
+    expect(again.heaven.tree).toEqual(s.heaven.tree);
+  });
+
+  it('keeps every P4 node id loadable (Alt-Save mit Doktrin bleibt intakt)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    const tree: Record<string, number> = {};
+    for (const cfg of TREE_NODES) tree[cfg.id] = 1;
+    raw.heaven = { hpf: 5, hpfLifetime: 900, ascensions2: 4, tree };
+    const s = deserializeCh(JSON.stringify(raw))!;
+    for (const cfg of TREE_NODES) expect(treeLevel(s.heaven, cfg.id)).toBe(1);
+  });
 });
 
 describe('ch-store — v9 migration & repair (M15)', () => {
@@ -582,6 +621,8 @@ describe('ch-store — v8 migration & repair (M13)', () => {
         streak: 5,
         lastLoginDay: 20_289,
         streakProtectWeek: 2898,
+        weekIndex: 2951,
+        weekBestZone: 30,
       },
       achievements: ['zone-10', 'boss-1'],
     };
@@ -1210,5 +1251,84 @@ describe('ch-store — v10 migration & repair (kaufbare Crew-Fähigkeiten)', () 
     expect(s).not.toBeNull();
     expect(s!.crewUp).toEqual({});
     expect(s!.souls).toBe(44);
+  });
+});
+
+describe('ch-store — v11 migration & repair (Bühnen-Sterne, P1)', () => {
+  it('migrates a v10 blob into v11 with an empty star collection', () => {
+    // Ein realistischer v10-Save: tief gereist, aber ohne Sterne-Felder.
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 10;
+    delete raw.stageStars;
+    delete raw.starsAwarded;
+    delete raw.bossFoulZone;
+    raw.gold = 4242;
+    raw.zone = 37;
+    raw.runMaxZone = 37;
+    raw.lifetimeMaxZone = 37;
+    const store = memStorage();
+    store.setItem(CH_SAVE_KEY, JSON.stringify(raw));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    expect(s.gold).toBe(4242);
+    expect(s.zone).toBe(37);
+    // Bewusst NICHT rückwirkend vergeben (siehe `migrateChV10toV11`): die Sammlung
+    // startet leer, obwohl `lifetimeMaxZone` 36 geclerte Bühnen belegt.
+    expect(s.stageStars).toEqual({});
+    expect(s.starsAwarded).toBe(0);
+    expect(s.bossFoulZone).toBe(0);
+  });
+
+  it('round-trips a star collection and masks impossible bits away', () => {
+    const s: ChState = {
+      ...createChState(),
+      stageStars: { '5': 7, '7': 5 },
+      starsAwarded: 15,
+      bossFoulZone: 10,
+    };
+    const round = deserializeCh(serializeCh(s, 1000));
+    expect(round!.stageStars).toEqual({ '5': 7, '7': 5 });
+    expect(round!.starsAwarded).toBe(15);
+    expect(round!.bossFoulZone).toBe(10);
+
+    // Gebastelter Save: der Timeout-Stern auf einer Nicht-Boss-Bühne (Bit 2) und
+    // ein erfundenes viertes Bit werden weggestutzt, echte Sterne bleiben.
+    const raw = JSON.parse(serializeCh(s, 1000)) as Record<string, unknown>;
+    raw.stageStars = { '5': 255, '7': 7, '11': 2, junk: 7 };
+    const repaired = deserializeCh(JSON.stringify(raw));
+    expect(repaired!.stageStars).toEqual({ '5': 7, '7': 5 });
+  });
+
+  it('repairs a wholly corrupt star slice without touching other progress', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.stageStars = 'garbage';
+    raw.starsAwarded = Number.NaN;
+    raw.souls = 21;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.stageStars).toEqual({});
+    expect(s!.starsAwarded).toBe(0);
+    expect(s!.souls).toBe(21);
+  });
+
+  it('keeps the star collection across all three prestige layers', () => {
+    const base: ChState = {
+      ...createChState(),
+      runMaxZone: 60,
+      lifetimeMaxZone: 60,
+      rsLifetime: 500,
+      souls: 500,
+      heaven: { hpf: 0, hpfLifetime: 200, ascensions2: 1, tree: {} },
+      stageStars: { '5': 7, '7': 5 },
+      starsAwarded: 15,
+      bossFoulZone: 10,
+    };
+    for (const next of [ascendState(base), himmelfahrtState(base), transcendState(base)]) {
+      expect(next.stageStars).toEqual({ '5': 7, '7': 5 });
+      expect(next.starsAwarded).toBe(15);
+      // Der offene Fehlversuch ist Run-Zustand — jeder Reset startet sauber.
+      expect(next.bossFoulZone).toBe(0);
+    }
   });
 });

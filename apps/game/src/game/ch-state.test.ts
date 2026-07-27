@@ -538,3 +538,45 @@ describe('ch-state — Transzendenz threading (§4.5.3)', () => {
     expect(transcendState(s).transcend.transcendences).toBe(2); // banked once more here
   });
 });
+
+// ROADMAP-V2 P4: die drei Himmelsbaum-Knoten, die im DERIVED-Layer hängen — der
+// Beweis, dass sie nicht bloß im Katalog stehen, sondern durch die echte Pipeline
+// laufen (und dass Klick- und Idle-Seite sauber getrennt bleiben, P1).
+describe('ch-state — P4 Himmelsbaum im derived layer', () => {
+  const base = {
+    ...createChState(),
+    crew: { boss: 30, hype: 10 }, // boss: Klick-Linie, hype: DPS-Linie
+    souls: 8,
+    ancients: { twerkules: 3, poposeidon: 2 },
+  };
+  const withTree = (tree: Record<string, number>): typeof base => ({
+    ...base,
+    heaven: { ...createHeaven(), hpf: 4, hpfLifetime: 10, tree },
+  });
+  const plain = withTree({});
+
+  it('„Schwerer Bass" + „Crew-Doktrin" heben NUR dpsOf', () => {
+    const bass = withTree({ schwererbass: 3 }); // +24 %
+    expect(dpsOf(bass)).toBeCloseTo(dpsOf(plain) * 1.24, 6);
+    expect(clickDamageOf(bass)).toBeCloseTo(clickDamageOf(plain), 6);
+    const crew = withTree({ crewdoktrin: 1 });
+    expect(dpsOf(crew)).toBeCloseTo(dpsOf(plain) * 1.25, 6);
+    expect(clickDamageOf(crew)).toBeCloseTo(clickDamageOf(plain), 6);
+  });
+
+  it('„Klick-Doktrin" hebt NUR clickDamageOf', () => {
+    const klick = withTree({ klickdoktrin: 1 });
+    expect(clickDamageOf(klick)).toBeCloseTo(clickDamageOf(plain) * 1.25, 6);
+    expect(dpsOf(klick)).toBeCloseTo(dpsOf(plain), 6);
+  });
+
+  it('„Goldene Hände" hebt goldMult um 10 % je Stufe', () => {
+    expect(goldMult(plain)).toBeCloseTo(goldMult({ ...plain, heaven: createHeaven() }), 6);
+    expect(goldMult(withTree({ goldenehande: 3 }))).toBeCloseTo(goldMult(plain) * 1.3, 6);
+  });
+
+  it('keyDropMult trägt den Truhen-Magneten weiterhin (Alt-Knoten, neuer Ast)', () => {
+    expect(keyDropMult(plain)).toBeCloseTo(1, 6);
+    expect(keyDropMult(withTree({ truhenmagnet: 1 }))).toBeCloseTo(1.25, 6);
+  });
+});

@@ -40,6 +40,9 @@ import {
   type HeavenState,
   bankHimmelfahrt,
   createHeaven,
+  goldeneHandeMult,
+  heavenClickMult,
+  heavenDpsMult,
   heavenGlobalMult,
   soulBonusEff,
   truhenMagnetBonus,
@@ -55,6 +58,7 @@ import {
 } from './heroes';
 import { incomeMultiplier } from './peach';
 import { type MetaState, createMeta } from './quests';
+import { type StageStars, createStageStars } from './stars';
 import {
   type TranscendState,
   bankTranscendence,
@@ -235,6 +239,25 @@ export interface ChState {
    * all of L1 AND L2 but PRESERVES this slice (`transcendState`). Survives everything.
    */
   transcend: TranscendState;
+  /**
+   * Bühnen-Sterne (CH-save v11, ROADMAP-V2 P1): pro Bühne eine 3-Bit-Maske
+   * (geclert / Boss ohne Timeout / heiße Combo). Rein kosmetisch-sammelnd und
+   * eine LEBENSZEIT-Sammlung: sie überlebt jede Prestige-Schicht, sonst würde ein
+   * Reset das Sammelziel entwerten.
+   */
+  stageStars: StageStars;
+  /**
+   * Sterne, die bereits eine Meilenstein-Truhe gezahlt haben (Highwater, immer ein
+   * Vielfaches von `STAR_MILESTONE`) — verhindert doppelte Auszahlung über Reloads.
+   */
+  starsAwarded: number;
+  /**
+   * Die Boss-Bühne, an der zuletzt ein Timeout kassiert wurde (0 = keine). RUN-
+   * Zustand, kein Meta: Er entscheidet allein darüber, ob der laufende Anlauf an
+   * DIESEM Gate noch „ohne Timeout" ist, und wird beim Kill des Gates gelöscht.
+   * Persistiert, damit ein Reload mitten im Retry den Fehlversuch nicht vergisst.
+   */
+  bossFoulZone: number;
 }
 
 /** A brand-new run/profile. */
@@ -266,6 +289,9 @@ export function createChState(): ChState {
     meta: createMeta(),
     achievements: [],
     transcend: createTranscend(),
+    stageStars: createStageStars(),
+    starsAwarded: 0,
+    bossFoulZone: 0,
   };
 }
 
@@ -299,6 +325,9 @@ export function dpsOf(state: DerivedInput): number {
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientDpsMult(state.ancients) *
     heavenGlobalMult(hpf) *
+    // ROADMAP-V2 P4 (Kampf-Ast): „Schwerer Bass" × „Crew-Doktrin" — die einzigen
+    // Himmelsbaum-Faktoren, die NUR die Idle-Seite heben (Klick hat seinen eigenen).
+    heavenDpsMult(state.heaven) *
     (state.transcend ? transcendGlobalMult(state.transcend.te) : 1) *
     (state.gear ? dpsGearMult(state.gear) : 1) *
     (state.permTokens ? permTokenDpsMult(state.permTokens) : 1) *
@@ -321,6 +350,10 @@ export function clickDamageOf(state: DerivedInput): number {
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientClickMult(state.ancients) *
     heavenGlobalMult(hpf) *
+    // ROADMAP-V2 P4 (Kampf-Ast): die „Klick-Doktrin" — Gegenstück zur „Crew-Doktrin"
+    // in `dpsOf`. Genau EINE der beiden ist je kaufbar (Exklusiv-Paar), also kann
+    // der Baum das Klick:Idle-Verhältnis immer nur in EINE Richtung kippen.
+    heavenClickMult(state.heaven) *
     (state.transcend ? transcendGlobalMult(state.transcend.te) : 1) *
     (state.gear ? clickGearMult(state.gear) : 1)
   );
@@ -332,16 +365,23 @@ export function clickDamageOf(state: DerivedInput): number {
  * bought `gold`-special ability tiers (v11). Does NOT include the transient
  * Golden-Peach ×3 income boost — the glue folds that in live via
  * `peach.incomeMultiplier` (kills) while offline accrual uses this alone.
- * `crewUp` is optional so pre-v11 callers/tests fold the neutral ×1.
+ * `crewUp`/`heaven` are optional so pre-v11 callers/tests fold the neutral ×1.
+ * `heaven` trägt seit ROADMAP-V2 P4 den Ökonomie-Knoten „Goldene Hände"
+ * (+10 %/Stufe) — er wirkt damit auf JEDE BP-Quelle, live wie offline.
  */
 export function goldMult(
-  state: Pick<ChState, 'ancients' | 'gear'> & { permTokens?: PermTokens; crewUp?: CrewUps },
+  state: Pick<ChState, 'ancients' | 'gear'> & {
+    permTokens?: PermTokens;
+    crewUp?: CrewUps;
+    heaven?: HeavenState;
+  },
 ): number {
   return (
     ancientGoldMult(state.ancients) *
     goldGearMult(state.gear) *
     (state.permTokens ? permTokenGoldMult(state.permTokens) : 1) *
-    (state.crewUp ? crewSpecialBonuses(state.crewUp).goldMult : 1)
+    (state.crewUp ? crewSpecialBonuses(state.crewUp).goldMult : 1) *
+    (state.heaven ? goldeneHandeMult(state.heaven) : 1)
   );
 }
 
@@ -488,6 +528,11 @@ export function ascendState(state: ChState): ChState {
     // acquisitions, never reset by prestige.
     meta: state.meta,
     achievements: state.achievements,
+    // Bühnen-Sterne (P1) sind eine Lebenszeit-SAMMLUNG wie Achievements — ein
+    // Reset der Tour darf sie nie einkassieren (`bossFoulZone` ist Run-Zustand
+    // und fällt bewusst auf 0 zurück).
+    stageStars: state.stageStars,
+    starsAwarded: state.starsAwarded,
   };
 }
 
@@ -524,6 +569,9 @@ export function himmelfahrtState(state: ChState): ChState {
     // Retention meta (§7) survives a Himmelfahrt too (lifetime acquisitions).
     meta: state.meta,
     achievements: state.achievements,
+    // Bühnen-Sterne (P1) — Lebenszeit-Sammlung, überlebt auch L2.
+    stageStars: state.stageStars,
+    starsAwarded: state.starsAwarded,
   };
 }
 
@@ -567,5 +615,8 @@ export function transcendState(state: ChState): ChState {
     // Retention meta (§7) survives (lifetime acquisitions).
     meta: state.meta,
     achievements: state.achievements,
+    // Bühnen-Sterne (P1) — Lebenszeit-Sammlung, überlebt auch L3.
+    stageStars: state.stageStars,
+    starsAwarded: state.starsAwarded,
   };
 }

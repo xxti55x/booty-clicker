@@ -30,6 +30,15 @@ export interface ScorePayload {
   ascensions: number;
 }
 
+/**
+ * Der Allzeit-Board-Schlüssel (X4). Er wird bewusst NICHT mitgeschickt, wenn er
+ * gemeint ist: ein Request ohne `board` ist byte-gleich zu dem, was der Client
+ * vor X4 gesendet hat, und trifft serverseitig denselben Pfad und dieselbe
+ * Tabelle. Ein Wochen-Board heißt `weekly-<ISO-Wochen-Index>` (siehe
+ * `game/weekly.weeklyBoardKey`).
+ */
+export const ALL_BOARD = 'all';
+
 /** The minimal shape of a fetch response this client consumes. */
 interface ResponseLike {
   ok: boolean;
@@ -47,6 +56,12 @@ export interface LeaderboardOpts {
   fetchImpl?: FetchLike;
   /** Abort timeout in ms (defaults to {@link TIMEOUT_MS}). */
   timeoutMs?: number;
+  /**
+   * Board key (X4) — {@link ALL_BOARD} (oder weggelassen) heißt Allzeit-Board und
+   * wird gar nicht erst übertragen, damit der historische Request unverändert
+   * bleibt.
+   */
+  board?: string;
 }
 
 const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? '').replace(/\/+$/, '');
@@ -69,6 +84,12 @@ export function validateClientNickname(v: string): string | null {
 function resolveBase(opts?: LeaderboardOpts): string {
   const b = opts?.base ?? API_BASE;
   return b.replace(/\/+$/, '');
+}
+
+/** Der angefragte Board-Schlüssel, oder `null` für „Allzeit" (= nichts senden). */
+function boardOf(opts?: LeaderboardOpts): string | null {
+  const b = opts?.board;
+  return b && b !== ALL_BOARD ? b : null;
 }
 
 /**
@@ -110,6 +131,7 @@ export async function submitScore(
 ): Promise<{ rank: number } | null> {
   const nick = validateClientNickname(nickname);
   if (nick === null) return null;
+  const board = boardOf(opts);
   const res = await safeFetch(
     '/api/v2/scores',
     {
@@ -120,6 +142,7 @@ export async function submitScore(
         maxZone: payload.maxZone,
         souls: payload.souls,
         ascensions: payload.ascensions,
+        ...(board === null ? {} : { board }),
       }),
     },
     opts,
@@ -137,7 +160,9 @@ export async function submitScore(
  * Worker. Resolves to the rows on success, or `null` on any failure / when disabled.
  */
 export async function fetchTop(limit = 50, opts?: LeaderboardOpts): Promise<ScoreEntry[] | null> {
-  const res = await safeFetch(`/api/v2/scores/top?limit=${limit}`, { method: 'GET' }, opts);
+  const board = boardOf(opts);
+  const q = `limit=${limit}` + (board === null ? '' : `&board=${encodeURIComponent(board)}`);
+  const res = await safeFetch(`/api/v2/scores/top?${q}`, { method: 'GET' }, opts);
   if (!res) return null;
   try {
     return (await res.json()) as ScoreEntry[];

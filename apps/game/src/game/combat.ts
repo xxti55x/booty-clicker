@@ -10,6 +10,9 @@
  * never buried in logic). The reducer functions (`hit`, `tickBoss`, `travelTo`)
  * are pure so the whole progression is unit-testable and deterministic.
  */
+import { bossHpScale } from './boss-gimmicks';
+import { REMIX_OFF } from './stage-mods';
+import { WEEK_OFF, weeklyHpScale } from './weekly';
 
 /** Normal rivals to out-twerk before a zone is cleared. */
 export const MONSTERS_PER_ZONE = 10;
@@ -38,9 +41,15 @@ export function monsterHp(zone: number): number {
   return HP_BASE * Math.pow(HP_GROWTH, zone - 1);
 }
 
-/** Max Ausdauer (HP) of the boss guarding `zone`. */
+/**
+ * Max Ausdauer (HP) of the boss guarding `zone`. Since ROADMAP-V2 A2 every gate
+ * carries its theme's Gimmick, and the boss pays for its trick in Ausdauer
+ * (`bossHpScale`) — so a Gimmick redistributes HOW a gate is fought without
+ * moving the total power the wall demands. Off a boss zone the scale is 1, so
+ * the raw ×10 curve is unchanged.
+ */
 export function bossHp(zone: number): number {
-  return monsterHp(zone) * BOSS_HP_FACTOR;
+  return monsterHp(zone) * BOSS_HP_FACTOR * bossHpScale(zone);
 }
 
 /** BP dropped for defeating a rival (or boss) at `zone`. */
@@ -65,15 +74,56 @@ export interface CombatState {
   boss: boolean;
   /** Seconds left on the boss timer (0 when not a boss). */
   bossTimer: number;
+  /**
+   * Remix-Seed der Bühnen-Modifikatoren (ROADMAP-V2 A1; `REMIX_OFF` = keine).
+   *
+   * Er steht hier, weil `hit`/`tickBoss`/`travelTo` das NÄCHSTE Ziel selbst
+   * spawnen — ein nur von außen übergebener Faktor wäre beim ersten Kill wieder
+   * weg. Getragen wird der SEED, nicht der fertige Faktor: der Modifikator hängt
+   * an der Bühne, und die wechselt mit jedem Spawn. Der Wert ist reine
+   * Laufzeit-Konfiguration (aus `rng.seed` + `stats.ascensions` abgeleitet) und
+   * wird nie persistiert — das Save trägt weiterhin nur `zone`/`killsThisZone`.
+   */
+  remix: number;
+  /**
+   * Der ISO-Wochen-Index der „Bühne der Woche" (ROADMAP-V2 A5; `WEEK_OFF` = aus).
+   *
+   * Er reist aus demselben Grund wie `remix` im Kampf-Zustand mit: die Re-Spawns
+   * passieren hier drin, und auf der Wochen-Bühne haben die Rivalen eine ANDERE
+   * Ausdauer (die zwei Wochen-Regeln ersetzen dort die A1-Regel). Getragen wird
+   * wieder nur der INDEX — die Bühne und ihre Modifikatoren fallen pur daraus
+   * ({@link weeklyHpScale}), es gibt also keine zweite Kopie der Wochen-Wahrheit
+   * und nichts, was zwischen HUD und Kampf auseinanderlaufen könnte. Reine
+   * Laufzeit-Konfiguration, nie persistiert.
+   */
+  week: number;
 }
 
 /**
  * Build the combat state for a given zone + kill count. A boss is the target
  * when we're on a boss zone and the normal rivals are already cleared.
+ *
+ * `remix` (ROADMAP-V2 A1) skaliert die Ausdauer der RIVALEN mit dem Modifikator
+ * der Bühne — hier und nur hier, weil hier jedes Ziel entsteht. `monsterHp`
+ * bleibt damit die unveränderte, seedfreie Kurve (Advisor, Offline-Ertrag und
+ * der Float-Guard lesen sie weiter roh), und Bosse sind per Definition außen vor
+ * (`bossHp` fragt `stageHpScale` nicht — Boss-Bühnen tragen keinen Modifikator).
+ * Default `REMIX_OFF` ⇒ Verhalten byte-gleich zu vorher.
+ *
+ * `week` (ROADMAP-V2 A5) schaltet die Präzedenz-Regel scharf: auf der Bühne der
+ * Woche skaliert {@link weeklyHpScale} mit den ZWEI Wochen-Modifikatoren statt
+ * mit dem A1-Modifikator. Default `WEEK_OFF` ⇒ exakt `stageHpScale`, also
+ * byte-gleich zu A1.
  */
-export function spawnFor(zone: number, killsThisZone: number, maxZone: number): CombatState {
+export function spawnFor(
+  zone: number,
+  killsThisZone: number,
+  maxZone: number,
+  remix: number = REMIX_OFF,
+  week: number = WEEK_OFF,
+): CombatState {
   const boss = isBossZone(zone) && killsThisZone >= MONSTERS_PER_ZONE;
-  const hpMax = boss ? bossHp(zone) : monsterHp(zone);
+  const hpMax = boss ? bossHp(zone) : monsterHp(zone) * weeklyHpScale(zone, remix, week);
   return {
     zone,
     maxZone: Math.max(maxZone, zone),
@@ -82,12 +132,18 @@ export function spawnFor(zone: number, killsThisZone: number, maxZone: number): 
     hpMax,
     boss,
     bossTimer: boss ? BOSS_TIME_S : 0,
+    remix,
+    week,
   };
 }
 
 /** A fresh run: zone 1, no kills. */
-export function createCombat(maxZone = 1): CombatState {
-  return spawnFor(1, 0, Math.max(1, maxZone));
+export function createCombat(
+  maxZone = 1,
+  remix: number = REMIX_OFF,
+  week: number = WEEK_OFF,
+): CombatState {
+  return spawnFor(1, 0, Math.max(1, maxZone), remix, week);
 }
 
 export interface HitResult {
@@ -124,21 +180,21 @@ export function hit(state: CombatState, dmg: number): HitResult {
   const gold = goldFor(state.zone, state.boss);
 
   if (state.boss) {
-    const next = spawnFor(state.zone + 1, 0, state.maxZone);
+    const next = spawnFor(state.zone + 1, 0, state.maxZone, state.remix, state.week);
     return { state: next, killed: true, gold, advancedZone: true, bossSpawned: false };
   }
 
   const kills = state.killsThisZone + 1;
   if (kills >= MONSTERS_PER_ZONE) {
     if (isBossZone(state.zone)) {
-      const boss = spawnFor(state.zone, kills, state.maxZone);
+      const boss = spawnFor(state.zone, kills, state.maxZone, state.remix, state.week);
       return { state: boss, killed: true, gold, advancedZone: false, bossSpawned: true };
     }
-    const next = spawnFor(state.zone + 1, 0, state.maxZone);
+    const next = spawnFor(state.zone + 1, 0, state.maxZone, state.remix, state.week);
     return { state: next, killed: true, gold, advancedZone: true, bossSpawned: false };
   }
 
-  const same = spawnFor(state.zone, kills, state.maxZone);
+  const same = spawnFor(state.zone, kills, state.maxZone, state.remix, state.week);
   return { state: same, killed: true, gold, advancedZone: false, bossSpawned: false };
 }
 
@@ -149,17 +205,32 @@ export interface BossTickResult {
 }
 
 /**
- * Advance the boss timer by `dt`. On expiry the boss bounces: the zone's normal
- * rivals respawn (killsThisZone → 0) so the player can farm gold and re-approach
- * the boss when stronger. No zones are lost (never a soft-lock).
+ * Advance the boss timer by `dt`. On expiry the boss bounces the player back to
+ * the PREVIOUS stage (zone − 1, clamped) to farm gold and buy upgrades; the
+ * frontier (`maxZone`) is kept, so the boss stage stays reachable via the zone
+ * strip and the boss can be re-challenged when stronger. Never a soft-lock.
  */
 export function tickBoss(state: CombatState, dt: number): BossTickResult {
   if (!state.boss) return { state, failed: false };
   const bossTimer = state.bossTimer - dt;
   if (bossTimer <= 0) {
-    return { state: spawnFor(state.zone, 0, state.maxZone), failed: true };
+    return {
+      state: spawnFor(Math.max(1, state.zone - 1), 0, state.maxZone, state.remix, state.week),
+      failed: true,
+    };
   }
   return { state: { ...state, bossTimer }, failed: false };
+}
+
+/**
+ * Challenge the frontier boss directly (skip the remaining rival wave). Only
+ * meaningful on the highest reached boss stage while its gate is unbeaten —
+ * everywhere else this is a no-op. Skipping the wave is a strictly risky
+ * trade (less farm gold, boss sooner), never an exploit.
+ */
+export function challengeBoss(state: CombatState): CombatState {
+  if (!isBossZone(state.zone) || state.boss || state.zone !== state.maxZone) return state;
+  return spawnFor(state.zone, MONSTERS_PER_ZONE, state.maxZone, state.remix, state.week);
 }
 
 /** Fraction of the boss timer remaining (1..0), for the timer bar. */
@@ -175,5 +246,5 @@ export function hpFraction(state: CombatState): number {
 /** Travel to a cleared zone to farm gold. Clamped to 1..maxZone; spawns a rival. */
 export function travelTo(state: CombatState, zone: number): CombatState {
   const target = Math.max(1, Math.min(state.maxZone, Math.floor(zone)));
-  return spawnFor(target, 0, state.maxZone);
+  return spawnFor(target, 0, state.maxZone, state.remix, state.week);
 }

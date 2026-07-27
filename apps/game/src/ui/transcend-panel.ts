@@ -1,10 +1,16 @@
 import type { ChState } from '../game/ch-state';
 import {
+  MYTHOS_NODES,
+  type MythosNodeConfig,
   TRANSCEND_MIN_HPF_LIFETIME,
+  canBuyMythos,
   canTranscend,
+  mythosOwned,
+  mythosSpent,
   transcendGain,
   transcendGlobalMult,
 } from '../game/transcend';
+import { emptyState } from './empty';
 import { fmt } from './format';
 
 function byId(id: string): HTMLElement {
@@ -19,6 +25,8 @@ export interface TranscendDeps {
   state: ChState;
   /** Perform the Transzendenz (bank TE, reset ALL of L1 **and** L2). */
   onTranscend: () => void;
+  /** Buy one Mythos node with held TE (after a successful buy, refresh). */
+  onBuyMythos: (id: string) => void;
 }
 
 /**
@@ -27,8 +35,12 @@ export interface TranscendDeps {
  * tour, Ruhm-Seelen, Twerk-Ahnen **and** all of L2 — Himmelspfirsiche + Himmelsbaum)
  * for a permanent, compounding **×3^TE** global boost, plus the +TE gain preview and
  * the 100-lifetime-HPF gate progress before the first Transzendenz. Held TE / Mythos
- * survive every future reset. The Mythos content tree is an intentional M15 placeholder
- * (the catalog is empty per the scaffold — see the module note).
+ * survive every future reset.
+ *
+ * Darunter der **Mythos-Shop** (ROADMAP-V2 P2): vier einmalige Wahl-Knoten gegen
+ * gehaltenes TE. Weil `transcendGlobalMult` auf dem GEHALTENEN TE rechnet, kostet
+ * jeder Kauf zusätzlich globalen Boost — die Card nennt deshalb vor dem Klick
+ * beides, Kosten UND den Boost danach. Kein Respec: Käufe sind permanent.
  */
 export class Transcend {
   private readonly body = byId('tabTranscend');
@@ -43,7 +55,7 @@ export class Transcend {
         <button class="btn danger" id="transcendBtn" type="button">Transzendieren</button>
       </div>
       <div class="settings-section">
-        <h3>Mythos 🔮</h3>
+        <h3>Mythos-Shop 🔮</h3>
         <div class="rebirth-info transcend-info" id="tcMythosInfo"></div>
         <div id="tcMythosList"></div>
       </div>`;
@@ -114,14 +126,43 @@ export class Transcend {
     }
 
     byId('tcMythosInfo').innerHTML =
-      `Ausgegebene TE schalten <b>Mythos-Skins</b> & -Inhalte frei — permanent über alle Transzendenzen.`;
+      `<span class="tc-bank">Verfügbar <b>${fmt(t.te)}</b> 🔮</span> · ausgegeben <b>${fmt(mythosSpent(t))}</b> 🔮 · Boost <b>×${fmt(mult)}</b>.<br>` +
+      `Knoten sind <b>permanent</b> (überleben jede weitere Transzendenz) und es gibt <b>keinen Respec</b>. ` +
+      `<span class="dim">Achtung: Ausgeben senkt den gehaltenen TE-Stand — und damit den ×3^TE-Boost. Genau das ist die Entscheidung.</span>`;
 
-    // The Mythos content tree is intentionally minimal in M15 (the scaffold ships an
-    // empty catalog, spec §11 open question #5 „bewusst dünn"). A tasteful placeholder
-    // stands in for the future spent-TE sink; no balance is invented here.
-    byId('tcMythosList').innerHTML = `<div class="item locked mythos-soon">
-        <div class="nm">Mythos-Skins <span class="lv">bald</span></div>
-        <div class="ds">Kosmetische Mythos-Skins & Flavor-Inhalte für Transzendente Essenz — in Arbeit.</div>
+    // ROADMAP-V2 G6: Ohne TE ist der Mythos-Shop eine Auslage ohne Geld — ein
+    // Satz sagt, woher es kommt.
+    const shopEmpty =
+      t.te <= 0 && MYTHOS_NODES.every((cfg) => !mythosOwned(t, cfg.id))
+        ? emptyState(
+            'transcend',
+            'Transzendente Essenz gibt es nur bei einer Transzendenz — dann kaufst du hier permanente Mythos-Knoten.',
+          )
+        : '';
+
+    const list = byId('tcMythosList');
+    list.innerHTML = shopEmpty + MYTHOS_NODES.map((cfg) => this.nodeCard(cfg)).join('');
+    for (const el of Array.from(list.querySelectorAll<HTMLElement>('.item'))) {
+      const id = el.dataset.id;
+      if (id && MYTHOS_NODES.some((n) => n.id === id)) {
+        el.addEventListener('click', () => this.deps.onBuyMythos(id));
+      }
+    }
+  }
+
+  /** Eine Mythos-Knoten-Card: Name, Effekt, Kosten bzw. gekauft-Haken. */
+  private nodeCard(cfg: MythosNodeConfig): string {
+    const t = this.deps.state.transcend;
+    const owned = mythosOwned(t, cfg.id);
+    const affordable = canBuyMythos(t, cfg.id);
+    const foot = owned
+      ? `<span class="cost tc-owned">✔ Gekauft — für immer aktiv</span>`
+      : `<span class="cost ${affordable ? '' : 'bad'}">${fmt(cfg.cost)} 🔮` +
+        `${affordable ? ` · danach Boost ×${fmt(transcendGlobalMult(t.te - cfg.cost))}` : ' · nicht genug TE'}</span>`;
+    return `<div class="item ${owned ? 'tc-node-owned' : affordable ? '' : 'locked'}" data-id="${cfg.id}">
+        <div class="nm">${cfg.name}<span class="lv">${owned ? '✔' : `${fmt(cfg.cost)} 🔮`}</span></div>
+        <div class="ds">${cfg.desc}</div>
+        <div class="crew-foot">${foot}</div>
       </div>`;
   }
 }

@@ -34,12 +34,36 @@ describe('peach — schedule (§6.1)', () => {
     expect(rollNextPeachAt(0, a)).toBe(rollNextPeachAt(0, b));
     expect(a.cursor).toBe(b.cursor);
   });
+
+  // ROADMAP-V2 P2, Mythos-Knoten „Pfirsich-Magnet": der Faktor skaliert NUR die
+  // gewürfelte Pause. Default 1 ⇒ byte-gleich zu vorher (die Sim fährt ohne Knoten).
+  it('skaliert die Pause mit `gapMult`, ohne den Zufallszug zu verändern', () => {
+    const mk = (): Rng => new Rng({ seed: 3, cursor: 5 });
+    const plain = rollNextPeachAt(0, mk());
+    const faster = rollNextPeachAt(0, mk(), 1 / 1.2);
+    expect(faster).toBeCloseTo(plain / 1.2, 6); // exakt +20 % Frequenz
+    expect(rollNextPeachAt(0, mk(), 1)).toBe(plain); // Default = altes Verhalten
+    // Beide Aufrufe kosten genau einen Zug — der RNG-Cursor bleibt vergleichbar.
+    const a = mk();
+    const b = mk();
+    rollNextPeachAt(0, a);
+    rollNextPeachAt(0, b, 0.5);
+    expect(a.cursor).toBe(b.cursor);
+    // Müll-Faktoren fallen auf 1 zurück (nie 0 s Pause, nie NaN).
+    for (const bad of [0, -2, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(rollNextPeachAt(0, mk(), bad)).toBe(plain);
+    }
+  });
 });
 
 describe('peach — boost (§6.1)', () => {
   it('is ×2 income for exactly 60 s (v12 Goal-Nerf)', () => {
     const now = 5_000;
     const until = activateBoost(now);
+    // ROADMAP-V2 P4 „Pfirsich-Reife": +15 s auf genau dieses Fenster (Default 0).
+    expect(activateBoost(now, 15_000)).toBe(until + 15_000);
+    expect(activateBoost(now, -5)).toBe(until);
+    expect(activateBoost(now, Number.NaN)).toBe(until);
     expect(until).toBe(now + PEACH_BOOST_S * 1000);
     expect(PEACH_BOOST).toBe(2);
     expect(incomeMultiplier(until, now)).toBe(2);

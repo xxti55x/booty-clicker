@@ -1,6 +1,7 @@
 import { ASCEND_MIN_ZONE, canAscend, pendingSouls } from '../game/ascension';
 import type { ChState } from '../game/ch-state';
 import { soulBonusEff } from '../game/heaven';
+import { emptyState } from './empty';
 import { fmt } from './format';
 
 function byId(id: string): HTMLElement {
@@ -71,7 +72,20 @@ export class Prestige {
     const bonusNow = Math.round(state.souls * bonus * 100);
     const bonusAfter = Math.round((state.souls + pending) * bonus * 100);
 
+    // ROADMAP-V2 G6: Solange nie aszendiert wurde, trägt der Tab nur Nullen —
+    // und genau dann sieht man ihn zum ERSTEN Mal (er erscheint, sobald sich
+    // eine Aszension lohnt). Ein Satz sagt, worum es hier überhaupt geht; die
+    // Statistik darunter bleibt unverändert stehen.
+    const fresh = state.souls <= 0 && state.rsLifetime <= 0;
+    const empty = fresh
+      ? emptyState(
+          'fame',
+          `Ab Bühne ${ASCEND_MIN_ZONE} tauscht eine Aszension die ganze Tour gegen Ruhm-Seelen — sie machen jeden neuen Anlauf dauerhaft stärker.`,
+        )
+      : '';
+
     byId('prInfo').innerHTML =
+      empty +
       `Aktuell <b>${fmt(state.souls)}</b> gehaltene Seelen (+${bonusNow}% Schaden).<br>` +
       `Beim Neustart deiner Tournee gibt es <b>+${fmt(pending)}</b> Seelen ` +
       `(→ +${bonusAfter}% dauerhaft). Deine Crew, Bühne & BP werden zurückgesetzt; Ahnen bleiben.<br>` +

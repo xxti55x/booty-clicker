@@ -13,6 +13,8 @@ import {
   isQuestComplete,
 } from '../game/quests';
 import type { Season } from '../game/season';
+import type { WeeklyStage } from '../game/weekly';
+import { emptyState } from './empty';
 import { fmt } from './format';
 
 function byId(id: string): HTMLElement {
@@ -59,6 +61,14 @@ export interface MetaDeps {
   openSubmit: () => void;
   /** The active season banner, or null. */
   season: () => Season | null;
+  /** ROADMAP-V2 A5: die Bühne der Woche (null = aus). */
+  weekly: () => WeeklyStage | null;
+  /** Die Wochen-Bestzone (Frontier-Highwater dieser Woche). */
+  weekBest: () => number;
+  /** Die aktuelle Frontier — entscheidet, ob die Wochen-Bühne erreichbar ist. */
+  frontier: () => number;
+  /** Auf die Wochen-Bühne reisen (no-op, wenn sie noch nicht erreicht ist). */
+  travel: (zone: number) => void;
 }
 
 /**
@@ -79,6 +89,10 @@ export class Meta {
   constructor(private readonly deps: MetaDeps) {
     this.body.innerHTML = `
       <div class="meta-season hidden" id="metaSeason"></div>
+      <div class="settings-section" id="metaWeekSec">
+        <h3>Bühne der Woche</h3>
+        <div class="week-card" id="metaWeek"></div>
+      </div>
       <div class="settings-section">
         <h3>Täglicher Login</h3>
         <div id="metaDaily"></div>
@@ -97,6 +111,7 @@ export class Meta {
       </div>
       <div class="settings-section">
         <h3>Erfolge <span class="dim" id="metaAchCount"></span></h3>
+        <div id="metaAchEmpty"></div>
         <div class="ach-grid" id="metaAch"></div>
       </div>`;
 
@@ -106,6 +121,12 @@ export class Meta {
       if (btn && !btn.disabled) this.deps.claim(btn.dataset.claim!);
     });
     byId('metaReroll').addEventListener('click', () => this.deps.reroll());
+    // A5: Reise-Button per Delegation — die Karte wird bei jedem Wochen-/Frontier-
+    // Wechsel neu gebaut, ein direkt gebundener Handler ginge dabei verloren.
+    byId('metaWeek').addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-wz]');
+      if (btn && !btn.disabled) this.deps.travel(Number(btn.dataset.wz));
+    });
     byId('metaLbTop').addEventListener('click', () => this.deps.openTop());
     byId('metaLbSubmit').addEventListener('click', () => this.deps.openSubmit());
 
@@ -116,8 +137,14 @@ export class Meta {
     const m = this.deps.state.meta;
     const prog = m.questIds.map((id) => m.questProgress[id] ?? 0).join(',');
     const season = this.deps.season()?.id ?? '';
+    const wk = this.deps.weekly();
     return [
       season,
+      // A5: Woche, Wochen-Bestzone und Frontier gehören in die Change-Detection —
+      // sonst bliebe der Reise-Button gesperrt, bis irgendetwas anderes sich rührt.
+      wk?.week ?? 0,
+      this.deps.weekBest(),
+      this.deps.frontier(),
       m.day,
       m.streak,
       m.lastLoginDay,
@@ -134,6 +161,7 @@ export class Meta {
     if (!force && sig === this.sig) return; // change-detected: skip the rebuild
     this.sig = sig;
     this.renderSeason();
+    this.renderWeekly();
     this.renderDaily();
     this.renderQuests();
     this.renderAchievements();
@@ -149,6 +177,38 @@ export class Meta {
     }
     el.classList.remove('hidden');
     el.innerHTML = `<span class="ms-emoji">${s.emoji}</span><span class="ms-body"><b>${s.name}</b><span class="dim">${s.hint}</span></span>`;
+  }
+
+  /**
+   * ROADMAP-V2 A5 — die Wochen-Karte: Bühnen-Nummer, die zwei gestapelten Regeln,
+   * die eigene Wochen-Bestzone und EIN Button.
+   *
+   * Der Button kennt zwei Zustände, und die Frontier-Regel des Zonen-Strips gilt
+   * hier unverändert: erreicht ⇒ „Zu Bühne 37 reisen", nicht erreicht ⇒ der
+   * gesperrte Hinweis „Erreiche Bühne 37". Ein Wochen-Anker darf nichts
+   * überspringen — er ist ein Ziel, keine Abkürzung.
+   */
+  private renderWeekly(): void {
+    const wk = this.deps.weekly();
+    const sec = byId('metaWeekSec');
+    if (!wk) {
+      sec.classList.add('hidden');
+      return;
+    }
+    sec.classList.remove('hidden');
+    const best = this.deps.weekBest();
+    const reached = this.deps.frontier() >= wk.zone;
+    const rules = wk.mods
+      .map((m) => `<span class="wk-mod" title="${m.description}">${m.icon} ${m.name}</span>`)
+      .join('<span class="wk-plus">+</span>');
+    const btn = reached
+      ? `<button class="btn" type="button" data-wz="${wk.zone}">Zu Bühne ${wk.zone} reisen</button>`
+      : `<button class="btn ghost" type="button" disabled>Erreiche Bühne ${wk.zone}</button>`;
+    byId('metaWeek').innerHTML =
+      `<div class="wk-head">📅 Bühne der Woche: <b>${wk.zone}</b> <span class="dim">(KW ${wk.isoWeek})</span></div>` +
+      `<div class="wk-mods">${rules}</div>` +
+      `<div class="wk-best">Bestzone diese Woche: <b>${best > 0 ? fmt(best) : '—'}</b></div>` +
+      `<div class="wk-act">${btn}</div>`;
   }
 
   private renderDaily(): void {
@@ -214,6 +274,15 @@ export class Meta {
   private renderAchievements(): void {
     const owned = new Set(this.deps.state.achievements);
     byId('metaAchCount').textContent = `${owned.size}/${CH_ACHIEVEMENTS.length}`;
+    // ROADMAP-V2 G6: Eine Wand aus 🔒 ist der leerste Zustand des Tabs — ein
+    // Satz sagt, dass sie sich beim Spielen von selbst füllt.
+    byId('metaAchEmpty').innerHTML =
+      owned.size === 0
+        ? emptyState(
+            'goals',
+            'Erfolge schalten sich beim Spielen frei — Bühnen klettern, Bosse legen, Truhen öffnen, aszendieren.',
+          )
+        : '';
     byId('metaAch').innerHTML = CH_ACHIEVEMENTS.map((a) => {
       const on = owned.has(a.id);
       return `<div class="ach ${on ? 'on' : 'off'}" title="${a.desc}">

@@ -3,6 +3,951 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## ROADMAP-V2 Schritt 11 — X6 Mobile-QA + P5 Balance-Ritual
+
+- **Der schlimmste Mobil-Befund war kein Telefon im Hochformat, sondern das
+  QUERformat.** Portrait (402×850) hatte lauter kleine Wunden — Touch-Ziele
+  zwischen 20 und 37 px, die Hinweiszeile unter dem Mute-Knopf, 4 px Crew-Knopf
+  in der HUD-Karte, ein neunter Reiter hinter einem Seitwärts-Scroll _ohne
+  Balken_. Eine kleine Landscape (740×360) dagegen war ein Trümmerhaufen: die
+  Ekstase-Leiste lag zu 280 × 42 px auf der Rivalen-Karte, der Crew-Knopf zu
+  33 × 33 px auf dem Zonen-Strip, der Mute-Knopf auf Karte und Boss-Knopf, und
+  die Rivalen-Karte endete 26 px UNTER der Falz. Ursache: über 640 px Breite
+  greift das 50/50-Layout (Bühne rechts, Overlay-Spalte auf 75 %) — es fragt
+  aber nur nach BREITE. Ein Landscape-Telefon ist breit und flach, also bekam es
+  die Desktop-Maße auf 360 px Höhe. Lehre für die Zukunft: jede Layout-Abfrage
+  in diesem Projekt, die eine Spalte stapelt, braucht ihr Höhen-Gegenstück.
+- **Die Reparatur ist eine `max-height`-Abfrage, keine zweite Breiten-Abfrage.**
+  `@media (max-height: 480px)` schnürt die Kopf-Spalte zusammen (BP 40 → 24 px,
+  Karten-Polster halbiert, Strip-Kacheln 46 → 40 px = exakt die Touch-Grenze)
+  und legt Ekstase + Mute an den unteren Rand; ein zweiter Block
+  `(min-width: 641px) and (max-height: 480px)` verschiebt NUR die horizontale
+  Hälfte (Overlay-Spalte 75 % → 66 %, am Crew-Knopf vorbei). Getrennt, weil ein
+  640 × 360-Gerät die Höhen-Kur braucht, aber weiter das Bottom-Sheet-Layout
+  fährt. Der Block steht am ENDE des Stylesheets — `.zs`/`.zonestrip` werden
+  weiter oben definiert, und Media-Queries erben keine Spezifität.
+- **Die Tutorial-Zeile verschwindet auf flachen Viewports ganz.** Sie lag quer
+  über der Rivalen-Karte, und auf 360 px Höhe ist eine Zeile, die sich nach 26 s
+  ohnehin wegblendet, kein Platz wert. Sie ist die EINZIGE Sache, die X6
+  ausblendet — alles andere schrumpft nur.
+- **44 px statt 40 px, wo Platz ist.** Die Messlatte des Pakets war „≥ 40 px",
+  die Portrait-Fixes gehen auf 44 (Kauf-Mengen, Kulissen, Skin-Knöpfe,
+  Boss-Knopf, Board-Wechsler); in der flachen Landscape, wo jede Zeile zählt,
+  bleibt es bei 40. Die Reiter gehen auf 44 px Mindestbreite: neun Reiter à 56 px
+  ergaben 448 px auf einem 399 px breiten Blatt, „⚙️ Mehr" war praktisch
+  unerreichbar. Mit 44 px passen alle neun nebeneinander, und „Himmel" (die
+  längste Beschriftung, 9.5 px) passt weiterhin hinein.
+- **Der Zonen-Strip war schon in Ordnung — gemessen, nicht geraten.** Sieben
+  Slots (fünf Bühnen + „…"-Lücke + Frontier) belegen im Portrait 320 px in einer
+  370 px breiten Karte, jede Kachel 46 × 51 px inkl. Mod-Abzeichen und
+  Stern-Pips. Der Lücken-Slot ist mit 20 × 19 px klein, aber er ist ein
+  Trennzeichen und kein Knopf — er wurde bewusst NICHT aufgeblasen. Ebenfalls
+  gemessen und bewusst gelassen: `scrollWidth` des Strips liegt 4 px über der
+  Box, weil die aktive Kachel um 1.16 skaliert; die Karte hat 22 px Polster,
+  es wird nichts abgeschnitten.
+- **fps: SwiftShader taugt nur als RELATIV-Maß — und sagt hier etwas
+  Unerwartetes.** Über je 5 s gemessen (rAF-Delta, Bühne 12, Preset-Vorgabe
+  „high"): Portrait 402 × 850 → 1350 ms/Frame (0.7 fps), Landscape 740 × 360 →
+  536 ms/Frame (1.9 fps). Die Gerätepixel-Dichte ist dabei fast egal (DPR 2 → 1
+  bringt nur −5 % bzw. −9 %), also ist der Software-Rasterizer NICHT
+  füllraten-, sondern pass-gebunden. Draw-Calls: Portrait 179, Landscape und
+  Desktop je 236 — beide unter dem 250er-Budget, und das Hochformat hat sogar
+  WENIGER. Der Portrait-Rückstand ist damit eine Eigenschaft des
+  Software-Rasterizers über einem hohen, schmalen Puffer, keine Spiel-Eigenschaft
+  — die X6-Änderungen sind ohnehin reines CSS und bewegen ihn nicht.
+- **Offen und ehrlich benannt: das Mobil-Preset wählt sich nicht selbst.**
+  `settings.quality` steht per Vorgabe auf `high` (Pixel-Ratio-Deckel 2, Schatten,
+  Bloom, volle Ambient-Dichte); eine Geräte-Erkennung gibt es nicht. Die
+  Roadmap-Latte „60/30 fps Desktop/Mobil-Preset" hängt also an einer manuellen
+  Einstellung. Das zu drehen ist Logik, nicht Layout — X6 war ausdrücklich eine
+  CSS-Runde, also bleibt es hier als benannte Restschuld stehen statt als stille
+  Änderung.
+- **P5: `npm run balance` läuft über node + esbuild, nicht über den
+  Test-Runner.** Zwei Wege standen zur Wahl: ein `balance.report.test.ts`, das
+  eine Tabelle druckt und immer grün ist, oder ein Skript, das die TS-Module
+  bündelt und abtastet. Der Test-Runner-Weg hätte die Tabelle bei JEDEM
+  `npm test` mitlaufen lassen (+15 s) und einen Test erfunden, der nichts
+  behauptet. Das Skript folgt stattdessen dem Muster, das schon
+  `tools/blender/dump_poses.mjs` vorgibt: esbuild (über Vite ohnehin im Baum,
+  also keine neue Dependency) bündelt `game/sim.ts` + `game/weekly.ts` nach ESM,
+  node importiert und misst. Laufzeit 9.8 s gegen ein 60-s-Budget; das Skript
+  bricht selbst ab, wenn es das Budget reißt.
+- **Keine Zweitimplementierung — die Bot-Profile sind jetzt geteilt.**
+  `SIM_ACTIVE`, `SIM_ACTIVE_CAL`, `SIM_RUN_S` und `SIM_SEEDS_HEAVY` standen als
+  lokale Konstanten in `sim.test.ts` und wären im Skript ein zweites Mal
+  getippt worden — das driftet irgendwann. Sie stehen jetzt in `sim.ts`, und
+  BEIDE Seiten importieren sie; ein Test pinnt ihre Werte, damit eine Änderung
+  laut wird statt still jede Kennlinie zu verschieben. Die Zahlen selbst kommen
+  ausschließlich aus `simulateSingleRun`/`simulateRunChain`/
+  `simulateAscensionEra`/`simulateContinuous` — denselben Funktionen wie die
+  Anker, mit denselben Optionen.
+- **Die Tabelle nennt neben jedem Block seinen Anker.** Sie ist kein Gate (rot
+  wird nur `npm test`), sondern der Kontostand daneben: „t25 32.4 min · Anker
+  ~30 min ±25 %" liest man in zwei Sekunden, „E2-Verhältnis 1.86 · Anker ≤ 2.00"
+  auch. So sieht man eine Verschiebung, BEVOR ein Anker reißt — genau der Zweck,
+  den P5 der Roadmap versprochen hat.
+
+### Balance-Snapshot (2026-07-27, Seeds 1/7/12345 — `npm run balance`)
+
+```
+── 1 · Pacing im ersten Sitting · Bot 3 cps + Juice, OHNE Loot (§4.8-Kalibrierung)
+Seed    t10 [min]   t20 [min]   t25 [min]   t30 [min]   Wand-Bühne
+────────────────────────────────────────────────────────────────────
+1             1.7        13.7        35.8       n. e.           25
+7             1.7        13.9        33.9       n. e.           25
+12345         1.7        13.4        27.4       n. e.           25
+   Anker: t10 ~1.75 min ±25 % · t25 ~30 min ±25 % (+5) · Bühne 30 NICHT im ersten Sitting
+   Mittel: t10 1.7 min · t25 32.4 min · Wand ⌀ Bühne 25.0
+
+── 2 · Kumulierter Marsch · Bot 1 cps ohne Juice, MIT Loot (14 × 45 min)
+Seed    t50 [h]   t75 [h]   Beste Bühne   Seelen-Bank
+───────────────────────────────────────────────────────
+1          2.84      3.90            75          1295
+7          2.72      3.13            75          1295
+12345      2.29      3.20            75          1295
+   Anker: t75 in [3 h, 7.5 h] · Mittel t75 3.41 h
+
+── 3 · Erste Himmelfahrt · Bot 0.7 cps ohne Juice, OHNE Loot (RS-Lebenszeit ≥ 1000)
+Seed    Himmelfahrt [h]   Durststrecke [min]   +50 %-Stufen   Aszensionen   Tiefste Bühne
+───────────────────────────────────────────────────────────────────────────────────────────
+1                 17.36                 93.7             74             8              75
+7                 19.06                 98.1             71            10              75
+12345             17.17                 98.2             73             8              75
+   Anker: Himmelfahrt in [11.6 h, 19.4 h] · Durststrecke ≤ 105 min
+   Mittel: 17.86 h · längste Durststrecke 98.2 min
+
+── 4 · E2 weiche Wand · adaptive Aszension + Ahnen + Himmelfahrt + Baum
+Seed    +5-Stufen   schlimmstes Verhältnis   Aszensionen   Himmelfahrten   HPF   Baum-Stufen   Beste Bühne
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+1              15                     0.93            15               1     1             0            75
+7              15                     0.84            15               1     1             0            75
+12345          15                     1.86            13               1     1             0            75
+   Anker: ≥ 14 Stufen · Verhältnis ≤ 2.00 · ≥ 1 Himmelfahrt über ≥ 8 Aszensionen
+
+── 5 · E3 Lebendigkeit (20 Aszensionen) + E4 Klick-Vorsprung (45 min)
+Seed    E3 +50 %-Stufen   E3 größte Lücke [min]   aktiv   gemächlich   E4-Vorsprung
+─────────────────────────────────────────────────────────────────────────────────────
+1                    55                     6.0      30           23             +7
+7                    49                     5.5      45           20            +25
+12345                58                     4.6      35           30             +5
+   Anker: ≥ 10 Stufen · Lücke ≤ 90 min · E4-Vorsprung ≥ 4 Bühnen
+   Mittel: E4-Vorsprung +12.3 Bühnen · kleinster 5
+
+── 6 · Wochen-Anker · Bühne der Woche + Board-Saison (ISO-Kalender, A5/X4)
+Woche                 ISO   Bühne                         Regeln           Saison   Board-Schlüssel
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+2952 ◀ jetzt   KW 31/2026      44       Beat-Nacht + Peach-Party   7 (Woche 5/13)       weekly-2952
+2953           KW 32/2026      51   Konfetti-Regen + Peach-Party   7 (Woche 6/13)       weekly-2953
+2954           KW 33/2026      58   Konfetti-Regen + Peach-Party   7 (Woche 7/13)       weekly-2954
+2955           KW 34/2026      66        Zähe Menge + Beat-Nacht   7 (Woche 8/13)       weekly-2955
+2956           KW 35/2026      72          Goldrausch + Marathon   7 (Woche 9/13)       weekly-2956
+   Streuung über 52 Wochen: 43 verschiedene Bühnen (21…79), Schrittweite 7
+
+═══ fertig in 9.8 s (Budget < 60 s) ══════════════════════════════
+```
+
+Alle Werte decken sich mit den Anker-Tests (807 + 1 = 808 grün) — P5 hat keine
+Balance-Zahl bewegt, es macht sie nur sichtbar.
+
+## ROADMAP-V2 Schritt 10 — A5 Bühne der Woche + X4 Leaderboard-UI
+
+- **2026-07-27 — A5 landete regulär (Commit „Buehne der Woche"), X4 wurde vom
+  Reviewer geborgen.** Der Coding-Agent starb nach fertigem X4-Code (Client,
+  UI, additive Worker-Erweiterung inkl. Tests), aber vor Commit/Beweis — der
+  Reviewer (Fable) hat den Stand abgenommen: 807 Game-Tests + 29 API-Tests
+  grün, Build sauber, Headless-Beweis über den Ziele-Tab (Wochen-Karte mit
+  gestapelten Wochen-Mods, gesperrtem Reise-Button unterhalb der Frontier
+  und Wochen-Bestzone; Saison-Zeile/Board-Wechsler/Fehler-Retry per
+  gemockter API, die echte D1-API läuft headless nicht). Wochen-Regel: auf
+  der Wochen-Bühne ERSETZEN die zwei welt-einheitlichen Wochen-Mods (Seed =
+  ISO-Woche, nicht der Spieler-Seed) den A1-Mod — nie drei Regeln
+  gleichzeitig. Prozess-Lehre: Agenten-Läufe brauchen einen
+  Fallback-Check-in des Reviewers; ein still gestorbener Agent kostete hier
+  Stunden Wartezeit, die Arbeit selbst war unversehrt im Working Tree.
+
+## ROADMAP-V2 Schritt 9 — P4 Himmelsbaum-Ausbau
+
+- **Drei Äste, 18 Knoten — und die fünf alten bleiben byte-gleich.** Twerk-Coach,
+  Frühstarter, Nachtschicht, Ekstase-Ausdauer und Truhen-Magnet behalten Id,
+  Kostenliste und Wirkung; sie wurden nur einem Ast zugeordnet (Coach +
+  Ekstase-Ausdauer → 🕺 Ritual, Nachtschicht + Truhen-Magnet → 💰 Ökonomie,
+  Frühstarter → ⚔️ Kampf: er ist der einzige Knoten, der einen RE-CLIMB direkt
+  stärkt, und Re-Climb ist Kampf, nicht Buchhaltung). Damit verliert kein Alt-Save
+  eine einzige gekaufte Stufe, und die neuen Knoten füllen jeden Ast auf 4 normale
+  - 1 Exklusiv-Paar auf.
+- **Kein Schema-Bump — und unbekannte Baum-Ids ÜBERLEBEN das Laden.** `heaven.tree`
+  ist seit v5 ein offenes `Record<string, number>`; `repairHeaven` filtert nur auf
+  „positive ganze Zahl", nicht auf bekannte Ids. Neue Knoten brauchen also keine
+  Migration. Die offene Frage war, ob unbekannte Ids beim Laden geprunt werden
+  sollten — Entscheidung: **überleben lassen**. Wer mit einem neueren Build spielt,
+  dort einen neuen Knoten kauft und danach eine ältere Version öffnet (Itch-Build,
+  zweites Gerät), bekäme beim Prunen seine HPF _nicht_ zurück, sondern verlöre sie
+  ersatzlos. Gefährlich ist das Überleben nicht, weil `treeLevel` jetzt die EINZIGE
+  Effekt-Quelle ist und jede Stufe auf das Max-Level des Knotens deckelt — eine
+  unbekannte Id hat Max-Level 0 und ist damit von Natur aus wirkungslos (derselbe
+  Deckel neutralisiert nebenbei ein hand-editiertes `coach: 999`). Aufgeräumt
+  werden die Fremd-Ids beim Respec, also genau dann, wenn der Spieler ohnehin
+  „alles auf Anfang" sagt — erstattet wird für sie nichts, weil kein Preis bekannt ist.
+- **Exklusiv-Paare statt einer weiteren Einkaufsliste.** Pro Ast schließen sich zwei
+  Knoten gegenseitig aus (Truhen- vs. Pfirsich-Fokus · Klick- vs. Crew-Doktrin ·
+  Ekstase- vs. Combo-Doktrin). Die Sperre hängt an EINEM Feld (`exclusiveWith`,
+  beidseitig gesetzt) und wird an genau einer Stelle ausgewertet
+  (`treeNodeBlockedBy` → `canBuyTreeNode`), damit UI, Sim und Save dieselbe Regel
+  lesen. Warum ausgerechnet diese Paare: jedes stellt eine echte Spielweise gegen
+  eine andere (Truhen-Ökonomie vs. BP-Tempo, aktiv vs. idle, Burst vs. Dauerfeuer)
+  — ein Paar aus „+20 % X" und „+20 % Y" wäre eine Rechenaufgabe, keine Entscheidung.
+- **Der Preis der Wahl ist doppelt — und das ist der Punkt.** Gehaltene HPF geben
+  +2 % globalen Schaden UND verstärken jede Seele. Ein 35-HPF-Doktrin-Kauf nimmt
+  also 70 % globalen Schaden mit. Im Headless-Beweis sieht man das direkt: der Kauf
+  der Crew-Doktrin (+25 % Crew-DPS) hebt die DPS von 734K auf 745K, senkt den
+  Klick-Schaden aber von 154K auf 125K — weil 35 gehaltene HPF fehlen. Genau
+  deshalb ist der Baum eine Reihe von Entscheidungen und keine Checkliste.
+- **Exklusiv-Knoten kosten einheitlich 35 HPF.** Teurer als jeder normale
+  Einzel-Knoten (8–25), aber unter den tiefen Stufen (75/100). Einheitlich, damit
+  die Wahl eine Build- und keine Preisfrage ist — ein Test hält beide Eigenschaften
+  fest. Die restliche Kurve setzt die bestehende fort (×2.5 je Stufe).
+- **Respec: 1 HPF Gebühr, kein neues Save-Feld.** `respecTree` erstattet die Summe
+  aller bezahlten Stufen, behält 1 HPF ein und leert `tree` — mehr braucht es nicht,
+  der Vorgang ist „Baum leeren + Konto erhöhen". `hpfLifetime` bleibt unangetastet
+  (ein Highwater, kein Konto), und das Ergebnis wird auf `hpfLifetime` gedeckelt,
+  damit die Kern-Invariante „gehalten ≤ jemals verdient" auch ein frisiertes Save
+  überlebt. Die Gebühr ist bewusst winzig: sie soll das Experimentieren nicht
+  bestrafen, sondern verhindern, dass man vor jedem Bosskampf umskillt.
+- **Bestätigung per Arm-Knopf statt `confirm()`.** Derselbe Zwei-Klick-Pfad, den
+  Himmelfahrt und Transzendieren schon benutzen (`armed`-Klasse, 4-s-Timeout,
+  „Sicher? Alle Knoten fallen"). Ein natives `confirm()` gibt es im Repo nirgends —
+  es blockiert den Loop, sieht auf dem Handy fremd aus und ließe sich nicht
+  headless fotografieren.
+- **Gestapelte Ast-Sektionen statt echter Spalten.** Das Panel lebt im
+  Bottom-Sheet, das im Portrait ~50 % der Höhe misst; drei Spalten à sechs Karten
+  wären dort unlesbar schmal. Die Äste sind stattdessen als eigene Blöcke mit
+  Kopfzeile (Icon + Name + ein Satz) gerahmt, die Exklusiv-Paare stehen in einem
+  eigenen gestrichelten Kasten mit „ODER"-Steg dazwischen. Portrait-Kontrolle:
+  Ast-Breite 385 px, kein horizontaler Scroll.
+- **Jeder Knoten hängt in einem echten Rechenpfad — kein toter Effekt.** Goldene
+  Hände → `goldMult` (also live UND offline), Pfirsich-Reife → `activateBoost`,
+  Truhen-Fokus → `rivalChestChance`-Roll, Pfirsich-Fokus → `rollNextPeachAt`-Pause
+  (multipliziert sich mit dem Mythos-Knoten „Pfirsich-Magnet"), Schwerer Bass +
+  Crew-Doktrin → `dpsOf`, Klick-Doktrin → `clickDamageOf`, Präzisions-Shake →
+  `critMultFactor` (derselbe Griff wie die Krit-Token), Gate-Crasher →
+  `withBossTimerBonus`, Beat-Gefühl → derselbe `beatBonusMs`-Term wie Beatrix/Gear
+  (weitet damit auch das A2-Schild-Fenster), Combo-Gedächtnis → derselbe
+  Reduktions-Term wie die Showmaster-Sterne, Ekstase-Doktrin → `frenzyMult`,
+  Combo-Doktrin → `comboMult`-Schritt. Drei pure Module bekamen dafür einen
+  optionalen Parameter mit unverändertem Default (`comboMult(combo, step)`,
+  `frenzyMult(state, now, mult)`, `activateBoost(now, extraMs)`) — kein Aufrufer
+  außerhalb ändert dadurch sein Verhalten.
+- **Nebenbefund mitgenommen: der Retry-Boss bekam nie einen Uhr-Bonus.** „Boss
+  herausfordern" spawnte über `challengeBoss` ohne `withBossTimerBonus`, also fielen
+  Chronilla und der Gear-Bonus dort still unter den Tisch. Mit dem Gate-Crasher
+  wäre das ein sichtbar kaputter Knoten geworden; jetzt läuft der Retry-Boss über
+  denselben Pfad wie jeder reguläre Spawn.
+- **Sim: der Bot kauft NUR, was er auch rechnet.** `SIM_TREE_PRIORITY` listet die
+  elf Knoten, deren Wirkung im Bot ankommt (Klick/Crew/Krit/Combo/BP/Truhen/
+  Pfirsich). Die Utility-Knoten fehlen bewusst: der Bot geht nie offline, zündet
+  keine Ekstase, klickt ungetaktet und modelliert Boss-Uhr-Boni nirgends — ein Kauf
+  würde ihm dort nur den +2 %/HPF-Globalmult nehmen und die Anker künstlich
+  pessimistisch machen. Das ist dieselbe Untergrenzen-Logik, mit der schon
+  Twerk-Ekstase und die Boss-Schadens-Mults draußen bleiben. Beide Seiten jedes
+  Exklusiv-Paares stehen in der Liste, die DPS-lastige zuerst — weil alle sechs
+  gleich viel kosten, entscheidet bei `cheapestTreeBuy` die Reihenfolge, und der
+  Bot fährt reproduzierbar Crew-/Combo-/Truhen-Fokus.
+- **E2-Anker-Lauf: kein einziger Wert bewegt sich — und das ist gemessen, nicht
+  gehofft.** Mit leerem Baum liefert jeder neue Getter exakt seinen neutralen Wert,
+  also sind alle Anker bit-identisch (722 Alt-Tests grün ohne eine einzige
+  Anpassung). Gemessen mit den E2-Parametern (stallSeconds 1500, 400 k s,
+  fullPrestige, seeds 1/7/12345): 15/15/15 Verbesserungen, worstRatio
+  0.93/0.84/1.86, 1 Himmelfahrt, 15/15/13 Aszensionen — Wert für Wert wie vor P4.
+  Grund: der Bot bankt an der z75-Wand genau **1 HPF** (das dokumentierte
+  F7-Residual), und der billigste gelistete Knoten kostet 12. Statt das als
+  Kommentar stehen zu lassen, gibt `ContinuousResult` jetzt `hpfHeld` +
+  `treeLevels` heraus, und der E2-Test prüft die Aussage („1 HPF gebankt, 0 Stufen
+  gekauft") als echte Messung. Die Kauf-Strategie selbst ist separat getestet
+  (`greedyTreeSpend` mit 200 und 500 HPF), damit „der Bot versteht die neuen Knoten"
+  nicht von einem minutenlangen Lauf abhängt.
+- **Warum die Kosten NICHT gesenkt wurden, damit der Bot etwas kauft.** Verlockend
+  wäre gewesen, den Einstiegsknoten auf ≤ 1 HPF zu drücken, damit der E2-Lauf den
+  Baum anfasst. Das hätte aber die Balance für den BOT gebaut statt für den
+  Spieler: 1 HPF ist der Stand nach der allerersten Himmelfahrt (~15 h), und ein
+  dauerhafter Prestige-Knoten für den Gegenwert von 2 % globalem Schaden wäre
+  geschenkt. Die Anker bleiben damit ehrliche Untergrenzen, und der Baum bleibt
+  das, was die Roadmap will: die Entscheidungs-Dichte für die LANGE Strecke
+  zwischen erster Himmelfahrt und Transzendenz.
+
+## ROADMAP-V2 Schritt 8 — G4 Prestige-Zeremonien + G6 UI-Zahlen-Leben + X5 Audio-Lücken
+
+- **Die Zeremonie ist REIN OPTISCH — die Gutschrift läuft immer vorher.** Alle
+  drei Reset-Handler buchen, setzen zurück, refreshen die Panels und
+  persistieren exakt wie bisher; `playCeremony` ist die LETZTE Zeile. Damit ist
+  der Skip-Tap gefahrlos (es gibt nichts zu überspringen außer Pixeln), das
+  Overlay darf seine Zeiger selbst schlucken (kein Klick rutscht auf die Bühne
+  durch), und ein Absturz mitten in der Blende kostet nichts. Der Zahlen-
+  Aufzähler bekommt die DIFFERENZ als fertigen Wert gereicht (`souls − vorher`)
+  — er rechnet nichts, er zeigt nur.
+- **DOM statt Three für die Zeremonie-Partikel.** Die Blende läuft in genau der
+  Sekunde, in der die Bühne ohnehin komplett neu gebaut wird (Rivale, Kulisse,
+  Crew-Liste, Modifikator-Karte). Ein paar Dutzend absolut positionierte Spans
+  mit einer CSS-Keyframe kosten dort nichts, während zusätzliche Three-Sprites
+  neue Geometrie im teuersten Frame des Spiels bräuchten. Der einzige rAF ist
+  der Aufzähler, und auch der lebt nur für die Dauer der Blende.
+- **✨/🍑/🔮 statt des Roadmap-👻 als Zeremonie-Glyph.** Die Roadmap skizziert
+  „Seelen-Regen 👻 · +N 👻". Genommen wurden die Glyphen, die das Spiel für
+  diese drei Währungen ÜBERALL schon benutzt (HUD-Seelenzeile, Ahnen-Kosten,
+  Prestige-Toasts, Himmel-/Mythos-Panel). Ein 👻 wäre ein zweites Symbol für
+  eine bestehende Währung — genau der Stil-Bruch, den das G6-Konsistenz-Audit
+  eigentlich einsammeln soll. Unterschieden werden die drei ohnehin dreifach:
+  Glyph, Farbe/Bewegung (Regen vs. Implosion) und Dauer (1.5 s vs. 2 s).
+- **Der „Neustart"-Sweep liegt IM Overlay, nicht in der G1-Insel-Animation.**
+  Die drei Reset-Pfade rufen `updateBackground(true)` — ein bewusster Hard-Swap,
+  weil der Wechsel dort Teil eines Resets ist und nicht einer Bühnen-Reise (G1
+  friert für seine 1.2 s den Kampf ein und verschluckt Klicks; das mitten in
+  einen Prestige-Reset zu legen wäre eine Verhaltensänderung an G1). Der Sweep
+  ist deshalb ein CSS-Band, das am Ende der Blende einmal durchs Bild fährt —
+  derselbe „frischer Lauf"-Beat, ohne einen abgenommenen Pfad anzufassen.
+- **Preset-Pflicht ohne neues Preset-Feld.** Die Blende hängt an
+  `preset.cinematics` (aus für low ⇒ es bleibt beim Toast von früher), die
+  Sprite-Dichte an `preset.confetti` — dieselben zwei Regler, die schon den
+  G2-Boss-Auftritt und den Sieg-Wurf steuern. Ein drittes Feld hätte dieselbe
+  Information ein drittes Mal gespeichert. Der AUDIO-Stinger hängt bewusst an
+  KEINEM Preset: er kostet keine Bildrate, und im low-Preset ist er der einzige
+  Moment, der den Reset überhaupt markiert (gleiche Logik wie beim
+  G2-Boss-Stinger, der auch in low bleibt).
+- **G6: `fmt` bleibt die Anzeige-Quelle, getweent wird nur der WERT.** Der
+  Zähler rendert weiter `fmt(v)` — der Tween liefert nur das `v` dazwischen.
+  Ein neuer Kontostand bricht den laufenden Tween ab und startet beim GEZEIGTEN
+  Wert (sonst zuckt die Zahl bei jedem Idle-Tick zurück), und `shouldTween`
+  schluckt Sprünge unter 0.1 %: ein Idle-Tick von 1 000 000 auf 1 000 050 sähe
+  als Tween identisch aus und kostete nur einen rAF. Der rAF läuft
+  ausschließlich während echter Bewegung — im Ruhezustand ist der Zähler
+  exakt so teuer wie vorher.
+- **Kauf-Effekte leben in einer Overlay-Schicht, nicht im Panel.** Der
+  0.25-s-Idle-Tick rendert den offenen Tab neu, sobald sich Gold ändert (also
+  praktisch immer) — ein Konfetti-Partikel IM Crew-Markup wäre nach maximal
+  250 ms mitten im Flug weg, und der frisch gekaufte Fähigkeits-Slot wird beim
+  Rebuild ohnehin durch ein neues Element ersetzt. Die fixe, klick-durchlässige
+  Schicht `#fxLayer` überlebt jeden Rebuild; der Slot-Stempel merkt sich die
+  Position VOR dem Kauf. Nebeneffekt: das Panel-HTML bleibt frei von
+  Effekt-Markup, und `crew.ts` meldet mit `buy`/`buyAbility` jetzt ehrlich
+  zurück, ob wirklich gekauft wurde (gefeiert wird nur ein echter Kauf).
+- **Tab-Wechsel blendet nur EIN.** Die Bodies werden per `display` geschaltet;
+  ein Ausblenden bräuchte einen zweiten, verzögerten Schritt und ließe beide
+  Panels kurz übereinander liegen (Layout-Sprung im Bottom-Sheet). Die
+  120-ms-Keyframe rührt nur `opacity`/`transform` an.
+- **Leerzustände: Stroke-Icons, keine Emojis — und sie ERSETZEN nichts.** Die
+  Icons sind dieselben Pfade wie in der Tab-Leiste (eine Icon-Sprache); Emojis
+  tragen im Spiel Bedeutung (Truhen-Stufen, Sterne, Währungen) und wären hier
+  eine zweite Bedeutungsebene für reines Chrome. Die Karte steht ÜBER der Liste,
+  statt sie zu verdrängen: die gesperrten Knoten sind das Versprechen, der
+  Leerzustand sagt nur, wie man es einlöst. Beim Ruhm-Tab wurde die Bedingung
+  bewusst auf „nie aszendiert" (`rsLifetime === 0`) gelockert statt „nichts zu
+  holen" — sonst wäre sie unerreichbar, weil der Tab genau dann erscheint, wenn
+  sich eine Aszension lohnt.
+- **Konsistenz-Audit (Alt-Phase U): bewusst NICHTS angefasst.** Die
+  Rest-Emojis in HUD und Toasts sind Absicht — Truhen-Stufen (🪵🥈🥇💎🌌),
+  Sterne, Währungen (✨🍑🔮🔑🧩) und Event-Marken (👑👺⏱) sind dort Inhalt,
+  nicht Dekor. Gefunden wurde kein Stil-Bruch, der eine Änderung rechtfertigt;
+  neu dazu kam mit den Leerzuständen ausschließlich Stroke-Ikonografie.
+- **X5: die Ekstase-Lage hängt am FENSTER, nicht an der Intensitätsstufe.**
+  `intensityFor` liefert 3 sowohl bei Ekstase als auch bei Combo-Tier 4 — die
+  vorhandene Stufe-3-Schicht (Lead + Filter-Sweep) bleibt genau so. Die neue
+  zweite Instrumenten-Lage bekommt deshalb einen eigenen Schalter
+  (`setEkstase`), damit das Fenster hörbar sein eigenes Signal hat und nicht mit
+  einer heißen Combo verschwimmt. Sie hängt am selben `out`-Bus wie die übrige
+  Musik, wird also vom Mute-Schalter und vom gestoppten Loop automatisch
+  miterfasst.
+- **`swell` als zweiter Ton-Helfer.** Der bestehende `tone` schlägt in 6 ms an —
+  richtig für Klicks und Stiche, falsch für eine Zeremonie, die tragen soll.
+  `swell` ergänzt weiches Anschwellen plus optionales Frequenz-Gleiten (der
+  Transzendenz-Sog von 110 auf 55 Hz); `tone` bleibt unangetastet, damit kein
+  bestehender SFX seinen Charakter ändert.
+- **Klang wird MESSBAR bewiesen, nicht behauptet.** Headless gibt es kein
+  Audio-Foto, also bekam die Engine `debug` (Kontext-Status + effektive
+  Master-Lautstärke) und `main.ts` die Beweis-Oberfläche `window.chAudio` —
+  gleicher Geist wie `chLoot`/`chGob`. Der Smoke misst damit den Mute-Vertrag
+  (Master exakt 0) und zählt `createOscillator`-Aufrufe pro 2 s mit und ohne
+  laufende Ekstase (club 10 → 26, synth 10 → 36, beach 8 → 17, space 6 → 15).
+  Bewusst gegen eine echte Ekstase (Taste F) gemessen statt gegen den Schalter:
+  der Loop schreibt `setEkstase(frenzy)` jeden Frame und überschriebe jede
+  Fernsteuerung — dieselbe Falle hätte einen falsch-negativen Beweis erzeugt.
+
+## ROADMAP-V2 Schritt 7 — A1 Bühnen-Modifikatoren + A4 Choreo-Sets + A3 Truhen-Kobold
+
+- **Der Modifikator-SEED reist im `CombatState`, nicht der fertige Faktor — und
+  deshalb bleibt `monsterHp` unangetastet.** Drei Wege standen zur Wahl: (a) ein
+  Hook in `monsterHp` (tabu: Advisor, Offline-Ertrag und der Float-Guard lesen
+  dieselbe Kurve und dürfen keinen Seed kennen), (b) ein Faktor an der Stelle,
+  wo die Ausdauer VERBRAUCHT wird (also im Schadenspfad, wie es P2 beim
+  „Boss-Brecher" gemacht hat), oder (c) `spawnFor` bekommt den Seed. Gewählt:
+  **(c)**. Grund ist `hit`/`tickBoss`/`travelTo`: die spawnen das NÄCHSTE Ziel
+  selbst, ein nur von außen gereichter Faktor wäre beim ersten Kill wieder weg.
+  Getragen wird der Seed (nicht der Faktor), weil der Modifikator an der BÜHNE
+  hängt und die mit jedem Spawn wechselt. Der Gewinn gegenüber (b): **eine
+  Quelle** — Spiel, HUD und Bot lesen dieselbe `hpMax`, der Balken zeigt die
+  echte Zahl, und die Sim musste für die HP-Seite gar nichts nachbauen.
+  `REMIX_OFF` (0) ist der Default der Signatur, also rechnen alle Alt-Tests und
+  `simulateFloatGuard` byte-gleich weiter.
+- **Kein Save-Bump — der Remix-Seed wird abgeleitet, nicht gespeichert.**
+  `remixSeedFor(rng.seed, stats.ascensions)`: beide Felder liegen seit Langem im
+  Save und überleben jede Prestige-Schicht. Die Aszensions-Zahl wird durch einen
+  splitmix-Mixer gedreht statt addiert — eine Addition hätte die Karte nur um
+  Bühnen VERSCHOBEN (Bühne 12 bekäme, was eben Bühne 11 hatte); der Roadmap-Satz
+  „Aszension remixt" verlangt eine neue Karte, kein Karussell. Save bleibt bei
+  **v11**, keine Migration, keine neue Fixture. Auch der Kobold (A3) und die
+  Choreo-Sets (A4) sind reine Laufzeit: der Kobold-Zustand lebt wie der
+  A2-`GimmickRuntime` nur in der Glue, ein Reload würfelt seine nächste Runde neu.
+- **Boss-Bühnen tragen NIE einen Modifikator.** Das ist die direkte Lehre aus
+  A2: ein Gate ist eine 30-s-Klippe, kein Regler — dort kostete schon ein
+  Zehntel Wirkungsverlust ganze Bühnen. Die Gates tragen außerdem seit A2 bereits
+  eine eigene Regel-Ebene (Theme-Gimmick); ein zweiter Würfel obendrauf wäre
+  unlesbar. A1 wirkt deshalb ausschließlich auf der Farm-Strecke — und genau
+  dort, wo die Rückreise stattfindet, die es strategisch machen soll.
+- **Zwei Parameter gegenüber der Roadmap gezähmt — vom empfindlichsten Anker
+  entschieden.** Mit den Roadmap-Rohwerten („Zähe Menge" +30 % Ausdauer, „Nebel"
+  −20 % Crew-DPS) lief der 0.7-cps-Bot auf seed 7 mit **20.35 h** aus dem
+  Himmelfahrts-Fenster (Obergrenze 19.38 h) — derselbe idle-dominierte Anker,
+  der schon die A2-Spotlight-Dauer diktiert hat. Mit **+20 %** bzw. **−15 %**
+  landet er bei 19.06 h. Alles andere blieb wie in der Roadmap skizziert.
+- **Was der Bot faltet und was bewusst neutral bleibt.** Gefaltet: `gold`
+  (Kill-BP), `hp` (über `spawnFor`), `click`/`dps` getrennt über
+  `stageDamageFactor` (der Bot rechnet mit EINEM Sekundenbetrag, „Nebel" trifft
+  aber beide Anteile gegenläufig), `crit` im gedeckelten Krit-Stack und `chest`.
+  Neutral: `beat` (der Bot klickt ungetaktet und holt den On-Beat-Bonus nie ab),
+  `ekstase` (im Bot ohnehin nicht modelliert) und `peachGap` (der Bot reist nicht
+  zum Farmen). Alle drei können den ECHTEN Spieler nur beschleunigen — die Anker
+  bleiben damit Untergrenzen, wie schon bei Ekstase und den Boss-Schadens-Mults.
+- **Anker-Lauf (seeds 1/7/12345, vorher → nachher).** t10 104 → 104 s (Bühne 10
+  liegt unter `MOD_MIN_ZONE`, per Konstruktion gleich); t25 2032/2044/2033 →
+  2147/2035/1643 s (Mittel −4.6 %), Bühne 30 bleibt außer Reichweite; erste
+  Himmelfahrt 18.44/18.27/18.32 → 17.36/19.06/17.17 h (Mittel 18.34 → 17.86 h,
+  −2.6 %); kumuliert t75 1.66/2.32/2.36 → 1.61/1.73/1.59 h; E2/E3/E4, Gear-E4 und
+  der Float-Guard unverändert. **Die Streuung je Seed wächst auf ± 10 % (vorher
+  ± 3 %) — das ist die Mechanik, nicht ihr Fehler**: jeder Lauf würfelt eine
+  andere Karte, jede Aszension würfelt neu. Der MITTELWERT bewegt sich kaum, also
+  wandert keine Wand; ein neuer Test pinnt genau das fest (Σ Tiefe über fünf
+  Seeds, mods an gegen mods aus, Grenze 15 %). Kein Fenster musste aufgerissen
+  werden; der Token-Zeugen-Seed wandert 7 → 5 (dieselbe Sorte Zeugen-Tausch wie
+  bei A2 — die Modifikatoren verschieben, welche Truhen-Lose in 45 min gezogen
+  werden).
+- **Der Kobold zieht im BOT aus einem Seiten-Strom.** Im Spiel hängt er am
+  gemeinsamen persistierten `rng` (wie der Pfirsich). Im Bot bekäme dadurch jede
+  Truhen-/Krit-/Gild-Ziehung aller Alt-Seeds einen Versatz — zwei Anker fielen
+  allein daran, ohne dass sich die Balance geändert hätte. `sim.goblinRng` ist
+  aus demselben Seed abgeleitet: gleiche Verteilung, gleiche Kadenz, aber die
+  Alt-Anker messen weiter Balance statt Strom-Versatz. Ertrag im Bot: eine
+  Holztruhe je Fang bei **80 % Fangquote** (`GOBLIN_SIM_CATCH` — 5 Klicks in 8 s
+  sind trivial, die Quote bildet ab, dass man ihn übersieht); der 10-s-×2-Klick-
+  Buff bleibt UNMODELLIERT (≈ +3 % Klick im Mittel, dieselbe Untergrenzen-Logik).
+- **Der Kobold-Buff ist NICHT das Ekstase-System.** `ability.ts` trägt EIN
+  ×10-Fenster mit Ladebalken, HUD-Ring und Ton. Den Kobold dort einzuhängen hätte
+  entweder den Ring falsch angezeigt oder die Ekstase-Dauer heimlich verlängert.
+  Stattdessen ein eigener, winziger Zeit-Buff (`goblinBuffMult`) als eigener
+  Faktor im `extraMult` — zwei Buffs, zwei Zustände, ein Klick-Pfad.
+- **A4 fasst `moves.ts`-Mathematik nicht an.** Neu ist nur eine Auswahl-Ebene:
+  `Choreographer.useSet(indices)` + `advance()`. Die Intensitäts-Tabelle
+  (`MOVE_INTENSITY`) ist paarweise verschieden, damit „die zwei intensivsten"
+  ohne Gleichstands-Regel eindeutig sind; ein Test pinnt sie gegen die echten
+  `MOVES`-Namen, damit ein neuer Move nicht stumm als Intensität 0 durchrutscht.
+  Der Sieges-Diva-Turn ist ein FLAG (`victoryDance`), kein direkter `setMove`:
+  derselbe Kill stellt unmittelbar danach das Set der neuen Bühne, der Sieges-Move
+  muss also zuletzt kommen. Dass er „einmalig" ist, fällt ohne Extra-Zustand
+  heraus — `advance()` von einem Move AUSSERHALB des Sets springt auf dessen
+  ersten Eintrag.
+- **Beweis (Headless, Port 4188, Save v11, seed 424242).**
+  `a1-a-strip-und-card.png` — Bühne 11 mit 🎉-Abzeichen im Strip-Slot und der
+  Card-Zeile „Konfetti-Regen · Die Twerk-Ekstase lädt 50 % schneller auf.";
+  Slot 9 (< 11) und die Slots 10/40 (Boss-Gates) tragen bewusst KEIN Abzeichen.
+  `a1-b-andere-buehne-anderer-mod.png` — Bühne 12, 💰 „Goldrausch", anderer Satz.
+  `a3-c-kobold-auf-der-buehne.png` — der Kobold hoppelt mit Rest-Klick-Zähler
+  über die Insel. `a3-d-kobold-gefangen.png` — nach fünf ECHTEN Button-Klicks
+  (der Beweis nimmt den Spieler-Pfad, nicht die Logik): Holztruhen-Bestand 6 → 7
+  und der Toast „Kobold gefangen! · 🪵 Holztruhe · ×2 Klick-Schaden für 10
+  Sekunden". `a3-e-mini-frenzy-badge.png` — nach dem Toast steht das
+  „×2 Klick · 5s"-Badge allein über dem Ekstase-Knopf.
+  `a4-e-buehne13-BootySlam.png` / `a4-f-buehne18-DivaTurn.png` /
+  `a4-g-boss15-Twerk.png` — drei klar verschiedene Silhouetten mit den Sets
+  [Booty-Slam · Bounce · Hip Circles] / [Diva-Turn · Welle · Drop It Low] /
+  [Twerk · Drop It Low] (Boss ⇒ nur die zwei intensivsten, und keine Mod-Card).
+- **Drei Dinge fielen erst im Bild auf und wurden nachgezogen.** (1) Das
+  Strip-Abzeichen saß außerhalb des Slots (`top: -6px`) und wurde auf der um 1.16
+  skalierten AKTIVEN Bühne vom Panel-Rand abgeschnitten ⇒ nach innen gerückt.
+  (2) Der Kobold hoppelte über die volle Fensterbreite, im 50/50-Layout also
+  quer über die Crew-Liste ⇒ auf die Bühnen-Hälfte und die untere Bildhälfte
+  begrenzt (er soll über die INSEL laufen und keine Knöpfe verdecken). (3) Das
+  ×2-Badge lag zuerst oben auf dem Zonen-Strip ⇒ über den Ekstase-Knopf gesetzt,
+  wo der Klick-Buff hingehört. Kobold und Badge können sich nie überlappen — mit
+  dem Fang verschwindet er.
+
+## ROADMAP-V2 Schritt 6 — P2 Transzendenz-Teaser + TE-Sink
+
+- **`mythos` war seit M14 ein leerer Slot — genau dafür gebaut, also KEIN
+  Schema-Bump.** Der L3-Slice führt `mythos: Record<string, number>` als
+  „spent-TE ledger" mit Kommentar „der Katalog ist absichtlich leer, das hier ist
+  nur der Platz"; `repairTranscend` schickt ihn seit v9 durch `repairCountMap`,
+  die X7-Matrix deckt ihn ab (`{ diamantBooty: 2.7, bad: -1, junk: 'x' }` ⇒
+  `{ diamantBooty: 2 }`). Der Mythos-Shop schreibt nur `id → 1` in genau diese
+  Map. Save bleibt bei **v11**, keine Migration, keine neuen Fixtures — ein Bump
+  ohne neues Feld wäre reine Zeremonie gewesen.
+- **Die Kostenkurve folgt der TE-Einkommenskurve, nicht dem Bauchgefühl.**
+  `teForHpfLifetime = ⌊log10(HPF_life)⌋` startet am 100-HPF-Gate bei **2** und
+  gibt je Größenordnung +1. Der realistische Lebensvorrat liegt also bei **2–4
+  TE**, nicht bei Dutzenden. Die in der Roadmap skizzierte 1/2/3/5-Kurve (11 TE)
+  entspräche 10¹¹ Lebenszeit-HPF — der Shop wäre Deko gewesen. Gewählt:
+  **1/1/2/2**, Board-Summe 6. Damit finanziert die erste Transzendenz (2 TE)
+  genau EINE Entscheidung: ×9 behalten, oder ein 1-TE-Knoten + ×3, oder zwei
+  billige Knoten und gar kein Boost. Das volle Board (10⁶ HPF) ist **absichtlich**
+  unerreichbar — P2 wollte eine Auswahl, keine Checkliste.
+- **Der Preis ist der Boost selbst, und das bleibt so.** `transcendGlobalMult`
+  rechnet auf dem GEHALTENEN TE; jeder Kauf kostet also zusätzlich ×3 globalen
+  Schaden. Der Scaffold-Kommentar erlaubt ausdrücklich, stattdessen `teLifetime`
+  zu füttern (Boost immun gegen Ausgeben) — verworfen: dann wäre der Shop gratis
+  und die „Entscheidung" aus P2 verschwunden. Die Card nennt deshalb VOR dem
+  Klick beides, Kosten und Boost danach („2 🔮 · danach Boost ×27").
+- **Boss-Brecher als Schadens-Faktor, nicht als HP-Abzug — wegen der geteilten
+  Kurve.** `bossHp(zone)` lesen Combat, HUD, Advisor UND die Sim. Ein Eingriff
+  dort hätte einen Zustands-Parameter durch `spawnFor`/`hit`/`tickBoss`/
+  `travelTo` und die Sim schleifen müssen. Stattdessen hängt `1/(1−0.1)` im
+  Boss-Schadens-Stack — wirkungsgleich (der Boss fällt bei 90 % der Ausdauer),
+  aber an EINER Stelle im Spielpfad (`applyHit`) und gespiegelt in
+  `advisor.bossDamageMult`. Diese Spiegelung ist Pflicht, nicht Kosmetik: sonst
+  unterschätzte die P3-Wand-Telemetrie den Spieler nach dem Kauf dauerhaft.
+- **Sim-Ehrlichkeit ohne Anker-Verschiebung.** Alle Anker fahren `te = 0`, kein
+  Knoten gekauft; jeder Effekt-Getter liefert dann exakt den Identitätswert
+  (×1 / +0 s / unveränderte Crew). `rollNextPeachAt` bekam `gapMult = 1` als
+  Default, damit der Zufallszug byte-gleich bleibt und die Sim (die ohne Faktor
+  aufruft) dieselbe Kurve sieht. Ergebnis: 651 Tests grün, E2/E3/E4 und das
+  Himmelfahrts-Fenster **unverändert** — nichts musste re-ankert werden.
+- **Käufe sind permanent, es gibt keinen Respec — konsistent mit `mythos`.**
+  `transcendState` nimmt den ganzen L3-Slice inklusive Ledger mit, `teSpent`
+  (= `teLifetime − te`) bleibt über jede weitere Transzendenz stabil. Deshalb
+  ist jeder Knoten einstufig: eine Kaufkurve, die nie zurückgedreht werden
+  kann, muss klein und lesbar sein.
+- **Frühstart greift nach ALLEN drei Resets, nicht nur nach der Aszension.** Der
+  Himmelsbaum-„Frühstarter" ist aszensions-gebunden und prozentual — nach einer
+  Transzendenz ist er weg, weil L2 mitgewiped wird. Genau dort ist der TE-Knoten
+  am meisten wert, also hängt er in `onAscend`, `onHimmelfahrt` UND
+  `onTranscend`. Er hebt nur an (Max-Regel), kassiert also nie einen höheren
+  Stand des Himmelsbaum-Knotens ein.
+- **Der 🌈-Tab öffnet jetzt mit der ersten Aszension — sonst hätte der Teaser ein
+  Zeitfenster von Minuten.** Bisher: `hpfLifetime > 0 || canHimmelfahrt(…)`, also
+  erst ab 1 000 Lebenszeit-RS — dem Moment, in dem die Himmelfahrt ohnehin
+  bereitsteht. Der 🔮-Teaser darin wäre praktisch nie zu sehen gewesen, weil der
+  echte 🔮-Tab eine Sekunde später erscheint. Die Öffnung folgt exakt der
+  Begründung, die schon über dem 'transcend'-Case steht („eine Schicht, die man
+  erst sieht, wenn sie offen ist, kann kein Ziel sein"); das Panel zeigt vor dem
+  Gate ehrlich „Lebenszeit-RS X / 1 000 (30 %)". Reine Anzeige — `canHimmelfahrt`
+  bleibt das einzige echte Gate, und die 'transcend'-Regel ist **unangetastet**.
+- **Beweis (Headless, Port 4188, Save v11).**
+  `p2-a-himmel-teaser.png` — Save nach erster Aszension (`hpfLifetime 0`):
+  🌈-Tab sichtbar, 🔮-Tab **nicht**, unten der gesperrte Knoten „🔮 ??? 🔒" mit
+  `cursor: default` (kein Klick-Handler). `p2-b-shop-kaufbar.png` — 5 TE, alle
+  vier Knoten mit Kosten + „danach Boost ×N". `p2-c-shop-gekauft.png` — nach
+  zwei Käufen: Haken, Gold-Rand, Kontostand 5 → 1 🔮, Boost ×243 → ×3, Save
+  trägt `mythos: { nachtschwarmer: 1, bossbrecher: 1 }`.
+  `p2-c-offline-cap-crop.png` — X3-Card mit Cap **8 h → 12 h**.
+
+## ROADMAP-V2 Schritt 5 — A2 Boss-Gimmicks
+
+- **2026-07-26 — Der entscheidende Befund: ein Boss-Gate ist kein Regler,
+  sondern eine Klippe.** Der erste Wurf setzte die Gimmicks 1:1 nach Roadmap um
+  (Club 2×5 s ohne Crew, Synth nur im Beat-Fenster, Beach 5 %/10 s, Space
+  Combo ×1.5) — und riss die Balance-Anker komplett auf: die kumulierte
+  Bühne-75-Messung und die erste Himmelfahrt wurden von den Bots **gar nicht
+  mehr erreicht** (statt 4.75/6.94 h bzw. 18.3 h), E2 fiel von 15 auf 6
+  Verbesserungen, E3 von Bühne 75 auf 10. Ursache: Ein Gate ist eine
+  30-s-Zeitschranke. Wer 10 % Wirkung verliert, verliert nicht 10 % Tempo — er
+  verliert das Gate, fällt auf die Vor-Bühne, farmt bei gedeckeltem Einkommen
+  und wächst nur noch logarithmisch. Isoliert gemessen: die MILDESTE Variante
+  (nur Beach, +15 % nötiger Schaden) kostete allein +62 % auf t75; Spotlight
+  und Schild sperrten die casual-Anker jeweils für sich aus.
+- **Konsequenz: das Gimmick verteilt Schwierigkeit um, statt sie zu addieren
+  (`GIMMICK_HP_SCALE`).** Ein Gimmick-Boss trägt weniger Ausdauer — ziemlich
+  genau um den Anteil, den sein Trick dem Durchschnitts-Build kostet
+  (Spotlight ×0.78, Schild ×0.57, Welle ×0.87, Gravitation ×1.00). Die Wand
+  verlangt damit dieselbe Gesamt-Power wie vorher, aber eine ANDERE Verteilung:
+  ein Idle-Build zahlt am Spotlight-Gate voll (Ausgleich dort ± 0), ein
+  Klick-Build kommt ~13 % leichter durch; wer im Takt trifft, nimmt dem
+  Schild-Gate ~30 % ab; wer den Kampf in die Länge zieht, zahlt an der Welle
+  echte Prozente. Genau die Lese-Tiefe, die A2 wollte — ohne die Progression zu
+  verbiegen. Alternative „Gimmicks einfach zahnlos machen" wurde verworfen:
+  bei ≤ 4 % Wirkung wären sie Deko gewesen.
+- **Gravitation bekommt KEINEN Ausdauer-Aufschlag (×1.00), obwohl sie hilft.**
+  Erster Ansatz war ×1.05 als Gegengewicht zum Combo-Bonus. Gemessen: der
+  0.7-cps-Anker-Bot spielt ohne Combo (`juice: false`), bekommt den Bonus also
+  gar nicht — und blieb mit dem Aufschlag an Bühne 40 hängen (Himmelfahrt nie
+  erreicht). Ein Ausgleich für einen Bonus, den nicht jeder bekommt, ist eine
+  Strafe für alle anderen. Gravitation ist jetzt reine Belohnung fürs
+  Combo-Halten.
+- **Das Schild-Fenster steht in PHASEN-Einheiten, nicht in Millisekunden.**
+  `isOnBeat` misst den Zeitabstand zum nächsten Beat, aber die Beats laufen mit
+  dem Klick-„drive" schneller: bei vollem Drive (6) liegt der maximale Abstand
+  zum nächsten Onset bei ~82 ms — komplett innerhalb des ±100-ms-On-Beat-
+  Fensters. Ein in ms fixiertes Schild stünde für jeden hart klickenden Spieler
+  DAUERHAFT offen, die Mechanik wäre ein Placebo. In Phasen-Einheiten
+  (`SHIELD_WINDOW_PHASE` = ±100 ms × 1.4 bei ruhender Choreo) ist es
+  drive-invariant und lässt konstant **55.4 %** der Zeit durch. Die
+  Beat-Fenster-Boni aus Ahnen/Gear/Fähigkeiten weiten es weiterhin — der Hebel,
+  mit dem man sich gezielt gegen die Mechanik rüstet.
+- **Spotlight 2×4 s statt 2×5 s — vom Anker entschieden.** Mit vollem
+  Ausdauer-Ausgleich schob 2×5 s die erste Himmelfahrt auf 19.7 h und damit aus
+  ihrem ±25-%-Fenster (Obergrenze 19.4 h); 2×4 s landet bei 18.3 h. Der
+  0.7-cps-Bot ist der empfindlichste Anker des Pakets (idle-dominiert, lebt an
+  der Gate-Kante) und hat die Parameterwahl praktisch diktiert.
+- **Sim-Modellierung: `stepSecond` kennt jetzt Klick- und Idle-Schaden
+  getrennt.** `powerSplit` liefert beide Terme, der Boss-Schaden einer Sekunde
+  läuft durch `gimmickBossDamage` (Club: `click + idle·(1−Phasenanteil)`,
+  Synth: `(click+idle)·0.554`, Beach: unverändert + HP-Regen, Space:
+  Klick-Term auf `spaceComboBonus` gehoben). Der resultierende Faktor `k` wird
+  über die ganze Sekunde angewandt; nach einem Boss-Kill wird der Rest-Schaden
+  **zeit-proportional** zurückgerechnet (`hp/k` = wirklich verbrauchter Anteil
+  der Sekunde), damit der Übertrag auf die nächsten Rivalen ehrlich bleibt.
+  Dokumentierte Annahme: **der Bot klickt ungetaktet** (er hat keine
+  Choreo-Phase), trifft am Schild also mit derselben Fenster-Wahrscheinlichkeit
+  wie die Crew — bewusst pessimistisch, damit die Anker untere Schranken
+  bleiben. Einzige optimistische Stelle: der doppelte Combo-Verfall greift beim
+  Bot nicht (er klickt ≥ 1×/s und bleibt im 1.5-s-Gnadenfenster); gedeckelt auf
+  +8.3 % Klick-Schaden am Combo-Cap.
+- **Anker-Lauf (seeds 1/7/12345, vorher → nachher).** t10 105 → 104 s ·
+  t20 824 → 823 s · t25 2133/2144 → 2032/2044 s (−4.7 %) · Bühne 30 bleibt
+  unerreichbar · kumuliert t75 4.75/6.94 → 4.99/6.96 h · erste Himmelfahrt
+  18.26/18.81/18.19 → 18.44/18.27/18.32 h (± 3 %) · E2 15 Verbesserungen +
+  1 Himmelfahrt (unverändert) · E3 ≥ 41 Meilensteine, längste Durststrecke
+  ≤ 42 min (Anker 90) · E4 8–15 → 10–15 Bühnen Vorsprung · Gear-E4 10 → 10/11.
+  **Kein Anker musste aufgerissen werden.** Einzige Nachführung: der
+  🧩-Zeugen-Seed für „Splitter → Gear-Level" wandert 12345 → 4711 (die Gimmicks
+  verschieben, welche Bosse in ein 45-min-Fenster fallen, und damit die seeded
+  Truhen-Züge; seed 12345 bankt jetzt 7 statt 10+ 🧩). Behauptung unverändert.
+- **Der Kampf-Zustand bleibt AUSSERHALB des `CombatState`.** Spotlight-Phasen
+  und Wellen-Uhr gehören zu EINEM Kampf und überleben keinen Reload — sie
+  stehen als `GimmickRuntime` in der Glue (main.ts) bzw. im Sim-State. Kein
+  Schema-Bump, keine Migration, keine Fixture. Ein Save mitten im Boss-Kampf
+  spawnt den Boss ohnehin frisch; ein frischer Kampf ist der korrekte Zustand.
+- **Die Theme-Rotation hatte drei Kopien — jetzt eine.** `bgForZone` (main.ts),
+  `stripTheme` (ch-hud.ts) und das Gimmick brauchen dasselbe Theme;
+  `themeForZone` in `boss-gimmicks.ts` ist die einzige Quelle. `ZONES_PER_THEME`
+  steht dort bewusst LOKAL statt aus `combat.ts` importiert, damit `combat.ts`
+  seinerseits `bossHpScale` holen kann, ohne einen Import-Zyklus zu bauen; ein
+  Test pinnt `ZONES_PER_THEME === BOSS_EVERY` fest.
+- **Kein Preset-Gate für die Gimmick-Optik.** Balken-Look, Plaketten-Puls und
+  die „🛡 Klirr!"-Pop sind reines CSS/DOM auf dem bestehenden Pop-Pool — kein
+  Draw-Call, keine Partikel. Sie tragen wie das G2-Banner INFORMATION (welche
+  Regel gerade gilt), gehören also auch im low-Preset auf den Schirm. Der
+  Plaketten-Puls respektiert `prefers-reduced-motion`.
+- **Headless-Beweis (angesehen, nicht nur gelaufen).** Je Theme Banner +
+  Plakette (Bühnen 5/10/15/20, `chVs().gim` stimmt mit dem Katalog überein);
+  Club-Spotlight live gemessen: HP-Verlust IN der Phase 0.00 %, in einem gleich
+  langen Fenster DANACH 4.70 % (0.8 Sim-s, keine Klicks) — der Idle-Stopp ist
+  echt; Synth-Abpraller sichtbar, 13 von 60 Klicks prallten ab (untere
+  Schranke), die Ausdauer sinkt trotzdem von 89.8 % auf 24.5 % (das Schild
+  lässt im Takt durch); Beach-Welle 61.10 % → 65.90 % Rest-HP (+4.81 pp) mit
+  Puls-Klasse. Gemessen wird an der Sim-Uhr `chVs().t0`, weil SwiftShader
+  ~0.2× Echtzeit läuft — Wanduhr-Fenster wären hier die falsche Achse.
+
+## ROADMAP-V2 Schritt 4 — X2+X3+G3 Ekstase-Fenster, Offline-Rückkehr, Idle-Leben
+
+- **2026-07-26 — Review-Befund (Fable): der Phase-L-Bloom lief NIE.**
+  `post.enabled` wurde nirgends gesetzt (bei einem Refactor verloren) — der
+  Composer war toter Code, alle Abnahmen liefen ohne Bloom. Beim Review-
+  Aktivieren zeigte die Kette eine uniforme Aufhellung des gesamten Bildes
+  (mutmaßlich doppelte sRGB-Konvertierung im Composer-Pfad); Threshold-
+  Korrektur (0.82 → 1.05, linearer HDR-Raum — für sich genommen richtig und
+  behalten) ändert daran nichts. Entscheid: Bloom bleibt explizit AUS
+  (`post.enabled = false` mit Known-Issue-Kommentar), denn das Spiel ist in
+  seinem bloomlosen Look abgenommen — ein stilles Aktivieren eines nie
+  validierten Effekts wäre eine Verschlechterung. Die Farb-Pipeline-Reparatur
+  ist ein eigenes künftiges Paket.
+
+- **2026-07-26 — X2: Der Balken zeigt jetzt IMMER die Ladung, der Ring die
+  Laufzeit.** Vorher trug `#ekstaseFill` beide Bedeutungen: außerhalb der
+  Ekstase die Ladung, innerhalb die Restzeit. Das las sich im Fenster wie eine
+  Ladung, die rückwärts läuft — und verbarg, wie weit die NÄCHSTE Ekstase schon
+  ist (im ×10-Fenster klickt man am meisten, die Ladung steigt also am
+  schnellsten). Jetzt sind es zwei Kanäle: Balken = Ladung (durchgehend), Ring
+  am linken Pillen-Ende = Restlaufzeit mit den Sekunden im Kern. Headless
+  gegengeprüft: bei offener Ekstase Ring 85 % / 51 s bei Ladung 0 %, nach 14
+  Klicks Ring 77 % / 46 s bei Ladung 8 % — beides gleichzeitig lesbar.
+- **Der Ring misst sein Fenster selbst, weil der Save die Dauer nicht kennt.**
+  Persistiert ist nur `frenzyUntil`; `frenzyFraction` rechnet gegen die
+  BASIS-Dauer (12 s) und pegelt deshalb bei einer per Ekstase-Ausdauer/Gear
+  verlängerten Ekstase (30 s sind erreichbar) über eine Minute lang auf 100 %.
+  `trackFrenzyWindow` misst die Länge beim ERSTEN Frame des Fensters und führt
+  sie mit — pur, getestet, ohne Schema-Bump. Ein Reload mitten in der Ekstase
+  startet den Ring bei 100 % der REST-Zeit: die verlorene Vorgeschichte ist
+  nicht rekonstruierbar, und ein zu voller Ring ist ehrlicher als ein
+  springender.
+- **Der Deck-Puls moduliert das geteilte `floorMat`, statt Geometrie zu
+  bauen.** Ein zweites Emissive-Deck (Overlay-Disc) hätte einen Draw-Call und
+  Z-Fighting gekostet. `World.setEkstase(active, beatV)` lerpt stattdessen das
+  Theme-Emissive Richtung Ekstase-Pink und hebt die Intensität — mit demselben
+  `beatV`, den die Kulissen-Anims bekommen, also im Takt der Neonkanten. Die
+  Ruhelage wird bei jedem `rebuild` frisch gemerkt, ein G1-Bühnenwechsel
+  MITTEN im Fenster reißt den Puls daher nicht ab; beim Fenster-Ende wird genau
+  einmal zurückgestellt. `low` schaltet ihn per `preset.ekstaseDeck` ab
+  (headless gemessen: high 1.60…1.87 Intensität + wechselnde Farbe, low
+  konstant 1.00/Schwarz).
+- **X3: Der Offline-Verdienst wird gepuffert — aber trotzdem MITGESPEICHERT.**
+  „Erst beim Einsacken gutschreiben" und „niemals Verlust" widersprechen sich,
+  sobald der Tab hart wegbricht (Crash/Task-Kill, kein `beforeunload`). Gelöst
+  ohne Kompromiss: `state.gold` bleibt bis zum Klick unberührt (die Card darf
+  den Moment inszenieren), aber `persist()` schreibt `withPendingOffline(state)`
+  — den Kontostand INKLUSIVE Puffer. Ein Reload findet das Gold als Kontostand
+  vor, die Abwesenheit ist dann ~0, also keine zweite Card und keine
+  Doppelbuchung. Zusätzlich sackt JEDER Schließ-Pfad ein (Button, Backdrop-
+  Klick, Escape) — „Überspringen" ist kein Verzicht. Headless: HUD vor dem Klick
+  500.01K, danach 1.18M, im Save lag der Betrag schon vorher.
+- **Die Card rechnet nicht selbst — sie ruft `offlineGold` auf.** Ein zweiter
+  Rechenweg für die Anzeige wäre die klassische Quelle für „zeigt X, bucht Y".
+  `welcomeBackData(dps, zone, elapsed, opts)` ist die EINZIGE Quelle: sie ruft
+  `offlineGold` mit denselben Argumenten und gibt den Betrag zurück, den
+  `main.ts` dann gutschreibt. Der Unit-Test prüft genau das über sieben
+  Parameter-Kombinationen (Coach, Gold-Mult, Rate-Bonus, ausgebauter Cap).
+  Schwelle: > 10 min (exakt 10 min noch nicht) — darunter bleibt es die stille
+  Gutschrift von vorher, auch beim Tab-Rückkehr-Pfad.
+- **Der Cap-Hinweis erscheint nur, wenn der Cap gegriffen hat.** `capped` ist
+  `elapsed > capS`, nicht „Cap existiert" — ein Hinweis ohne Anlass wäre eine
+  Drohung. Der angezeigte Cap ist der WIRKSAME (Nachtschicht/Beach-Gear heben
+  ihn), nicht die 8-h-Konstante, sonst würde die Card den eigenen Ausbau
+  verschweigen.
+- **G3: Ambient-Leben kostet EINEN Draw-Call pro Sorte, egal wie viele
+  Stücke.** Glühwürmchen = ein `Points`, Sternschnuppen/Kometen/Möwen/Publikum =
+  je ein `InstancedMesh` mit einem Material. Die Preset-Dichte
+  (`ambientLife`: low 0.5) skaliert damit die STÜCKZAHL, nicht die Batches —
+  low spart Füllrate, nicht Draw-Calls. Der Beach-Schaumpuls kostet gar nichts:
+  er animiert den Kantenring, den `world/island.ts` ohnehin baut.
+- **Das Publikum hängt an der `islandGroup`, das Flugzeug-Zeug an der
+  `propGroup`.** Beide fahren beim G1-Wechsel mit, aber die Kulisse nur mit
+  `PROP_PARALLAX` (0.55). Was AUF der Bühne steht (Publikum, Glühwürmchen) muss
+  1:1 mitfahren, sonst löst es sich beim Absturz von der Insel; was am Himmel
+  fliegt, darf zurückbleiben. Der Bogen liegt im +z-Halbraum — von der
+  Diorama-Kamera aus hinter dem Duo, nie davor.
+- **Draw-Call-Budget: die Bühnen waren schon VOR G3 drüber.** Erste Messung
+  (`renderer.info.render.calls`, high): club 269, synth 298, beach 316, space
+  237 — das Budget der Roadmap ist 250. Das war kein G3-Schaden, sondern die
+  alten Props: eine Palme trug 6 Wedel- und 2 Nuss-Meshes MIT je eigener
+  Ink-Hülle (18 Draw-Calls pro Baum, bei 6 Palmen 108), der Synth-Bergring 12
+  Kegel + 12 Hüllen + 12 Drahtgitter (36), die Tanzfläche 25 Kacheln mit je
+  EIGENEM Material. Behoben durch reines Batching bei gleichem Bild: alles
+  Statische gleichen Materials wird in EINE Geometrie gebacken (`bake` in
+  `world/island.ts`, `mergeGeometries` mit dem Transform in den Vertices) —
+  Palmwedel/Nüsse, Bergring, Sand-Zapfen, Seestern, Schirm, Puffwolken,
+  Club-Zapfen/Blöcke, Mini-Inseln, Landelichter, Weltraum-Kristalle und
+  -Trümmer; die Kacheln sind ein `InstancedMesh` mit `instanceColor`. Was sich
+  EINZELN bewegt (die vier drehenden Amethyste, die Synth-Shards), bleibt ein
+  eigenes Objekt. Ergebnis MIT dem neuen Ambient-Leben: club 237, synth 229,
+  beach 239, space 219 — und 242 im G2-Boss-Punch-In, der durch die Kamerafahrt
+  mehr Kulisse ins Frustum zieht (vor dem zweiten Batching-Durchgang lag genau
+  dieser Moment mit 251 noch drüber). Die Kacheln verloren dabei ihren
+  Standard-Material-Anteil aus den vier Club-Spots; das ×1.12 im Farb-Term
+  gleicht die Helligkeit aus.
+- **Streifen sind ein Kreuz aus zwei Dreiecken, Möwen stehen ohne Yaw.** Ein
+  einzelnes flaches Dreieck, das in die Flugrichtung gedreht wird, steht je nach
+  Bahn kantenständig zur Kamera — also unsichtbar. Das Kreuz kostet ein Dreieck
+  mehr und keinen Draw-Call. Die Möwen-Silhouetten drehen aus demselben Grund
+  gar nicht mit ihrer Ellipse mit: sie stehen wie ein Sprite zur Diorama-Kamera.
+  Beide fliegen bewusst TIEF — der obere Himmel liegt hinter dem HUD-Streifen.
+
+## ROADMAP-V2 Schritt 3 — P1+P3 Bühnen-Sterne & Wand-Telemetrie
+
+- **2026-07-26 — Stern 2 gibt es nur an Boss-Gates; Nicht-Boss-Bühnen tragen
+  zwei Sterne.** Die Roadmap schreibt „3 ⭐ pro Bühne", aber zwei der drei
+  Kriterien hängen am Gate: „ohne Timeout" setzt einen Timer voraus, den eine
+  normale Bühne nicht hat. Die Alternativen wären ein erfundenes Ersatzkriterium
+  („keine Rivalin überlebt 60 s") oder ein für immer unerreichbarer Slot —
+  beides schlechter als die ehrliche Variante: `starBitsFor(zone)` liefert die
+  BITS, die eine Bühne überhaupt tragen kann, die Pips zeigen genau so viele
+  Slots (Boss 3, sonst 2), und `totalStars` zählt nur, was die Regeln hergeben.
+  Ein gebastelter Save mit „7" auf einer Nicht-Boss-Bühne wird beim Laden auf 5
+  maskiert, kann die Meilenstein-Truhen also nicht erschleichen.
+- **Combo-Schwelle ×1.1 = 25 Stacks = Tier „Heiß".** Die Roadmap sprach von
+  „≥ ×3-Combo" — diese Skala existiert seit dem v12-Nerf nicht mehr:
+  `comboMult = 1 + min(stacks, 50)·0,004` deckelt bei ×1.2. ×1.1 ist damit exakt
+  die halbe Strecke zum Cap und fällt mit der Tier-2-Grenze zusammen: bei ~5
+  Klicks/s in gut fünf Sekunden erreicht, aber sofort weg, wenn man die Combo im
+  Shop verfallen lässt. `STAR_COMBO_STACKS` wird aus der echten Kurve abgeleitet
+  (Schleife über `comboMult`), nie als zweite Zahl gepflegt — ändert sich die
+  Balance, wandert die Grenze automatisch mit. Der Stern zählt nur bei
+  KLICK-Kills: Idle-DPS zieht weder Combo noch Krit (P1), ein Crew-Tick, der
+  zufällig in ein heißes Fenster fällt, hat ihn nicht verdient.
+- **Der Fehlversuch ist EIN Skalar, kein Set.** „Ohne Timeout" heißt: zwischen
+  dem ersten Boss-Spawn dieses Anlaufs und dem Kill lag kein Timeout. Man kämpft
+  immer nur an einem Gate, also reicht `bossFoulZone` (0 = sauber). Gesetzt beim
+  Timeout, gelöscht beim Kill DIESES Gates — und verworfen, sobald ein Boss auf
+  einer anderen Bühne spawnt: nach einer Aszension ist der Anlauf auf Bühne 10
+  ein neuer, kein ewig verdorbener. Persistiert (Run-Zustand, überlebt kein
+  Prestige), damit ein Reload mitten im Retry den Fehlversuch nicht vergisst;
+  ohne Persistenz wäre F5 der billigste Stern-Exploit des Spiels.
+- **Save v10 → v11 vergibt bewusst NICHTS rückwirkend.** `lifetimeMaxZone`
+  würde verraten, welche Bühnen ein Alt-Save geclert hat — „ohne Timeout" und
+  „Combo" lassen sich aber nicht rekonstruieren. Eine halb gefüllte Sammlung
+  (jede Bühne genau ein Stern) wäre irreführender als eine frische, und weil die
+  Sterne rein kosmetisch sind, geht dabei keine Macht verloren. Neu im Schema:
+  `stageStars` (Zone → 3-Bit-Maske), `starsAwarded` (Meilenstein-Highwater) und
+  `bossFoulZone`; die Sterne überleben alle drei Prestige-Schichten (Sammlung
+  wie Achievements), der Fehlversuch nicht. Die X7-Matrix ist um v11 gewachsen
+  (gesundes + kaputtes Fixture) — genau die Bremse, die X7 dafür gebaut hat.
+- **Meilenstein gegen einen Highwater, nicht gegen einen Zähler.** Alle 15
+  Sterne fällt eine Holztruhe. Ein „schon ausgezahlt"-Flag pro Block wäre
+  fragil; stattdessen speichert `starsAwarded` die Sterne, die bereits gezahlt
+  haben (immer ein Vielfaches von 15), und `milestoneChests(total, awarded)`
+  rechnet die Differenz aus. Ein Reload zahlt damit nie doppelt, ein Import mit
+  46 Sternen zahlt alle drei offenen Truhen auf einmal.
+- **P3: Die Greedy-ROI-Rangfolge zieht in `heroes.ts` um — eine Quelle für Bot
+  und Tipp.** `sim.buyCrewGreedy` trug die Rangfolge (nächstes Level vs. nächste
+  Fähigkeit, Special-Stufen als KLAMMER zur folgenden Power-Stufe gepreist) als
+  private Schleife. Für den Spiel-Tipp wäre eine Kopie das Schlimmste gewesen:
+  Bot und Ratschlag würden lautlos auseinanderlaufen. Jetzt ist es
+  `heroes.bestCrewBuy(levels, ups, gilds, budget)` — pur, getestet, vom Sim mit
+  `budget = gold` und vom Advisor mit `budget = 3 × gold` aufgerufen. Die
+  Sim-Anker (E1–E4, Himmelfahrts-Fenster, Pacing-Tabelle) sind unverändert grün,
+  die Extraktion ist verhaltensgleich.
+- **Das ×3-Budget des Tipps ist Absicht.** Genau an der Wand ist oft NICHTS
+  bezahlbar; ein „spar auf Türsteher Lv 121" ist dort die nützlichere Antwort
+  als Schweigen. Weiter als das Dreifache greift der Tipp nie (Invariante im
+  Test: `cost ≤ 3 × gold`), sonst empfiehlt er Träume statt des nächsten
+  Schritts. `affordable` unterscheidet in der Zeile „jetzt kaufen" von „(sparen)".
+- **Burst-Annahmen: konservativ und benannt.** 30-s-Fenster (`BOSS_TIME_S`, ohne
+  Chronilla/Gear-Verlängerung), 5 Klicks/s als realistische Dauerrate (der
+  Balance-Bot rechnet mit 3/s), Combo-Mittel ×1.1 (halbe Strecke zum Cap — bei 5
+  Klicks/s stünde man nach ~10 s am Cap, aber Anlauf und Shop-Griffe drücken den
+  Schnitt), Krit-EV ×1.8 aus den BASIS-Konstanten (dieselbe Annahme, mit der
+  §4.8 kalibriert ist). VOLL eingerechnet wird nur der Boss-Schadens-Stack
+  (Glutaeus, Tyrann-Gear, `boss`-Specials) — Macht, die sicher da ist und nur im
+  Bosskampf zählt. Draußen bleiben On-Beat ×1.5, Ekstase ×10 und der Coach: alles
+  davon macht den echten Burst nur größer, die Schätzung bleibt eine Untergrenze
+  und der Tipp verspricht nie zu viel. Schwelle für die Zeile: Lücke > 20 %
+  (`bossGap < 0.8`) — knappe Kämpfe sind der spannende Normalfall und brauchen
+  keinen Ratschlag.
+- **Throttle: rechnen im 0.25-s-Tick, verstecken sofort.** `hud.advise` läuft
+  nur aus dem gedrosselten Tick (die Kauf-Rangfolge scannt die ganze Crew und
+  hat im Klick-Pfad nichts verloren) und hinter einer Cache-Signatur aus
+  Gold/Leveln/Fähigkeiten. Das VERSCHWINDEN hängt dagegen an der
+  Change-Detection von `hud.update`: Sichtbarkeit teilt sich die Bedingung mit
+  dem „Boss herausfordern"-Button (`atFrontierGate`), also ist die Zeile in dem
+  Moment weg, in dem der Boss die Bühne betritt — ohne auf den Tick zu warten.
+
+## ROADMAP-V2 Schritt 2 — G1+G2 Bühnen-Wechsel & Boss-Auftritt
+
+- **2026-07-26 — Aus zwei Cuts werden zwei Momente.** G1: `World.setBackground`
+  bekam ein drittes Argument `{ animate }`. Damit fährt die ALTE `islandGroup`
+  in 0.5 s mit Cubic-Ease-In und leichtem Tilt 17 Einheiten nach unten aus dem
+  Bild (die Kulisse mit 0.55-Parallaxe hinterher), wird ERST DANN entsorgt und
+  neu gebaut, und die neue Bühne schwebt in 0.7 s mit Ease-Out + kleinem
+  Überschwinger (~0.35 Einheiten) herein. Kamera bleibt ruhig; getickt wird in
+  `world.update(dt)` aus dem bestehenden Render-Loop. Drei Entscheidungen, die
+  nicht offensichtlich waren:
+  (1) **Palette überblendet stetig über beide Phasen.** Sky/Fog/Deck-Ton und
+  das Licht-Rig werden nicht am Umschaltpunkt gesetzt, sondern von der alten
+  zur neuen Palette gelerpt (`paletteFor`/`snapshotPalette`/`applyPalette`) —
+  sonst hätte mitten im Wechsel der Himmel hart umgeschlagen, also genau der
+  Hard-Cut, den G1 beseitigen soll. Diskret bleiben nur Dinge, die es sein
+  müssen (Deck-Map/Emissive-Map brauchen einen Programm-Rebuild) — die passieren
+  unter dem Bildrand.
+  (2) **Duo + Kontaktschatten fahren NICHT mit, sie treten ab.** Der naive Weg
+  (Spieler-Wrapper und Rivale am Insel-Versatz mitziehen) zerreißt die
+  Cheek-Physik: die Federn (k = 190, c = 7) laufen in WELTkoordinaten, ihr
+  stationärer Nachlauf ist c·v/k, und bei Spitzengeschwindigkeit ~100 u/s wären
+  das ~3.7 Einheiten Gummiband quer über die Bühne. Kompensieren hieße den
+  Physik-Zustand von außen anfassen — verboten. Also: ab −0.35 Einheiten
+  Deck-Versatz werden Duo und Kontaktschatten unsichtbar (16 px Bewegung, der
+  Wechsel hat sichtbar begonnen) und kommen mit der neuen Bühne zurück. Dafür
+  gibt `createScene` den Kontaktschatten jetzt heraus.
+  (3) **Klicks werden IGNORIERT, nicht gepuffert**, und Idle-DPS/Coach/Boss-Timer
+  pausieren für die 1.2 s. Puffern hätte einen Klick-Schwall auf einen Rivalen
+  losgelassen, der gar nicht auf der Bühne steht, und Combo-Fenster/On-Beat/
+  Ekstase-Ladung verfälscht. Nebeneffekt, der zählt: kein Idle-Kill kann mitten
+  im Wechsel den nächsten Wechsel auslösen (der Fall ist zusätzlich abgesichert
+  — ein `animate`-Aufruf während eines laufenden Übergangs tauscht das ZIEL,
+  statt hart umzuschalten).
+- **G2 — der Boss-Auftritt.** Beide Spawn-Pfade (25/25 auf der Boss-Bühne und
+  der „Boss herausfordern"-Button) laufen jetzt durch EIN `bossEntrance()`:
+  CSS-Banner „👑 <Bossname>" rollt oben in die `.topui`-Spalte ein (Name aus
+  `rivalName` — dieselbe Quelle wie das HUD, damit beide nie auseinanderlaufen),
+  0.8 s Licht-Moment und ein Bass-Drop-Stinger (`audio.bossIntro()`: Rausch-
+  Riser 0.45 s → Sub-Sinus 110→32 Hz → Sägezahn-Grollen + Klatsch, alles im
+  bestehenden WebAudio-Graph, keine Samples). Der Licht-Moment senkt Key/Fill/
+  Hemi **und** `renderer.toneMappingExposure`; das war die eigentliche Erkenntnis:
+  ein reines Rig-Dim ist auf der Bühne kaum zu sehen, weil das Rig dort gar nicht
+  die dominante Lichtquelle ist (die Club-Spots stehen auf Intensität 90, halbe
+  Kulissen leuchten emissiv). Die Belichtung senkt alles gleichmäßig, das Rig-Dim
+  gibt dem Moment die Form. Dazu ein Kamera-Punch-In über das FOV (−14 %) statt
+  über die Position, damit die Kamera ruhig bleibt — dieselbe „kurz zupacken,
+  weich lösen"-Hüllkurve wie der Screen-Shake. `resize()` stellt den Punch
+  vorher zurück, sonst würde `frameCamera` die Distanz aus dem gepunchten FOV
+  rechnen und die Bühne dauerhaft falsch rahmen.
+- **G2 — der Sieg-Beat.** Boss-Kill: Konfetti aus dem bestehenden Partikel-Pool
+  (fünf Abschusspunkte quer über die Insel statt eines zentralen Klumpens),
+  `audio.bossWin()` bekam einen Schluss-Akkord + Jubel-Klatsch statt abzureißen,
+  Truhen-Toast unverändert. Zonen-Clear ohne Boss-Gate: zwei kurze, leisere Töne
+  (`audio.zoneClear()`), damit der Boss der lautere Moment bleibt. Reihenfolge in
+  `onKillProgress` gedreht — erst Sieg-Beat (Toast/Fanfare/Konfetti) auf der
+  alten Bühne, DANN `updateBackground()`; vorher wäre der Wechsel losgelaufen,
+  bevor der Sieg überhaupt zu sehen war.
+- **Preset-Pflicht**: `QualityPreset` trägt jetzt `stageTransition`, `cinematics`
+  und `confetti`. low = Hard-Swap wie vor G1, keine Regie, kein Konfetti;
+  medium/high animieren, high wirft doppelt so viel Konfetti. 557 → 559 Tests.
+- **Headless-Beweis** (SwiftShader läuft ~0.2× Echtzeit und EIN Screenshot
+  kostet ~0.3 Simulationssekunden — eine Frame-Serie aus EINEM 1.2-s-Übergang
+  wäre zwangsläufig grobkörnig): der gleiche Übergang wird sechsmal gefahren und
+  je Durchlauf EIN Frame an einer festen Position der Fahrt geschossen, getriggert
+  über den echten Insel-Versatz (`window.chVs()` liefert dafür jetzt zusätzlich
+  `stageY`/`swapping`, read-only wie der Rest des Hooks). Belegt: 6-Frame-Serie
+  Synthwave → Neon-Club ohne Hard-Cut, Boss-Auftritt mit Banner + sichtbarem Dim +
+  Punch, Boss-Kill mit Konfetti und anschließendem Wechsel, low-Preset ohne jede
+  Bewegung. 0 Page-Errors.
+
+## ROADMAP-V2 Schritt 1 — X7 Save-Migrations-Matrix
+
+- **2026-07-19 — Jeder historische Save-Stand hat jetzt ein Fixture-Paar.**
+  P1 (Sterne), A1 (Modifikator-Seeds) und P4 (Baum) bumpen als Nächstes das
+  CH-Schema; vorher bekam die Ladekette ihr Netz. `ch-store-matrix.test.ts`
+  zieht JEDEN Stand v1 … v10 durch `loadCh` → `migrateCh` → `isChSave` →
+  `stateFromSave`. Aufbau: EIN Spielstand (Bühne 55, 12 345 Gold, Crew
+  boss 80 / hype 30 / legend 6, 130 RS), pro Version in der Sprache seiner
+  Ära ausgedrückt — jede Slice erscheint genau ab der Version, die sie
+  eingeführt hat. Geprüft werden beide Richtungen: Kernfelder + Ära-Slices
+  verlustfrei nach oben, jüngere Slices exakt auf ihrem dokumentierten
+  Default nach unten (`createGear`/`createChests`/`createMeta`/
+  `createTranscend`/…). Dazu pro Version EIN kaputter Alt-Save an genau den
+  Feldern DIESER Ära (fehlende Slices, Prototyp-Keys wie `skin: "toString"`,
+  negative/gebrochene Zähler, NaN-Timer): repariert wird slice-isoliert, der
+  Kern bleibt unangetastet. Und die Gegenprobe — ist ein GATE-Feld hin (gold
+  NaN, zone 0, crew-Level negativ, lastSeen weg, roh-`NaN` im JSON), fällt
+  die Kette sauber auf `null` = Frischstart und wirft NIE. Zwei Extras: ein
+  Fixpunkt-Test (Re-Save/Reload des migrierten Standes driftet kein Feld) und
+  eine Bremse für den nächsten v-Bump — `VERSIONS` wird gegen `CH_SCHEMA`
+  geprüft, ein Bump ohne neues Fixture-Paar färbt die Matrix rot. 515 → 556
+  Tests, KEINE Produktions-Änderung nötig. Eine Beobachtung fürs Protokoll:
+  `migrateChV4toV5` überschreibt ein vorhandenes `rsLifetime` mit den
+  gebankten Seelen, statt `max(rsLifetime, souls)` zu nehmen — die einzige
+  Stelle der Kette, die einen Highwater SENKEN kann. Für echte v4-Saves
+  folgenlos (bis v4 gab es keine Seelen-Senke, verdient == gehalten; auch der
+  Legacy-Import hebt `rsLifetime` immer auf ≥ `souls`). Review-Entscheid
+  (Fable): trotzdem gehärtet — `max(prior, souls)`, ein Highwater darf durch
+  die Kette NIE sinken, auch nicht für Hand-Edits; ein Monotonie-Testfall
+  pinnt das (556 → 557 Tests).
+
+## Bühnen-Rücknavigation + Boss-Fallback
+
+- **2026-07-19 — „Zurück zur Vor-Bühne farmen" als echter Loop.** Drei Teile:
+  (1) Der Zonen-Strip zeigt NUR erreichte Bühnen (keine Zukunfts-Spoiler)
+  und ist wieder klickbar — `travelTo` (Kern, war nie weg) bekam seine UI
+  zurück; reist man weit zurück, bleibt die Frontier als „… N"-Slot immer
+  erreichbar (sonst käme man nicht mehr zum Boss-Gate). (2) Boss-Timeout
+  wirft jetzt auf die VOR-Bühne zurück (`tickBoss` → zone−1, Frontier
+  bleibt) statt die Boss-Bühne neu zu bevölkern — dort BP farmen, Upgrades
+  kaufen. (3) „👑 Boss herausfordern"-Button (nur an der unbesiegten
+  Frontier-Boss-Bühne): `challengeBoss` überspringt die Rivalen-Welle —
+  der Retry kostet Farm-Zeit, aber kein Neu-Grinden. Der Sim-Bot modelliert
+  exakt das (`retryBossZone`: Welle nur beim ERSTEN Anlauf, Retry per
+  Button), damit die v12-Kalibrierung vergleichbar bleibt; einzige ehrliche
+  Verschiebung: die längste Power-Durststrecke wächst durch die
+  Fallback-Detours von ≤ 90 auf ~95–98 min (Anker neu: 105 min).
+  Stolperfalle im CSS: `.boss-challenge { display:block }` stand später im
+  Sheet als `.hidden` (gleiche Spezifität) und überschrieb das Verstecken —
+  `.boss-challenge.hidden` explizit ergänzt; Overlay brauchte zudem
+  `pointer-events:auto`. Headless bewiesen: Strip 4–8 ohne Zukunft,
+  Rückreise + Theme-Wechsel, Frontier-Rücksprung, Button-Sichtbarkeit in
+  allen drei Zuständen, 0 Page-Errors.
+
 ## Web-Assets für ALLE 10 Playermodels (Goal)
 
 - **2026-07-19 — Pipeline generalisiert, ein Draco-glb pro Skin.**

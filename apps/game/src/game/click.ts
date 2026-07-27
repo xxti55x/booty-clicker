@@ -53,9 +53,15 @@ export const PHASE_RATE_BASE = 2.2;
 export const PHASE_RATE_DRIVE = 0.35;
 export const BEAT_PERIOD_PHASE = 1 / CLAPS_PER_PHASE;
 
-/** Combo multiplier: 1 + min(combo, cap)·step ⇒ 1 (at 0) … 2 (at/over cap). */
-export function comboMult(combo: number): number {
-  return 1 + Math.min(combo, COMBO_CAP) * COMBO_STEP;
+/**
+ * Combo multiplier: `1 + min(combo, cap)·step` ⇒ ×1 (at 0) … ×1.2 (at/over cap).
+ * `step` defaults to `COMBO_STEP`; der Himmelsbaum-Knoten „Combo-Doktrin"
+ * (ROADMAP-V2 P4, `heaven.comboStepFor`) hebt ihn auf ×1.3 am Cap. Ein
+ * nicht-endlicher/negativer Schritt fällt auf die Basis zurück.
+ */
+export function comboMult(combo: number, step: number = COMBO_STEP): number {
+  const s = Number.isFinite(step) && step >= 0 ? step : COMBO_STEP;
+  return 1 + Math.min(combo, COMBO_CAP) * s;
 }
 
 /** Effective crit chance given a tier/gear bonus, hard-capped at `CRIT_CHANCE_CAP`. */
@@ -135,11 +141,24 @@ export interface ClickCtx {
    * Defaults to 1; M8+ multiplies its own factors in here without touching callers.
    */
   extraMult?: number;
+  /**
+   * Combo-Schritt je Stack (ROADMAP-V2 P4): der Himmelsbaum-Knoten „Combo-Doktrin"
+   * hebt den Cap-Wert von ×1.2 auf ×1.3. Defaults to `COMBO_STEP`.
+   */
+  comboStep?: number;
 }
 
 /** The effective damage of one click. */
 export function effectiveClick(ctx: ClickCtx): number {
-  const { baseClick, combo, crit, critMultBonus = 0, critMultFactor = 1, extraMult = 1 } = ctx;
+  const {
+    baseClick,
+    combo,
+    crit,
+    critMultBonus = 0,
+    critMultFactor = 1,
+    extraMult = 1,
+    comboStep = COMBO_STEP,
+  } = ctx;
   const cm = crit ? critMult(critMultBonus) * Math.max(0, critMultFactor) : 1;
-  return baseClick * comboMult(combo) * cm * extraMult;
+  return baseClick * comboMult(combo, comboStep) * cm * extraMult;
 }

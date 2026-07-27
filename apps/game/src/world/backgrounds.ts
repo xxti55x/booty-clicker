@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 import { INK, mk, outlineMaterial, toonMat, withOutline } from '../engine/materials';
 import type { GlowSpriteFn, SceneLights } from '../engine/scene';
@@ -14,7 +15,7 @@ import {
   speckleTex,
   strataTex,
 } from '../engine/textures';
-import { buildIsland } from './island';
+import { bake, buildIsland, ISLAND_C, ISLAND_R, TOP_Y } from './island';
 import type { BackgroundKey, WorldAnim } from '../types';
 
 /**
@@ -38,12 +39,20 @@ const LAP_HUE = 0.085;
 
 interface BuildCtx {
   propGroup: THREE.Group;
+  /**
+   * Die Insel-Gruppe (G1): alles hier drin fährt beim Bühnen-Wechsel 1:1 mit
+   * der Insel aus und ein — im Gegensatz zu `propGroup`, die als ferne Kulisse
+   * nur mit `PROP_PARALLAX` mitzieht. Das G3-Publikum sitzt auf der Insel.
+   */
+  islandGroup: THREE.Group;
   glowSprite: GlowSpriteFn;
   anims: WorldAnim[];
   /** Recolour lap 0,1,2… (endless depth); 0 = the stage's original palette. */
   variant: number;
   /** Lap-shifted palette colour — identity on lap 0. */
   hue: (hex: number) => THREE.Color;
+  /** G3-Ambient-Dichte aus dem Quality-Preset (1 = voll, 0.5 = low, 0 = aus). */
+  density: number;
 }
 
 interface BgConfig {
@@ -103,9 +112,25 @@ interface Sway {
 }
 
 /**
+ * Kopien einer Geometrie an vorgegebenen Transforms zu EINER Geometrie backen.
+ * Die Palme trug vorher 6 Wedel- und 2 Nuss-Meshes mit je eigener Ink-Hülle —
+ * 18 Draw-Calls pro Baum, bei 6 Palmen (Synth/Beach) allein 108. Gebacken sind
+ * es 6 pro Baum bei BYTE-GLEICHEM Bild: dieselbe Geometrie, dieselben
+ * Transforms, dieselben Materialien — nur ein Batch statt vieler (G3-Budget).
+ */
+function baked(geo: THREE.BufferGeometry, mats: THREE.Matrix4[]): THREE.BufferGeometry {
+  const parts = mats.map((m) => geo.clone().applyMatrix4(m));
+  const merged = mergeGeometries(parts);
+  parts.forEach((p) => p.dispose());
+  geo.dispose();
+  return merged ?? geo;
+}
+
+/**
  * Chunky cartoon palm: toon trunk, six blob fronds (baked-scale spheres so the
  * ink hull keeps constant weight) and a pair of coconuts. Registered in
- * `sways` for the caller's shared sway anim.
+ * `sways` for the caller's shared sway anim. Wedel und Nüsse sind in je EINE
+ * Geometrie gebacken (siehe `baked`).
  */
 function palm(
   ctx: BuildCtx,
@@ -131,25 +156,34 @@ function palm(
   const leafGeo = new THREE.SphereGeometry(1, 10, 8);
   leafGeo.scale(1.12 * s, 0.22 * s, 0.44 * s);
   const leafMat = toonMat({ color: hue(leafHex) });
-  const crown = new THREE.Group();
+  // hold(rotY) ∘ leaf(T · Rz) — exakt die Objekt-Hierarchie von vorher.
+  const leafMats: THREE.Matrix4[] = [];
+  for (let i = 0; i < 6; i++) {
+    leafMats.push(
+      new THREE.Matrix4()
+        .makeRotationY((i / 6) * Math.PI * 2 + 0.35)
+        .multiply(
+          new THREE.Matrix4()
+            .makeTranslation(0.92 * s, 0, 0)
+            .multiply(new THREE.Matrix4().makeRotationZ(-0.48)),
+        ),
+    );
+  }
+  const crown = O(new THREE.Mesh(baked(leafGeo, leafMats), leafMat));
   crown.position.set(0.3 * s, 3.28 * s, 0);
   g.add(crown);
-  for (let i = 0; i < 6; i++) {
-    const hold = new THREE.Group();
-    hold.rotation.y = (i / 6) * Math.PI * 2 + 0.35;
-    crown.add(hold);
-    const leaf = O(new THREE.Mesh(leafGeo, leafMat));
-    leaf.position.x = 0.92 * s;
-    leaf.rotation.z = -0.48;
-    hold.add(leaf);
-  }
-  const nutGeo = new THREE.SphereGeometry(0.15 * s, 8, 8);
   const nutMat = toonMat({ color: hue(0x6b4a2a) });
-  const nut1 = O(new THREE.Mesh(nutGeo, nutMat), 0.02);
-  nut1.position.set(0.16 * s, 3.12 * s, 0.18 * s);
-  const nut2 = O(new THREE.Mesh(nutGeo, nutMat), 0.02);
-  nut2.position.set(0.48 * s, 3.08 * s, -0.12 * s);
-  g.add(nut1, nut2);
+  const nuts = O(
+    new THREE.Mesh(
+      baked(new THREE.SphereGeometry(0.15 * s, 8, 8), [
+        new THREE.Matrix4().makeTranslation(0.16 * s, 3.12 * s, 0.18 * s),
+        new THREE.Matrix4().makeTranslation(0.48 * s, 3.08 * s, -0.12 * s),
+      ]),
+      nutMat,
+    ),
+    0.02,
+  );
+  g.add(nuts);
   g.position.set(x, -2.4, z);
   propGroup.add(g);
   sways.push({ g, phase: x * 0.7 + z, amp: 0.02 + 0.012 * ((Math.abs(x) + s) % 1) });
@@ -320,6 +354,300 @@ function ufo(
 }
 
 // ---------------------------------------------------------------------------
+// G3 — Idle-Leben pro Theme (ROADMAP-V2)
+//
+// Regeln für ALLES hier drunter: EIN Material und EIN Draw-Call pro Sorte
+// (`Points` bzw. `InstancedMesh`), kein Licht, keine Schatten, keine
+// Per-Frame-Allokation. Die Stückzahlen skalieren mit `ctx.density` (Preset),
+// die Zahl der Draw-Calls NICHT — low spart Füllrate, nicht Batches.
+// ---------------------------------------------------------------------------
+
+/** Stückzahl aus Basis × Preset-Dichte; 0 = das Element entfällt ganz. */
+function amount(ctx: BuildCtx, base: number): number {
+  if (ctx.density <= 0) return 0;
+  return Math.max(1, Math.round(base * ctx.density));
+}
+
+/** Wiederverwendeter Schreib-Puffer für Instanz-Matrizen (keine Allokation im Loop). */
+const M4 = new THREE.Matrix4();
+const QUAT = new THREE.Quaternion();
+const EUL = new THREE.Euler();
+const VEC = new THREE.Vector3();
+const SCL = new THREE.Vector3();
+
+/** Instanz-Matrix aus Position/Y-Drehung/Skalierung schreiben. */
+function put(
+  mesh: THREE.InstancedMesh,
+  i: number,
+  x: number,
+  y: number,
+  z: number,
+  rotY: number,
+  sx: number,
+  sy: number,
+): void {
+  VEC.set(x, y, z);
+  EUL.set(0, rotY, 0);
+  QUAT.setFromEuler(EUL);
+  SCL.set(sx, sy, 1);
+  mesh.setMatrixAt(i, M4.compose(VEC, QUAT, SCL));
+}
+
+/**
+ * Club — träge kreisende Glühwürmchen über dem Deck. Ein `Points`-Objekt, ein
+ * additives Material: 1 Draw-Call für den ganzen Schwarm. Jeder Punkt hat
+ * seinen eigenen Radius/Winkelspeed/Höhen-Phasenversatz, damit der Schwarm
+ * nicht wie ein starres Karussell wirkt.
+ */
+function fireflies(ctx: BuildCtx, base: number, colorHex: number): void {
+  const count = amount(ctx, base);
+  if (count === 0) return;
+  const pos = new Float32Array(count * 3);
+  const seeds: { r: number; a: number; w: number; y: number; ph: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    seeds.push({
+      r: 4.6 + ((i * 2.7) % 3.2),
+      a: (i / count) * Math.PI * 2,
+      w: 0.05 + ((i * 1.7) % 5) * 0.012,
+      y: -1.9 + ((i * 3.1) % 3.4),
+      ph: i * 1.13,
+    });
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const pts = new THREE.Points(
+    geo,
+    new THREE.PointsMaterial({
+      color: ctx.hue(colorHex),
+      size: 0.42,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  pts.frustumCulled = false;
+  ctx.islandGroup.add(pts);
+  const attr = geo.attributes.position as THREE.BufferAttribute;
+  ctx.anims.push((t, beatV) => {
+    for (let i = 0; i < count; i++) {
+      const s = seeds[i];
+      const a = s.a + t * s.w;
+      attr.setXYZ(
+        i,
+        ISLAND_C.x + Math.cos(a) * s.r,
+        s.y + Math.sin(t * 0.55 + s.ph) * 0.5,
+        ISLAND_C.z + Math.sin(a) * s.r,
+      );
+    }
+    attr.needsUpdate = true;
+    // Auf dem Beat glimmen sie kurz auf — dieselbe Hüllkurve wie die Neonkante.
+    (pts.material as THREE.PointsMaterial).opacity = 0.55 + beatV * 0.45;
+  });
+}
+
+/**
+ * Streifen-Geometrie: hell am Kopf (lokal 0/0/0), auslaufend zum Schweif bei
+ * x = −1. Die Vertex-Farbe trägt den Verlauf, additiv gemischt — ein
+ * Kometenschweif braucht so weder Textur noch zweites Material. Zwei um 90°
+ * gekreuzte Dreiecke statt einem: der Streifen wird in die Flugrichtung gedreht
+ * und dürfte sonst je nach Bahn haarfein kantenständig zur Kamera stehen (=
+ * unsichtbar). Das Kreuz kostet ein zusätzliches Dreieck, keinen Draw-Call.
+ */
+function streakGeo(width: number): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry();
+  // prettier-ignore
+  const pos = new Float32Array([
+    0, width, 0, 0, -width, 0, -1, 0, 0,
+    0, 0, width, 0, 0, -width, -1, 0, 0,
+  ]);
+  // prettier-ignore
+  const col = new Float32Array([
+    1, 1, 1, 1, 1, 1, 0, 0, 0,
+    1, 1, 1, 1, 1, 1, 0, 0, 0,
+  ]);
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return geo;
+}
+
+interface StreakCfg {
+  color: number;
+  /** Länge des Schweifs in Welt-Einheiten. */
+  len: number;
+  /** Breite am Kopf. */
+  width: number;
+  /** Sekunden für einen kompletten Durchflug. */
+  travelS: number;
+  /** Sekunden Pause zwischen zwei Durchflügen desselben Streifens. */
+  gapS: number;
+  /** Startpunkt + Flugrichtung (Richtung wird normiert). */
+  from: [number, number, number];
+  dir: [number, number, number];
+  /** Streuung der Startpunkte je Instanz. */
+  spread: [number, number, number];
+}
+
+/**
+ * Synth-Sternschnuppen / Space-Kometen: EIN `InstancedMesh` mit dem Streifen-
+ * Dreieck, das in Intervallen durchs Bild zieht und dazwischen auf Skalierung 0
+ * steht (kein Fragment, kein Pop — es taucht am Rand auf und verlässt ihn).
+ */
+function streaks(ctx: BuildCtx, base: number, cfg: StreakCfg): void {
+  const count = amount(ctx, base);
+  if (count === 0) return;
+  const mesh = new THREE.InstancedMesh(
+    streakGeo(cfg.width),
+    new THREE.MeshBasicMaterial({
+      color: ctx.hue(cfg.color),
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+    count,
+  );
+  mesh.frustumCulled = false;
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  ctx.propGroup.add(mesh);
+  const cycle = cfg.travelS + cfg.gapS;
+  const d = new THREE.Vector3(...cfg.dir).normalize();
+  // Der Kopf liegt lokal bei +x — diese Drehung legt ihn auf die Flugbahn,
+  // Schräge inklusive (ein reiner Yaw ließe den Schweif waagerecht stehen,
+  // während die Sternschnuppe schräg fällt).
+  const aim = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), d);
+  ctx.anims.push((t) => {
+    for (let i = 0; i < count; i++) {
+      const k = ((t + i * (cycle / count)) % cycle) / cfg.travelS;
+      if (k > 1) {
+        put(mesh, i, 0, 0, 0, 0, 0, 0); // Pause: unsichtbar
+        continue;
+      }
+      const j = ((i * 7919) % 1000) / 1000; // deterministische Streuung
+      const dist = k * (cfg.travelS * 9);
+      // Ein-/Ausblenden über die Länge, damit nichts hart erscheint/verschwindet.
+      const fade = Math.sin(Math.PI * k);
+      VEC.set(
+        cfg.from[0] + (j - 0.5) * cfg.spread[0] + d.x * dist,
+        cfg.from[1] + (j - 0.5) * cfg.spread[1] + d.y * dist,
+        cfg.from[2] + (j - 0.5) * cfg.spread[2] + d.z * dist,
+      );
+      SCL.set(cfg.len * fade, fade, fade);
+      mesh.setMatrixAt(i, M4.compose(VEC, aim, SCL));
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  });
+}
+
+/** V-Silhouette einer Möwe: zwei schmale Dreiecke, ein gemeinsames Material. */
+function gullGeo(): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry();
+  // prettier-ignore
+  const v = new Float32Array([
+    0, 0, 0, -1, 0.5, 0, -0.86, -0.04, 0,
+    0, 0, 0, 0.86, -0.04, 0, 1, 0.5, 0,
+  ]);
+  geo.setAttribute('position', new THREE.BufferAttribute(v, 3));
+  return geo;
+}
+
+/**
+ * Beach — Möwen auf Ellipsen über dem Meer. Ein `InstancedMesh`, ein dunkles
+ * Basic-Material: die Silhouette braucht kein Licht. Das „Flügelschlagen" ist
+ * eine Y-Skalierung (die V-Form klappt auf und zu) — pro Instanz eine Zahl,
+ * kein Morph-Target, keine zweite Geometrie.
+ */
+function gulls(ctx: BuildCtx, base: number): void {
+  const count = amount(ctx, base);
+  if (count === 0) return;
+  const mesh = new THREE.InstancedMesh(
+    gullGeo(),
+    new THREE.MeshBasicMaterial({ color: 0x2a1e2c, side: THREE.DoubleSide }),
+    count,
+  );
+  mesh.frustumCulled = false;
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  ctx.propGroup.add(mesh);
+  ctx.anims.push((t) => {
+    for (let i = 0; i < count; i++) {
+      const sp = 0.13 + i * 0.035;
+      const a = t * sp + i * 2.4;
+      const rx = 7 + i * 2.5;
+      const rz = 5 + i * 2;
+      const x = Math.cos(a) * rx;
+      const z = 15 + Math.sin(a) * rz;
+      const flap = 0.55 + Math.abs(Math.sin(t * 3.1 + i * 1.7)) * 0.7;
+      const s = 1 + i * 0.35;
+      // Kein Yaw: die Silhouette steht wie ein Sprite zur Diorama-Kamera —
+      // mitgedreht stünde sie an den Ellipsen-Scheiteln kantenständig (= weg).
+      put(mesh, i, x, 3.2 + i * 0.9 + Math.sin(t * 0.6 + i) * 0.5, z, 0, s, s * flap);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  });
+}
+
+/**
+ * Publikum-Silhouetten am hinteren Inselrand (G3). Ein `InstancedMesh` mit
+ * einer Halbkörper-Silhouette (Kopf + Schultern als EINE `ShapeGeometry`), ein
+ * unbeleuchtetes dunkles Material — 1 Draw-Call für die ganze Menge. Sie hängen
+ * an der `islandGroup`, fahren beim G1-Wechsel also exakt mit der Bühne raus
+ * und rein, und wippen mit `beatV` (Y-Bob + Stauchung).
+ */
+function audienceGeo(): THREE.ShapeGeometry {
+  const head = new THREE.Shape();
+  head.absarc(0, 0.6, 0.19, 0, Math.PI * 2, false);
+  const torso = new THREE.Shape();
+  torso.moveTo(-0.34, -0.55);
+  torso.lineTo(-0.3, 0.16);
+  torso.quadraticCurveTo(-0.26, 0.42, 0, 0.44);
+  torso.quadraticCurveTo(0.26, 0.42, 0.3, 0.16);
+  torso.lineTo(0.34, -0.55);
+  torso.closePath();
+  return new THREE.ShapeGeometry([head, torso], 8);
+}
+
+function audience(ctx: BuildCtx): void {
+  const count = amount(ctx, 8);
+  if (count === 0) return;
+  const mesh = new THREE.InstancedMesh(
+    audienceGeo(),
+    new THREE.MeshBasicMaterial({ color: 0x140f22, side: THREE.DoubleSide }),
+    count,
+  );
+  mesh.frustumCulled = false;
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  ctx.islandGroup.add(mesh);
+  const R = ISLAND_R - 0.6;
+  ctx.anims.push((t, beatV) => {
+    for (let i = 0; i < count; i++) {
+      // Der sichtbare Bogen liegt im +z-Halbraum — von der Diorama-Kamera aus
+      // also HINTER dem Duo, nie davor.
+      const a = 0.3 + (i / Math.max(1, count - 1)) * (Math.PI - 0.6);
+      const r = R - ((i * 3) % 4) * 0.22;
+      const x = ISLAND_C.x + Math.cos(a) * r;
+      const z = ISLAND_C.z + Math.sin(a) * r;
+      const ph = i * 0.9;
+      const bob = beatV * 0.16 + Math.sin(t * 1.6 + ph) * 0.05;
+      const s = 1.25 + ((i * 5) % 3) * 0.13;
+      put(
+        mesh,
+        i,
+        x,
+        TOP_Y + s * 0.55 + bob,
+        z,
+        Math.atan2(ISLAND_C.x - x, ISLAND_C.z - z),
+        s,
+        s * (1 - beatV * 0.07),
+      );
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // The four stages
 // ---------------------------------------------------------------------------
 
@@ -395,8 +723,12 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
         propGroup.add(beam);
         beams.push({ l, beam, ph: i * 1.57 });
       }
-      // Beat-reactive dance tiles (already cartoon-graphic — kept).
-      const tiles: THREE.Mesh[] = [];
+      // Beat-reactive dance tiles. G3-Budget: vorher trug JEDE Kachel ein
+      // eigenes Mesh MIT eigenem Material (25 Draw-Calls für ein Feld, das sich
+      // nur in der Farbe unterscheidet). Jetzt ein `InstancedMesh` mit
+      // `instanceColor` — die Regenbogen-Welle läuft unverändert, kostet aber
+      // einen Batch. Unbeleuchtet, weil der Look ohnehin aus dem Emissive kam.
+      const tilePos: [number, number][] = [];
       for (let ix = -4; ix < 4; ix++)
         for (let iz = -4; iz < 4; iz++) {
           const tx = ix * 2 + 1;
@@ -405,21 +737,22 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
           // Tanzfläche liegt als gerundetes Feld AUF der schwebenden Insel
           // (Insel-Zentrum = Duo-Mitte 1.4/1.7, siehe scene.ts ISLAND_C).
           if (Math.hypot(tx - 1.4, tz - 1.7) > 5.6) continue;
-          const t = new THREE.Mesh(
-            new THREE.PlaneGeometry(1.9, 1.9),
-            mk({
-              color: 0x111118,
-              roughness: 0.3,
-              metalness: 0.5,
-              emissive: 0x8b5cf6,
-              emissiveIntensity: 0,
-            }),
-          );
-          t.rotation.x = -Math.PI / 2;
-          t.position.set(tx, -2.39, tz);
-          propGroup.add(t);
-          tiles.push(t);
+          tilePos.push([tx, tz]);
         }
+      const tileGeo = new THREE.PlaneGeometry(1.9, 1.9);
+      tileGeo.rotateX(-Math.PI / 2);
+      const tiles = new THREE.InstancedMesh(
+        tileGeo,
+        new THREE.MeshBasicMaterial({ color: 0xffffff }),
+        tilePos.length,
+      );
+      const tileC = new THREE.Color();
+      for (let i = 0; i < tilePos.length; i++) {
+        put(tiles, i, tilePos[i][0], -2.39, tilePos[i][1], 0, 1, 1);
+        tiles.setColorAt(i, tileC.setHex(0x111118));
+      }
+      tiles.instanceMatrix.needsUpdate = true;
+      propGroup.add(tiles);
       // Chunky cartoon speaker stacks flanking the floor + one echo at −z.
       const pulses: THREE.Object3D[] = [];
       speakerStack(ctx, 10.5, 10, 1.35, pulses);
@@ -429,6 +762,8 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       const confettiG = confettiCloud(ctx, 130);
       confettiG.position.set(1.5, 0.9, 7);
       propGroup.add(confettiG);
+      // G3: träge kreisende Glühwürmchen über dem Deck (1 Draw-Call).
+      fireflies(ctx, 14, 0xbfff70);
       anims.push((t, beatV) => {
         ball.rotation.y += 0.012;
         for (let i = 0; i < beams.length; i++) {
@@ -441,11 +776,20 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
           b.beam.lookAt(0, -2.4, 0);
           b.beam.rotateX(-Math.PI / 2);
         }
-        for (let i = 0; i < tiles.length; i++) {
-          const mat = tiles[i].material as THREE.MeshStandardMaterial;
-          mat.emissiveIntensity = Math.max(0, Math.sin(t * 3 + i * 0.7)) * 0.8 * (0.4 + beatV);
-          mat.emissive.setHSL((t * 0.05 + i * 0.03) % 1, 0.8, 0.5);
+        for (let i = 0; i < tilePos.length; i++) {
+          // ×1.4 gleicht aus, was mit dem Standard-Material wegfiel: die vier
+          // farbigen Club-Spots lieferten den Kacheln vorher zusätzlich einen
+          // Diffus-/Specular-Anteil, das unbeleuchtete Material nicht.
+          const k = Math.max(0, Math.sin(t * 3 + i * 0.7)) * 1.12 * (0.4 + beatV);
+          tileC.setHSL((t * 0.05 + i * 0.03) % 1, 0.8, 0.5).multiplyScalar(k);
+          // Grundton der dunklen Kachel (0x111118), damit sie im Aus-Zustand
+          // nicht schwarz kippt — vorher trug den der `color` des Materials.
+          tileC.r += 0.067;
+          tileC.g += 0.067;
+          tileC.b += 0.094;
+          tiles.setColorAt(i, tileC);
         }
+        if (tiles.instanceColor) tiles.instanceColor.needsUpdate = true;
         const pk = 1 + beatV * 0.3;
         for (let i = 0; i < pulses.length; i++) pulses[i].scale.setScalar(pk);
         confettiG.rotation.y = t * 0.07;
@@ -518,16 +862,23 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
         transparent: true,
         opacity: 0.25,
       });
-      for (let i = 0; i < 12; i++) {
-        const a = (i / 12) * Math.PI * 2 + 0.26;
-        const r = 27 + (i % 3) * 4;
-        const h = 4.5 + ((i * 2.7) % 4);
-        const geo = new THREE.ConeGeometry(3 + ((i * 1.3) % 2.5), h, 6);
-        const m = O(new THREE.Mesh(geo, mtnMat), 0.07);
-        m.position.set(Math.cos(a) * r, -2.4 + h / 2, Math.sin(a) * r);
-        m.rotation.y = (i * 1.1) % 3;
-        m.add(new THREE.Mesh(geo, wireMat));
-        propGroup.add(m);
+      // G3-Budget: der 12er-Bergring war 36 Draw-Calls (Kegel + Ink-Hülle +
+      // Neon-Drahtgitter je Berg). Gebacken sind es drei — gleiches Bild, denn
+      // das Drahtgitter der zusammengefassten Geometrie zeigt dieselben Kanten.
+      {
+        const peaks: THREE.Mesh[] = [];
+        for (let i = 0; i < 12; i++) {
+          const a = (i / 12) * Math.PI * 2 + 0.26;
+          const r = 27 + (i % 3) * 4;
+          const h = 4.5 + ((i * 2.7) % 4);
+          const m = new THREE.Mesh(new THREE.ConeGeometry(3 + ((i * 1.3) % 2.5), h, 6));
+          m.position.set(Math.cos(a) * r, -2.4 + h / 2, Math.sin(a) * r);
+          m.rotation.y = (i * 1.1) % 3;
+          peaks.push(m);
+        }
+        const ridge = O(bake(peaks, mtnMat), 0.07);
+        ridge.add(new THREE.Mesh(ridge.geometry, wireMat));
+        propGroup.add(ridge);
       }
       // Dark toon palms flanking the sun (classic synthwave silhouettes).
       const sways: Sway[] = [];
@@ -556,6 +907,20 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       );
       orb.position.set(15.5, 2.2, 23);
       propGroup.add(orb);
+      // G3: Sternschnuppen-Streifen, die in Intervallen über den Horizont ziehen.
+      streaks(ctx, 3, {
+        color: 0xffe6ff,
+        len: 4.2,
+        width: 0.16,
+        travelS: 1.7,
+        gapS: 5,
+        // Bild-Geometrie: +x liegt auf der Leinwand LINKS, +z hinten. Der
+        // Streifen quert den offenen Himmel UNTER der schwebenden Insel: der
+        // obere Bildrand gehört dem HUD-Streifen, die Bildmitte der Bühne.
+        from: [6, 1.5, 15],
+        dir: [-1, -0.25, 0],
+        spread: [3, 2, 4],
+      });
       anims.push((t) => {
         sunMat.uniforms.t.value = t;
         for (let i = 0; i < sways.length; i++) {
@@ -620,17 +985,33 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       palm(ctx, -12, -7, 1.35, 0x8a5a30, 0x2fae4e, sways);
       palm(ctx, 7, -13, 1.2, 0x7a4c28, 0x27994a, sways);
       // Striped umbrella (each wedge toon; one ink hull for the silhouette).
+      // G3-Budget: die 8 Keile sind zwei Batches (je Streifenfarbe einer).
       {
         const g = new THREE.Group();
         const wedgeA = toonMat({ color: hue(0xff4d5a) });
         const wedgeB = toonMat({ color: 0xfff2dc });
+        const wedgesA: THREE.BufferGeometry[] = [];
+        const wedgesB: THREE.BufferGeometry[] = [];
         for (let i = 0; i < 8; i++) {
-          const w = new THREE.Mesh(
-            new THREE.ConeGeometry(1.85, 0.95, 3, 1, true, (i / 8) * Math.PI * 2, Math.PI / 4),
-            i % 2 ? wedgeA : wedgeB,
+          const geo = new THREE.ConeGeometry(
+            1.85,
+            0.95,
+            3,
+            1,
+            true,
+            (i / 8) * Math.PI * 2,
+            Math.PI / 4,
           );
-          w.position.y = 2.15;
-          g.add(w);
+          geo.translate(0, 2.15, 0);
+          (i % 2 ? wedgesA : wedgesB).push(geo);
+        }
+        for (const [parts, mat] of [
+          [wedgesA, wedgeA],
+          [wedgesB, wedgeB],
+        ] as const) {
+          const merged = mergeGeometries(parts);
+          parts.forEach((p) => p.dispose());
+          if (merged) g.add(new THREE.Mesh(merged, mat));
         }
         const hull = new THREE.Mesh(
           new THREE.ConeGeometry(1.85, 0.95, 24, 1, true),
@@ -671,26 +1052,31 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
         ballG.position.set(9.5, -1.85, 5.5);
         propGroup.add(ballG);
       }
-      // Starfish chilling on the sand.
+      // Starfish chilling on the sand — 5 Arme + Kern in EINEM Batch (G3-Budget).
       {
         const s = 1.1;
-        const g = new THREE.Group();
         const starMat = toonMat({ color: hue(0xff7a8a) });
         const armGeo = new THREE.SphereGeometry(1, 8, 6);
         armGeo.scale(0.42 * s, 0.11 * s, 0.16 * s);
+        const mats: THREE.Matrix4[] = [];
         for (let i = 0; i < 5; i++) {
           const a = (i / 5) * Math.PI * 2;
-          const arm = O(new THREE.Mesh(armGeo, starMat), 0.02);
-          arm.position.set(Math.cos(a) * 0.3 * s, 0, Math.sin(a) * 0.3 * s);
-          arm.rotation.y = -a;
-          g.add(arm);
+          mats.push(
+            new THREE.Matrix4()
+              .makeTranslation(Math.cos(a) * 0.3 * s, 0, Math.sin(a) * 0.3 * s)
+              .multiply(new THREE.Matrix4().makeRotationY(-a)),
+          );
         }
         const coreGeo = new THREE.SphereGeometry(1, 10, 8);
         coreGeo.scale(0.24 * s, 0.13 * s, 0.24 * s);
-        g.add(O(new THREE.Mesh(coreGeo, starMat), 0.02));
-        g.position.set(7.2, -2.31, 6.1);
-        g.rotation.y = 0.7;
-        propGroup.add(g);
+        const arms = baked(armGeo, mats);
+        const whole = mergeGeometries([arms, coreGeo]);
+        arms.dispose();
+        coreGeo.dispose();
+        const star = O(new THREE.Mesh(whole ?? arms, starMat), 0.02);
+        star.position.set(7.2, -2.31, 6.1);
+        star.rotation.y = 0.7;
+        propGroup.add(star);
       }
       // Tiny island on the horizon, with its own mini palm.
       {
@@ -702,6 +1088,9 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
         propGroup.add(isle);
         palm(ctx, 20, 36, 0.9, 0x7a4c28, 0x27994a, sways);
       }
+      // G3: zwei Möwen auf Ellipsen über dem Meer (1 Draw-Call, 1 Material).
+      // Der Schaum-Puls am Inselrand sitzt bei seinem Ring in `world/island.ts`.
+      gulls(ctx, 2);
       const pos = seaGeo.attributes.position;
       anims.push((t, beatV) => {
         for (let i = 0; i < pos.count; i++) {
@@ -849,6 +1238,19 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
         s.material.opacity = 0.12;
         propGroup.add(s);
       }
+      // G3: ein bis zwei Kometen mit kurzem Schweif queren das Sternenfeld.
+      streaks(ctx, 2, {
+        color: 0x9ff2ff,
+        len: 5,
+        width: 0.2,
+        travelS: 2,
+        gapS: 6.5,
+        // Von rechts (−x) quer durchs Sternenfeld, unter der Insel hindurch —
+        // der obere Bildrand gehört dem HUD-Streifen.
+        from: [-9, 2.5, 16],
+        dir: [1, -0.22, 0],
+        spread: [4, 3, 5],
+      });
       anims.push((t, beatV) => {
         stars.rotation.y = t * 0.008;
         planet.rotation.y = t * 0.05;
@@ -876,15 +1278,95 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// G1 — Bühnen-Wechsel als Moment (ROADMAP-V2)
+// ---------------------------------------------------------------------------
+
+/** Ausfahrt der ALTEN Bühne (s) — Cubic-Ease-In, sie fällt beschleunigt weg. */
+const OUT_S = 0.5;
+/** Einfahrt der NEUEN Bühne (s) — Ease-Out mit kleinem Überschwinger. */
+const IN_S = 0.7;
+/** Fallhöhe: weit genug, dass die Insel bei jedem Framing aus dem Bild ist. */
+const DROP_Y = 17;
+/** Leichter Kippwinkel, damit die Bühne fällt statt zu „faten". */
+const TILT = 0.14;
+/** Kulissen-Parallaxe: die ferne Szenerie zieht schwächer mit als die Insel. */
+const PROP_PARALLAX = 0.55;
+
+/**
+ * ROADMAP-V2 X2 — Farbe, zu der das Deck-Emissive während der Twerk-Ekstase
+ * pulst (das Peach-Pink der Ekstase-Leiste). Das Theme-Emissive bleibt der
+ * Ausgangspunkt: Synthwave pulst also aus seinem Grid heraus, die Themes ohne
+ * Deck-Emissive (Club/Beach/Space) glühen aus Schwarz auf.
+ */
+const EKSTASE_DECK = new THREE.Color(0xff4d8d);
+
+const easeInCubic = (k: number): number => k * k * k;
+/**
+ * Ease-Out mit Überschwinger. `c = 0.75` federt ~2 % über die Ruhelage — bei
+ * `DROP_Y` sind das gut 0.35 Einheiten, also spürbar als Landung, aber klein
+ * genug, dass das Duo (das erst ab −0.35 wieder auftritt) nicht im Deck steht.
+ */
+const easeOutBack = (k: number): number => {
+  const c = 0.75;
+  const p = k - 1;
+  return 1 + (c + 1) * p * p * p + c * p * p;
+};
+
+/** Alles, was beim Theme-Wechsel STETIG überblendet werden kann (G1). */
+interface Palette {
+  skyTop: THREE.Color;
+  skyBot: THREE.Color;
+  fog: THREE.Color;
+  floor: THREE.Color;
+  key: THREE.Color;
+  keyInt: number;
+  fill: THREE.Color;
+  fillInt: number;
+  sky: THREE.Color;
+  ground: THREE.Color;
+  rimA: THREE.Color;
+  rimB: THREE.Color;
+}
+
 /**
  * Owns the swappable stage props and the sky/fog/floor tint. Replaces the
  * prototype's propGroup/anims globals + setBackground().
+ *
+ * G1: `setBackground(key, variant, { animate: true })` macht aus dem Cut einen
+ * Moment — die alte `islandGroup` fährt nach unten aus dem Bild (Kulisse mit
+ * Parallaxe hinterher), erst DANN wird sie entsorgt und die neue Bühne gebaut,
+ * die von unten einschwebt. Sky/Fog/Deck-Farbe und das Licht-Rig blenden über
+ * die GANZE Dauer stetig über, damit nirgends ein Hard-Cut sitzt. Getickt wird
+ * im bestehenden Render-Loop (`update(dt)`), die Kamera bleibt unberührt.
  */
 export class World {
   private propGroup = new THREE.Group();
   private islandGroup = new THREE.Group();
   /** Per-frame animation callbacks for the active background. */
   readonly anims: WorldAnim[] = [];
+
+  /** X2: Deck-Emissive des aktuellen Themes — die Ruhelage des Ekstase-Pulses. */
+  private deckEmissive0 = new THREE.Color(0x000000);
+  private deckEmissiveI0 = 1;
+  /** X2: Läuft der Deck-Puls gerade? (Nur dann muss zurückgestellt werden.) */
+  private ekstaseOn = false;
+  /** G3: Dichte-Faktor der Ambient-Elemente (aus dem Quality-Preset). */
+  private ambientLife = 1;
+  /** Die zuletzt GEBAUTE Bühne — für einen Rebuild bei Dichte-Wechsel (G3). */
+  private cur: { key: BackgroundKey; variant: number } | null = null;
+
+  /** G1-Übergangs-Zustand: `null` = keine Bühne in Bewegung. */
+  private trans: {
+    key: BackgroundKey;
+    variant: number;
+    /** `false` = die alte Bühne fährt noch aus, `true` = die neue fährt ein. */
+    entering: boolean;
+    /** Sekunden in der laufenden Phase. */
+    t: number;
+    from: Palette;
+    to: Palette;
+  } | null = null;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -908,14 +1390,92 @@ export class World {
     });
   }
 
+  /** Lap-Hue-Funktion für einen Recolour-Lap (Identität auf Lap 0). */
+  private static hueFn(variant: number): (hex: number) => THREE.Color {
+    const dh = (variant * LAP_HUE) % 1;
+    return (hex) => {
+      const c = new THREE.Color(hex);
+      if (dh !== 0) c.offsetHSL(dh, 0, 0);
+      return c;
+    };
+  }
+
   /**
-   * Swap the stage. `variant` is the recolour lap (0 = original palette) —
-   * deeper endless laps hue-shift the sky, fog, floor and prop palette so
-   * lap 2+ of a tier reads visibly different (Wave-3 endless variety).
-   * Seit dem Goal-Umbau wird auch die INSEL selbst pro Theme neu gebaut
-   * (`world/island.ts`) und das Deck texturiert (`deck`-Config).
+   * Die überblendbare Palette eines Themes. Goal „alle Bühnen heller": die
+   * Kulissen-Paletten werden Richtung Weiß geliftet (Sky am stärksten, Boden
+   * dezent) — die Stimmungen bleiben unterscheidbar, aber nichts säuft mehr im
+   * Dunkel ab. Das Licht-Rig (Roadmap L) läuft bewusst OHNE Hue-Lap.
    */
-  setBackground(key: BackgroundKey, variant = 0): void {
+  private static paletteFor(key: BackgroundKey, variant: number): Palette {
+    const hue = World.hueFn(variant);
+    const lift = (c: THREE.Color, f: number): THREE.Color => c.lerp(new THREE.Color(0xffffff), f);
+    const b = BGS[key];
+    const L = b.light;
+    return {
+      skyTop: lift(hue(b.top), 0.22),
+      skyBot: lift(hue(b.bot), 0.3),
+      fog: lift(hue(b.fog), 0.26),
+      floor: lift(hue(b.floor), 0.14),
+      key: new THREE.Color(L.key),
+      keyInt: L.keyInt,
+      fill: new THREE.Color(L.fill),
+      fillInt: L.fillInt,
+      sky: new THREE.Color(L.sky),
+      ground: new THREE.Color(L.ground),
+      rimA: new THREE.Color(L.rimA),
+      rimB: new THREE.Color(L.rimB),
+    };
+  }
+
+  /** Die AKTUELL gesetzte Palette (Startpunkt einer G1-Überblendung). */
+  private snapshotPalette(): Palette {
+    const l = this.lights;
+    const base = World.paletteFor('club', 0); // Fallback-Werte ohne Licht-Rig
+    return {
+      skyTop: (this.skyMat.uniforms.top!.value as THREE.Color).clone(),
+      skyBot: (this.skyMat.uniforms.bot!.value as THREE.Color).clone(),
+      fog: (this.scene.fog as THREE.FogExp2).color.clone(),
+      floor: this.floorMat.color.clone(),
+      key: l ? l.key.color.clone() : base.key,
+      keyInt: l ? l.key.intensity : base.keyInt,
+      fill: l ? l.fill.color.clone() : base.fill,
+      fillInt: l ? l.fill.intensity : base.fillInt,
+      sky: l ? l.hemi.color.clone() : base.sky,
+      ground: l ? l.hemi.groundColor.clone() : base.ground,
+      rimA: l ? l.rimA.color.clone() : base.rimA,
+      rimB: l ? l.rimB.color.clone() : base.rimB,
+    };
+  }
+
+  /** Palette schreiben — `k < 1` blendet von `from` nach `to` (G1). */
+  private applyPalette(from: Palette, to: Palette, k: number): void {
+    const c = (a: THREE.Color, b: THREE.Color): THREE.Color =>
+      k >= 1 ? b.clone() : a.clone().lerp(b, k);
+    const n = (a: number, b: number): number => (k >= 1 ? b : a + (b - a) * k);
+    (this.skyMat.uniforms.top!.value as THREE.Color).copy(c(from.skyTop, to.skyTop));
+    (this.skyMat.uniforms.bot!.value as THREE.Color).copy(c(from.skyBot, to.skyBot));
+    (this.scene.fog as THREE.FogExp2).color.copy(c(from.fog, to.fog));
+    this.floorMat.color.copy(c(from.floor, to.floor));
+    if (this.lights) {
+      this.lights.key.color.copy(c(from.key, to.key));
+      this.lights.key.intensity = n(from.keyInt, to.keyInt);
+      this.lights.fill.color.copy(c(from.fill, to.fill));
+      this.lights.fill.intensity = n(from.fillInt, to.fillInt);
+      this.lights.hemi.color.copy(c(from.sky, to.sky));
+      this.lights.hemi.groundColor.copy(c(from.ground, to.ground));
+      this.lights.rimA.color.copy(c(from.rimA, to.rimA));
+      this.lights.rimB.color.copy(c(from.rimB, to.rimB));
+    }
+  }
+
+  /**
+   * Die harte Hälfte des Wechsels: alte Gruppen entsorgen, Deck-Texturen +
+   * Insel + Kulisse neu bauen. Alles hier ist DISKRET (Map-Wechsel brauchen
+   * einen Programm-Rebuild) — im animierten Fall läuft es, während die Bühne
+   * unter dem Bildrand steht.
+   */
+  private rebuild(key: BackgroundKey, variant: number): void {
+    this.cur = { key, variant };
     this.disposeGroup(this.propGroup);
     this.disposeGroup(this.islandGroup);
     this.propGroup = new THREE.Group();
@@ -926,21 +1486,8 @@ export class World {
     this.scene.add(this.propGroup, this.islandGroup);
     this.anims.length = 0;
 
-    const dh = (variant * LAP_HUE) % 1;
-    const hue = (hex: number): THREE.Color => {
-      const c = new THREE.Color(hex);
-      if (dh !== 0) c.offsetHSL(dh, 0, 0);
-      return c;
-    };
+    const hue = World.hueFn(variant);
     const b = BGS[key];
-    // Goal „alle Bühnen heller": die Kulissen-Paletten werden beim Anwenden
-    // Richtung Weiß geliftet (Sky am stärksten, Boden dezent) — die Stimmungen
-    // bleiben unterscheidbar, aber nichts säuft mehr im Dunkel ab.
-    const lift = (c: THREE.Color, f: number): THREE.Color => c.lerp(new THREE.Color(0xffffff), f);
-    (this.skyMat.uniforms.top!.value as THREE.Color).copy(lift(hue(b.top), 0.22));
-    (this.skyMat.uniforms.bot!.value as THREE.Color).copy(lift(hue(b.bot), 0.3));
-    (this.scene.fog as THREE.FogExp2).color.copy(lift(hue(b.fog), 0.26));
-    this.floorMat.color.copy(lift(hue(b.floor), 0.14));
     this.floorMat.roughness = b.fr;
     this.floorMat.metalness = b.fm;
     // Deck-Texturen (Goal „apply texture"): Map/Emissive-Map je Theme; ein
@@ -954,19 +1501,11 @@ export class World {
     this.floorMat.bumpMap = d.bump ? (this.floorMat.map ?? this.floorMat.emissiveMap) : null;
     this.floorMat.bumpScale = d.bump ?? 1;
     this.floorMat.needsUpdate = true;
-    // Roadmap L: das Licht-Rig wechselt mit der Kulisse (bewusst OHNE Hue-Lap —
-    // die Paletten shiften genug; Licht hält die Grundstimmung des Themes).
-    if (this.lights) {
-      const L = b.light;
-      this.lights.key.color.set(L.key);
-      this.lights.key.intensity = L.keyInt;
-      this.lights.fill.color.set(L.fill);
-      this.lights.fill.intensity = L.fillInt;
-      this.lights.hemi.color.set(L.sky);
-      this.lights.hemi.groundColor.set(L.ground);
-      this.lights.rimA.color.set(L.rimA);
-      this.lights.rimB.color.set(L.rimB);
-    }
+    // X2: die frische Deck-Emissive-Ruhelage merken. Läuft gerade eine Ekstase,
+    // schreibt der nächste `setEkstase`-Tick den Puls wieder darüber — der
+    // Bühnen-Wechsel MITTEN im Fenster reißt den Puls also nicht ab.
+    this.deckEmissive0.copy(this.floorMat.emissive);
+    this.deckEmissiveI0 = this.floorMat.emissiveIntensity;
     if (d.scroll && this.floorMat.emissiveMap) {
       const tex = this.floorMat.emissiveMap;
       const speed = d.scroll;
@@ -975,12 +1514,162 @@ export class World {
       });
     }
     buildIsland(this.islandGroup, key, hue, this.floorMat, this.anims);
-    b.build({
+    const ctx: BuildCtx = {
       propGroup: this.propGroup,
+      islandGroup: this.islandGroup,
       glowSprite: this.glowSprite,
       anims: this.anims,
       variant,
       hue,
-    });
+      density: this.ambientLife,
+    };
+    b.build(ctx);
+    // G3: Publikum-Silhouetten am hinteren Inselrand — für JEDE Bühne gleich
+    // (das Publikum ist der Bühne eigen, nicht dem Theme), deshalb hier und
+    // nicht in den vier `build`-Funktionen.
+    audience(ctx);
+  }
+
+  /** Bühnen-Versatz setzen (G1) — `y` in Welt-Einheiten, `tilt` in Radiant. */
+  private setStageOffset(y: number, tilt: number): void {
+    this.islandGroup.position.y = y;
+    this.islandGroup.rotation.z = tilt;
+    this.propGroup.position.y = y * PROP_PARALLAX;
+    this.propGroup.rotation.z = tilt * PROP_PARALLAX;
+  }
+
+  /**
+   * Swap the stage. `variant` is the recolour lap (0 = original palette) —
+   * deeper endless laps hue-shift the sky, fog, floor and prop palette so
+   * lap 2+ of a tier reads visibly different (Wave-3 endless variety).
+   * Seit dem Goal-Umbau wird auch die INSEL selbst pro Theme neu gebaut
+   * (`world/island.ts`) und das Deck texturiert (`deck`-Config).
+   *
+   * G1: mit `{ animate: true }` (medium/high) wird daraus die Aus-/Einfahrt —
+   * siehe `update()`. Ohne die Option (und im low-Preset) bleibt es der
+   * bisherige Hard-Swap in EINEM Frame.
+   */
+  setBackground(key: BackgroundKey, variant = 0, opts?: { animate?: boolean }): void {
+    if (opts?.animate) {
+      if (this.trans) {
+        // Nachgereichter Wechsel MITTEN im laufenden: nur das Ziel austauschen,
+        // damit nie zwei Übergänge übereinander liegen. Steht die neue Bühne
+        // schon in der Einfahrt, wird sie neu gebaut und fährt erneut ein.
+        this.trans.key = key;
+        this.trans.variant = variant;
+        this.trans.to = World.paletteFor(key, variant);
+        if (this.trans.entering) {
+          this.rebuild(key, variant);
+          this.setStageOffset(-DROP_Y, -TILT);
+          this.trans.t = 0;
+        }
+        return;
+      }
+      // Die alte Bühne bleibt vorerst stehen und fährt aus; entsorgt wird sie
+      // erst, wenn sie unter dem Bildrand ist (siehe `update`).
+      this.trans = {
+        key,
+        variant,
+        entering: false,
+        t: 0,
+        from: this.snapshotPalette(),
+        to: World.paletteFor(key, variant),
+      };
+      return;
+    }
+    // Hard-Swap: ein laufender Übergang wird verworfen (Prestige/Import setzen
+    // die Bühne hart — dort darf keine halb ausgefahrene Insel hängenbleiben).
+    this.trans = null;
+    this.rebuild(key, variant);
+    this.setStageOffset(0, 0);
+    const p = World.paletteFor(key, variant);
+    this.applyPalette(p, p, 1);
+  }
+
+  /** Läuft gerade ein Bühnen-Wechsel? (Der Loop pausiert dann Treffer/Klicks.) */
+  get transitioning(): boolean {
+    return this.trans !== null;
+  }
+
+  /**
+   * ROADMAP-V2 X2 — Deck-Emissive-Puls im Ekstase-Fenster.
+   *
+   * Aufruf JEDEN Frame aus dem Render-Loop mit `(frenzy && preset.ekstaseDeck,
+   * beatV)` — derselbe `beatV`, den auch die Kulissen-Anims bekommen, also
+   * pulst das Deck exakt im Takt der Neonkanten und Lautsprecher-Dome. Kein
+   * eigener Timer, kein Licht, keine zusätzliche Geometrie: es wird nur das
+   * ohnehin vorhandene geteilte `floorMat` moduliert und beim Fenster-Ende
+   * genau einmal auf die Theme-Ruhelage zurückgestellt.
+   */
+  setEkstase(active: boolean, beatV: number): void {
+    if (!active) {
+      if (this.ekstaseOn) {
+        this.ekstaseOn = false;
+        this.floorMat.emissive.copy(this.deckEmissive0);
+        this.floorMat.emissiveIntensity = this.deckEmissiveI0;
+      }
+      return;
+    }
+    this.ekstaseOn = true;
+    // Grundglut + Beat-Spitze: das Deck steht auch zwischen den Schlägen hell
+    // (das Fenster ist ein Zustand, kein Stroboskop), schlägt aber sichtbar an.
+    const k = 0.45 + 0.55 * Math.max(0, Math.min(1, beatV));
+    this.floorMat.emissive.copy(this.deckEmissive0).lerp(EKSTASE_DECK, k);
+    this.floorMat.emissiveIntensity = this.deckEmissiveI0 + 0.2 + k * 0.9;
+  }
+
+  /**
+   * ROADMAP-V2 G3 — Dichte der Ambient-Elemente (Preset-Pflicht). Ändert sich
+   * der Wert (Grafik-Einstellung im Spiel), wird die aktuelle Bühne einmal neu
+   * gebaut, damit die Stückzahlen sofort stimmen; ein LAUFENDER G1-Wechsel wird
+   * dabei bewusst nicht gestört — er baut die neue Bühne ohnehin gleich mit der
+   * neuen Dichte.
+   */
+  setAmbientLife(density: number): void {
+    const d = Math.max(0, density);
+    if (d === this.ambientLife) return;
+    this.ambientLife = d;
+    if (this.cur && !this.trans) this.rebuild(this.cur.key, this.cur.variant);
+  }
+
+  /** Aktueller Höhen-Versatz der Bühne (0 = Ruhelage) — für den Headless-Beweis. */
+  get stageY(): number {
+    return this.islandGroup.position.y;
+  }
+
+  /**
+   * G1-Tick aus dem Render-Loop. Phase 1 (`OUT_S`): die alte Insel-Gruppe fällt
+   * mit Cubic-Ease-In und leichtem Tilt aus dem Bild, die Kulisse mit
+   * Parallaxe hinterher. Am Phasenende wird sie entsorgt und die neue Bühne
+   * gebaut (unter dem Bildrand). Phase 2 (`IN_S`): die neue Gruppe schwebt mit
+   * Ease-Out und kleinem Überschwinger in die Ruhelage. Über BEIDE Phasen
+   * blendet die Palette stetig — kein Hard-Cut, auch nicht am Himmel.
+   */
+  update(dt: number): void {
+    const tr = this.trans;
+    if (!tr) return;
+    tr.t += dt;
+    if (!tr.entering) {
+      const k = Math.min(1, tr.t / OUT_S);
+      const e = easeInCubic(k);
+      this.setStageOffset(-DROP_Y * e, TILT * e);
+      this.applyPalette(tr.from, tr.to, (k * OUT_S) / (OUT_S + IN_S));
+      if (k >= 1) {
+        this.rebuild(tr.key, tr.variant);
+        this.setStageOffset(-DROP_Y, -TILT);
+        tr.entering = true;
+        tr.t = 0;
+      }
+      return;
+    }
+    const k = Math.min(1, tr.t / IN_S);
+    const e = easeOutBack(k);
+    this.setStageOffset(-DROP_Y * (1 - e), -TILT * (1 - e));
+    this.applyPalette(tr.from, tr.to, (OUT_S + k * IN_S) / (OUT_S + IN_S));
+    if (k >= 1) {
+      this.setStageOffset(0, 0);
+      this.applyPalette(tr.to, tr.to, 1);
+      this.trans = null;
+    }
   }
 }

@@ -869,6 +869,101 @@ body {
   max-width: 360px;
   width: 88vw;
 }
+
+/* ---- X3: Willkommen-zurück-Card (Offline-Rückkehr als Moment) ---- */
+.dialog.wb {
+  max-width: 340px;
+  width: 86vw;
+}
+.wb-rows {
+  margin: 14px 0 4px;
+  text-align: left;
+}
+.wb-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 2px solid var(--parch-line);
+  border-radius: 10px;
+  background: #fff8e6;
+  margin-bottom: 6px;
+}
+.wb-k {
+  font-size: 12px;
+  color: var(--parch-soft);
+}
+.wb-v {
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--parch-ink);
+  white-space: nowrap;
+}
+.wb-v.wb-gold {
+  color: #a06a12;
+}
+.wb-cap {
+  margin: 8px 2px 2px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--parch-soft);
+}
+.wb-cap.hidden {
+  display: none;
+}
+/* ---- ROADMAP-V2 X4: Saison-Zeile + Board-Wechsler über der Bestenliste ---- */
+.lb-season {
+  margin: 6px 0 2px;
+  font-family: var(--display);
+  font-size: 13px;
+  color: var(--gold-hi);
+  letter-spacing: 0.2px;
+}
+.lb-season.hidden {
+  display: none;
+}
+.lb-boards {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin: 8px 0 4px;
+  flex-wrap: wrap;
+}
+.lb-board {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--parch-soft);
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 210, 120, 0.28);
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+}
+.lb-board:hover {
+  border-color: rgba(255, 210, 120, 0.6);
+}
+.lb-board.on {
+  color: #1b1424;
+  background: linear-gradient(180deg, #ffd77a, #e8a72e);
+  border-color: rgba(255, 210, 120, 0.85);
+  font-weight: 800;
+}
+.lb-sub {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--parch-soft);
+  opacity: 0.85;
+}
+#lbTopRetry.hidden,
+#lbRetryBtn.hidden {
+  display: none;
+}
 .lb-list {
   max-height: 50vh;
   overflow-y: auto;
@@ -1027,7 +1122,9 @@ body {
     left: 50%;
   }
   .topui {
-    top: calc(60px + env(safe-area-inset-top, 0px));
+    /* X6: 68 statt 60 px — im Portrait ist der Crew-Knopf höher gepolstert
+       (12 px statt 8 px), seine Unterkante stieß sonst in die HUD-Karte. */
+    top: calc(68px + env(safe-area-inset-top, 0px));
     width: min(440px, 96vw);
     gap: 6px;
   }
@@ -1048,6 +1145,24 @@ body {
   .hintbar {
     font-size: 11px;
     width: 92%;
+    /* X6: Die Zeile lief bei 92 % Breite unter den Mute-Knopf (44×13 px
+       Überdeckung). Sie steigt über die Ekstase-Leiste, statt schmaler zu
+       werden — so bleibt sie einzeilig lesbar. */
+    bottom: calc(112px + env(safe-area-inset-bottom, 0px));
+  }
+  /* X6: Touch-Ziele auf 44 px. Gemessen lagen darunter: Kauf-Mengen (36),
+     Kulissen-Wahl (29), Skin-Knöpfe (20/26), „Boss herausfordern" (37) und
+     der Board-Wechsler des Leaderboards (26). Der Zonen-Strip war mit
+     46×51 px schon in Ordnung und bleibt unberührt. */
+  .amt,
+  .kbtn,
+  .sc-equip,
+  .lb-board,
+  .boss-challenge {
+    min-height: 44px;
+  }
+  .sc-btn {
+    min-height: 40px;
   }
 }
 
@@ -1156,6 +1271,46 @@ body {
   background-size:
     28px 100%,
     100% 100%;
+}
+/* ROADMAP-V2 A2: Spotlight-Phase (Club) — der Balken wechselt in einen kalten
+   Bühnenlicht-Look und pulst, solange nur Klicks zählen. Rein visuell. */
+.rival-hpfill.spotlight {
+  background:
+    repeating-linear-gradient(
+      -55deg,
+      rgba(255, 255, 255, 0.3) 0 7px,
+      rgba(255, 255, 255, 0) 7px 14px
+    ),
+    linear-gradient(180deg, #fffdf0 0%, #ffe9a8 55%, #e8c25a 100%);
+  background-size:
+    28px 100%,
+    100% 100%;
+  animation:
+    hpstripes 0.45s linear infinite,
+    hpspot 0.7s ease-in-out infinite;
+}
+@keyframes hpspot {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.45);
+  }
+}
+/* …und ein kurzer Rückwärts-Blitz, wenn die Welle geheilt hat (Beach). */
+.rival-hpfill.healed {
+  animation:
+    hpstripes 0.8s linear infinite,
+    hpheal 0.55s ease-out 1;
+}
+@keyframes hpheal {
+  0% {
+    filter: brightness(2.1) hue-rotate(-40deg);
+  }
+  100% {
+    filter: none;
+  }
 }
 @keyframes hpstripes {
   to {
@@ -1297,6 +1452,13 @@ body {
   color: #ffd24d;
   text-shadow: 0 0 10px rgba(255, 210, 77, 0.85);
 }
+/* ROADMAP-V2 A2 (Synth „Schild-Takte"): abgeprallter Klick. Kalt, klein und
+   ohne Zahl — die Aussage ist „nichts angekommen", nicht „wie viel". */
+.pop.blocked {
+  color: #9fd6ff;
+  font-size: 17px;
+  text-shadow: 0 0 10px rgba(120, 190, 255, 0.75);
+}
 
 /* ---- M8: combo tiers, ability bar, crew milestone bars ---- */
 .combo.tier1 {
@@ -1380,6 +1542,46 @@ body {
 .ability-btn.active .ability-fill {
   background: linear-gradient(90deg, #ffd24d, #ff6b8d);
 }
+
+/* ---- X2: Countdown-Ring der Ekstase-LAUFZEIT (Ladung = .ability-fill) ----
+   Conic-Gradient von 12 Uhr aus: der helle Sektor ist die Rest-Laufzeit
+   (`--ek-left`, von der AbilityBar gesetzt), der Rest läuft dunkel ab. Sitzt
+   im linken Ende der Pille, damit das Label mittig lesbar bleibt. */
+.ability-ring {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  z-index: 2;
+  display: none;
+  background: conic-gradient(
+    from 0deg,
+    #ffe98a 0%,
+    #ffd24d var(--ek-left, 100%),
+    rgba(24, 12, 4, 0.72) var(--ek-left, 100%),
+    rgba(24, 12, 4, 0.72) 100%
+  );
+  box-shadow: 0 0 10px rgba(255, 210, 77, 0.7);
+}
+.ability-ring.on {
+  display: block;
+}
+.ability-ring b {
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: #2a1a10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffe6a8;
+}
 @keyframes ekready {
   0%,
   100% {
@@ -1441,6 +1643,15 @@ body {
 .tabs .tab {
   flex: 1 0 auto;
   min-width: 56px;
+}
+/* X6: Auf dem Telefon ergaben 56 px × neun Reiter 448 px — mehr als das Blatt
+   breit ist, „⚙️ Mehr" verschwand hinter einem Seitwärts-Scroll OHNE Balken
+   (`scrollbar-width: none`). 44 px passen alle neun nebeneinander und bleiben
+   ein volles Touch-Ziel; die Beschriftungen (max. „Himmel", 9.5 px) passen. */
+@media (max-width: 640px) {
+  .tabs .tab {
+    min-width: 44px;
+  }
 }
 
 .gear-bal {
@@ -1983,6 +2194,94 @@ body {
   display: none;
 }
 
+/* ---- ROADMAP-V2 A3: Truhen-Kobold (hoppelnder Fang-Button + Mini-Frenzy) ---- */
+/* Bewusst ANDERS als der Pfirsich: eckig statt rund, grün statt orange, mit
+   Rest-Klick-Zähler — er ist ein Gegner, kein Sammelstück. */
+.goblinBtn {
+  position: fixed;
+  left: 16px;
+  top: 76px;
+  width: 64px;
+  height: 64px;
+  z-index: 41;
+  display: grid;
+  place-items: center;
+  border: 2px solid rgba(0, 0, 0, 0.55);
+  border-radius: 16px;
+  background: radial-gradient(circle at 38% 28%, #b6ec7a, #4e9a3a 72%);
+  box-shadow:
+    0 4px 0 rgba(30, 70, 20, 0.85),
+    0 0 0 4px rgba(168, 232, 49, 0.22);
+  cursor: pointer;
+  line-height: 1;
+  transition: transform 0.08s;
+}
+.goblinBtn .gb-face {
+  font-size: 34px;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.45));
+}
+.goblinBtn .gb-chest {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  font-size: 20px;
+}
+.goblinBtn .gb-count {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  min-width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #141021;
+  border: 2px solid var(--gold-base);
+  color: var(--gold-hi);
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 800;
+}
+.goblinBtn.hit {
+  animation: goblinHit 0.18s ease-out;
+}
+.goblinBtn.hidden {
+  display: none;
+}
+@keyframes goblinHit {
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  40% {
+    transform: scale(0.86) rotate(-9deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+.goblinBadge {
+  /* Direkt ÜBER dem Ekstase-Knopf statt oben: der Mini-Frenzy ist ein
+     Klick-Buff und gehört zum Klick-Bereich — oben läge er auf dem Zonen-Strip. */
+  position: fixed;
+  bottom: calc(132px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%) rotate(1.5deg);
+  z-index: 26;
+  background: rgba(120, 210, 80, 0.95);
+  color: #0e2a06;
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 800;
+  padding: 5px 12px 4px;
+  border: 2px solid rgba(0, 0, 0, 0.5);
+  border-radius: 20px;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+.goblinBadge.hidden {
+  display: none;
+}
+
 /* ---- M13: 📋 Ziele tab (daily/streak, quests, achievements, season) ---- */
 .meta-season {
   display: flex;
@@ -2008,6 +2307,53 @@ body {
 .meta-season .ms-body b {
   color: #c4b5fd;
   font-weight: 800;
+}
+
+/* ---- ROADMAP-V2 A5: Wochen-Karte im Ziele-Tab ---- */
+.week-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.14), rgba(139, 92, 246, 0.1));
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.week-card .wk-head {
+  font-family: var(--display);
+  font-size: 14px;
+  color: #e8e3f5;
+}
+.week-card .wk-head b {
+  color: #7dd3fc;
+}
+.week-card .wk-mods {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.week-card .wk-mod {
+  font-size: 11.5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(20, 16, 33, 0.6);
+  border: 1px solid rgba(255, 210, 120, 0.4);
+  color: var(--gold-hi);
+}
+.week-card .wk-plus {
+  font-weight: 800;
+  opacity: 0.7;
+}
+.week-card .wk-best {
+  font-size: 12px;
+  color: #d9d3ea;
+}
+.week-card .wk-act .btn {
+  width: 100%;
+}
+#metaWeekSec.hidden {
+  display: none;
 }
 
 .streak-row {
@@ -2171,6 +2517,111 @@ body {
 .item.mythos-soon .lv {
   color: #d0a8ff;
 }
+/* ---- ROADMAP-V2 P2: Mythos-Shop (TE-Sink) + 🔮-Teaser im Himmel-Tab ---- */
+.tc-bank {
+  color: #ffe9a8;
+  font-weight: 800;
+}
+.item.tc-node-owned {
+  cursor: default;
+  border-color: var(--gold-deep);
+  box-shadow:
+    0 3px 0 rgba(30, 17, 5, 0.4),
+    inset 0 0 0 1px rgba(255, 207, 94, 0.5);
+}
+.cost.tc-owned {
+  color: #2e7d32;
+}
+/* Gesperrter Teaser-Knoten: abgedunkelt, Schloss, KEIN Klick-Verhalten. */
+.item.tc-teaser {
+  cursor: default;
+  opacity: 0.5;
+  filter: grayscale(0.45);
+  border-style: dashed;
+  border-color: rgba(208, 168, 255, 0.45);
+}
+.item.tc-teaser:hover {
+  background: linear-gradient(180deg, #f6ead0 0%, var(--parch) 60%, var(--parch-deep) 100%);
+  border-color: rgba(208, 168, 255, 0.45);
+}
+.item.tc-teaser .lv {
+  color: #7a3fb8;
+}
+
+/* ---- ROADMAP-V2 P4: Himmelsbaum in drei Ästen + Exklusiv-Paare + Respec ---- */
+.hv-branch {
+  border: 1px solid rgba(255, 207, 94, 0.22);
+  border-radius: 12px;
+  padding: 9px 9px 1px;
+  margin-bottom: 12px;
+  background: rgba(255, 207, 94, 0.04);
+}
+.hv-branch-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin-bottom: 8px;
+}
+.hv-branch-nm {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--gold-base);
+}
+.hv-branch-ds {
+  font-size: 11px;
+  color: #cbbb95;
+}
+/* Exklusiv-Paar: die beiden Karten stehen als EINE Einheit, verbunden vom Steg. */
+.hv-pair {
+  border: 1px dashed rgba(255, 207, 94, 0.45);
+  border-radius: 10px;
+  padding: 8px 8px 1px;
+  margin-bottom: 10px;
+  background: rgba(255, 207, 94, 0.05);
+}
+.hv-pair .item {
+  margin-bottom: 0;
+}
+.hv-or {
+  position: relative;
+  text-align: center;
+  margin: 7px 0;
+  height: 13px;
+}
+.hv-or::before {
+  content: '';
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 50%;
+  border-top: 2px dotted rgba(255, 207, 94, 0.55);
+}
+.hv-or span {
+  position: relative;
+  padding: 0 9px;
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--gold-base);
+  background: #2a1b0d;
+  border-radius: 6px;
+}
+/* Der Verlierer der Doktrin-Wahl: ausgegraut, nicht klickbar, aber lesbar. */
+.item.hv-blocked {
+  opacity: 0.42;
+  filter: grayscale(0.6);
+  cursor: not-allowed;
+}
+.item.hv-blocked:hover {
+  background: linear-gradient(180deg, #f6ead0 0%, var(--parch) 60%, var(--parch-deep) 100%);
+  border-color: var(--parch-line);
+}
+.rebirth-info.hv-respec-info {
+  margin-top: 4px;
+}
 
 /* ---- v10: kaufbare Crew-Fähigkeiten (goal: slower progression) ---- */
 .btn.ab-buy {
@@ -2191,6 +2642,7 @@ body {
   .hintbar,
   .toasts,
   .boostBadge,
+  .goblinBadge,
   .coach {
     left: 75%;
   }
@@ -2198,7 +2650,8 @@ body {
     left: 73.5%; /* nicht mit dem Crew-Button oben rechts kollidieren */
     width: min(420px, 44vw);
   }
-  .peachBtn {
+  .peachBtn,
+  .goblinBtn {
     left: calc(50% + 20px);
   }
 }
@@ -2314,8 +2767,8 @@ body {
   margin-bottom: 6px;
   pointer-events: auto;
 }
-/* Reine Anzeige (Goal-Umbau): Bühnen sind nicht mehr wählbar — kein Cursor,
-   kein Hover; der Fortschritt läuft automatisch. */
+/* Nur ERREICHTE Bühnen (keine Zukunft) — jede ist klickbar: zurückreisen zum
+   Farmen, wieder vor bis zur Frontier. */
 .zs {
   position: relative;
   display: flex;
@@ -2327,9 +2780,18 @@ body {
   background: rgba(0, 0, 0, 0.28);
   border: 2px solid rgba(255, 210, 120, 0.22);
   border-radius: 9px;
+  font: inherit;
+  cursor: pointer;
   transition:
     transform 0.12s,
     border-color 0.12s;
+}
+.zs.go:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 210, 120, 0.55);
+}
+.zs.active {
+  cursor: default;
 }
 .zs svg {
   width: 34px;
@@ -2362,6 +2824,783 @@ body {
   border: 5px solid transparent;
   border-top-color: var(--gold-base);
 }
-.zs.lockd {
-  opacity: 0.35;
+/* ---- ROADMAP-V2 P1: Bühnen-Sterne als Mini-Pips ---- */
+/* Eine Zeile unter der Bühnen-Nummer: gefüllte Sterne leuchten gold, offene
+   bleiben als dunkler Platzhalter stehen (man sieht, was noch zu holen ist).
+   Boss-Bühnen tragen drei, normale zwei (kein Timeout-Stern ohne Gate). */
+.zs-stars {
+  display: flex;
+  gap: 1px;
+  line-height: 1;
+  height: 8px;
+}
+.zs-stars i {
+  font-style: normal;
+  font-size: 8px;
+  line-height: 1;
+  color: rgba(255, 236, 200, 0.22);
+  text-shadow: none;
+}
+.zs-stars i.on {
+  color: var(--gold-hi);
+  text-shadow: 0 0 3px rgba(255, 200, 90, 0.85);
+}
+/* ---- ROADMAP-V2 A1: Modifikator-Icon im Strip-Slot ---- */
+/* Sitzt als kleines Abzeichen oben links am Insel-Thumbnail: man sieht schon im
+   Strip, welche Bühne welche Hausregel trägt — die Farm-Wahl beginnt hier. */
+.zs-mod {
+  position: absolute;
+  /* INNERHALB des Slots: die aktive Bühne ist um 1.16 skaliert, ein nach außen
+     ragendes Abzeichen würde dort am Panel-Rand abgeschnitten. */
+  top: 1px;
+  left: 1px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 1px 2px;
+  border-radius: 7px;
+  background: rgba(20, 16, 33, 0.86);
+  border: 1px solid rgba(255, 210, 120, 0.5);
+  pointer-events: none;
+}
+.zs-gap {
+  align-self: center;
+  font-weight: 800;
+  color: var(--parch);
+  opacity: 0.6;
+  padding: 0 2px;
+}
+/* ---- ROADMAP-V2 A1: Hausregel der Bühne auf der Bühnen-Card ---- */
+.stage-mod {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 6px;
+  padding: 5px 9px;
+  border-radius: 9px;
+  background: rgba(139, 92, 246, 0.16);
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  text-align: left;
+}
+.stage-mod b {
+  font-family: var(--display);
+  font-size: 12px;
+  color: var(--gold-hi);
+  letter-spacing: 0.2px;
+}
+.stage-mod span {
+  font-size: 10.5px;
+  line-height: 1.3;
+  color: #d9d3ea;
+}
+.stage-mod.hidden {
+  display: none;
+}
+/* ---- ROADMAP-V2 A5: die Bühne der Woche hebt sich vom A1-Alltag ab ---- */
+.stage-mod.weekly {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.55);
+}
+.stage-mod .sm-week {
+  color: #7dd3fc;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+/* Die zweite Regel bekommt etwas Luft, damit zwei Blöcke lesbar bleiben. */
+.stage-mod.weekly b + span + b {
+  margin-top: 4px;
+}
+/* Das 📅-Abzeichen der Wochen-Bühne im Strip — blau statt gold, damit es sich
+   vom Modifikator-Abzeichen unterscheidet, ohne ein zweites Icon zu brauchen. */
+.zs-mod.zs-week {
+  border-color: rgba(56, 189, 248, 0.85);
+  background: rgba(12, 42, 66, 0.9);
+}
+.zs.wk {
+  border-color: rgba(56, 189, 248, 0.5);
+}
+.boss-challenge {
+  display: block;
+  width: 100%;
+  pointer-events: auto;
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 800;
+  color: #2a1504;
+  background: linear-gradient(180deg, #ffe08a, #f5b93c);
+  border: 2px solid #8a5a16;
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: 0 2px 0 #8a5a16;
+  transition:
+    transform 0.1s,
+    box-shadow 0.1s;
+}
+.boss-challenge.hidden {
+  display: none; /* .hidden steht früher im Sheet — gleiche Spezifität, hier explizit */
+}
+.boss-challenge:hover {
+  transform: translateY(-1px);
+}
+.boss-challenge:active {
+  transform: translateY(1px);
+  box-shadow: 0 0 0 #8a5a16;
+}
+
+/* ---- ROADMAP-V2 P3: Wand-Telemetrie unter dem Boss-Button ---- */
+/* Eine ruhige Zeile, kein Alarm: Sie erklärt die Lücke, statt sie anzuschreien. */
+.boss-hint {
+  margin-top: 4px;
+  padding: 0 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--parch);
+  opacity: 0.92;
+  text-align: center;
+  text-shadow: 1px 1px 0 rgba(40, 22, 6, 0.7);
+}
+.boss-hint.hidden {
+  display: none; /* .hidden steht früher im Sheet — gleiche Spezifität, hier explizit */
+}
+.boss-hint b {
+  color: var(--gold-base);
+  font-weight: 800;
+}
+
+/* ---- ROADMAP-V2 A2: Gimmick-Label an der Boss-HP-Bar ---- */
+/* Eine kleine gestempelte Plakette: sie steht die GANZE Kampfzeit da, damit man
+   die Mechanik nachlesen kann, wenn das Auftritts-Banner längst weg ist. */
+.boss-gimmick {
+  align-self: center;
+  margin: 5px auto 0;
+  padding: 2px 9px 3px;
+  width: fit-content;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  color: #2a1500;
+  background: linear-gradient(180deg, #ffe9a8 0%, #f6c667 60%, #e0a344 100%);
+  border: 2px solid var(--wood-rim);
+  box-shadow: inset 0 1px 0 rgba(255, 252, 240, 0.8);
+}
+.boss-gimmick.hidden {
+  display: none; /* .hidden steht früher im Sheet — gleiche Spezifität, hier explizit */
+}
+/* Läuft die Spotlight-Phase, pulst die Plakette im selben Takt wie der Balken. */
+.boss-gimmick.on {
+  animation: gimmickPulse 0.7s ease-in-out infinite;
+}
+@keyframes gimmickPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: inset 0 1px 0 rgba(255, 252, 240, 0.8);
+  }
+  50% {
+    transform: scale(1.07);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 252, 240, 0.9),
+      0 0 14px rgba(255, 220, 120, 0.9);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boss-gimmick.on {
+    animation: none;
+  }
+}
+
+/* ---- ROADMAP-V2 G2: Boss-Auftritts-Banner ---- */
+/* Sitzt als letzte Zeile in der `.topui`-Spalte (unter der Rivalen-Karte), also
+   kann es mit HUD/Karte nie kollidieren und braucht keine Pixel-Position. Der
+   „rollt oben ein"-Moment ist eine reine Keyframe-Animation: einrollen,
+   halten, wieder wegrollen — main.ts blendet es danach per `.hidden` aus. */
+.boss-banner {
+  align-self: center;
+  max-width: 100%;
+  padding: 7px 20px 8px;
+  border-radius: 14px;
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  color: #2a1500;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: linear-gradient(180deg, var(--gold-hi) 0%, var(--gold-base) 55%, #e8a63c 100%);
+  border: 3px solid var(--wood-rim);
+  box-shadow:
+    0 5px 0 rgba(20, 10, 2, 0.5),
+    inset 0 1px 0 rgba(255, 252, 240, 0.85),
+    0 0 26px rgba(255, 138, 77, 0.55);
+  transform-origin: 50% 0;
+  animation: bossbanner 2.4s cubic-bezier(0.2, 0.9, 0.25, 1.1) forwards;
+}
+.boss-banner.hidden {
+  display: none;
+}
+/* ROADMAP-V2 A2: die Gimmick-Zeile unter dem Bossnamen — kleiner, ruhiger,
+   im selben Goldrahmen. Sie sagt die Mechanik EINMAL groß an. */
+.bb-gimmick {
+  display: block;
+  margin-top: 1px;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.1px;
+  color: #5a3200;
+}
+@keyframes bossbanner {
+  0% {
+    opacity: 0;
+    transform: translateY(-150%) rotate(-7deg) scale(0.82);
+  }
+  13% {
+    opacity: 1;
+    transform: translateY(7%) rotate(1.6deg) scale(1.05);
+  }
+  22% {
+    opacity: 1;
+    transform: translateY(0) rotate(-0.8deg) scale(1);
+  }
+  84% {
+    opacity: 1;
+    transform: translateY(0) rotate(-0.8deg) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-45%) rotate(-7deg) scale(0.9);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Kein Rollen — das Banner steht einfach da (main.ts blendet es nach der
+     gleichen Standzeit wieder aus, die Information geht also nicht verloren). */
+  .boss-banner {
+    animation: none;
+  }
+}
+
+/* ---- ROADMAP-V2 G4: Prestige-Zeremonien ---- */
+/* Vollbild-Blende über dem Canvas. Sie fängt ihre Zeiger selbst ab, also kann
+   während der 1.5–2 s kein Klick auf die Bühne durchrutschen — und ein Tap
+   irgendwo beendet sie sofort (die Gutschrift war ohnehin vorher). */
+.ceremony {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  animation: cerFade var(--cer-ms, 1500ms) ease-out forwards;
+}
+.ceremony.hidden {
+  display: none;
+}
+/* Drei Schichten, drei Handschriften: hell-lime (Aszension), warm-gold und
+   deutlich tiefer (Himmelfahrt), mystisch-violett (Transzendenz). */
+.ceremony.k-ascend {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(220, 255, 170, 0.5), rgba(12, 22, 6, 0.8) 68%),
+    rgba(6, 10, 4, 0.62);
+}
+.ceremony.k-himmelfahrt {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 186, 110, 0.46), rgba(28, 8, 4, 0.92) 66%),
+    rgba(10, 3, 1, 0.86);
+}
+.ceremony.k-transcend {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(176, 118, 255, 0.42), rgba(8, 3, 22, 0.94) 62%),
+    rgba(4, 1, 12, 0.9);
+}
+.cer-sprites {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.cer-sprites i {
+  position: absolute;
+  font-style: normal;
+  line-height: 1;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+.k-ascend .cer-sprites i,
+.k-himmelfahrt .cer-sprites i {
+  animation-name: cerRain;
+  animation-timing-function: ease-in;
+  animation-fill-mode: forwards;
+}
+.k-transcend .cer-sprites i {
+  animation-name: cerImplode;
+  animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.4);
+  animation-fill-mode: forwards;
+}
+@keyframes cerRain {
+  0% {
+    opacity: 0;
+    transform: translateY(-16vh) rotate(0deg);
+  }
+  14% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(108vh) rotate(var(--rot, 20deg));
+  }
+}
+@keyframes cerImplode {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(1.15);
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--tx, 0), var(--ty, 0)) scale(0.15);
+  }
+}
+.cer-core {
+  position: relative;
+  text-align: center;
+  padding: 0 20px;
+  animation: cerCore var(--cer-ms, 1500ms) cubic-bezier(0.2, 0.9, 0.25, 1.1) forwards;
+}
+.cer-title {
+  font-family: var(--display);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--parch);
+  text-shadow: var(--outline-ink);
+}
+.cer-count {
+  font-family: var(--display);
+  font-size: 58px;
+  font-weight: 800;
+  /* X6: 1.05 war zu eng — die Emoji-Ersatzschrift (✨/🍑/🔮) zeichnet höher als
+     die Zeilenbox, gemessen 76 px Inhalt in 61 px Box. Sie drängte damit in die
+     Unterzeile. 1.25 fängt den Überstand auf, ohne den Zähler zu verkleinern. */
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold-base);
+  text-shadow: var(--outline-ink);
+}
+.k-ascend .cer-count {
+  color: #e6ff9a;
+}
+.k-himmelfahrt .cer-count {
+  color: #ffcf8a;
+}
+.k-transcend .cer-count {
+  color: #d9b6ff;
+}
+.cer-sub {
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: rgba(242, 228, 196, 0.86);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.7);
+}
+/* „Neustart"-Sweep: fährt einmal über die Bühne, während die Blende ausgeht. */
+.cer-sweep {
+  position: absolute;
+  inset: -25% -70%;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 42%,
+    rgba(255, 255, 255, 0.42) 50%,
+    transparent 58%
+  );
+  transform: translateX(-120%);
+  animation: cerSweep 430ms ease-in forwards;
+}
+@keyframes cerSweep {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+.cer-skip {
+  position: absolute;
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: rgba(242, 228, 196, 0.6);
+}
+@keyframes cerFade {
+  0% {
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  82% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes cerCore {
+  0% {
+    opacity: 0;
+    transform: scale(0.78);
+  }
+  16% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  26% {
+    transform: scale(1);
+  }
+  84% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Kein Regen, kein Sweep — Titel, Zahl und Satz stehen einfach da (die
+     Information der Zeremonie geht also nicht verloren). */
+  .cer-sprites,
+  .cer-sweep {
+    display: none;
+  }
+  .ceremony,
+  .cer-core {
+    animation: none;
+  }
+}
+
+/* ---- ROADMAP-V2 G6: Kauf-Feedback, Tab-Wechsel, Leerzustände ---- */
+/* Eine fixe Overlay-Schicht über dem Shop (z 30), die NIE einen Klick abfängt.
+   Effekte leben hier statt im Panel, weil der 0.25-s-Idle-Tick das Panel-HTML
+   neu schreibt und ein Partikel darin mitten im Flug verschwände. */
+.fxlayer {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  overflow: hidden;
+}
+.fx-coin {
+  position: absolute;
+  width: 15px;
+  height: 15px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--gold-hi), var(--gold-base) 55%, #e09a2c);
+  border: 1.5px solid var(--gold-line);
+  box-shadow: 0 1px 3px rgba(20, 10, 2, 0.5);
+  opacity: 0;
+  animation: coinFly 420ms cubic-bezier(0.35, 0, 0.5, 1) forwards;
+}
+@keyframes coinFly {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.6);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(calc(var(--dx, 0px) * 0.16), calc(var(--dy, 0px) * 0.16 - 20px)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx, 0px), var(--dy, 0px)) scale(0.5);
+  }
+}
+/* Ankunfts-Puls des BP-Zählers (die Münze landet). */
+.bp span.bump {
+  display: inline-block;
+  animation: goldBump 260ms cubic-bezier(0.2, 0.9, 0.25, 1.2);
+}
+@keyframes goldBump {
+  0% {
+    transform: scale(1);
+  }
+  38% {
+    transform: scale(1.16);
+    filter: brightness(1.25);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+/* Mini-Konfetti + Stempel im Fähigkeits-Slot. */
+.fx-bit {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 1.5px;
+  background: var(--gold-base);
+  opacity: 0;
+  animation: bitPop 560ms ease-out forwards;
+}
+.fx-bit:nth-child(2n) {
+  background: var(--acc);
+}
+.fx-bit:nth-child(3n) {
+  background: var(--pink);
+}
+@keyframes bitPop {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4);
+  }
+  22% {
+    opacity: 1;
+    transform: translate(calc(var(--tx, 0px) * 0.5), calc(var(--ty, 0px) * 0.5)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--tx, 0px), calc(var(--ty, 0px) + 14px)) scale(0.7);
+  }
+}
+.fx-stamp {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border-radius: 9px;
+  color: #2e7d32;
+  background: rgba(126, 190, 90, 0.28);
+  border: 2px solid #7fae6a;
+  animation: stampBounce 560ms cubic-bezier(0.2, 0.9, 0.25, 1.35) forwards;
+}
+.fx-stamp svg {
+  width: 17px;
+  height: 17px;
+}
+@keyframes stampBounce {
+  0% {
+    opacity: 0;
+    transform: scale(2.1) rotate(-14deg);
+  }
+  35% {
+    opacity: 1;
+    transform: scale(0.86) rotate(3deg);
+  }
+  55% {
+    transform: scale(1.06) rotate(-1deg);
+  }
+  78% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.1);
+  }
+}
+/* Tab-Wechsel: 120 ms Einblenden des neuen Panel-Inhalts (nur transform +
+   opacity — kein Layout-Thrash). */
+.tabbody.tb-in {
+  animation: tabIn 120ms ease-out;
+}
+@keyframes tabIn {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+/* Leerzustand: ein Stroke-Icon + EIN Satz, in einer gestrichelten Pergament-
+   Karte — sichtbar KEINE Card, die man kaufen könnte. */
+.empty {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border: 2px dashed var(--parch-line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(242, 228, 196, 0.13), rgba(242, 228, 196, 0.05));
+}
+.empty-ic {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  fill: none;
+  stroke: var(--gold-base);
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.9;
+}
+.empty-tx {
+  font-size: 12px;
+  line-height: 1.42;
+  font-weight: 600;
+  color: #e6d7b4;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fx-coin,
+  .fx-bit,
+  .fx-stamp,
+  .bp span.bump,
+  .tabbody.tb-in {
+    animation: none;
+  }
+  .fx-coin,
+  .fx-bit,
+  .fx-stamp {
+    display: none;
+  }
+}
+
+/* ---- ROADMAP-V2 X6: flache Viewports (Landscape-Telefone, z. B. 740×360) ----
+   Bei 360 px HÖHE stapelte das Layout HUD-Karte, Rivalen-Karte, Ekstase-Leiste
+   und Hinweiszeile übereinander (gemessen bei 740×360: Ekstase ✕ Rivalen-Karte
+   280×42 px, Crew-Knopf ✕ Zonen-Strip 33×33 px, Rivalen-Karte 26 px unter der
+   Falz). Diese Abfrage schnürt die Kopf-Spalte zusammen und legt die
+   Bedien-Elemente wieder NEBEN- statt übereinander. Rein metrisch — kein
+   Element verschwindet, das im Hochformat trägt (Ausnahme: die Tutorial-Zeile,
+   die ohnehin nach 26 s ausblendet). */
+@media (max-height: 480px) {
+  .topui {
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    gap: 4px;
+  }
+  .hud-card {
+    padding: 4px 12px 6px;
+    border-radius: 12px;
+  }
+  .zonestrip {
+    gap: 3px;
+    margin-bottom: 4px;
+  }
+  .zs {
+    width: 40px; /* Touch-Untergrenze, nicht darunter */
+    padding: 2px 1px 1px;
+  }
+  .zs svg {
+    width: 30px;
+    height: 17px;
+  }
+  .zone {
+    font-size: 13px;
+  }
+  .bp {
+    font-size: 24px;
+  }
+  .stats {
+    font-size: 10.5px;
+  }
+  .combo {
+    height: 0;
+    margin-top: 0;
+  }
+  .rival-card {
+    padding: 4px 12px 6px;
+  }
+  .rival-name {
+    font-size: 13px;
+    margin-bottom: 3px;
+  }
+  .rival-hpbar {
+    height: 12px;
+  }
+  .rival-row {
+    margin-top: 3px;
+    font-size: 11px;
+  }
+  .stage-mod {
+    margin-top: 4px;
+    padding: 3px 7px;
+  }
+  .stage-mod b {
+    font-size: 11px;
+  }
+  .stage-mod span {
+    font-size: 9.5px;
+  }
+  .boss-challenge {
+    margin-top: 4px;
+    padding: 4px 8px;
+    min-height: 40px;
+  }
+  .boss-hint {
+    margin-top: 3px;
+    font-size: 9.5px;
+  }
+  /* Ekstase an den unteren Rand und schmaler: so berührt sie weder die
+     Rivalen-Karte über ihr noch den Mute-Knopf rechts. */
+  .abilitybar {
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+  .ability-btn {
+    width: min(240px, 40vw);
+    height: 40px; /* Touch-Untergrenze */
+    border-radius: 20px;
+  }
+  .muteBtn {
+    width: 40px;
+    height: 40px;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+  .toggleShop {
+    padding: 6px 11px;
+    font-size: 12px;
+    min-height: 40px;
+  }
+  /* Auch hier gilt die Touch-Untergrenze: die Kauf-Mengen, die Kulissen-Wahl,
+     die Skin-Knöpfe und der Board-Wechsler stehen im Panel dicht beieinander. */
+  .amt,
+  .kbtn,
+  .sc-equip,
+  .sc-btn,
+  .lb-board {
+    min-height: 40px;
+  }
+  /* Auf 360 px Höhe ist die Tutorial-Zeile reines Rauschen — und sie lag
+     quer über der Rivalen-Karte. Der Onboarding-Coach unterrichtet ohnehin. */
+  .hintbar {
+    display: none;
+  }
+}
+
+/* Und die horizontale Hälfte: über 640 px Breite liegt die Bühne rechts, die
+   Overlay-Spalte stand auf 75 % — genau unter dem Crew-Knopf. 66 % schiebt sie
+   an ihm vorbei, ohne die Bühne zu verlassen (sie beginnt bei 50 %). */
+@media (min-width: 641px) and (max-height: 480px) {
+  .topui,
+  .abilitybar,
+  .toasts,
+  .boostBadge,
+  .goblinBadge,
+  .coach {
+    left: 66%;
+  }
+  .topui {
+    width: min(340px, 42vw);
+  }
 }

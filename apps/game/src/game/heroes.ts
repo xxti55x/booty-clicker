@@ -496,6 +496,100 @@ export function totalRawDps(levels: CrewLevels, gilds: CrewGilds = {}, ups: Crew
   return dps;
 }
 
+// ---------------------------------------------------------------------------
+// Greedy-ROI-Auswahl — EINE Quelle für Sim-Bot und Spiel-Tipp
+// ---------------------------------------------------------------------------
+
+/** Eine Kauf-Option mit ihrem Grenznutzen (Output-Zuwachs pro BP). */
+export interface CrewBuy {
+  /** Ein Level der Leiter oder die nächste Fähigkeits-Stufe. */
+  readonly kind: 'level' | 'ability';
+  readonly id: string;
+  /** Preis DIESES Kaufs in BP (bei einer Special-Klammer der erste Schritt). */
+  readonly cost: number;
+  /** Grenznutzen pro BP — die Größe, nach der sortiert wird. */
+  readonly roi: number;
+}
+
+/**
+ * Der Output eines Mitglieds bei `level`/`ups`. Die Klick-Linie zählt hier 1:1
+ * wie DPS: Sim-Treiber wie Spieler klicken quasi durchgehend, also ist
+ * „1 Klick-Schaden ≈ Klicks/s DPS" nah genug für eine Greedy-Rangfolge und hält
+ * die Schleife mitglieds-agnostisch.
+ */
+function outputAt(cfg: HeroConfig, level: number, gild: number, ups: number): number {
+  return cfg.click ? heroClick(cfg, level, gild, ups) : heroDps(cfg, level, gild, ups);
+}
+
+/**
+ * Die EINE beste Kauf-Option innerhalb von `budget` BP: nächstes Level oder
+ * nächste freigeschaltete Fähigkeit, quer über die ganze Crew, nach
+ * Grenznutzen/BP sortiert (`null`, wenn nichts ins Budget passt).
+ *
+ * Special-Fähigkeitsstufen (v11) tragen keinen eigenen Output — `gold`/`crit`/
+ * `idle` wirken über die Economy, nicht über die Ausgabe des Mitglieds. Da
+ * Fähigkeiten strikt der Reihe nach gekauft werden, würde ein reiner Output-
+ * Greedy an ihnen hängenbleiben; sie werden deshalb als TOR zur nächsten
+ * Power-Stufe bewertet: die Klammer (alle aufeinanderfolgenden Specials + die
+ * folgende Power-Stufe — die v11.1-Rhythmen haben bis zu zwei Specials in Folge)
+ * wird zusammen gegen den Output-Zuwachs der Power-Stufe gepreist. Der
+ * Utility-Wert der Specials selbst wird bewusst NICHT gutgeschrieben, damit der
+ * Sim-Bot eine ehrliche Untergrenze bleibt.
+ *
+ * Pur über (Level, Fähigkeiten, Vergoldungen, Budget) — `sim.ts` fährt damit
+ * seinen ROI-Greedy, `game/advisor.ts` leitet daraus den Kauf-Tipp im Spiel ab
+ * (ROADMAP-V2 P3), beide ohne eine zweite Kopie der Rangfolge.
+ */
+export function bestCrewBuy(
+  levels: CrewLevels,
+  ups: CrewUps,
+  gilds: CrewGilds,
+  budget: number,
+): CrewBuy | null {
+  let best: CrewBuy | null = null;
+  let bestRoi = 0;
+  for (const cfg of CREW) {
+    const lvl = levels[cfg.id] ?? 0;
+    const bought = ups[cfg.id] ?? 0;
+    const gild = gilds[cfg.id] ?? 0;
+    const cost = nextLevelCost(cfg, lvl);
+    if (cost <= budget) {
+      const gain = outputAt(cfg, lvl + 1, gild, bought) - outputAt(cfg, lvl, gild, bought);
+      const roi = gain / cost;
+      if (roi > bestRoi) {
+        bestRoi = roi;
+        best = { kind: 'level', id: cfg.id, cost, roi };
+      }
+    }
+    const ab = nextAbility(cfg, lvl, bought);
+    if (ab.unlocked && ab.cost <= budget && bought < abilityTiersUnlocked(lvl)) {
+      const direct = outputAt(cfg, lvl, gild, bought + 1) - outputAt(cfg, lvl, gild, bought);
+      let roi = direct / ab.cost;
+      if (direct <= 0) {
+        // Special-Stufe(n): die Klammer bis zur nächsten Power-Stufe zusammen
+        // preisen (Rhythmen erlauben höchstens zwei Specials in Folge; die
+        // Schleifen-Grenze 4 ist reine Absicherung).
+        let costSum = ab.cost;
+        for (let k = bought + 1; k - bought <= 4; k++) {
+          const nxt = nextAbility(cfg, lvl, k);
+          if (!nxt.unlocked || k >= abilityTiersUnlocked(lvl)) break;
+          costSum += nxt.cost;
+          const gain = outputAt(cfg, lvl, gild, k + 1) - outputAt(cfg, lvl, gild, bought);
+          if (gain > 0) {
+            if (costSum <= budget) roi = gain / costSum;
+            break;
+          }
+        }
+      }
+      if (roi > bestRoi) {
+        bestRoi = roi;
+        best = { kind: 'ability', id: cfg.id, cost: ab.cost, roi };
+      }
+    }
+  }
+  return best;
+}
+
 /**
  * Raw click damage (before global/crit/frenzy): flat floor + the Booty-Boss
  * click line (upgrade 1 IS click damage) + a share of the whole crew's DPS, so

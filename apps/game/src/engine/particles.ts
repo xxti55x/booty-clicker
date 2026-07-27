@@ -43,8 +43,12 @@ export class ParticleSystem {
     scene.add(points);
   }
 
-  /** Spawn a burst of `count` particles at a world position. */
-  burst(x: number, y: number, z: number, count = 12): void {
+  /**
+   * Spawn a burst of `count` particles at a world position. `power` skaliert die
+   * Anfangsgeschwindigkeit (ROADMAP-V2 G2): 1 = der bisherige Klick-Funke,
+   * > 1 = der weit auffächernde Konfetti-Wurf über der Bühne.
+   */
+  burst(x: number, y: number, z: number, count = 12, power = 1): void {
     for (let n = 0; n < count; n++) {
       const i = this.cursor;
       this.cursor = (this.cursor + 1) % MAX;
@@ -53,9 +57,9 @@ export class ParticleSystem {
       this.positions[i * 3 + 2] = z;
       const a = Math.random() * Math.PI * 2;
       const sp = 1.5 + Math.random() * 2.5;
-      this.velocities[i * 3] = Math.cos(a) * sp * 0.6;
-      this.velocities[i * 3 + 1] = 2 + Math.random() * 3;
-      this.velocities[i * 3 + 2] = Math.sin(a) * sp * 0.6;
+      this.velocities[i * 3] = Math.cos(a) * sp * 0.6 * power;
+      this.velocities[i * 3 + 1] = (2 + Math.random() * 3) * power;
+      this.velocities[i * 3 + 2] = Math.sin(a) * sp * 0.6 * power;
       this.life[i] = 1;
     }
   }

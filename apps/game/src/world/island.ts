@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 import { toonMat } from '../engine/materials';
 import {
@@ -30,7 +31,8 @@ import type { BackgroundKey, WorldAnim } from '../types';
 export const ISLAND_R = 6.4;
 /** Insel-Zentrum = DUO-Mitte (Spieler 0/0, Rivale ~2.9/3.6). */
 export const ISLAND_C = { x: 1.4, z: 1.7 };
-const TOP_Y = -2.4;
+/** Oberkante des Decks — für alles, was AUF der Insel steht (G3-Publikum). */
+export const TOP_Y = -2.4;
 
 type Hue = (hex: number) => THREE.Color;
 
@@ -48,6 +50,25 @@ function at(m: THREE.Object3D, x: number, y: number, z: number): THREE.Object3D 
 /** Deterministischer Winkel-Ring-Helper (Zapfen, Kristalle, Blöcke). */
 function ring(n: number, f: (a: number, i: number) => void): void {
   for (let i = 0; i < n; i++) f((i / n) * Math.PI * 2 + (i % 3) * 0.11, i);
+}
+
+/**
+ * Draw-Call-Budget (ROADMAP-V2 G3, < 250/Bühne): platzierte Meshes GLEICHEN
+ * Materials zu EINEM Mesh backen. Die Meshes werden nur als Transform-Träger
+ * gebaut und danach verworfen — Position/Rotation/Skalierung wandern in die
+ * Vertices, das Bild bleibt identisch, aus 14 Zapfen wird ein Batch. Nur für
+ * STATISCHE Deko: was sich einzeln bewegt (Shards, Kristall-Puls), bleibt ein
+ * eigenes Objekt.
+ */
+export function bake(meshes: THREE.Mesh[], mat: THREE.Material): THREE.Mesh {
+  const parts = meshes.map((m) => {
+    m.updateMatrix();
+    return m.geometry.clone().applyMatrix4(m.matrix);
+  });
+  const merged = mergeGeometries(parts);
+  parts.forEach((p) => p.dispose());
+  meshes.forEach((m) => m.geometry.dispose());
+  return new THREE.Mesh(merged ?? new THREE.BufferGeometry(), mat);
 }
 
 // ---------------------------------------------------------------------------
@@ -88,15 +109,23 @@ function clubIsland({ g, hue, anims }: IslandCtx): void {
   // Hängende Amethyst-Kristalle statt Erd-Zapfen.
   const gem = toonMat({ color: hue(0x9d5cf6), emissive: hue(0x5b2fa8), emissiveIntensity: 0.7 });
   const gems: THREE.Mesh[] = [];
+  const rocks: THREE.Mesh[] = [];
   ring(12, (a, i) => {
     const rr = ISLAND_R * (0.4 + 0.5 * (((i * 7) % 12) / 12));
     const s = 0.5 + 0.7 * (1 - rr / ISLAND_R) + ((i * 5) % 3) * 0.16;
-    const c = new THREE.Mesh(new THREE.OctahedronGeometry(s * 0.8), i % 3 === 0 ? gem : stoneDark);
+    const glow = i % 3 === 0;
+    const c = new THREE.Mesh(new THREE.OctahedronGeometry(s * 0.8), glow ? gem : stoneDark);
     c.scale.y = 1.9;
     c.rotation.y = a * 2.1;
-    g.add(at(c, Math.cos(a) * rr, TOP_Y - 1.9 - s * 0.8, Math.sin(a) * rr));
-    if (i % 3 === 0) gems.push(c);
+    at(c, Math.cos(a) * rr, TOP_Y - 1.9 - s * 0.8, Math.sin(a) * rr);
+    // Nur die vier glühenden Kristalle drehen sich einzeln — der Rest ist
+    // starre Deko und wandert in EINEN Batch (Draw-Call-Budget, G3).
+    if (glow) {
+      gems.push(c);
+      g.add(c);
+    } else rocks.push(c);
   });
+  g.add(bake(rocks, stoneDark));
   anims.push((_t, beatV) => {
     neon.emissiveIntensity = 0.7 + beatV * 0.7;
     gem.emissiveIntensity = 0.5 + beatV * 0.5;
@@ -118,20 +147,23 @@ function clubIsland({ g, hue, anims }: IslandCtx): void {
     emissiveIntensity: 0.35,
     map: repeated(velvetTex(3), 1.5, 1.5),
   });
+  const blocks: THREE.Mesh[] = [];
+  const edges: THREE.Mesh[] = [];
   for (const [x, y, z, s] of [
     [-11, -4.2, 13, 1.9],
     [12.5, -6, 10, 1.4],
     [-13.5, -2, 3, 1.1],
     [10, -7.5, 19, 2.3],
   ] as const) {
-    const b = new THREE.Mesh(new THREE.BoxGeometry(s * 2, s * 1.3, s * 2), blockMat);
+    const b = new THREE.Mesh(new THREE.BoxGeometry(s * 2, s * 1.3, s * 2));
     b.rotation.y = x * 0.3;
-    g.add(at(b, x, y, z));
-    const e = new THREE.Mesh(new THREE.TorusGeometry(s * 1.15, 0.06, 8, 4), neon);
+    blocks.push(at(b, x, y, z) as THREE.Mesh);
+    const e = new THREE.Mesh(new THREE.TorusGeometry(s * 1.15, 0.06, 8, 4));
     e.rotation.x = Math.PI / 2;
     e.rotation.z = Math.PI / 4 + x * 0.3;
-    g.add(at(e, x, y + s * 0.66, z));
+    edges.push(at(e, x, y + s * 0.66, z) as THREE.Mesh);
   }
+  g.add(bake(blocks, blockMat), bake(edges, neon));
   for (const [x, y, z, s] of [
     [-8, 2.6, 12, 1.1],
     [12, 4.2, 15, 1.4],
@@ -264,24 +296,23 @@ function beachIsland({ g, hue, anims }: IslandCtx): void {
   cap.rotation.x = Math.PI / 2;
   g.add(at(cap, 0, TOP_Y - 1.72, 0));
   // Schaumkante: heller Ring wie eine auslaufende Welle auf dem Sanddeck.
-  const foam = new THREE.Mesh(
-    new THREE.TorusGeometry(ISLAND_R - 0.18, 0.1, 8, 64),
-    toonMat({ color: 0xfff8ea, emissive: 0xcfe8f0, emissiveIntensity: 0.35 }),
-  );
+  const foamMat = toonMat({ color: 0xfff8ea, emissive: 0xcfe8f0, emissiveIntensity: 0.35 });
+  const foam = new THREE.Mesh(new THREE.TorusGeometry(ISLAND_R - 0.18, 0.1, 8, 64), foamMat);
   foam.rotation.x = Math.PI / 2;
   g.add(at(foam, 0, TOP_Y + 0.015, 0));
-  // Erd-Zapfen (Sand-Töne) + eingelagerte Kiesel.
+  // Erd-Zapfen (Sand-Töne) + eingelagerte Kiesel — je Material ein Batch.
+  const spikesDark: THREE.Mesh[] = [];
+  const spikesSand: THREE.Mesh[] = [];
   ring(14, (a, i) => {
     const rr = ISLAND_R * (0.35 + 0.58 * (((i * 7) % 14) / 14));
     const s = 0.7 + 1.0 * (1 - rr / ISLAND_R) + ((i * 5) % 4) * 0.2;
-    const spike = new THREE.Mesh(
-      new THREE.ConeGeometry(s * 0.72, s * 2.3, 6),
-      i % 3 === 0 ? earthDark : sandstone,
-    );
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(s * 0.72, s * 2.3, 6));
     spike.rotation.x = Math.PI;
     spike.rotation.y = a * 2.3;
-    g.add(at(spike, Math.cos(a) * rr, TOP_Y - 1.7 - s * 0.72, Math.sin(a) * rr));
+    at(spike, Math.cos(a) * rr, TOP_Y - 1.7 - s * 0.72, Math.sin(a) * rr);
+    (i % 3 === 0 ? spikesDark : spikesSand).push(spike);
   });
+  g.add(bake(spikesDark, earthDark), bake(spikesSand, sandstone));
   // Deko am Sandrand: Muschel + Seestern (klein, außerhalb der Tanzfläche).
   const shell = new THREE.Mesh(
     new THREE.SphereGeometry(0.28, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2),
@@ -291,14 +322,18 @@ function beachIsland({ g, hue, anims }: IslandCtx): void {
   g.add(at(shell, -4.9, TOP_Y + 0.08, -2.6));
   const starMat = toonMat({ color: hue(0xff7a8a) });
   const star = new THREE.Group();
-  for (let i = 0; i < 5; i++) {
-    const armGeo = new THREE.SphereGeometry(1, 8, 6);
-    armGeo.scale(0.34, 0.09, 0.13);
-    const arm = new THREE.Mesh(armGeo, starMat);
-    const a = (i / 5) * Math.PI * 2;
-    arm.position.set(Math.cos(a) * 0.24, 0, Math.sin(a) * 0.24);
-    arm.rotation.y = -a;
-    star.add(arm);
+  {
+    const arms: THREE.Mesh[] = [];
+    for (let i = 0; i < 5; i++) {
+      const armGeo = new THREE.SphereGeometry(1, 8, 6);
+      armGeo.scale(0.34, 0.09, 0.13);
+      const arm = new THREE.Mesh(armGeo);
+      const a = (i / 5) * Math.PI * 2;
+      arm.position.set(Math.cos(a) * 0.24, 0, Math.sin(a) * 0.24);
+      arm.rotation.y = -a;
+      arms.push(arm);
+    }
+    star.add(bake(arms, starMat));
   }
   g.add(at(star, 4.6, TOP_Y + 0.06, -3.4));
   // Hintergrund: die klassischen grünen Mini-Inseln + weiße Puffwolken.
@@ -314,18 +349,21 @@ function beachIsland({ g, hue, anims }: IslandCtx): void {
     emissiveIntensity: 0.35,
     map: repeated(velvetTex(3), 1.5, 1.5),
   });
+  const isleTops: THREE.Mesh[] = [];
+  const isleUnders: THREE.Mesh[] = [];
   for (const [x, y, z, r] of [
     [-11, -3.6, 14, 2.1],
     [12, -5.2, 11, 1.5],
     [-14.5, -1.8, 4, 1.2],
     [8, -6.5, 18, 2.6],
   ] as const) {
-    const top = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.92, r * 0.28, 22), grass);
-    g.add(at(top, x, y, z));
-    const under = new THREE.Mesh(new THREE.ConeGeometry(r * 0.8, r * 1.5, 8), sandstone);
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.92, r * 0.28, 22));
+    isleTops.push(at(top, x, y, z) as THREE.Mesh);
+    const under = new THREE.Mesh(new THREE.ConeGeometry(r * 0.8, r * 1.5, 8));
     under.rotation.x = Math.PI;
-    g.add(at(under, x, y - r * 0.85, z));
+    isleUnders.push(at(under, x, y - r * 0.85, z) as THREE.Mesh);
   }
+  g.add(bake(isleTops, grass), bake(isleUnders, sandstone));
   for (const [x, y, z, s] of [
     [-8, 2.6, 12, 1.2],
     [12, 4.2, 15, 1.5],
@@ -335,6 +373,14 @@ function beachIsland({ g, hue, anims }: IslandCtx): void {
     puffCloud(g, cloudMat, x, y, z, s);
   anims.push((t) => {
     star.rotation.y = Math.sin(t * 0.4) * 0.15;
+    // ROADMAP-V2 G3: Schaum-Puls am Inselrand — die Welle läuft alle ~4 s aus
+    // und zieht sich zurück. Kostet nichts: es ist die Ruhe-Anim des SCHON
+    // vorhandenen Kantenrings (Emissive + minimale Radial-Skalierung), also
+    // weder ein neuer Draw-Call noch ein neues Material.
+    const wave = 0.5 + 0.5 * Math.sin(t * 1.55);
+    foamMat.emissiveIntensity = 0.22 + wave * 0.5;
+    const w = 1 + wave * 0.006;
+    foam.scale.set(w, w, 1);
   });
 }
 
@@ -374,30 +420,44 @@ function spaceIsland({ g, hue, anims }: IslandCtx): void {
   g.add(at(belly, 0, TOP_Y - 0.5, 0));
   // Landelichter: kleine Cyan-Punkte rund um die Deckkante.
   const lightMat = toonMat({ color: hue(0x2ff5e8), emissive: hue(0x2ff5e8), emissiveIntensity: 1 });
+  const lamps: THREE.Mesh[] = [];
   ring(10, (a) => {
-    const b = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), lightMat);
-    g.add(at(b, Math.cos(a) * (ISLAND_R - 0.12), TOP_Y + 0.06, Math.sin(a) * (ISLAND_R - 0.12)));
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8));
+    lamps.push(
+      at(
+        b,
+        Math.cos(a) * (ISLAND_R - 0.12),
+        TOP_Y + 0.06,
+        Math.sin(a) * (ISLAND_R - 0.12),
+      ) as THREE.Mesh,
+    );
   });
+  g.add(bake(lamps, lightMat));
   // Kristall-Cluster wachsen aus dem Asteroiden-Bauch.
   const crystal = toonMat({
     color: hue(0x63e8ff),
     emissive: hue(0x2aa8c4),
     emissiveIntensity: 0.7,
   });
+  const shards: THREE.Mesh[] = [];
   ring(7, (a, i) => {
     const rr = ISLAND_R * (0.45 + 0.35 * ((i % 3) / 3));
     const s = 0.4 + (i % 3) * 0.22;
-    const c = new THREE.Mesh(new THREE.OctahedronGeometry(s * 0.7), crystal);
+    const c = new THREE.Mesh(new THREE.OctahedronGeometry(s * 0.7));
     c.scale.y = 2.1;
     c.rotation.z = Math.cos(a) * 0.5;
     c.rotation.x = Math.sin(a) * 0.4;
-    g.add(at(c, Math.cos(a) * rr, TOP_Y - 2.6 - (i % 2) * 0.7, Math.sin(a) * rr));
+    shards.push(
+      at(c, Math.cos(a) * rr, TOP_Y - 2.6 - (i % 2) * 0.7, Math.sin(a) * rr) as THREE.Mesh,
+    );
   });
+  g.add(bake(shards, crystal));
   anims.push((t, beatV) => {
     lightMat.emissiveIntensity = 0.6 + beatV * 0.8;
     crystal.emissiveIntensity = 0.5 + Math.sin(t * 1.4) * 0.2 + beatV * 0.3;
   });
   // Hintergrund: kleine Krater-Asteroiden statt Mini-Inseln (keine Wolken im All).
+  const debris: THREE.Mesh[] = [];
   for (const [x, y, z, s] of [
     [-11, -3.2, 13, 1.7],
     [12.5, -5.4, 10, 1.2],
@@ -408,13 +468,14 @@ function spaceIsland({ g, hue, anims }: IslandCtx): void {
   ] as const) {
     const geo = new THREE.SphereGeometry(s, 12, 9);
     geo.scale(1, 0.72 + (Math.abs(x) % 0.3), 0.85);
-    const a = new THREE.Mesh(geo, rock);
+    const a = new THREE.Mesh(geo);
     a.rotation.set(x * 0.2, z * 0.3, 0);
-    g.add(at(a, x, y, z));
+    debris.push(at(a, x, y, z) as THREE.Mesh);
   }
+  g.add(bake(debris, rock));
 }
 
-/** Weiche Toon-Puffwolke (3 gequetschte Kugeln) — Club/Beach-Hintergrund. */
+/** Weiche Toon-Puffwolke (3 gequetschte Kugeln, EIN Batch) — Club/Beach. */
 function puffCloud(
   g: THREE.Group,
   mat: THREE.MeshToonMaterial,
@@ -423,19 +484,18 @@ function puffCloud(
   z: number,
   r: number,
 ): void {
-  const cl = new THREE.Group();
+  const blobs: THREE.Mesh[] = [];
   for (const [ox, oz, rr] of [
     [-1.15, 0, 0.75],
     [0, 0.32, 1.0],
     [1.2, 0, 0.7],
   ] as const) {
-    const b = new THREE.Mesh(new THREE.SphereGeometry(r * rr, 14, 10), mat);
+    const b = new THREE.Mesh(new THREE.SphereGeometry(r * rr, 14, 10));
     b.scale.set(1, 0.72, 0.66);
     b.position.set(ox * r, oz * r, 0);
-    cl.add(b);
+    blobs.push(b);
   }
-  at(cl, x, y, z);
-  g.add(cl);
+  g.add(at(bake(blobs, mat), x, y, z));
 }
 
 const BUILDERS: Record<BackgroundKey, (ctx: IslandCtx) => void> = {

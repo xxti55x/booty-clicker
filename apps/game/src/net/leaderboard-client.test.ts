@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ALL_BOARD,
   type LeaderboardOpts,
   type ScorePayload,
   fetchTop,
@@ -127,5 +128,60 @@ describe('fetchTop — v2 GET /api/v2/scores/top', () => {
       },
     });
     await expect(fetchTop(10, { base: BASE, fetchImpl: brokenJson.fetchImpl })).resolves.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// X4: der optionale Board-Schlüssel
+// ---------------------------------------------------------------------------
+
+describe('board-Schlüssel (X4)', () => {
+  it('sendet OHNE `board`, solange das Allzeit-Board gemeint ist', async () => {
+    // Der historische Request muss byte-gleich bleiben — sonst wäre die Änderung
+    // nicht additiv, sondern eine neue API.
+    for (const opts of [{}, { board: ALL_BOARD }, { board: '' }]) {
+      const { fetchImpl, calls } = fakeFetch({ ok: true, json: async () => ({ rank: 1 }) });
+      await submitScore('Alice', PAYLOAD, { base: BASE, fetchImpl, ...opts });
+      expect(JSON.parse(calls[0].init?.body as string)).toEqual({
+        nickname: 'Alice',
+        maxZone: 42,
+        souls: 5,
+        ascensions: 2,
+      });
+      const top = fakeFetch({ ok: true, json: async () => [] });
+      await fetchTop(10, { base: BASE, fetchImpl: top.fetchImpl, ...opts });
+      expect(top.calls[0].url).toBe(`${BASE}/api/v2/scores/top?limit=10`);
+    }
+  });
+
+  it('hängt ein echtes Board an Body und Query', async () => {
+    const { fetchImpl, calls } = fakeFetch({ ok: true, json: async () => ({ rank: 2 }) });
+    await submitScore('Alice', PAYLOAD, { base: BASE, fetchImpl, board: 'weekly-2951' });
+    expect(JSON.parse(calls[0].init?.body as string)).toEqual({
+      nickname: 'Alice',
+      maxZone: 42,
+      souls: 5,
+      ascensions: 2,
+      board: 'weekly-2951',
+    });
+    const top = fakeFetch({ ok: true, json: async () => [] });
+    await fetchTop(50, { base: BASE, fetchImpl: top.fetchImpl, board: 'weekly-2951' });
+    expect(top.calls[0].url).toBe(`${BASE}/api/v2/scores/top?limit=50&board=weekly-2951`);
+  });
+
+  it('kodiert einen Board-Schlüssel für die Query', async () => {
+    const top = fakeFetch({ ok: true, json: async () => [] });
+    await fetchTop(50, { base: BASE, fetchImpl: top.fetchImpl, board: 'a b&c' });
+    expect(top.calls[0].url).toBe(`${BASE}/api/v2/scores/top?limit=50&board=a%20b%26c`);
+  });
+
+  it('bleibt auch mit Board fail-silent (kein Wurf, null)', async () => {
+    const bad = fakeFetch({ ok: false, json: async () => [] });
+    await expect(
+      fetchTop(50, { base: BASE, fetchImpl: bad.fetchImpl, board: 'weekly-2951' }),
+    ).resolves.toBeNull();
+    await expect(
+      submitScore('Alice', PAYLOAD, { base: BASE, fetchImpl: bad.fetchImpl, board: 'weekly-2951' }),
+    ).resolves.toBeNull();
   });
 });

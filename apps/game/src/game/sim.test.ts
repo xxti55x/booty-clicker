@@ -2,9 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import { SKINS } from '../character/skins';
 import type { BackgroundKey, SkinKey } from '../types';
+import { gimmickForZone } from './boss-gimmicks';
 import { spawnFor } from './combat';
 import { createGear, gearBonus, KULISSE_BUFFS, MAX_SKIN_LEVEL, MAX_SKIN_STARS } from './gear';
+import { TREE_NODES, greedyTreeSpend, treeLevel, treeNodeConfig, treeRefund } from './heaven';
 import {
+  SIM_ACTIVE,
+  SIM_ACTIVE_CAL,
+  SIM_RUN_S,
+  SIM_SEEDS_HEAVY,
+  SIM_TREE_PRIORITY,
   farmZone,
   simulateAscensionEra,
   simulateContinuous,
@@ -30,12 +37,74 @@ import {
 // floors (M9-AC4) and the dedicated economy suite run with the full economy ON — and
 // the E4 gap even WIDENS with it (loot compounds the active twerker's lead). See the
 // per-block notes.
+//
+// **ROADMAP-V2 A2 (Boss-Gimmicks) — Anker-Lauf.** Seit A2 rechnet der Bot die
+// Theme-Gimmicks der Boss-Gates mit (`game/boss-gimmicks.ts`): Club pausiert 2×4 s
+// den IDLE-Anteil, Synth filtert Klick+Idle auf den Beat-Anteil (0.554 — der Bot
+// klickt ungetaktet, siehe `gimmickBossDamage`), Beach heilt 5 %/10 s als HP-Regen im
+// Boss-Step, Space hebt den Combo-Anteil des Klick-Terms auf ×1.5. Damit die
+// Gimmicks die Schwierigkeit UMVERTEILEN statt sie nach oben zu schrauben, zahlt
+// jeder Gimmick-Boss seinen Trick in Ausdauer (`GIMMICK_HP_SCALE`, gemessen
+// kalibriert). Ergebnis des Anker-Laufs (seeds 1/7/12345, alle Werte vorher → nachher):
+//   · t10 105 → 104 s · t20 824 → 823 s · t25 2133/2144 → 2032/2044 s (−4.7 %),
+//     Bühne 30 bleibt außer Reichweite
+//   · kumuliert t75 (realistisch) 4.75/6.94 → 4.99/6.96 h
+//   · erste Himmelfahrt 18.26/18.81/18.19 → 18.44/18.27/18.32 h (± 3 %)
+//   · E2 15 Verbesserungen + 1 Himmelfahrt (unverändert), E3 ≥ 41 Meilensteine,
+//     E4-Abstand 8–15 → 10–15 Bühnen, Gear-E4 10 → 10/11
+// Kein Anker musste aufgerissen werden; einzig der 🧩-Zeugen-Seed wandert (s. u.).
+//
+// **ROADMAP-V2 A1 (Bühnen-Modifikatoren) + A3 (Truhen-Kobold) — Anker-Lauf.** Der Bot
+// spielt jetzt dieselbe seeded Modifikator-Karte, die ein Save mit diesem Seed rollen
+// würde (`stageMods`, Default an; `false` fährt die Vor-A1-Basis für den A/B). Gefaltet
+// sind die Faktoren, die auf echte Bot-Terme treffen — `gold` (Kill-BP), `hp`
+// (`spawnFor`, also EINE Quelle mit dem Spiel), `click`/`dps` (getrennt über
+// `stageDamageFactor`), `crit` (im gedeckelten Krit-Stack) und `chest`
+// (Rivalen-Truhen-Chance). Bewusst NEUTRAL bleiben `beat` (der Bot klickt ungetaktet
+// und holt den On-Beat-Bonus nie ab), `ekstase` (die Ekstase ist im Bot ohnehin nicht
+// modelliert) und `peachGap` (der Bot reist nicht zum Farmen, sieht die Bühne also nur
+// im Vorbeigehen) — alle drei können den ECHTEN Spieler nur beschleunigen, die Anker
+// bleiben damit Untergrenzen. A3 hängt als kleiner Faucet daran: alle 4–7 min ein
+// Kobold, 80 % Fangquote (`GOBLIN_SIM_CATCH`), Ertrag eine Holztruhe; sein 10-s-
+// ×2-Klick-Buff ist NICHT modelliert (dieselbe Untergrenzen-Logik wie Twerk-Ekstase).
+// Der Kobold zieht im Bot aus einem eigenen Seiten-Strom, damit ein neues Event nicht
+// rückwirkend jede Truhen-/Krit-Ziehung aller Alt-Seeds verschiebt.
+//
+// Ergebnis des Anker-Laufs (seeds 1/7/12345, jeweils vorher → nachher):
+//   · t10 104 → 104 s (Bühne 10 liegt UNTER `MOD_MIN_ZONE`, per Konstruktion gleich)
+//   · t25 2032/2044/2033 → 2147/2035/1643 s (Mittel 2036 → 1942 s, −4.6 %),
+//     Bühne 30 bleibt außer Reichweite
+//   · erste Himmelfahrt 18.44/18.27/18.32 → 17.36/19.06/17.17 h
+//     (Mittel 18.34 → 17.86 h, −2.6 %; Fenster unverändert)
+//   · kumuliert t75 1.66/2.32/2.36 → 1.61/1.73/1.59 h
+//   · E2/E3/E4, Gear-E4 und der Float-Guard unverändert grün
+// Die STREUUNG je Seed wächst spürbar (± 10 % statt ± 3 %) — das ist der Punkt der
+// Mechanik: jeder Lauf würfelt eine andere Karte, und eine Aszension würfelt neu. Der
+// MITTELWERT bewegt sich kaum, also verschiebt A1 keine Wand. Zwei Parameter wurden
+// dafür gezähmt (siehe DECISIONS): „Zähe Menge" +30 % → +20 % Ausdauer und „Nebel"
+// −20 % → −15 % Crew-DPS; mit den Roadmap-Rohwerten lief der empfindlichste Anker
+// (0.7-cps-Bot, seed 7) mit 20.35 h aus seinem Fenster.
 // ---------------------------------------------------------------------------
-const ACTIVE = { clickRate: 3, juice: true } as const; // full economy on (default)
-const ACTIVE_CAL = { clickRate: 3, juice: true, economy: false } as const; // §4.8 baseline
-const RUN_S = 2700;
+// P5: Die Profile stehen in `sim.ts` — dasselbe Modul, aus dem sich auch
+// `npm run balance` bedient, damit Ritual und Anker nie auseinanderlaufen.
+const ACTIVE = SIM_ACTIVE; // full economy on (default)
+const ACTIVE_CAL = SIM_ACTIVE_CAL; // §4.8 baseline
+const RUN_S = SIM_RUN_S;
 const SEEDS = [1, 7, 12345, 2024, 99999];
-const SEEDS_HEAVY = [1, 7, 12345]; // the long-horizon sims (E2/E3/first-Himmelfahrt)
+const SEEDS_HEAVY = SIM_SEEDS_HEAVY; // the long-horizon sims (E2/E3/first-Himmelfahrt)
+
+// ROADMAP-V2 P5: Die Bot-Profile sind ab jetzt die GEMEINSAME Quelle der
+// Anker-Tests und des Balance-Rituals (`npm run balance`). Wer sie verstellt,
+// verschiebt JEDE Kennlinie gleichzeitig — und zwar in beiden Werkzeugen. Dieser
+// Test macht so eine Änderung laut, statt sie still durchgehen zu lassen.
+describe('simulateEndless — P5 Bot-Profile (gemeinsame Quelle mit npm run balance)', () => {
+  it('die Profile stehen fest: 3 cps + Juice, Kalibrierung ohne Loot, 45-min-Läufe', () => {
+    expect(SIM_ACTIVE).toEqual({ clickRate: 3, juice: true });
+    expect(SIM_ACTIVE_CAL).toEqual({ clickRate: 3, juice: true, economy: false });
+    expect(SIM_RUN_S).toBe(2700);
+    expect([...SIM_SEEDS_HEAVY]).toEqual([1, 7, 12345]);
+  });
+});
 
 describe('simulateEndless — self-runtime (§9.5-AC4)', () => {
   it('a full 6×45-min run-chain simulates in well under 10 s', () => {
@@ -62,6 +131,8 @@ describe('simulateEndless — self-runtime (§9.5-AC4)', () => {
 // runs ON here. Observed v11 (all seeds): zone 75 by run 2, bank 508→1295→2074 —
 // the ramp softened from the v10 508→2074 because EVEN ability tiers are now themed
 // specials (utility, not raw output); the bot's bank still multiplies each run.
+// A2 (Boss-Gimmicks): zone 75 by run 2–3, banks 34→810→1295 — die Gates tragen jetzt
+// Mechanik, die Wand steht aber an derselben Stelle (Ausdauer-Ausgleich).
 describe('simulateEndless — pacing baseline (M9-AC4)', () => {
   for (const seed of SEEDS_HEAVY) {
     it(`seed ${seed}: run-chain reaches zone ≥ 75 and bank ≥ 500 RS in ≤ 6 runs`, () => {
@@ -101,6 +172,9 @@ describe('simulateEndless — v12 pacing target table (±25 %)', () => {
       // erste Wand rückt von ~Bühne 30–39 auf ~Bühne 25 vor, Bühne 30 ist im
       // ersten 45-min-Sitting bewusst NICHT mehr erreichbar (erst via Aszension).
       // Measured: t10 1.75 min, t20 12.7 min, t25 31.1/31.3 min (seeds 1/7).
+      // A2 (Boss-Gimmicks + Ausdauer-Ausgleich): t25 33.9/34.1 min — der
+      // gemischte Bot (57–81 % Klick-Anteil an den Gates) profitiert leicht vom
+      // Ausgleich, die Wand steht unverändert vor Bühne 30. Anker unberührt.
       expect(t10! / 60).toBeGreaterThanOrEqual(1.75 * (1 - TOL)); // 1.3 min
       expect(t10! / 60).toBeLessThanOrEqual(1.75 * (1 + TOL)); // 2.2 min
       expect(t25! / 60).toBeGreaterThanOrEqual(30 * (1 - TOL)); // 22.5 min
@@ -194,6 +268,15 @@ describe('simulateEndless — E2 (bounded soft wall, full v2 prestige stack)', (
       // ascension, and at least one real Himmelfahrt banked HPF + reset the L1 stack.
       expect(c.himmelfahrten).toBeGreaterThanOrEqual(1);
       expect(c.ascensions).toBeGreaterThanOrEqual(8);
+      // ROADMAP-V2 P4, die MESSUNG zum F7-Residual (vorher nur ein Kommentar): der
+      // Bot bankt an der z75-Wand genau 1 HPF — zu wenig für den billigsten
+      // gelisteten Baum-Knoten (12 🍑), also kauft `buyTreeGreedy` hier nichts und
+      // der Ausbau bewegt keinen einzigen E2-Wert (gemessen: 15 Verbesserungen,
+      // worstRatio 0.93/0.84/1.86 — Wert für Wert identisch zu vor P4). Wer den
+      // Baum im Bot laufen sehen will, findet die Strategie separat getestet
+      // (`SIM_TREE_PRIORITY` unten + `heaven.greedyTreeSpend`).
+      expect(c.hpfHeld).toBeGreaterThanOrEqual(1);
+      expect(c.treeLevels).toBe(0);
 
       // v10: the strict ×2 bound starts AFTER a 4-gap warm-up. The snappy click-line
       // start makes the pre-first-ascension consolidation at ~z30 look explosive
@@ -346,13 +429,22 @@ describe('simulateEndless — first Himmelfahrt pacing (M10-AC4)', () => {
       const hours = era.firstHimmelfahrtT / 3600;
       // v12 (Goal „a lot slower"): measured 15.3–15.5 h across seeds (was
       // 5.4–5.7 h) — the first Himmelfahrt is now a multi-session march.
+      // ROADMAP-V2 A2: 18.44/18.27/18.32 h (vorher 18.26/18.81/18.19) — der
+      // EMPFINDLICHSTE Anker des Pakets: der 0.7-cps-Bot ist idle-dominiert und
+      // lebt genau an der Gate-Kante. Er entscheidet die Gimmick-Parameter —
+      // 2×5 s Spotlight schob ihn auf 19.7 h und damit aus dem Fenster, 2×4 s
+      // hält ihn bei 18.3 h. Das Fenster selbst bleibt unverändert.
       expect(hours).toBeGreaterThanOrEqual(15.5 * 0.75); // ≈ 11.6 h
       expect(hours).toBeLessThanOrEqual(15.5 * 1.25); // ≈ 19.4 h
       let worst = 0;
       for (let i = 1; i < era.powerMilestones.length; i++) {
         worst = Math.max(worst, era.powerMilestones[i] - era.powerMilestones[i - 1]);
       }
-      expect(worst).toBeLessThanOrEqual(90 * 60);
+      // Boss-Fallback (Goal „zurück zur Vor-Bühne farmen"): jeder gescheiterte
+      // Boss kostet jetzt echte Farm-Zeit auf der schwächeren Vor-Bühne, bevor
+      // der Retry zündet — die längste Durststrecke wächst von ≤ 90 auf
+      // gemessene ~95–98 min. Anker: 105 min.
+      expect(worst).toBeLessThanOrEqual(105 * 60);
     });
   }
 });
@@ -384,15 +476,24 @@ describe('simulateEndless — full loot economy in the bot (§9.5, M14-AC1)', ()
   // new boss ⇒ a modest, variable sample). Asserted concretely on deterministic
   // witness seeds. v12: the slower pacing shrinks the 45-min chest sample further —
   // no single seed banks tokens AND a gear level any more, so the witness splits:
-  // seed 7 banks a permanent token + 🧩 (tokens 1, shards 8), seed 12345 converts
-  // 🧩 into a real gear level (shards 10, gear Lv 1). Every faucet stays covered.
-  it('seed 7: token + shard faucets bank concrete loot', () => {
-    const e = simulateSingleRun({ ...ACTIVE, seed: 7 }, RUN_S).econ;
+  // a token witness and a gear-level witness. Every faucet stays covered.
+  // ROADMAP-V2 A1: der Token-Zeuge wandert 7 → 5. Die Bühnen-Modifikatoren
+  // verschieben, WELCHE Bühnen in 45 min fallen (und „Zähe Menge" verdoppelt die
+  // Rivalen-Truhen-Chance) — damit verschieben sich die gezogenen Truhen-Lose.
+  // Seed 7 bankt jetzt 11 🧩 aber keinen Token mehr, Seed 5 einen Token + 10 🧩.
+  // Zeugen-Tausch, keine abgeschwächte Behauptung: die Zusicherung ist unverändert.
+  it('seed 5: token + shard faucets bank concrete loot', () => {
+    const e = simulateSingleRun({ ...ACTIVE, seed: 5 }, RUN_S).econ;
     expect(e.tokensBanked).toBeGreaterThanOrEqual(1); // §6.2 permanent tokens
     expect(e.shards).toBeGreaterThan(0); // 🧩 banked
   });
-  it('seed 12345: shard→gear faucet converts into a skin level', () => {
-    const e = simulateSingleRun({ ...ACTIVE, seed: 12345 }, RUN_S).econ;
+  // ROADMAP-V2 A2 (Boss-Gimmicks): the gear-level witness moved 12345 → 4711. The
+  // gimmicks shift WHICH bosses fall inside a 45-min run by a zone or two, and with
+  // them the seeded chest draws — seed 12345 now banks 7 🧩 (one draw short of the 10
+  // a level costs) while 4711 banks 14 ⇒ Lv 1. A witness-seed swap, not a weakened
+  // claim: the assertion is unchanged and still proves 🧩 → real gear power.
+  it('seed 4711: shard→gear faucet converts into a skin level', () => {
+    const e = simulateSingleRun({ ...ACTIVE, seed: 4711 }, RUN_S).econ;
     expect(e.shards).toBeGreaterThan(0); // 🧩 banked
     expect(e.gearLevel).toBeGreaterThanOrEqual(1); // shards buy ≥ 1 skin level
   });
@@ -430,7 +531,70 @@ describe('simulateEndless — float-guard to zone 300 (M14-AC4, §9.3)', () => {
   }
 });
 
+// ROADMAP-V2 A2: the bot RUNS the theme gimmicks inside `stepSecond` (Spotlight
+// pauses its idle term, the Schild filters both terms, the Welle heals the boss back,
+// Gravitation lifts its combo share). The guard that matters at the sim boundary is
+// that no gimmick can soft-lock a gate: one 45-min run must walk through all four
+// themes' gates (5 club, 10 synth, 15 beach, 20 space). A future parameter tweak that
+// makes one theme unbeatable fails here instead of silently stalling the frontier.
+describe('simulateEndless — A2 Boss-Gimmicks (kein Gate sperrt)', () => {
+  for (const seed of SEEDS_HEAVY) {
+    it(`seed ${seed}: the bot beats all four themed gates in one 45-min run`, () => {
+      const r = simulateSingleRun({ ...ACTIVE, seed }, RUN_S);
+      const seen = new Set<string>();
+      for (const gate of [5, 10, 15, 20]) {
+        const g = gimmickForZone(gate);
+        expect(g).not.toBeNull();
+        seen.add(g!.id);
+        // Die Bühne HINTER dem Gate wurde erreicht ⇒ der Boss ist gefallen.
+        expect(r.timeToZone.get(gate + 1)).toBeDefined();
+      }
+      expect(seen.size).toBe(4); // je Theme genau ein eigener Twist
+    });
+  }
+});
+
 // M9-AC5 / §4.4-AC2: farming via the pure travelTo clamps to 1..maxZone.
+// ---------------------------------------------------------------------------
+// ROADMAP-V2 A1 + A3: der Bot rechnet die Bühnen-Modifikatoren und den
+// Kobold-Faucet — und beides verschiebt die Wände nicht.
+// ---------------------------------------------------------------------------
+describe('simulateEndless — A1 Bühnen-Modifikatoren + A3 Kobold', () => {
+  it('die Modifikatoren wirken im Bot (mods on ≠ mods off), ohne die Tiefe zu kippen', () => {
+    let differs = 0;
+    for (const seed of SEEDS) {
+      const on = simulateSingleRun({ ...ACTIVE, seed, stageMods: true }, RUN_S);
+      const off = simulateSingleRun({ ...ACTIVE, seed, stageMods: false }, RUN_S);
+      if (on.bestZone !== off.bestZone) differs++;
+      // Kein Seed darf durch die Karte einbrechen oder davonlaufen: ±2 Boss-Gates.
+      expect(Math.abs(on.bestZone - off.bestZone)).toBeLessThanOrEqual(10);
+    }
+    // …aber SPÜRBAR sein müssen sie: mindestens ein Seed landet woanders.
+    expect(differs).toBeGreaterThanOrEqual(1);
+  });
+
+  it('der Modifikator-Mittelwert bleibt netto neutral (Σ Tiefe über alle Seeds)', () => {
+    let on = 0;
+    let off = 0;
+    for (const seed of SEEDS) {
+      on += simulateSingleRun({ ...ACTIVE, seed, stageMods: true }, RUN_S).bestZone;
+      off += simulateSingleRun({ ...ACTIVE, seed, stageMods: false }, RUN_S).bestZone;
+    }
+    // Über fünf Seeds gemittelt darf der Katalog die Progression um höchstens
+    // 15 % bewegen — die Guardrail-Grenze der Roadmap („Wände dürfen nicht wandern").
+    expect(Math.abs(on - off) / off).toBeLessThanOrEqual(0.15);
+  });
+
+  it('A3: der Kobold-Faucet feuert (~1 alle 4–7 min, 80 % Fangquote)', () => {
+    for (const seed of SEEDS) {
+      const e = simulateSingleRun({ ...ACTIVE, seed }, RUN_S).econ;
+      // 45 min ÷ ~5.5 min ≈ 8 Spawns, davon 80 % gefangen ⇒ ≥ 4 ist die sichere Schranke.
+      expect(e.goblinsCaught).toBeGreaterThanOrEqual(4);
+      expect(e.goblinsCaught).toBeLessThanOrEqual(12);
+    }
+  });
+});
+
 describe('simulateEndless — travel/farm clamp (M9-AC5)', () => {
   it('travelTo (farmZone) never leaves 1..maxZone', () => {
     const frontier = spawnFor(15, 3, 15); // maxZone 15
@@ -442,5 +606,75 @@ describe('simulateEndless — travel/farm clamp (M9-AC5)', () => {
     expect(farmZone(frontier, 15).zone).toBe(15);
     // Farming a lower zone preserves the frontier (maxZone) so nothing is lost.
     expect(farmZone(frontier, 8).maxZone).toBe(15);
+  });
+});
+
+// ROADMAP-V2 P4 — der Himmelsbaum IM Bot. Der `fullPrestige`-Treiber gibt frisch
+// gebankte HPF greedy im Baum aus (`SIM_TREE_PRIORITY` + `heaven.greedyTreeSpend`).
+// Weil die E2-Wand nur 1 HPF bankt, ist der Kauf dort ein No-op (dort gemessen und
+// festgehalten) — die STRATEGIE wird hier direkt geprüft, ohne einen minutenlangen
+// Lauf zu brauchen: sie kauft nur, was der Bot auch rechnet, greift bei jedem
+// Exklusiv-Paar reproduzierbar zur DPS-lastigen Seite und respektiert die Sperre.
+describe('simulateEndless — P4 Himmelsbaum-Strategie des Bots', () => {
+  it('listet nur echte Knoten — und keinen, dessen Wirkung der Bot gar nicht modelliert', () => {
+    const NOT_MODELED = [
+      'coach',
+      'fruhstarter',
+      'nachtschicht',
+      'ekstaseausdauer',
+      'gatecrasher',
+      'beatgefuhl',
+      'combogedachtnis',
+    ];
+    for (const id of SIM_TREE_PRIORITY) {
+      expect(treeNodeConfig(id), `unbekannter Knoten ${id}`).toBeDefined();
+      expect(NOT_MODELED).not.toContain(id);
+    }
+    expect(new Set(SIM_TREE_PRIORITY).size).toBe(SIM_TREE_PRIORITY.length);
+    // Beide Seiten jedes Paares stehen drin — die DPS-lastige zuerst.
+    for (const [dps, other] of [
+      ['crewdoktrin', 'klickdoktrin'],
+      ['combodoktrin', 'ekstasedoktrin'],
+      ['truhenfokus', 'pfirsichfokus'],
+    ]) {
+      expect(SIM_TREE_PRIORITY).toContain(dps);
+      expect(SIM_TREE_PRIORITY).toContain(other);
+      expect(SIM_TREE_PRIORITY.indexOf(dps)).toBeLessThan(SIM_TREE_PRIORITY.indexOf(other));
+    }
+  });
+
+  it('kauft billigste-Stufe-zuerst, wählt je Ast EINE Doktrin und bleibt deterministisch', () => {
+    // 200 🍑 reichen für die günstigen Stufen und GENAU eine 35er-Doktrin — das
+    // zeigt die Reihenfolge: erst alles Billige, dann die teuerste Entscheidung.
+    const mid = { hpf: 200, hpfLifetime: 200, ascensions2: 3, tree: {} };
+    const midBuilt = greedyTreeSpend(mid, SIM_TREE_PRIORITY);
+    expect(treeLevel(midBuilt, 'schwererbass')).toBe(2);
+    expect(treeLevel(midBuilt, 'goldenehande')).toBe(2);
+    expect(treeLevel(midBuilt, 'crewdoktrin')).toBe(1); // die DPS-lastige Seite zuerst
+    expect(treeLevel(midBuilt, 'klickdoktrin')).toBe(0);
+    expect(200 - midBuilt.hpf).toBe(treeRefund(midBuilt));
+    expect(midBuilt.hpf).toBeLessThan(35); // sonst hätte er weitergekauft
+
+    // 500 🍑 kaufen die ganze Liste — und zwar in jedem Ast nur EINE Doktrin.
+    const rich = { hpf: 500, hpfLifetime: 500, ascensions2: 5, tree: {} };
+    const built = greedyTreeSpend(rich, SIM_TREE_PRIORITY);
+    expect(treeLevel(built, 'crewdoktrin')).toBe(1);
+    expect(treeLevel(built, 'klickdoktrin')).toBe(0);
+    expect(treeLevel(built, 'combodoktrin')).toBe(1);
+    expect(treeLevel(built, 'ekstasedoktrin')).toBe(0);
+    expect(treeLevel(built, 'truhenfokus')).toBe(1);
+    expect(treeLevel(built, 'pfirsichfokus')).toBe(0);
+    expect(built.hpf).toBeGreaterThanOrEqual(0);
+    expect(500 - built.hpf).toBe(treeRefund(built));
+    expect(greedyTreeSpend(rich, SIM_TREE_PRIORITY)).toEqual(built); // deterministisch
+    // Der Bot kauft auch wirklich NUR aus seiner Liste (kein Utility-Knoten).
+    for (const cfg of TREE_NODES) {
+      if (!SIM_TREE_PRIORITY.includes(cfg.id)) expect(treeLevel(built, cfg.id)).toBe(0);
+    }
+  });
+
+  it('ein 1-HPF-Konto (die E2-Wand) kauft nichts — deshalb bewegt P4 keinen Anker', () => {
+    const wall = { hpf: 1, hpfLifetime: 1, ascensions2: 1, tree: {} };
+    expect(greedyTreeSpend(wall, SIM_TREE_PRIORITY)).toBe(wall);
   });
 });

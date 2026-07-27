@@ -9,11 +9,19 @@ import { cors } from 'hono/cors';
  *     GET  /api/scores/top?limit=50 -> 200 [{ nickname, bestTimeS, createdAt }]
  *
  *   v2 (endless `maxZone`, higher = better; §7.4/§9.7, behebt B8):
- *     POST /api/v2/scores       { nickname, maxZone, souls, ascensions } -> 201 { rank } | 400 | 429
- *     GET  /api/v2/scores/top?limit=50
+ *     POST /api/v2/scores       { nickname, maxZone, souls, ascensions, board? } -> 201 { rank } | 400 | 429
+ *     GET  /api/v2/scores/top?limit=50&board=all
  *          -> 200 [{ nickname, maxZone, souls, ascensions, updatedAt }]
  *     Upsert per nickname (D1 UNIQUE(nickname)); the stored row is only replaced
  *     when the submitted `maxZone` is strictly greater than the one on file.
+ *
+ *   `board` (ROADMAP-V2 X4) is an OPTIONAL, purely additive board key. Omitted (or
+ *   `"all"`) it means the all-time best-zone board and every byte of the request
+ *   path, the SQL and the response is what it was before — the legacy board keeps
+ *   its own table. Any other key (the game sends `weekly-<ISO-week-index>`) is a
+ *   self-contained board in `scores_boards`, so a weekly board resets simply by
+ *   virtue of the key changing every Monday: no cron, no cleanup, no season state
+ *   on the server.
  *
  * Storage (D1) and the per-IP rate limiter (KV) sit behind small interfaces so
  * the request logic is unit-testable with in-memory fakes (no wrangler needed).
@@ -42,21 +50,26 @@ export interface ScoreRepo {
   top(limit: number): Promise<ScoreRow[]>;
 
   // --- v2 (§9.7) ---
+  //
+  // `board` (X4) defaults to `ALL_BOARD` on every method, so an implementation
+  // that ignores the argument entirely still serves the historic single board —
+  // that is exactly what keeps the parameter additive.
   /**
-   * Upsert by nickname: insert a fresh row, or update the existing one ONLY when
-   * `row.maxZone` is strictly greater than the stored `maxZone`. Returns the row
-   * that is now on file (the submitted values on a write, the untouched stored
-   * values when the update was suppressed) so the caller can rank the real entry.
+   * Upsert by nickname WITHIN a board: insert a fresh row, or update the existing
+   * one ONLY when `row.maxZone` is strictly greater than the stored `maxZone`.
+   * Returns the row that is now on file (the submitted values on a write, the
+   * untouched stored values when the update was suppressed) so the caller can
+   * rank the real entry.
    */
-  upsertV2(row: ScoreRowV2): Promise<ScoreRowV2>;
+  upsertV2(row: ScoreRowV2, board?: string): Promise<ScoreRowV2>;
   /**
-   * 1-based rank of `row` under the total order maxZone DESC, then souls DESC,
-   * then nickname ASC (a strict order — nickname is unique). Equals 1 + the count
-   * of stored rows that sort strictly ahead of `row`.
+   * 1-based rank of `row` within its board, under the total order maxZone DESC,
+   * then souls DESC, then nickname ASC (a strict order — nickname is unique per
+   * board). Equals 1 + the count of stored rows that sort strictly ahead of `row`.
    */
-  rankForV2(row: ScoreRowV2): Promise<number>;
-  /** Top rows ordered by maxZone DESC (ties: souls DESC, then nickname ASC). */
-  topV2(limit: number): Promise<ScoreRowV2[]>;
+  rankForV2(row: ScoreRowV2, board?: string): Promise<number>;
+  /** Top rows of a board ordered by maxZone DESC (ties: souls DESC, nickname ASC). */
+  topV2(limit: number, board?: string): Promise<ScoreRowV2[]>;
 }
 
 export interface RateLimiter {
@@ -89,6 +102,26 @@ export function validateZone(v: unknown): number | null {
 /** Display stat (`souls`/`ascensions`): a non-negative finite number. Returns null if invalid. */
 export function validateStat(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
+}
+
+/** The all-time best-zone board — the default when no `board` is given (X4). */
+export const ALL_BOARD = 'all';
+
+const BOARD_RE = /^[a-z0-9][a-z0-9-]{0,23}$/;
+
+/**
+ * Board key (X4): absent/empty ⇒ {@link ALL_BOARD}; otherwise 1–24 chars of
+ * `[a-z0-9-]` starting alphanumeric. Returns null if invalid.
+ *
+ * Deliberately narrow: the key becomes a primary-key component and shows up in a
+ * URL, so it stays lowercase, unpunctuated and short. The game only ever sends
+ * `all` and `weekly-<n>`; the filter is what keeps a third-party client from
+ * turning the board dimension into free-form storage.
+ */
+export function validateBoard(v: unknown): string | null {
+  if (v === undefined || v === null || v === '') return ALL_BOARD;
+  if (typeof v !== 'string') return null;
+  return BOARD_RE.test(v) ? v : null;
 }
 
 export type EnvFactory<E, T> = (env: E) => T;
@@ -155,28 +188,40 @@ export function createApp<E extends object>(
     const maxZone = validateZone(b.maxZone);
     const souls = validateStat(b.souls);
     const ascensions = validateStat(b.ascensions);
-    if (nickname === null || maxZone === null || souls === null || ascensions === null) {
+    const board = validateBoard(b.board);
+    if (
+      nickname === null ||
+      maxZone === null ||
+      souls === null ||
+      ascensions === null ||
+      board === null
+    ) {
       return c.json({ error: 'validation' }, 400);
     }
 
     const repo = makeRepo(c.env);
     // Upsert returns the row actually on file (may keep a higher stored maxZone),
     // so the rank reflects the persisted entry, not a suppressed submission.
-    const stored = await repo.upsertV2({
-      nickname,
-      maxZone,
-      souls,
-      ascensions,
-      updatedAt: new Date().toISOString(),
-    });
-    const rank = await repo.rankForV2(stored);
+    const stored = await repo.upsertV2(
+      {
+        nickname,
+        maxZone,
+        souls,
+        ascensions,
+        updatedAt: new Date().toISOString(),
+      },
+      board,
+    );
+    const rank = await repo.rankForV2(stored, board);
     return c.json({ rank }, 201);
   });
 
   app.get('/api/v2/scores/top', async (c) => {
     const raw = Number(c.req.query('limit') ?? '50');
     const limit = Number.isFinite(raw) ? Math.min(50, Math.max(1, Math.floor(raw))) : 50;
-    const rows = await makeRepo(c.env).topV2(limit);
+    const board = validateBoard(c.req.query('board'));
+    if (board === null) return c.json({ error: 'validation' }, 400);
+    const rows = await makeRepo(c.env).topV2(limit, board);
     return c.json(rows, 200);
   });
 
@@ -213,7 +258,28 @@ function d1Repo(env: Bindings): ScoreRepo {
         .all<ScoreRow>();
       return res.results ?? [];
     },
-    async upsertV2(row) {
+    async upsertV2(row, board = ALL_BOARD) {
+      if (board !== ALL_BOARD) {
+        await env.DB.prepare(
+          `INSERT INTO scores_boards (board, nickname, max_zone, souls, ascensions, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(board, nickname) DO UPDATE SET
+             max_zone = excluded.max_zone,
+             souls = excluded.souls,
+             ascensions = excluded.ascensions,
+             updated_at = excluded.updated_at
+           WHERE excluded.max_zone > scores_boards.max_zone`,
+        )
+          .bind(board, row.nickname, row.maxZone, row.souls, row.ascensions, row.updatedAt)
+          .run();
+        const stored = await env.DB.prepare(
+          `SELECT nickname, max_zone AS maxZone, souls, ascensions, updated_at AS updatedAt
+           FROM scores_boards WHERE board = ? AND nickname = ?`,
+        )
+          .bind(board, row.nickname)
+          .first<ScoreRowV2>();
+        return stored ?? row;
+      }
       // Insert, or update the existing nickname only when the new maxZone wins.
       await env.DB.prepare(
         `INSERT INTO scores_v2 (nickname, max_zone, souls, ascensions, updated_at)
@@ -235,8 +301,20 @@ function d1Repo(env: Bindings): ScoreRepo {
         .first<ScoreRowV2>();
       return stored ?? row;
     },
-    async rankForV2(row) {
+    async rankForV2(row, board = ALL_BOARD) {
       // 1 + rows that sort strictly ahead: maxZone DESC, then souls DESC, then nickname ASC.
+      if (board !== ALL_BOARD) {
+        const r = await env.DB.prepare(
+          `SELECT COUNT(*) AS c FROM scores_boards
+           WHERE board = ?4
+             AND (max_zone > ?1
+              OR (max_zone = ?1 AND souls > ?2)
+              OR (max_zone = ?1 AND souls = ?2 AND nickname < ?3))`,
+        )
+          .bind(row.maxZone, row.souls, row.nickname, board)
+          .first<{ c: number }>();
+        return (r?.c ?? 0) + 1;
+      }
       const r = await env.DB.prepare(
         `SELECT COUNT(*) AS c FROM scores_v2
          WHERE max_zone > ?1
@@ -247,7 +325,19 @@ function d1Repo(env: Bindings): ScoreRepo {
         .first<{ c: number }>();
       return (r?.c ?? 0) + 1;
     },
-    async topV2(limit) {
+    async topV2(limit, board = ALL_BOARD) {
+      if (board !== ALL_BOARD) {
+        const res = await env.DB.prepare(
+          `SELECT nickname, max_zone AS maxZone, souls, ascensions, updated_at AS updatedAt
+           FROM scores_boards
+           WHERE board = ?
+           ORDER BY max_zone DESC, souls DESC, nickname ASC
+           LIMIT ?`,
+        )
+          .bind(board, limit)
+          .all<ScoreRowV2>();
+        return res.results ?? [];
+      }
       const res = await env.DB.prepare(
         `SELECT nickname, max_zone AS maxZone, souls, ascensions, updated_at AS updatedAt
          FROM scores_v2

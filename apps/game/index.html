@@ -87,8 +87,24 @@
             <span class="rival-prog" id="zoneProgress">0 / 10</span>
             <span class="rival-timer hidden" id="rivalTimer">30</span>
           </div>
+          <!-- ROADMAP-V2 A1: Hausregel der Bühne — Icon + Name + ein Satz.
+               Nur auf Nicht-Boss-Bühnen ab Bühne 11. -->
+          <div class="stage-mod hidden" id="stageMod"></div>
+          <!-- ROADMAP-V2 A2: Theme-Gimmick des Bosses — steht klein an der
+               HP-Bar, solange der Boss tanzt (das Banner sagt es einmal groß an). -->
+          <div class="boss-gimmick hidden" id="bossGimmick"></div>
+          <button type="button" class="boss-challenge hidden" id="bossChallenge">
+            👑 Boss herausfordern
+          </button>
+          <!-- ROADMAP-V2 P3: Wand-Telemetrie — erscheint nur an der Frontier-
+               Boss-Bühne und nur bei erkennbarer Lücke (> 20 %). -->
+          <div class="boss-hint hidden" id="bossHint"></div>
         </div>
       </div>
+
+      <!-- ROADMAP-V2 G2: Boss-Auftritts-Banner — rollt beim Spawn ein und
+           verschwindet von selbst (reine CSS-Animation). -->
+      <div class="boss-banner hidden" id="bossBanner"></div>
     </div>
 
     <button class="toggleShop" id="toggleShop">
@@ -132,6 +148,14 @@
         />
       </svg>
     </button>
+    <!-- ROADMAP-V2 A3: Truhen-Kobold — hoppelt 8 s über die Insel, 5 Klicks
+         fangen ihn. Eigener Look (👺 + Truhe), eigener Mini-Frenzy-Badge. -->
+    <button class="goblinBtn hidden" id="goblinBtn" type="button" title="Truhen-Kobold fangen!">
+      <span class="gb-face" aria-hidden="true">👺</span>
+      <span class="gb-chest" aria-hidden="true">🎁</span>
+      <span class="gb-count" id="goblinCount">5</span>
+    </button>
+    <div class="goblinBadge hidden" id="goblinBadge">×2 Klick</div>
     <div class="boostBadge hidden" id="boostBadge">
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path
@@ -148,12 +172,32 @@
     <div class="abilitybar" id="abilityBar">
       <button class="ability-btn" id="ekstaseBtn" type="button" title="Twerk-Ekstase (Taste F)">
         <span class="ability-fill" id="ekstaseFill"></span>
+        <!-- X2: Countdown-Ring der LAUFZEIT (der Balken darüber ist die LADUNG). -->
+        <span class="ability-ring" id="ekstaseRing" aria-hidden="true">
+          <b id="ekstaseRingSec">0</b>
+        </span>
         <span class="ability-label" id="ekstaseLabel">🍑 Ekstase</span>
       </button>
     </div>
 
     <div class="hintbar">Klick / Leertaste = Twerken &amp; Schaden · Crew macht Idle-DPS</div>
     <div class="toasts" id="toasts"></div>
+
+    <!-- ROADMAP-V2 G4: Prestige-Zeremonie. Reine Optik — die Gutschrift ist
+         gebucht, bevor die Blende überhaupt startet; ein Tap überspringt. -->
+    <div class="ceremony hidden" id="ceremony">
+      <div class="cer-sprites" id="cerSprites" aria-hidden="true"></div>
+      <div class="cer-core">
+        <div class="cer-title" id="cerTitle"></div>
+        <div class="cer-count" id="cerCount"></div>
+        <div class="cer-sub" id="cerSub"></div>
+      </div>
+      <div class="cer-sweep" id="cerSweep" aria-hidden="true"></div>
+      <div class="cer-skip">Tippen zum Überspringen</div>
+    </div>
+    <!-- ROADMAP-V2 G6: Overlay-Schicht für Coin-Fly + Fähigkeits-Konfetti.
+         Liegt über dem Shop, fängt aber nie einen Klick ab. -->
+    <div class="fxlayer" id="fxLayer" aria-hidden="true"></div>
 
     <div class="coach hidden" id="coach">
       <div class="coach-text" id="coachText"></div>
@@ -242,11 +286,22 @@
       <div class="tabbody" id="tabSet" style="display: none"></div>
     </div>
 
+    <!-- X3: Offline-Rückkehr als Moment — die BP landen erst mit „Einsacken". -->
     <div class="overlay hidden" id="welcomeBack">
-      <div class="dialog">
+      <div class="dialog wb">
         <div class="dt">🍑 Willkommen zurück!</div>
-        <div class="dd" id="wbText"></div>
-        <button class="btn" id="wbClose">Einsammeln</button>
+        <div class="wb-rows">
+          <div class="wb-row">
+            <span class="wb-k">Du warst weg</span>
+            <b class="wb-v" id="wbAway">–</b>
+          </div>
+          <div class="wb-row">
+            <span class="wb-k">Deine Crew hat erspielt</span>
+            <b class="wb-v wb-gold" id="wbGold">–</b>
+          </div>
+        </div>
+        <div class="wb-cap hidden" id="wbCap"></div>
+        <button class="btn" id="wbClose" type="button">Einsacken</button>
       </div>
     </div>
 
@@ -258,13 +313,21 @@
         <input class="lb-input" id="lbNick" maxlength="16" placeholder="Nickname (2–16 Zeichen)" />
         <div class="msg" id="lbMsg"></div>
         <button class="btn" id="lbSubmitBtn" type="button">Absenden</button>
+        <!-- X4: Der Fehlerpfad war stumm — jetzt bleibt der Versuch hier stehen
+             und lässt sich EINZELN wiederholen, ohne den Nickname neu zu tippen. -->
+        <button class="btn ghost hidden" id="lbRetryBtn" type="button">🔄 Erneut versuchen</button>
         <button class="btn ghost" id="lbSkipBtn" type="button">Überspringen</button>
       </div>
     </div>
     <div class="overlay hidden" id="lbTop">
       <div class="dialog wide">
-        <div class="dt">🏅 Top 50</div>
+        <div class="dt">🏅 Bestenliste</div>
+        <!-- X4: Saison-Zeile + Board-Wechsler über der Liste. -->
+        <div class="lb-season" id="lbSeason"></div>
+        <div class="lb-boards" id="lbBoards"></div>
+        <div class="lb-sub" id="lbBoardNote"></div>
         <div class="lb-list" id="lbList"></div>
+        <button class="btn ghost hidden" id="lbTopRetry" type="button">🔄 Erneut versuchen</button>
         <button class="btn" id="lbClose" type="button">Schließen</button>
       </div>
     </div>

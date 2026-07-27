@@ -50,15 +50,26 @@ export function clampBoostUntil(boostUntil: number, now: number): number {
  * Epoch-ms for the next peach: `now` + a random `PEACH_MIN_S..PEACH_MAX_S` seconds,
  * drawn from the injected `rng` (§9.4). Pure over `(now, rng-state)`; advances the
  * cursor by one draw.
+ *
+ * `gapMult` skaliert NUR die gewürfelte Pause, nie den Zufallszug selbst (ROADMAP-V2
+ * P2, Mythos-Knoten „Pfirsich-Magnet": ×1/1.2 ⇒ +20 % Frequenz). Default 1 ⇒ Verhalten
+ * byte-gleich zu vorher, deshalb sieht die Sim (te = 0, kein Knoten) exakt die alte
+ * Kurve. Nicht-endliche / nicht-positive Faktoren fallen auf 1 zurück.
  */
-export function rollNextPeachAt(now: number, rng: Rng): number {
-  const delayS = PEACH_MIN_S + rng.next() * (PEACH_MAX_S - PEACH_MIN_S);
+export function rollNextPeachAt(now: number, rng: Rng, gapMult = 1): number {
+  const m = Number.isFinite(gapMult) && gapMult > 0 ? gapMult : 1;
+  const delayS = (PEACH_MIN_S + rng.next() * (PEACH_MAX_S - PEACH_MIN_S)) * m;
   return now + delayS * 1000;
 }
 
-/** Epoch-ms until which the ×3 boost runs after catching a peach at `now`. */
-export function activateBoost(now: number): number {
-  return now + PEACH_BOOST_S * 1000;
+/**
+ * Epoch-ms until which the income boost runs after catching a peach at `now`:
+ * `PEACH_BOOST_S` plus `extraMs` (ROADMAP-V2 P4, Himmelsbaum-Knoten „Pfirsich-Reife":
+ * +15 s). Default 0 ⇒ zahlengleich zu vorher.
+ */
+export function activateBoost(now: number, extraMs = 0): number {
+  const extra = Number.isFinite(extraMs) && extraMs > 0 ? extraMs : 0;
+  return now + PEACH_BOOST_S * 1000 + extra;
 }
 
 /** Whether the peach boost is still active at `now`. */

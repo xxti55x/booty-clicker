@@ -235,6 +235,16 @@ export interface MetaState {
   lastLoginDay: number;
   /** Week number the free streak-protect was last spent (−1 = available). */
   streakProtectWeek: number;
+  /**
+   * ROADMAP-V2 A5 — der ISO-Wochen-INDEX (`weekly.weekIndexOf`, NICHT das
+   * Donnerstags-Raster von {@link weekNumber}), zu dem {@link weekBestZone}
+   * gehört; −1 = noch keine Woche gezählt. Die beiden Felder sind bewusst ein
+   * Paar: rollt die Woche, ersetzt der neue Index den alten UND setzt die
+   * Bestzone zurück — es gibt keine Historie, nur „diese Woche".
+   */
+  weekIndex: number;
+  /** Höchste Frontier (`runMaxZone`) der Woche {@link weekIndex} (0 = keine). */
+  weekBestZone: number;
 }
 
 /** A fresh meta slice — forces a quest roll + first login on the first boot. */
@@ -248,6 +258,8 @@ export function createMeta(): MetaState {
     streak: 0,
     lastLoginDay: -1,
     streakProtectWeek: -1,
+    weekIndex: -1,
+    weekBestZone: 0,
   };
 }
 

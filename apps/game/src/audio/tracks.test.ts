@@ -23,4 +23,14 @@ describe('MUSIC_TRACKS', () => {
       expect(s.every((n) => n >= 0)).toBe(true);
     }
   });
+
+  // ROADMAP-V2 X5: je Theme eine eigene zweite Instrumenten-Lage ab Ekstase.
+  it('gibt jedem Theme eine EIGENE Ekstase-Lage (vier Themen, vier Lagen)', () => {
+    const layers = keys.map((k) => MUSIC_TRACKS[k].ekstase);
+    expect(new Set(layers).size).toBe(keys.length);
+    expect(MUSIC_TRACKS.club.ekstase).toBe('stab');
+    expect(MUSIC_TRACKS.synth.ekstase).toBe('arp');
+    expect(MUSIC_TRACKS.beach.ekstase).toBe('steel');
+    expect(MUSIC_TRACKS.space.ekstase).toBe('pad');
+  });
 });

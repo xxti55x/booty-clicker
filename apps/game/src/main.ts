@@ -9,7 +9,8 @@ import { buildEntity, entityVariant, type EntityInstance } from './character/ent
 import { DT, renderCheeks, stepPhysics } from './character/physics';
 import { applyAccents, createAccents, stepAccents, triggerClickAccent } from './character/accents';
 import { SKINS } from './character/skins';
-import { Choreographer } from './choreo/moves';
+import { Choreographer, MOVES } from './choreo/moves';
+import { VICTORY_MOVE, activeSet } from './choreo/sets';
 import { createControls, frameCamera } from './engine/camera';
 import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
@@ -20,6 +21,7 @@ import { createScene } from './engine/scene';
 import {
   ABILITY_CHARGE_MAX,
   FRENZY_DURATION_MS,
+  FRENZY_MULT,
   abilityOnClick,
   activate,
   canActivate,
@@ -37,6 +39,7 @@ import {
 import {
   ascendState,
   chestLuck,
+  type ChState,
   clickDamageOf,
   createChState,
   dpsOf,
@@ -61,6 +64,7 @@ import {
   resolveDuplicate,
 } from './game/chests';
 import {
+  PEACH_BOOST_S,
   PEACH_MAX_S,
   PEACH_VISIBLE_S,
   activateBoost,
@@ -81,13 +85,72 @@ import {
   COMBO_WINDOW_S,
   createCombo,
   comboOnClick,
-  comboStep,
   comboTier,
   tierBeatWindowBonusMs,
   tierCritChanceBonus,
   tierCritMultBonus,
 } from './game/combo';
-import { type CombatState, goldFor, hit, monsterHp, spawnFor, tickBoss } from './game/combat';
+import {
+  type BossGimmick,
+  type GimmickRuntime,
+  SPOTLIGHT_S,
+  SYNTH_IDLE_FACTOR,
+  applyWaveHeal,
+  createGimmickRuntime,
+  gimmickForZone,
+  shieldWindowMs,
+  spaceComboExtra,
+  spaceComboStep,
+  spotlightActive,
+  themeForZone,
+  tickGimmick,
+  waveHealAmount,
+} from './game/boss-gimmicks';
+import {
+  type StageMod,
+  type StageModFactors,
+  remixSeedFor,
+  stageComboStep,
+  stageEkstaseChargeRed,
+} from './game/stage-mods';
+import {
+  type WeeklyStage,
+  boardSeasonFor,
+  noteWeeklyBest,
+  stageFactorsFor,
+  stageModsFor,
+  weekIndexOf,
+  weeklyBestZone,
+  weeklyBoardKey,
+  weeklyStage,
+} from './game/weekly';
+import {
+  GOBLIN_BUFF_S,
+  GOBLIN_CHESTS,
+  GOBLIN_DEFER_S,
+  GOBLIN_HITS,
+  type GoblinState,
+  createGoblin,
+  goblinBuffLeft,
+  goblinBuffMult,
+  goblinExpired,
+  goblinHit,
+  goblinPos,
+  goblinSpawnAllowed,
+  goblinVisible,
+  rollNextGoblinAt,
+} from './game/goblin';
+import {
+  challengeBoss,
+  type CombatState,
+  goldFor,
+  hit,
+  hpFraction,
+  monsterHp,
+  spawnFor,
+  tickBoss,
+  travelTo,
+} from './game/combat';
 import {
   accrueSugar,
   beatWindowBonus,
@@ -109,15 +172,26 @@ import {
 } from './game/gear';
 import { awardGildOnZone, isGildZone } from './game/gild';
 import {
+  beatGefuhlWindowMs,
   buyTreeNode,
   canHimmelfahrt,
   coachCps,
   coachDps,
+  comboGedachtnisReduction,
+  comboStepFor,
   ekstaseBonusMs,
+  ekstaseDoktrinMult,
   fruhstarterFraction,
+  gateCrasherTimerBonus,
+  heavenCritMultFactor,
   offlineCapS,
+  pfirsichFokusGapMult,
+  pfirsichReifeBonusMs,
+  respecTree,
+  truhenFokusChestMult,
 } from './game/heaven';
 import { canAscend } from './game/ascension';
+import type { CeremonyKind } from './game/ceremony';
 import { CREW, type CrewLevels, type CrewSpecialBonuses, crewSpecialBonuses } from './game/heroes';
 import { buildAchievementCtx, newlyUnlocked } from './game/ch-achievements';
 import {
@@ -132,18 +206,38 @@ import {
   rollDay,
 } from './game/quests';
 import { type Season, seasonFor } from './game/season';
-import { canTranscend, transcendGlobalMult } from './game/transcend';
+import {
+  STAR_CLEARED,
+  STAR_COMBO,
+  STAR_NO_TIMEOUT,
+  addStar,
+  comboStarQualifies,
+  milestoneChests,
+  milestoneHighwater,
+  totalStars,
+} from './game/stars';
+import {
+  bossBreakerDmgMult,
+  buyMythosNode,
+  canTranscend,
+  fruhstartCrew,
+  mythosOfflineCapBonusS,
+  mythosPeachGapMult,
+  transcendGlobalMult,
+} from './game/transcend';
 import { isTranscendEnabled } from './game/flags';
 import { shouldShakeOnKey } from './game/input';
 import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
 import { applyLegacyInheritance } from './game/legacy-import';
 import { loadSettings, type Quality, saveSettings } from './game/settings';
+import { type WelcomeBackData, welcomeBackData } from './game/welcome-back';
 import { loadCh, offlineGold, resetCh, saveCh } from './save/ch-store';
 import { loadGame } from './save/store';
 import { Rng } from './util/rng';
 import { AbilityBar } from './ui/ability-bar';
 import { Ancients } from './ui/ancients';
-import { ChHud } from './ui/ch-hud';
+import { Ceremony } from './ui/ceremony';
+import { ChHud, rivalName } from './ui/ch-hud';
 import { ChSettings } from './ui/ch-settings';
 import { Chests } from './ui/chest-panel';
 import { Crew } from './ui/crew';
@@ -159,6 +253,7 @@ import { Prestige } from './ui/prestige';
 import { Toasts } from './ui/toasts';
 import { Transcend } from './ui/transcend-panel';
 import { World } from './world/backgrounds';
+import { ISLAND_C } from './world/island';
 
 /**
  * Booty Clicker — endless (Clicker-Heroes-style) bootstrap.
@@ -172,13 +267,12 @@ import { World } from './world/backgrounds';
 // choreography cadence stays here as glue.
 const MOVE_SWITCH_CLICKS = 18;
 
-const BG_BY_TIER = ['club', 'synth', 'beach', 'space'] as const;
 // Bühnen-Auto-Rotation (Goal): Das Theme wechselt ALLE 5 Bühnen — und weil jede
 // 5. Bühne ein Boss-Gate ist (BOSS_EVERY), liegt jeder Theme-Wechsel exakt
 // HINTER einem Bosskampf (5→6, 10→11, …). Manuelles Wählen gibt es nicht mehr.
-const ZONES_PER_BG = 5;
-const bgForZone = (zone: number): (typeof BG_BY_TIER)[number] =>
-  BG_BY_TIER[Math.floor((zone - 1) / ZONES_PER_BG) % BG_BY_TIER.length];
+// Die Rotation selbst lebt als EINE Quelle in `game/boss-gimmicks.themeForZone`
+// (Kulisse, Zonen-Strip und Boss-Gimmick müssen dasselbe Theme sehen).
+const bgForZone = themeForZone;
 // Wave 3: scenery recolour lap — hue-shifts each stage's palette every full
 // 20-zone tour (4 Themes × 5 Bühnen), in step with the rival's entityVariant,
 // so endless laps 2, 3, … never look identical. Purely visual.
@@ -186,15 +280,32 @@ const bgVariant = (zone: number): number => Math.floor(Math.max(0, zone - 1) / 2
 
 // ---------- scene / engine ----------
 const canvas = document.getElementById('app') as HTMLCanvasElement;
-const { renderer, scene, camera, beat, skyMat, floorMat, glowSprite, lights } = createScene(canvas);
+const { renderer, scene, camera, beat, skyMat, floorMat, glowSprite, lights, contactShadow } =
+  createScene(canvas);
+/** Ruhe-FOV der Diorama-Kamera — Basis für den G2-Punch-In. */
+const BASE_FOV = camera.fov;
+/** Ruhe-Belichtung — Basis für das G2-Licht-Dim (siehe `stepCinematics`). */
+const BASE_EXPOSURE = renderer.toneMappingExposure;
 // Roadmap L: Bloom-Composer (nur high-Preset aktiv — sonst rendert der Loop direkt).
 const post = createPost(renderer, scene, camera);
 const controls = createControls(camera, renderer.domElement);
 
 const effects = loadSettings();
+/**
+ * Das aktive Grafik-Preset (ROADMAP-V2 Preset-Pflicht): G1-Bühnenwechsel,
+ * G2-Regie und Konfetti-Dichte lesen es live, `applyQuality` schreibt es.
+ */
+let preset = qualityPreset(effects.quality);
 function applyQuality(q: Quality): void {
-  const preset = qualityPreset(q);
+  preset = qualityPreset(q);
   renderer.setPixelRatio(effectivePixelRatio(q, window.devicePixelRatio));
+  // Roadmap L, KNOWN ISSUE (Review Schritt 4): `post.enabled` war nie true —
+  // die Zuweisung ging bei einem Refactor verloren, der Composer lief also nie
+  // und wurde nie visuell validiert. Beim Aktivieren zeigt die Kette eine
+  // uniforme Aufhellung (mutmaßlich doppelte sRGB-Konvertierung), Threshold-
+  // Tuning ändert daran nichts. Bewusst AUS gelassen, bis ein eigenes Paket
+  // die Farb-Pipeline fixt — das Spiel ist ohne Bloom abgenommen.
+  post.enabled = false;
   // Roadmap T1: Textur-Anisotropie folgt dem Preset (GPU-Maximum deckelt real).
   setTextureAnisotropy(Math.min(preset.anisotropy, renderer.capabilities.getMaxAnisotropy() || 1));
   if (renderer.shadowMap.enabled !== preset.shadows) {
@@ -213,7 +324,6 @@ applyQuality(effects.quality);
 let state = createChState();
 const loaded = loadCh();
 let offlineEarnedMs = 0;
-let offlineEarned = 0;
 if (loaded) {
   state = loaded.state;
   offlineEarnedMs = Math.max(0, Date.now() - loaded.lastSeen);
@@ -247,19 +357,60 @@ let rng = new Rng(state.rng);
 {
   const bootNow = Date.now();
   if (state.peach.nextPeachAt <= 0 || state.peach.nextPeachAt > bootNow + PEACH_MAX_S * 1000) {
-    state.peach.nextPeachAt = rollNextPeachAt(bootNow, rng);
+    state.peach.nextPeachAt = rollNextPeachAt(bootNow, rng, mythosPeachGapMult(state.transcend));
   }
   state.peach.boostUntil = clampBoostUntil(state.peach.boostUntil, bootNow);
 }
 
-let combat: CombatState = spawnFor(state.zone, state.killsThisZone, state.runMaxZone);
+/**
+ * ROADMAP-V2 A1: Der Remix-Seed der Bühnen-Modifikatoren. Abgeleitet aus dem
+ * bereits persistierten `rng.seed` + der Aszensions-Zahl — kein neues Save-Feld,
+ * und eine Aszension würfelt die Karte neu (`remixSeedFor`). Er wandert über
+ * `spawnFor` in den `CombatState` und von dort in jeden Re-Spawn.
+ */
+let runRemix = remixSeedFor(state.rng.seed, state.stats.ascensions);
 
-/** Extend a freshly-spawned boss timer by Chronilla + gear bossTimer (§4.6/§5). No-op off-boss. */
+/**
+ * ROADMAP-V2 A5: Der laufende ISO-Wochen-Index. Er kommt aus der Uhr (nicht aus
+ * dem Save) und wird beim Tages-Roll neu gelesen, damit eine Session, die über
+ * einen Montag läuft, ohne Reload auf die neue Wochen-Bühne umschaltet. Wie der
+ * Remix reist er im `CombatState` mit.
+ */
+let runWeek = weekIndexOf(Date.now());
+
+/** Die Wochen-Bühne der laufenden Woche (Karte, Strip-Badge, Board-Schlüssel). */
+let weekStage: WeeklyStage | null = weeklyStage(Date.now());
+
+let combat: CombatState = spawnFor(
+  state.zone,
+  state.killsThisZone,
+  state.runMaxZone,
+  runRemix,
+  runWeek,
+);
+
+/**
+ * Extend a freshly-spawned boss timer by Chronilla + gear bossTimer (§4.6/§5) + dem
+ * Himmelsbaum-Knoten „Gate-Crasher" (+5 s, ROADMAP-V2 P4). No-op off-boss.
+ */
 function withBossTimerBonus(c: CombatState): CombatState {
-  const bonus = ancientBossTimerBonus(state.ancients) + bossTimerBonus(state.gear);
+  const bonus =
+    ancientBossTimerBonus(state.ancients) +
+    bossTimerBonus(state.gear) +
+    gateCrasherTimerBonus(state.heaven);
   return c.boss && bonus > 0 ? { ...c, bossTimer: c.bossTimer + bonus } : c;
 }
 combat = withBossTimerBonus(combat);
+
+/**
+ * Ein frischer Lauf nach einer Prestige-Schicht: Bühne 1, neue Modifikator-Karte
+ * (die Aszensions-Zahl ist zu diesem Zeitpunkt schon hochgezählt). EINE Quelle
+ * für alle drei Reset-Pfade, damit keiner den Remix vergisst.
+ */
+function newRunCombat(): CombatState {
+  runRemix = remixSeedFor(state.rng.seed, state.stats.ascensions);
+  return withBossTimerBonus(spawnFor(1, 0, 1, runRemix, runWeek));
+}
 
 let dps = 0;
 let clickDmg = 1;
@@ -302,7 +453,10 @@ function ekstaseChargeMax(): number {
     0.9,
     ancientEkstaseChargeReduction(state.ancients) +
       frenzyChargeReduction(state.gear) +
-      crewSpec.ekstaseChargeRed,
+      crewSpec.ekstaseChargeRed +
+      // A1 „Konfetti-Regen": die Bühne selbst lädt die Ekstase schneller. Sie
+      // hängt im GLEICHEN, gedeckelten Reduktions-Stack — kein Sonderweg.
+      stageEkstaseChargeRed(stageFactors()),
   );
   return ABILITY_CHARGE_MAX * (1 - reduction);
 }
@@ -321,7 +475,13 @@ function offlineOpts(): {
   return {
     clickDmg,
     coachCps: coachCps(state.heaven) + coachCpsBonus(state.gear),
-    capS: offlineCapS(state.heaven) + offlineCapBonus(state.gear),
+    // Nachtschicht (Himmelsbaum) + Beach-Gear + der Mythos-Knoten „Nachtschwärmer"
+    // (+4 h, ROADMAP-V2 P2) — dieselbe Summe füttert die X3-Willkommen-zurück-Card,
+    // deren Cap-Zeile den Ausbau also sofort spiegelt.
+    capS:
+      offlineCapS(state.heaven) +
+      offlineCapBonus(state.gear) +
+      mythosOfflineCapBonusS(state.transcend),
     // Peachiel × gold-gear × permanent gold-tokens (§6.2). The transient peach ×3
     // boost is a 60-s live event — immaterial to multi-hour offline accrual and a
     // stale boostUntil would be wrong — so it is deliberately excluded here.
@@ -329,14 +489,40 @@ function offlineOpts(): {
     rateBonus: offlineRateBonus(state.gear),
   };
 }
+/**
+ * ROADMAP-V2 X3: Der Offline-Verdienst wird GEPUFFERT, solange die Willkommen-
+ * zurück-Card offen ist — erst „Einsacken" (oder irgendein anderes Schließen)
+ * bucht ihn auf `state.gold`. `null` = keine Card (unter 10 min weg oder nichts
+ * verdient), dann wird wie bisher still gebucht.
+ */
+let offlineCard: WelcomeBackData | null = null;
+/** Noch nicht eingesackter Offline-Verdienst (0 = nichts offen). */
+let pendingOffline = 0;
 if (loaded) {
-  offlineEarned = offlineGold(dps, combat.zone, offlineEarnedMs, offlineOpts());
-  state.gold += offlineEarned;
-  state.stats.goldLifetime += offlineEarned;
+  offlineCard = welcomeBackData(dps, combat.zone, offlineEarnedMs, offlineOpts());
+  if (offlineCard) {
+    pendingOffline = offlineCard.gold;
+  } else {
+    const silent = offlineGold(dps, combat.zone, offlineEarnedMs, offlineOpts());
+    state.gold += silent;
+    state.stats.goldLifetime += silent;
+  }
+}
+
+/** X3: `state` + gepufferter Offline-Verdienst — nur fürs Speichern, nie live. */
+function withPendingOffline(s: ChState, amount: number): ChState {
+  return {
+    ...s,
+    gold: s.gold + amount,
+    stats: { ...s.stats, goldLifetime: s.stats.goldLifetime + amount },
+  };
 }
 
 // ---------- visuals ----------
 const world = new World(scene, skyMat, floorMat, glowSprite, lights);
+// ROADMAP-V2 G3: Ambient-Dichte VOR dem ersten `setBackground` setzen, damit die
+// Boot-Bühne direkt mit den Preset-Stückzahlen gebaut wird (kein Rebuild).
+world.setAmbientLife(preset.ambientLife);
 const audio = new AudioEngine();
 const beatTracker = new BeatTracker();
 const choreo = new Choreographer();
@@ -362,8 +548,33 @@ let entity: EntityInstance = buildEntity(scene, bgForZone(combat.zone), {
   boss: combat.boss,
   variant: entityVariant(combat.zone),
 });
+// ---------- ROADMAP-V2 A4: Choreo-Set der Bühne ----------
+/**
+ * Nach einem Boss-Sieg EINMALIG den Diva-Turn tanzen. Als Flag statt als
+ * direktem `setMove`, weil derselbe Kill unmittelbar danach das Set der NEUEN
+ * Bühne stellt — der Sieges-Move muss also zuletzt kommen, sonst überschriebe
+ * ihn der Bühnen-Wechsel im selben Frame.
+ */
+let victoryDance = false;
+
+/**
+ * Das Move-Set der aktuellen Bühne setzen (Bosskampf ⇒ die zwei intensivsten).
+ * Hängt an denselben Übergängen wie `syncEntity` — jeder Bühnen-/Boss-Wechsel
+ * läuft dort durch, also kann die Choreo nicht auf einer alten Bühne hängen
+ * bleiben. Reine AUSWAHL: die Pose-Mathematik in `moves.ts` ist unberührt.
+ */
+function syncChoreoSet(): void {
+  choreo.useSet(activeSet(combat.zone, combat.remix, combat.boss));
+  if (victoryDance) {
+    victoryDance = false;
+    choreo.setMove(VICTORY_MOVE);
+  }
+}
+
 /** Rebuild the rival entity only when its look actually changes (cheap check). */
 function syncEntity(): void {
+  // A4: derselbe Übergang, dieselbe Stelle — Bühne/Boss gewechselt ⇒ neues Set.
+  syncChoreoSet();
   const theme = bgForZone(combat.zone);
   const variant = entityVariant(combat.zone);
   if (entity.theme !== theme || entity.boss !== combat.boss || entity.variant !== variant) {
@@ -379,10 +590,12 @@ if (state.gear.bgAuto) state.gear.bg = currentBg;
 world.setBackground(currentBg, currentBgVariant);
 audio.setBackground(currentBg);
 recompute(); // fold the (possibly view-synced) kulisse buff into the derived numbers
-choreo.setMove(0);
+syncChoreoSet(); // A4: das Set der Start-Bühne statt eines festen Move 0
 
 const hud = new ChHud();
 const toasts = new Toasts();
+// ROADMAP-V2 G4: die Vollbild-Blende der drei Prestige-Schichten (rein optisch).
+const ceremony = new Ceremony();
 const particles = new ParticleSystem(scene);
 const pops = new Pops();
 const haptics = new Haptics();
@@ -408,13 +621,24 @@ function syncMaxZones(): void {
   // Himmelfahrt (which drops lifetimeMaxZone to 1, §4.5.2/§5.3).
   state.gear.zoneEver = Math.max(state.gear.zoneEver, state.lifetimeMaxZone);
   state.rsLifetime = Math.max(state.rsLifetime, state.souls); // lifetime-RS highwater (§4.5.2)
+  // ROADMAP-V2 A5: Die Wochen-Bestzone ist der Frontier-Highwater INNERHALB der
+  // laufenden Woche. Sie hier zu ziehen (statt an den Kill-Pfad zu hängen) ist
+  // die billigste ehrliche Stelle: `runMaxZone` steht eine Zeile darüber fertig,
+  // und jeder Weg, auf dem die Frontier wächst, läuft durch `syncMaxZones`.
+  state.meta = noteWeeklyBest(state.meta, runWeek, state.runMaxZone);
   state.rng = rng.toState(); // fold the live RNG cursor back into the save
   state.combo = { stacks: comboState.stacks }; // ability is mutated on state in place
 }
 const persist = (): void => {
   if (suppressSave) return;
   syncMaxZones();
-  saveCh(state, Date.now());
+  // X3: Ein noch nicht eingesackter Offline-Verdienst wird MITGESPEICHERT, ohne
+  // schon auf `state.gold` zu liegen. Die Card darf den Betrag also inszenieren
+  // („erst beim Klick gutgeschrieben"), aber ein hart weggerissener Tab (Crash,
+  // Task-Kill, kein `beforeunload`) kann ihn nicht mehr verschlucken: „niemals
+  // Verlust" schlägt die Inszenierung. Beim Reload ist der Betrag Kontostand,
+  // die Abwesenheit dann ~0 — also keine zweite Card und keine Doppelbuchung.
+  saveCh(pendingOffline >= 1 ? withPendingOffline(state, pendingOffline) : state, Date.now());
 };
 window.setInterval(persist, 10_000);
 
@@ -429,12 +653,23 @@ document.addEventListener('visibilitychange', () => {
   } else if (document.visibilityState === 'visible' && hiddenAt > 0) {
     const elapsed = Math.max(0, Date.now() - hiddenAt);
     hiddenAt = 0;
+    // X3: Ab 10 min Abwesenheit trägt die Card den Betrag (und puffert ihn),
+    // darunter bleibt es die stille Gutschrift von vorher.
+    const card = welcomeBackData(dps, combat.zone, elapsed, offlineOpts());
+    if (card) {
+      // Eine noch offene Card zuerst abrechnen, damit die neue genau ihren
+      // eigenen Betrag zeigt (zwei Puffer übereinander wären eine Lüge).
+      claimOffline();
+      pendingOffline = card.gold;
+      showWelcomeBack(card);
+      persist();
+      return;
+    }
     const grant = offlineGold(dps, combat.zone, elapsed, offlineOpts());
     if (grant >= 1) {
       state.gold += grant;
       state.stats.goldLifetime += grant;
       hud.update(state, combat, dps, clickDmg);
-      if (elapsed > 60_000) showWelcomeBack(grant, elapsed);
       persist();
     }
   }
@@ -492,6 +727,40 @@ function applyFruhstarter(prevCrew: CrewLevels): void {
   state.crew = restored;
 }
 
+/**
+ * Mythos-Knoten „Frühstart" (ROADMAP-V2 P2): die ersten drei Crew-Mitglieder starten
+ * nach einem Reset auf Lv 5. Anders als der Himmelsbaum-„Frühstarter" (nur Aszension,
+ * prozentual auf die VORIGE Crew) greift er nach JEDEM der drei Resets — TE überlebt
+ * alle drei, und nach einer Transzendenz ist der Himmelsbaum weg, sodass der Knoten
+ * genau dort am meisten wert ist. Hebt nur an, senkt nie (Max-Regel).
+ */
+function applyMythosFruhstart(): void {
+  state.crew = fruhstartCrew(
+    state.crew,
+    CREW.map((c) => c.id),
+    state.transcend,
+  );
+}
+
+/**
+ * ROADMAP-V2 G4 — Die Zeremonie einer Prestige-Schicht anstoßen.
+ *
+ * Sie läuft IMMER erst, nachdem der Reset-Handler gebucht, zurückgesetzt und
+ * persistiert hat: das Overlay ist reine Optik, es darf also nichts gewähren und
+ * nichts blockieren. `preset.cinematics` ist das Preset-Gate — im low-Preset
+ * bleibt es beim Toast von früher, der ohnehin in jedem Fall feuert.
+ */
+function playCeremony(kind: CeremonyKind, amount: number): void {
+  // ROADMAP-V2 X5: Der Stinger läuft in JEDEM Preset — er kostet keine
+  // Bildrate, und im low-Preset ist er der einzige Moment, der den Reset
+  // überhaupt markiert (dort bleibt es sonst beim Toast). Er ersetzt das
+  // generische `unlockJingle`, das vorher alle drei Schichten gleich klingen
+  // ließ; die Blende darüber hängt weiter an `preset.cinematics`.
+  audio.ceremony(kind);
+  if (!preset.cinematics) return;
+  ceremony.play(kind, amount, preset.confetti);
+}
+
 const prestige = new Prestige({
   state,
   getRunMaxZone: () => Math.max(state.runMaxZone, combat.maxZone),
@@ -502,9 +771,13 @@ const prestige = new Prestige({
     state.stats.ascensions += 1;
     state.meta = advanceMeta(state.meta, 'ascend');
     const prevCrew = { ...state.crew };
+    // G4: der Betrag für den Zahlen-Aufzähler — die DIFFERENZ der Gutschrift, die
+    // unmittelbar danach gebucht wird. Die Zeremonie zeigt sie nur, sie rechnet nichts.
+    const soulsBefore = state.souls;
     Object.assign(state, ascendState(state)); // mutate in place — panels hold this ref
     applyFruhstarter(prevCrew);
-    combat = withBossTimerBonus(spawnFor(1, 0, 1));
+    applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
+    combat = newRunCombat();
     comboState = createCombo(state.combo.stacks); // run-scoped juice resets
     comboT3KeyAwardedThisRun = false; // the combo-Tier-3 key is once per run (§6.1)
     lastShakeTier = 0;
@@ -520,8 +793,8 @@ const prestige = new Prestige({
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     toasts.show('✨', 'Ruhm eingeheimst!', `Jetzt ${fmt(state.souls)} Seelen`);
     checkAchievements(); // ascension / soul milestones (§7.3)
-    audio.unlockJingle();
     persist();
+    playCeremony('ascend', state.souls - soulsBefore); // G4: erst buchen, dann feiern
   },
 });
 
@@ -540,8 +813,10 @@ const heaven = new Heaven({
   state,
   onHimmelfahrt: () => {
     syncMaxZones();
+    const hpfBefore = state.heaven.hpf; // G4: Betrag für den Aufzähler (nur Anzeige)
     Object.assign(state, himmelfahrtState(state)); // mutate in place
-    combat = withBossTimerBonus(spawnFor(1, 0, 1));
+    applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
+    combat = newRunCombat();
     comboState = createCombo(state.combo.stacks);
     comboT3KeyAwardedThisRun = false; // once per run (§6.1)
     lastShakeTier = 0;
@@ -557,8 +832,8 @@ const heaven = new Heaven({
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     toasts.show('🌈', 'Himmelfahrt!', `${fmt(state.heaven.hpf)} Himmelspfirsiche`);
     checkAchievements(); // Himmelfahrt / HPF milestones (§7.3)
-    audio.unlockJingle();
     persist();
+    playCeremony('himmelfahrt', state.heaven.hpf - hpfBefore); // G4
   },
   onBuyNode: (id) => {
     const r = buyTreeNode(state.heaven, id);
@@ -568,6 +843,24 @@ const heaven = new Heaven({
     audio.buy();
     hud.update(state, combat, dps, clickDmg);
     heaven.refresh();
+    persist();
+  },
+  // ROADMAP-V2 P4: Baum zurücksetzen. Kein Reset des Laufs, keine Zeremonie — es
+  // wandert nur HPF aus dem Baum zurück ins Konto (minus Gebühr). `recompute` muss
+  // trotzdem laufen: Klick-/Crew-Doktrin und der Bass hängen in dps/clickDmg.
+  onRespec: () => {
+    const r = respecTree(state.heaven);
+    if (!r.done) return;
+    state.heaven = r.heaven;
+    recompute();
+    audio.buy();
+    hud.update(state, combat, dps, clickDmg);
+    heaven.refresh();
+    toasts.show(
+      '🌳',
+      'Baum zurückgesetzt',
+      `+${fmt(r.refunded - r.fee)} 🍑 zurück (−${r.fee} Gebühr)`,
+    );
     persist();
   },
 });
@@ -590,9 +883,11 @@ if (transcendEnabled) {
       // but guard here too so a stray call can never wipe L1+L2 for nothing).
       if (!canTranscend(state.transcend, state.heaven.hpfLifetime)) return;
       syncMaxZones(); // fold live combat maxzones + RNG cursor + combo into state first
+      const teBefore = state.transcend.te; // G4: Betrag für den Aufzähler (nur Anzeige)
       Object.assign(state, transcendState(state)); // mutate in place (banks TE, wipes L1+L2)
+      applyMythosFruhstart(); // P2: der Knoten überlebt den tiefsten Reset und greift hier
       // ---- re-seed, mirroring the Himmelfahrt handler exactly (L2-wipe hazard) ----
-      combat = withBossTimerBonus(spawnFor(1, 0, 1)); // zone/front travel reset to Bühne 1
+      combat = newRunCombat(); // zone/front travel reset to Bühne 1
       comboState = createCombo(state.combo.stacks); // run-scoped combo juice reset
       comboT3KeyAwardedThisRun = false; // the combo-Tier-3 key is once per run (§6.1)
       lastShakeTier = 0;
@@ -613,7 +908,20 @@ if (transcendEnabled) {
         `${fmt(state.transcend.te)} TE · ×${fmt(transcendGlobalMult(state.transcend.te))} Boost`,
       );
       checkAchievements(); // Transzendenz / TE milestones (§7.3)
-      audio.unlockJingle();
+      persist();
+      playCeremony('transcend', state.transcend.te - teBefore); // G4
+    },
+    // ROADMAP-V2 P2 — Mythos-Shop: gehaltenes TE gegen einen permanenten Wahl-Knoten.
+    // Der Kauf senkt `te` und damit den ×3^TE-Boost, deshalb muss der HUD-Multiplikator
+    // sofort neu gerechnet werden (`recompute` liest die Held-TE über `dpsOf`/`clickDamageOf`).
+    onBuyMythos: (id) => {
+      const r = buyMythosNode(state.transcend, id);
+      if (!r.bought) return;
+      state.transcend = r.transcend;
+      recompute();
+      audio.buy();
+      hud.update(state, combat, dps, clickDmg);
+      transcendPanel?.refresh();
       persist();
     },
   });
@@ -643,7 +951,13 @@ const chSettings = new ChSettings({
   applyImported: (imported) => {
     Object.assign(state, imported); // mutate in place — panels hold this ref
     rng = new Rng(state.rng); // resume the imported save's RNG stream
-    combat = withBossTimerBonus(spawnFor(state.zone, state.killsThisZone, state.runMaxZone));
+    // Der importierte Save bringt seinen EIGENEN Seed + Aszensions-Stand mit, also
+    // gehört die Modifikator-Karte neu abgeleitet (vorher fiel sie hier still auf
+    // `REMIX_OFF` zurück — der Import spielte bis zum nächsten Reload regelfrei).
+    runRemix = remixSeedFor(state.rng.seed, state.stats.ascensions);
+    combat = withBossTimerBonus(
+      spawnFor(state.zone, state.killsThisZone, state.runMaxZone, runRemix, runWeek),
+    );
     comboState = createCombo(state.combo.stacks);
     comboT3KeyAwardedThisRun = false; // fresh run context for the imported save (§6.1)
     lastShakeTier = 0;
@@ -670,27 +984,63 @@ const chSettings = new ChSettings({
     window.location.reload();
   },
   effects,
-  onGraphicsChange: () => applyQuality(effects.quality),
+  onGraphicsChange: () => {
+    applyQuality(effects.quality);
+    // G3: Dichte-Wechsel baut die laufende Bühne einmal neu (No-op bei gleichem Wert).
+    world.setAmbientLife(preset.ambientLife);
+  },
 });
 
-// ---------- welcome back ----------
+// ---------- welcome back (ROADMAP-V2 X3) ----------
 const welcomeBack = document.getElementById('welcomeBack') as HTMLElement;
-document.getElementById('wbClose')?.addEventListener('click', () => {
+const wbCap = document.getElementById('wbCap') as HTMLElement;
+/**
+ * Den gepufferten Offline-Verdienst gutschreiben. Idempotent (der Puffer wird
+ * zuerst geleert), damit „Einsacken" + irgendein zweiter Schließ-Pfad nie
+ * doppelt zahlen.
+ */
+function claimOffline(): void {
+  if (pendingOffline < 1) return;
+  const amount = pendingOffline;
+  pendingOffline = 0;
+  state.gold += amount;
+  state.stats.goldLifetime += amount;
+  hud.update(state, combat, dps, clickDmg);
+  audio.buy();
+  toasts.show('🍑', 'Eingesackt!', `+${fmt(amount)} BP von deiner Crew.`);
+  persist();
+}
+/**
+ * Card zu — und ZWINGEND buchen. „Überspringen" ist kein Verzicht: wer die Card
+ * per Button, Klick daneben oder Escape wegräumt, hat den Verdienst trotzdem
+ * verdient (X3: niemals Verlust).
+ */
+function closeWelcomeBack(): void {
+  if (welcomeBack.classList.contains('hidden')) return;
   welcomeBack.classList.add('hidden');
+  claimOffline();
+}
+document.getElementById('wbClose')?.addEventListener('click', closeWelcomeBack);
+welcomeBack.addEventListener('click', (e) => {
+  if (e.target === welcomeBack) closeWelcomeBack(); // Klick auf den Backdrop
 });
-function showWelcomeBack(earned: number, elapsedMs: number): void {
-  const mins = Math.floor(elapsedMs / 60_000);
-  const dur =
-    mins < 1
-      ? '< 1 min'
-      : mins < 60
-        ? `${mins} min`
-        : `${Math.floor(mins / 60)} h ${mins % 60} min`;
-  (document.getElementById('wbText') as HTMLElement).textContent =
-    `Du warst ${dur} weg. Deine Crew hat weitergetwerkt: +${fmt(earned)} BP (Idle-Rate 50 %, max. 8 h).`;
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape') closeWelcomeBack();
+});
+function showWelcomeBack(card: WelcomeBackData): void {
+  (document.getElementById('wbAway') as HTMLElement).textContent = card.away;
+  (document.getElementById('wbGold') as HTMLElement).textContent = `+${fmt(card.gold)} BP`;
+  // Der Cap-Hinweis erscheint NUR, wenn er auch gegriffen hat — sonst wäre er
+  // eine Drohung ohne Anlass. Mit Hinweis auf den Ausbau (Himmelsbaum P4 und,
+  // sobald der Knoten gekauft ist, den Mythos-Nachtschwärmer aus P2).
+  wbCap.classList.toggle('hidden', !card.capped);
+  if (card.capped) {
+    const owl = mythosOfflineCapBonusS(state.transcend) > 0 ? ' (inkl. Nachtschwärmer 🔮)' : '';
+    wbCap.textContent = `Cap: ${card.capLabel}${owl} — länger zählt der Idle-Verdienst nicht. Mehr geht mit dem Himmelsbaum.`;
+  }
   welcomeBack.classList.remove('hidden');
 }
-if (offlineEarned >= 1) showWelcomeBack(offlineEarned, offlineEarnedMs);
+if (offlineCard) showWelcomeBack(offlineCard);
 
 // ---------- tabs ----------
 const tabBodies: Record<string, string> = {
@@ -720,10 +1070,24 @@ for (const tab of Array.from(document.querySelectorAll<HTMLElement>('.tab'))) {
     const key = tab.dataset.t!;
     for (const t of Array.from(document.querySelectorAll('.tab'))) t.classList.remove('active');
     tab.classList.add('active');
+    let shown: HTMLElement | null = null;
     for (const [k, id] of Object.entries(tabBodies)) {
-      (document.getElementById(id) as HTMLElement).style.display = k === key ? '' : 'none';
+      const el = document.getElementById(id) as HTMLElement;
+      el.style.display = k === key ? '' : 'none';
+      if (k === key) shown = el;
     }
     renderActiveTab(key);
+    // ROADMAP-V2 G6: 120-ms-Einblenden des neuen Panel-Inhalts. Bewusst nur die
+    // EINBLENDE-Richtung: der alte Body wird per `display:none` weggeschaltet,
+    // ein Ausblenden bräuchte einen zweiten, verzögerten Schritt und ließe die
+    // Panels kurz übereinander liegen. Die Keyframe rührt nur `opacity` und
+    // `transform` an (kein Layout-Thrash), und der Reflow stößt sie auch beim
+    // zweiten Wechsel auf denselben Tab neu an.
+    if (shown) {
+      shown.classList.remove('tb-in');
+      void shown.offsetWidth;
+      shown.classList.add('tb-in');
+    }
   });
 }
 
@@ -748,8 +1112,19 @@ function tabUnlocked(key: string): boolean {
       );
     case 'anc': // 🌀 Ahnen: the soul sink — only after a first ascension banks souls
       return state.stats.ascensions > 0 || Object.keys(state.ancients).length > 0;
-    case 'heaven': // 🌈 Himmel (L2): once a Himmelfahrt is reachable or done
-      return state.heaven.hpfLifetime > 0 || canHimmelfahrt(state.heaven, state.rsLifetime);
+    case 'heaven': // 🌈 Himmel (L2): ab der ersten Aszension, spätestens am L2-Gate
+      // ROADMAP-V2 P2a: Der Tab öffnet jetzt schon mit der ersten Aszension statt erst
+      // bei 1 000 Lebenszeit-RS. Grund ist derselbe, aus dem der 🔮-Tab bewusst VOR
+      // seinem Gate erscheint (siehe 'transcend' unten): eine Schicht, die man erst
+      // sieht, wenn sie ohnehin offen ist, kann kein Ziel sein. Der Panel-Zustand ist
+      // dort ehrlich gesperrt (Fortschritt „Lebenszeit-RS X / 1 000") und trägt den
+      // 🔮-Teaser, der ohne diese Öffnung praktisch nie zu sehen wäre. Reine Anzeige —
+      // `canHimmelfahrt` bleibt das einzige echte Gate.
+      return (
+        state.stats.ascensions > 0 ||
+        state.heaven.hpfLifetime > 0 ||
+        canHimmelfahrt(state.heaven, state.rsLifetime)
+      );
     case 'transcend': // 🔮 Transzendenz (L3): only if enabled AND the player is in L2
       // Reveal with the FIRST Himmelfahrt (hpfLifetime > 0), not first at the 100-HPF
       // gate: the panel's locked state shows the „Lebenszeit-HPF X / 100"-Fortschritt,
@@ -810,6 +1185,13 @@ muteBtn.addEventListener('click', () => {
 // In Tour-Modus (`gear.bgAuto`) the tier rotation drives the kulisse and keeps
 // `gear.bg` (⇒ its mini-buff/set) synced with the view; with a manual pick the
 // chosen `gear.bg` is fixed and the loop never rotates away from it (§5.5).
+/**
+ * `force` = Hard-Swap in einem Frame (Prestige/Import/Kulissen-Wahl: dort ist
+ * der Wechsel Teil eines Resets, keine Bühnen-Reise). Ohne `force` — also bei
+ * Boss-Advance, Rückreise über eine Theme-Grenze und Boss-Timeout — fährt die
+ * alte Bühne aus und die neue ein (ROADMAP-V2 G1), sofern das Preset das
+ * hergibt (low: weiterhin Hard-Swap).
+ */
 function updateBackground(force = false): void {
   const bg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
   const variant = bgVariant(combat.zone); // recolour lap follows depth even on a manual kulisse
@@ -820,15 +1202,225 @@ function updateBackground(force = false): void {
     state.gear.bg = bg;
     recompute(); // Space +5 % dpsPct etc. follow the auto-rotation
   }
-  world.setBackground(bg, variant);
+  cancelCinematics(); // ein laufender Boss-Punch darf nicht ins neue Licht-Rig schreiben
+  world.setBackground(bg, variant, { animate: !force && preset.stageTransition });
   audio.setBackground(bg); // idempotent for a same-key (variant-only) rebuild
 }
 
-// ---------- Bühnen-Progression (Goal-Umbau) ----------
-// Bühnen sind NICHT mehr wählbar: kein Zonen-Klick, keine Travel-Pfeile. Die
-// Progression läuft von selbst — jede Bühne clearen, Boss-Gates besiegen, und
-// alle 5 Bühnen (= direkt nach einem Bosskampf) wechselt das Theme automatisch
-// (`bgForZone`); der Zonen-Strip ist eine reine Anzeige.
+// ---------- ROADMAP-V2 G2: Boss-Auftritt + Sieg-Beat ----------
+// Der wichtigste Kampf des Loops sah aus wie jeder Rivalen-Wechsel. Jetzt hat
+// er einen Auftritt: Namens-Banner rollt ein, das Szenen-Licht fällt kurz weg,
+// die Kamera zieht an, ein Bass-Drop-Stinger legt sich darunter. Alles Optische
+// hängt am Preset (`cinematics`); Banner + Stinger tragen die INFORMATION und
+// bleiben deshalb auch im low-Preset.
+
+/** Standzeit des Banners — deckungsgleich mit der CSS-Keyframe-Dauer. */
+const BANNER_MS = 2400;
+/** Dauer des Auftritts-Moments (Licht-Dim + Kamera-Punch) in Sekunden. */
+const BOSS_CINE_S = 0.8;
+/** Anteil des Moments, in dem angezogen wird (Rest = weiches Lösen). */
+const CINE_ATTACK = 0.19;
+
+const bossBanner = document.getElementById('bossBanner') as HTMLElement;
+let bannerTimer = 0;
+/** < 0 = kein Auftritts-Moment aktiv; sonst die verstrichene Zeit in s. */
+let cineT = -1;
+let cineKeyInt = 0;
+let cineFillInt = 0;
+let cineHemiInt = 0;
+
+/**
+ * „👑 <Bossname>" einrollen lassen (Name aus derselben Quelle wie das HUD) —
+ * darunter als zweite Zeile das Gimmick-Label des Gates (ROADMAP-V2 A2), damit
+ * die Mechanik EINMAL groß angesagt wird, bevor sie zuschlägt.
+ */
+function showBossBanner(zone: number): void {
+  bossBanner.textContent = rivalName(zone, true); // trägt die 👑 bereits
+  const g = gimmickForZone(zone);
+  if (g) {
+    const sub = document.createElement('span');
+    sub.className = 'bb-gimmick';
+    sub.textContent = g.label;
+    sub.title = g.description;
+    bossBanner.appendChild(sub);
+  }
+  bossBanner.classList.remove('hidden');
+  // Keyframes neu anstoßen (zweiter Boss in derselben Sitzung): Animation aus,
+  // Reflow erzwingen, zurück auf den Stylesheet-Wert.
+  bossBanner.style.animation = 'none';
+  void bossBanner.offsetWidth;
+  bossBanner.style.animation = '';
+  window.clearTimeout(bannerTimer);
+  bannerTimer = window.setTimeout(() => bossBanner.classList.add('hidden'), BANNER_MS);
+}
+
+/** Regie beenden und Licht + Belichtung + Brennweite EXAKT zurücksetzen. */
+function cancelCinematics(): void {
+  if (cineT < 0) return;
+  cineT = -1;
+  lights.key.intensity = cineKeyInt;
+  lights.fill.intensity = cineFillInt;
+  lights.hemi.intensity = cineHemiInt;
+  renderer.toneMappingExposure = BASE_EXPOSURE;
+  camera.fov = BASE_FOV;
+  camera.updateProjectionMatrix();
+}
+
+function startCinematics(): void {
+  if (!preset.cinematics || world.transitioning) return;
+  cancelCinematics(); // ein laufender Moment wird sauber abgeschlossen
+  cineKeyInt = lights.key.intensity;
+  cineFillInt = lights.fill.intensity;
+  cineHemiInt = lights.hemi.intensity;
+  cineT = 0;
+}
+
+/**
+ * Ein Frame Boss-Regie: Licht, Belichtung und Brennweite folgen derselben
+ * „kurz zupacken, weich lösen"-Hüllkurve wie der Screen-Shake — nur schreibt
+ * sie auf Licht/Exposure/FOV statt auf die Kamera-Position, damit die Kamera
+ * selbst ruhig bleibt.
+ *
+ * Warum ZUSÄTZLICH die Tonemapping-Belichtung: das Key/Fill/Hemi-Rig ist in
+ * den Themen nicht die dominante Lichtquelle (die Club-Spots stehen auf 90,
+ * halbe Kulissen leuchten emissiv) — ein reines Rig-Dim wäre auf der Bühne
+ * kaum zu sehen. Die Belichtung senkt ALLES gleichmäßig, das Rig-Dim gibt dem
+ * Moment die Form.
+ */
+function stepCinematics(dt: number): void {
+  if (cineT < 0) return;
+  cineT += dt;
+  const k = Math.min(1, cineT / BOSS_CINE_S);
+  const punch =
+    k < CINE_ATTACK ? k / CINE_ATTACK : Math.pow(1 - (k - CINE_ATTACK) / (1 - CINE_ATTACK), 1.6);
+  lights.key.intensity = cineKeyInt * (1 - 0.68 * punch);
+  lights.fill.intensity = cineFillInt * (1 - 0.68 * punch);
+  lights.hemi.intensity = cineHemiInt * (1 - 0.5 * punch);
+  renderer.toneMappingExposure = BASE_EXPOSURE * (1 - 0.62 * punch);
+  camera.fov = BASE_FOV * (1 - 0.14 * punch);
+  camera.updateProjectionMatrix();
+  if (k >= 1) cancelCinematics();
+}
+
+// ---------- ROADMAP-V2 A2: Boss-Gimmicks pro Theme ----------
+// Der Kampf-Zustand (welche Spotlight-Phasen liefen schon, wann rollt die
+// nächste Welle) ist bewusst NUR hier in der Glue: er gehört zu EINEM Kampf,
+// überlebt keinen Reload und hat deshalb im `CombatState` (→ Save) nichts
+// verloren. Ein frisch gespawnter Boss startet mit `createGimmickRuntime()`.
+let bossGimmick: GimmickRuntime = createGimmickRuntime();
+/**
+ * ROADMAP-V2 A3: Der Truhen-Kobold. Genau wie der Gimmick-Kampfzustand ist er
+ * TRANSIENT — der ganze Zustand (nächster Spawn, Treffer, Buff-Fenster) lebt nur
+ * hier in der Glue. Ein Reload würfelt seine nächste Runde neu, dafür kostet das
+ * Event weder Schema-Bump noch Migration, und ein verpasster Kobold lässt sich
+ * nicht per Reload zurückholen.
+ */
+let goblin: GoblinState = createGoblin();
+/** Läuft gerade eine Spotlight-Phase? (nur für den HUD-Look) */
+let spotlightOn = false;
+
+/** Das Gimmick des LAUFENDEN Kampfes (null, solange kein Boss tanzt). */
+function activeGimmick(): BossGimmick | null {
+  return combat.boss ? gimmickForZone(combat.zone) : null;
+}
+
+// ---------- ROADMAP-V2 A1 + A5: Bühnen-Modifikatoren ----------
+// Seed UND Wochen-Index reisen im `CombatState` mit (`combat.remix`,
+// `combat.week`), also fragt die Glue IMMER den Kampf-Zustand — nie eine zweite
+// Kopie. `stageModsFor` trägt die Präzedenz-Regel: auf der Bühne der Woche die
+// ZWEI Wochen-Regeln, sonst die EINE A1-Regel, auf Boss-Bühnen keine.
+
+/** Die Regeln der Bühne, auf der gerade gekämpft wird (0, 1 oder 2). */
+function activeMods(): readonly StageMod[] {
+  return stageModsFor(combat.zone, combat.remix, combat.week);
+}
+
+/** Die Faktoren der aktuellen Bühne — neutral, wo keine Regel liegt. */
+function stageFactors(): StageModFactors {
+  return stageFactorsFor(combat.zone, combat.remix, combat.week);
+}
+
+/** Der Boss betritt die Bühne — beide Spawn-Pfade laufen hier zusammen. */
+function bossEntrance(): void {
+  // A2: frischer Kampf ⇒ frische Phasen + Wellen-Uhr.
+  bossGimmick = createGimmickRuntime();
+  spotlightOn = false;
+  // P1-Buchhaltung: Ein offener Fehlversuch gehört immer nur zu EINEM Gate.
+  // Spawnt ein Boss auf einer anderen Bühne (z. B. Bühne 5 nach einer Aszension,
+  // während der Timeout auf Bühne 10 liegt), ist der alte Anlauf Geschichte —
+  // das nächste Mal an Bühne 10 zählt wieder als sauberer erster Anlauf. Spawnt
+  // er auf DERSELBEN Bühne (der Retry nach dem Rückwurf), bleibt der Makel.
+  if (state.bossFoulZone !== combat.zone) state.bossFoulZone = 0;
+  showBossBanner(combat.zone);
+  startCinematics();
+  audio.bossIntro();
+  haptics.boss(effects.haptics);
+}
+
+/**
+ * Konfetti-Wurf über der Bühne zum Boss-Sieg. Nutzt den bestehenden
+ * Partikel-Pool (`ParticleSystem`, 200 Slots) — fünf Abschuss-Punkte quer über
+ * die Insel statt eines zentralen Klumpens, damit der Wurf die Bühne
+ * überspannt. Dichte kommt aus dem Preset (low: gar nicht).
+ */
+function bossConfetti(): void {
+  const total = preset.confetti;
+  if (!effects.particles || total <= 0) return;
+  const spots = [
+    [-3.2, -1.6],
+    [-1.4, 1.8],
+    [0.7, -0.4],
+    [2.4, 1.6],
+    [3.6, -1.2],
+  ] as const;
+  const per = Math.max(1, Math.round(total / spots.length));
+  for (const [dx, dz] of spots) {
+    particles.burst(ISLAND_C.x + dx, 0.9 + Math.random() * 0.9, ISLAND_C.z + dz, per, 1.5);
+  }
+}
+
+// ---------- Bühnen-Progression & Rück-Navigation ----------
+// Vorwärts läuft die Progression von selbst (Bühne clearen, Boss-Gate, Theme-
+// Wechsel alle 5 Bühnen via `bgForZone`). Der Zonen-Strip zeigt NUR erreichte
+// Bühnen (nichts Zukünftiges) und ist klickbar: zurückreisen zum Farmen, wieder
+// vor bis zur Frontier. Scheitert ein Boss, wirft er auf die Vor-Bühne zurück —
+// dort BP farmen, Upgrades kaufen und den Boss per Button erneut herausfordern.
+/**
+ * Auf eine erreichte Bühne reisen — EINE Stelle für alle Wege dorthin (Zonen-Strip
+ * und die A5-Wochen-Karte im Ziele-Tab). Die Frontier-Regel steht hier und nur
+ * hier: alles über `combat.maxZone` wird still verworfen, es gibt keine Abkürzung.
+ */
+function travelToZone(z: number): boolean {
+  if (!Number.isFinite(z) || z === combat.zone || z > combat.maxZone || z < 1) return false;
+  const back = z < combat.zone;
+  combat = travelTo(combat, z);
+  updateBackground();
+  syncEntity();
+  hud.update(state, combat, dps, clickDmg);
+  toasts.show(
+    '🗺',
+    `Bühne ${combat.zone}`,
+    back ? 'Farm-Modus — vorwärts geht’s jederzeit wieder.' : 'Zurück an der Front!',
+  );
+  return true;
+}
+document.getElementById('zoneStrip')?.addEventListener('click', (e) => {
+  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-z]');
+  if (!el) return;
+  travelToZone(Number(el.dataset.z));
+});
+document.getElementById('bossChallenge')?.addEventListener('click', () => {
+  const next = challengeBoss(combat);
+  if (next === combat) return;
+  // P4: Der Retry-Boss bekommt dieselbe verlängerte Uhr wie ein regulär
+  // gespawnter (Chronilla + Gear + „Gate-Crasher") — vorher fiel der Bonus beim
+  // „Boss herausfordern"-Weg still unter den Tisch.
+  combat = withBossTimerBonus(next);
+  syncEntity();
+  hud.update(state, combat, dps, clickDmg);
+  toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
+  bossEntrance(); // G2: derselbe Auftritt wie beim 25/25-Spawn
+});
 
 // ---------- combat glue ----------
 /** Ein Frame zeichnen: Bloom-Kette im high-Preset, sonst direkt (Roadmap L). */
@@ -846,6 +1438,31 @@ const CHEST_EMOJI = Object.fromEntries(CHEST_TIERS.map((c) => [c.tier, c.emoji])
 >;
 const chestEmoji = (tier: ChestTier): string => CHEST_EMOJI[tier];
 
+// ---------- ROADMAP-V2 P1: Bühnen-Sterne ----------
+/**
+ * Einen Stern auf einer Bühne setzen. `addStar` gibt dieselbe Referenz zurück,
+ * wenn der Stern schon hängt ODER auf dieser Bühne gar nicht möglich ist (der
+ * Timeout-Stern existiert nur an Boss-Gates) — dann passiert hier nichts. Ist er
+ * NEU, prüft die Funktion den Sammel-Meilenstein: alle `STAR_MILESTONE` Sterne
+ * fällt EINE Holztruhe, gegen einen persistierten Highwater abgerechnet, damit
+ * ein Reload nie doppelt auszahlt.
+ */
+function awardStar(zone: number, bit: number): void {
+  const next = addStar(state.stageStars, zone, bit);
+  if (next === state.stageStars) return;
+  state.stageStars = next;
+  const total = totalStars(next);
+  const chests = milestoneChests(total, state.starsAwarded);
+  if (chests <= 0) return;
+  state.chests.inventory.wood += chests;
+  state.starsAwarded = milestoneHighwater(total, state.starsAwarded);
+  toasts.show(
+    '⭐',
+    `${state.starsAwarded} Sterne — Truhe!`,
+    chests > 1 ? `${chests} Holztruhen für die Sammlung` : 'Holztruhe für die Sammlung',
+  );
+}
+
 function onKillProgress(
   r: ReturnType<typeof hit>,
   fromClick: boolean,
@@ -857,7 +1474,13 @@ function onKillProgress(
   // Golden-Peach ×2 income boost (§6.1, v12) multiply kill gold — the boost thus lifts
   // ALL income (click + idle + coach kills) uniformly for its 60-s window.
   const now = Date.now();
-  const gold = Math.floor(r.gold * goldMult(state) * peachIncomeMult(state, now));
+  // ROADMAP-V2 A1: der BP-Faktor der Bühne, auf der der Kill LANDETE — bei einem
+  // Vorstoß ist das die eben verlassene, sonst die aktuelle (dieselbe Regel wie
+  // beim P1-Combo-Stern unten). Boss-Bühnen tragen keinen Modifikator, ein
+  // Boss-Kill zahlt also unverändert.
+  const killZone = r.advancedZone ? combat.zone - 1 : combat.zone;
+  const stage = stageFactorsFor(killZone, combat.remix, combat.week);
+  const gold = Math.floor(r.gold * goldMult(state) * peachIncomeMult(state, now) * stage.gold);
   state.gold += gold;
   state.stats.goldLifetime += gold;
   if (wasBoss) {
@@ -869,11 +1492,25 @@ function onKillProgress(
     state.meta = advanceMeta(state.meta, 'bossKills');
   } else if (r.killed) {
     // Rival kill (§6.1): a 3 % base chance — scaled by Truhen-Luck — drops a Holztruhe.
-    if (rng.next() < rivalChestChance(chestLuck(state))) state.chests.inventory.wood += 1;
+    // A1 „Zähe Menge" verdoppelt genau diese Chance; der P4-Exklusiv-Knoten
+    // „Truhen-Fokus" hebt sie dauerhaft um 50 %.
+    if (
+      rng.next() <
+      rivalChestChance(chestLuck(state)) * stage.chest * truhenFokusChestMult(state.heaven)
+    ) {
+      state.chests.inventory.wood += 1;
+    }
+  }
+  // P1-Stern 3 („Combo"): ein Kill, der mit heißer Combo LANDET. Bewusst nur für
+  // Klick-Kills — Idle-DPS zieht weder Combo noch Krit (P1), ein Crew-Tick, der
+  // zufällig in ein heißes Fenster fällt, hat den Stern nicht verdient. Die
+  // Bühne des Kills: bei einem Vorstoß die eben verlassene, sonst die aktuelle.
+  if (fromClick && comboStarQualifies(comboState.stacks)) {
+    awardStar(r.advancedZone ? combat.zone - 1 : combat.zone, STAR_COMBO);
   }
   if (r.bossSpawned) {
     toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
-    audio.unlockJingle();
+    bossEntrance(); // G2: Banner + Licht-Dim + Kamera-Punch + Bass-Drop
   }
   if (r.advancedZone) {
     // Vergoldung (§4.3.4): the first clear of each 10-zone (10, 20, 30, …) — i.e.
@@ -881,6 +1518,10 @@ function onKillProgress(
     // a seeded-random member. `lifetimeMaxZone` is the highwater, so a re-clear after
     // ascension never double-awards. Gilds survive ascension (anti-plateau, P3).
     const clearedZone = combat.zone - 1;
+    // P1-Stern 1 („geclert"): die Bühne ist durch — auf einer normalen Bühne mit
+    // der letzten Rivalin, auf einer Boss-Bühne mit dem Boss (nur er schiebt sie
+    // weiter). Einmalig und lebenslang, auch beim Re-Clear nach einer Aszension.
+    awardStar(clearedZone, STAR_CLEARED);
     // Reaching a NEW lifetime-best zone (§7.2 quest metric): the deepest we've ever
     // been is `state.lifetimeMaxZone` (synced at the end of this fn), so advancing
     // past it is a genuine record — fires the „neue Bestzone" quest once.
@@ -903,9 +1544,14 @@ function onKillProgress(
     if (combat.zone > state.runMaxZone) state.runMaxZone = combat.zone;
     if (fromClick && x !== undefined) pops.gold(gold, x, y ?? 0);
     // was the kill a boss? (advanced from a boss target)
-    updateBackground();
     if (combat.zone % 5 === 1 && combat.zone > 1) {
       const bossZone = combat.zone - 1;
+      // P1-Stern 2 („ohne Timeout"): das Gate fiel, ohne dass seit dem ersten
+      // Boss-Spawn DIESES Anlaufs die Uhr abgelaufen ist. `bossFoulZone` trägt
+      // genau einen offenen Fehlversuch; er wird mit dem Kill des Gates gelöscht,
+      // damit ein späterer Anlauf (nach einer Aszension) wieder sauber startet.
+      if (state.bossFoulZone !== bossZone) awardStar(bossZone, STAR_NO_TIMEOUT);
+      else state.bossFoulZone = 0;
       // §6.1: a boss kill guarantees 1 🔑 (whole part guaranteed, the Truhen-Magnet/
       // gear key-drop bonus adds a seeded probabilistic extra) + a tier-appropriate
       // chest (§6.2) into the inventory.
@@ -924,9 +1570,18 @@ function onKillProgress(
         `${chestEmoji(tier)} · +${keys} 🔑 · +${shards} 🧩 (Bühne ${combat.zone})`,
       );
       audio.bossWin();
+      victoryDance = true; // A4: der Sieges-Move, einmalig (siehe `syncChoreoSet`)
+      bossConfetti(); // G2: Sieg-Beat über der Bühne
       if (effects.screenShake) shakeMag = Math.max(shakeMag, SHAKE_BOSS_KILL);
       haptics.boss(effects.haptics);
+    } else if (!wasBoss) {
+      // G2: Zonen-Clear ohne Boss-Gate — sehr kurze, leise Mini-Fanfare, damit
+      // der Boss-Sieg der lautere Moment bleibt.
+      audio.zoneClear();
     }
+    // Der Kulissen-Wechsel kommt ZULETZT: erst der Sieg-Beat (Toast, Fanfare,
+    // Konfetti) auf der alten Bühne, dann fährt sie aus (G1).
+    updateBackground();
   }
   syncMaxZones();
 }
@@ -935,9 +1590,30 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
   const wasBoss = combat.boss;
   // Glutaeus Maximus (§4.6) + Tyrann/Krönung gear (§5) + the crew's `boss`-special
   // ability tiers (v11 — Türsteher/Orbital-Station) boost damage dealt to a boss.
-  const effDmg = wasBoss
-    ? dmg * ancientBossDmgMult(state.ancients) * bossDmgMult(state.gear) * crewSpec.bossMult
+  // ROADMAP-V2 P2: der Mythos-Knoten „Boss-Brecher" hängt im GLEICHEN Stack (×1/0.9
+  // ⇔ −10 % Boss-Ausdauer) — `advisor.bossDamageMult` spiegelt ihn, damit die
+  // P3-Wand-Telemetrie und der echte Kampf dieselbe Zahl sehen.
+  let effDmg = wasBoss
+    ? dmg *
+      ancientBossDmgMult(state.ancients) *
+      bossDmgMult(state.gear) *
+      crewSpec.bossMult *
+      bossBreakerDmgMult(state.transcend)
     : dmg;
+  // ROADMAP-V2 A2: Theme-Gimmick des Gates. Nur der IDLE-Anteil wird hier
+  // gefiltert — der Klick-Pfad entscheidet in `doShake` selbst (er kennt Takt und
+  // Combo und braucht das Abprall-Feedback). Spotlight: die Crew pausiert ganz.
+  // Schild: sie trommelt ungetaktet und landet nur im Beat-Fenster.
+  if (wasBoss && !fromClick) {
+    const g = gimmickForZone(combat.zone);
+    if (g?.id === 'spotlight' && spotlightActive(bossGimmick)) effDmg = 0;
+    else if (g?.id === 'shield') effDmg *= SYNTH_IDLE_FACTOR;
+  }
+  // ROADMAP-V2 A1: Der CREW-Faktor der Bühne („Nebel" −15 %) gehört hierher, weil
+  // hier jeder Nicht-Klick-Schaden ankommt (Idle-DPS UND Twerk-Coach). Der
+  // KLICK-Faktor sitzt dagegen in `doShake` im `extraMult` — dort kennt die
+  // Pipeline Takt und Combo, und die angezeigte Schadenszahl bleibt ehrlich.
+  if (!wasBoss && !fromClick) effDmg *= stageFactors().dps;
   const r = hit(combat, effDmg);
   // A newly-spawned boss gets Chronilla's extra timer seconds.
   combat = r.bossSpawned ? withBossTimerBonus(r.state) : r.state;
@@ -959,6 +1635,11 @@ let downY = 0;
 let downT = 0;
 
 function doShake(x?: number, y?: number): void {
+  // G1: Während die Bühne aus- und einfährt zählt kein Klick. Bewusst
+  // IGNORIEREN statt puffern — der Wechsel dauert 1.2 s, ein nachgeholter
+  // Klick-Schwall würde Combo-Fenster, On-Beat-Wertung und Ekstase-Ladung
+  // verfälschen; und der Rivale, den man träfe, steht gar nicht auf der Bühne.
+  if (world.transitioning) return;
   state.totalClicks += 1;
   state.meta = advanceMeta(state.meta, 'clicks'); // §7.2 „Shakes" quest (no-op if inactive)
   const now = Date.now();
@@ -966,18 +1647,26 @@ function doShake(x?: number, y?: number): void {
   // On-beat is judged against the CURRENT tier's (possibly widened) window,
   // before this click bumps the combo.
   const curTier = comboTier(comboState.stacks);
-  const onBeat = isOnBeat(
-    choreo.phase,
-    phaseVelocity(drive),
-    // Beatrix (§4.6) + Neon/Synth gear (§5) + DJ/KI-Cluster `beat`-specials (v11)
-    // widen the on-beat window on top of the tier bonus.
-    beatWindowMs(
-      tierBeatWindowBonusMs(curTier) +
-        ancientBeatWindowBonusMs(state.ancients) +
-        beatWindowBonus(state.gear) +
-        crewSpec.beatWindowMs,
-    ),
-  );
+  // Beatrix (§4.6) + Neon/Synth gear (§5) + DJ/KI-Cluster `beat`-specials (v11)
+  // widen the on-beat window on top of the tier bonus — dieselbe Summe weitet
+  // auch das A2-Schild-Fenster (genau der Hebel, mit dem man sich rüstet).
+  const beatBonusMs =
+    tierBeatWindowBonusMs(curTier) +
+    ancientBeatWindowBonusMs(state.ancients) +
+    beatWindowBonus(state.gear) +
+    crewSpec.beatWindowMs +
+    // ROADMAP-V2 P4 „Beat-Gefühl" (Ritual-Ast): +40 ms im GLEICHEN Term — er
+    // weitet damit auch das A2-Schild-Fenster, genau wie Beatrix und das Gear.
+    beatGefuhlWindowMs(state.heaven);
+  const pps = phaseVelocity(drive);
+  const onBeat = isOnBeat(choreo.phase, pps, beatWindowMs(beatBonusMs));
+  // A2 Synth „Schild-Takte": eigenes, drive-invariantes Fenster (siehe
+  // `shieldWindowMs`) — außerhalb prallt der Klick am Boss ab.
+  const gimmick = activeGimmick();
+  // ROADMAP-V2 A1: die Hausregel dieser Bühne (neutral auf jeder Boss-Bühne).
+  const stage = stageFactors();
+  const bounced =
+    gimmick?.id === 'shield' && !isOnBeat(choreo.phase, pps, shieldWindowMs(pps, beatBonusMs));
 
   // Wackelias (§4.6) + Showmaster/Club gear (§5) + Hype-Girl/Viral-Team
   // `combo`-specials (v11) widen the combo grace window.
@@ -1002,7 +1691,9 @@ function doShake(x?: number, y?: number): void {
         ancientCritChanceBonus(state.ancients) +
         critChanceBonus(state.gear) +
         permTokenCritChance(state.permTokens) +
-        crewSpec.critChance,
+        crewSpec.critChance +
+        // A1 „Krit-Funken": +5 pp, durch DENSELBEN 40-%-Deckel wie alles andere.
+        stage.crit,
     ),
   );
   if (crit) {
@@ -1029,14 +1720,40 @@ function doShake(x?: number, y?: number): void {
     // Combo-tier + Disco/Lava gear (§5) + Booty-Boss/A-Promi `critdmg`-specials
     // (v11) raise the crit multiplier; Neon-Ninja gear widens on-beat ×.
     critMultBonus: tierCritMultBonus(tier) + critMultBonus(state.gear) + crewSpec.critDmg,
-    // Permanent „+1 % Krit-Schaden" tokens scale the whole crit multiplier (§6.2).
-    critMultFactor: permTokenCritMult(state.permTokens),
-    extraMult: beatBonus(onBeat, onBeatMultBonus(state.gear)) * frenzyMult(state.ability, now),
+    // Permanent „+1 % Krit-Schaden" tokens scale the whole crit multiplier (§6.2) —
+    // MAL dem P4-Knoten „Präzisions-Shake" (+25 %), der genau dieselbe Skala meint.
+    critMultFactor: permTokenCritMult(state.permTokens) * heavenCritMultFactor(state.heaven),
+    // P4 „Combo-Doktrin" (Ritual-Ast): hebt den Combo-Schritt (Cap ×1.2 ⇒ ×1.3).
+    comboStep: comboStepFor(state.heaven),
+    extraMult:
+      // A1 „Beat-Nacht" weitet den On-Beat-Bonus additiv (×1.5 ⇒ ×2), genau wie
+      // die Neon-Ninja-Sterne — eine Quelle, ein Term.
+      beatBonus(onBeat, onBeatMultBonus(state.gear) + stage.beat) *
+      // P4 „Ekstase-Doktrin" (Ritual-Ast): dasselbe Fenster, nur ×12 statt ×10.
+      frenzyMult(state.ability, now, ekstaseDoktrinMult(state.heaven, FRENZY_MULT)) *
+      // A3: der Mini-Frenzy des Truhen-Kobolds (×2 für 10 s). Bewusst ein
+      // EIGENER Faktor neben `frenzyMult` — die Twerk-Ekstase behält ihren
+      // Ladebalken, ihren Ring und ihren Ton für sich.
+      goblinBuffMult(goblin.buffUntil, now) *
+      // A1: der Klick-Faktor der Bühne („Nebel" +30 %).
+      stage.click *
+      // A2 Space „Gravitations-Combo": der Combo-BONUS zählt ×1.5. `effectiveClick`
+      // trägt `comboMult(stacks)` schon in sich — dieser Faktor hebt genau ihn.
+      (gimmick?.id === 'gravity' ? spaceComboExtra(comboState.stacks) : 1),
   });
   const px = x ?? window.innerWidth / 2;
   const py = y ?? window.innerHeight / 2;
 
-  applyHit(dmg, true, px, py);
+  // A2 Synth: ein Klick daneben prallt ab — 0 Schaden, „Klirr"-Feedback statt
+  // Schadenszahl. Combo/Ekstase/Krit hat er trotzdem gezählt (er war ja ein
+  // Klick), nur der Boss steckt nichts ein.
+  if (bounced) {
+    pops.blocked(px, py);
+    audio.bossHit();
+    entity.flinch();
+  } else {
+    applyHit(dmg, true, px, py);
+  }
   lootFromClick(now);
 
   char.cheeks.forEach((c) => {
@@ -1059,9 +1776,9 @@ function doShake(x?: number, y?: number): void {
   haptics.pulse(now, effects.haptics, crit);
   if (++clicksSinceSwitch >= MOVE_SWITCH_CLICKS) {
     clicksSinceSwitch = 0;
-    choreo.setMove(choreo.moveIdx + 1);
+    choreo.advance(); // A4: im Bühnen-Set kreisen statt stur durch alle Moves
   }
-  pops.damage({ value: dmg, crit, onBeat, x: px, y: py }, now);
+  if (!bounced) pops.damage({ value: dmg, crit, onBeat, x: px, y: py }, now);
   audio.click();
   const stacks = Math.floor(comboState.stacks);
   if (stacks > 2 && stacks % 5 === 0) audio.combo(stacks);
@@ -1175,8 +1892,23 @@ function peachVisible(now: number): boolean {
 function updatePeachSchedule(now: number): void {
   const at = state.peach.nextPeachAt;
   if (at <= 0 || now >= at + PEACH_VISIBLE_S * 1000) {
-    state.peach.nextPeachAt = rollNextPeachAt(now, rng);
+    state.peach.nextPeachAt = rollNextPeachAt(now, rng, peachGapMult());
   }
+}
+
+/**
+ * Der Pausen-Faktor des nächsten Pfirsichs: der P2-Mythos-Knoten „Pfirsich-Magnet"
+ * MAL dem P4-Exklusiv-Knoten „Pfirsich-Fokus" MAL dem A1-Modifikator „Peach-Party"
+ * (alle drei verkürzen die Pause, also multiplizieren sie sich). Gewürfelt wird beim
+ * Neuplanen — wer auf einer Peach-Party-Bühne steht, plant kürzere Pausen ein: genau
+ * der Farm-Anreiz.
+ */
+function peachGapMult(): number {
+  return (
+    mythosPeachGapMult(state.transcend) *
+    pfirsichFokusGapMult(state.heaven) *
+    stageFactors().peachGap
+  );
 }
 
 /**
@@ -1188,14 +1920,17 @@ function updatePeachSchedule(now: number): void {
 function catchPeach(): { keys: number; boostUntil: number } | null {
   const now = Date.now();
   if (!peachVisible(now)) return null;
-  state.peach.boostUntil = activateBoost(now); // fresh ×2 60-s window
+  // P4 „Pfirsich-Reife" (Ökonomie-Ast) verlängert genau dieses Fenster um 15 s.
+  const bonusMs = pfirsichReifeBonusMs(state.heaven);
+  state.peach.boostUntil = activateBoost(now, bonusMs); // frisches ×2-Fenster
   const keys = peachKeyRoll(rng);
   earnKeys(keys);
-  state.peach.nextPeachAt = rollNextPeachAt(now, rng);
+  state.peach.nextPeachAt = rollNextPeachAt(now, rng, peachGapMult());
+  const boostS = Math.round((PEACH_BOOST_S * 1000 + bonusMs) / 1000);
   toasts.show(
     '🍑',
     'Goldener Pfirsich!',
-    keys > 0 ? '×2 Einkommen 60 s · +1 🔑' : '×2 Einkommen 60 s',
+    keys > 0 ? `×2 Einkommen ${boostS} s · +1 🔑` : `×2 Einkommen ${boostS} s`,
   );
   hud.update(state, combat, dps, clickDmg);
   persist();
@@ -1312,11 +2047,60 @@ interface LootGlue {
   peachVisible: () => peachVisible(Date.now()),
 };
 
+// ROADMAP-V2 A3: dieselbe winzige Beweis-Oberfläche für den Truhen-Kobold
+// (gleicher Geist wie `chLoot`): den nächsten Spawn auf JETZT ziehen und den
+// Zustand lesen. Der Fang selbst läuft über den echten Button-Klick — der
+// Headless-Beweis nimmt also exakt den Spieler-Pfad, nichts wird umgangen.
+/**
+ * ROADMAP-V2 X5: Die Beweis-Oberfläche fürs Audio (gleicher Geist wie `chLoot`
+ * und `chGob`). Headless lässt sich Klang nicht fotografieren — also ruft der
+ * Smoke die neuen Funktionen HIER auf, im echten WebAudio-Graph des laufenden
+ * Spiels, und liest über `debug` nach, ob der Kontext läuft und was der
+ * Mute-Schalter mit dem Master-Regler macht.
+ */
+(
+  window as unknown as {
+    chAudio: {
+      unlock(): void;
+      ceremony(kind: CeremonyKind): void;
+      goblinSpawn(): void;
+      goblinCatch(): void;
+      ekstase(on: boolean): void;
+      mute(on: boolean): void;
+      debug(): { ctx: string; master: number; muted: boolean };
+    };
+  }
+).chAudio = {
+  unlock: () => audio.unlock(),
+  ceremony: (kind) => audio.ceremony(kind),
+  goblinSpawn: () => audio.goblinSpawn(),
+  goblinCatch: () => audio.goblinCatch(),
+  ekstase: (on) => audio.setEkstase(on),
+  mute: (on) => audio.setMuted(on),
+  debug: () => audio.debug,
+};
+
+(window as unknown as { chGob: { spawn(): void; state(): GoblinState } }).chGob = {
+  spawn: () => {
+    goblin = { ...goblin, nextAt: Date.now(), hits: 0 };
+    goblinSpawnId = 0;
+  },
+  state: () => ({ ...goblin }),
+};
+
 // ---------- M13: leaderboard + retention meta (§7) ----------
 
 // Leaderboard v2 (§7.4) — fail-silent & default-off. With no `VITE_API_BASE` every
 // call is a no-op and no submit modal ever auto-pops (the game stays fully playable).
-const leaderboard = new Leaderboard();
+// X4: Die UI bekommt Saison, Wochen-Board und den Toast-Kanal als Deps — sie
+// rechnet nichts selbst, sondern liest dieselbe Wochen-Wahrheit wie Karte + Strip.
+const leaderboard = new Leaderboard({
+  toast: (icon, title, sub) => toasts.show(icon, title, sub),
+  weekly: () => weekStage,
+  season: () => (weekStage ? boardSeasonFor(weekStage.week) : null),
+  weeklyBoardKey: () => (weekStage ? weeklyBoardKey(weekStage.week) : null),
+  weekBest: () => weeklyBestZone(state.meta, runWeek),
+});
 
 // Best-zone submit throttle: remember the deepest zone we've already offered to
 // submit (localStorage, NOT the CH save — v8 schema is frozen) so the prompt fires
@@ -1414,6 +2198,26 @@ function grantLoginReward(reward: LoginReward): void {
 }
 
 /**
+ * ROADMAP-V2 A5: Rollt die ISO-Woche (Montag 00:00 UTC), zieht die Wochen-Bühne
+ * nach und hängt den laufenden Kampf an den neuen Wochen-Index. Läuft im selben
+ * 0.25-s-Tick wie der Tages-Roll, eine Session über den Montag hinweg schaltet
+ * also ohne Reload um.
+ *
+ * Der LAUFENDE Gegner behält seine Ausdauer (er wurde unter der alten Woche
+ * gespawnt) — erst der nächste Spawn rechnet mit der neuen Regel. Alles andere
+ * hieße, einem Spieler mitten im Schlag die HP-Leiste zu verschieben.
+ */
+function maybeNewWeek(): void {
+  const week = weekIndexOf(Date.now());
+  if (week === runWeek) return;
+  runWeek = week;
+  weekStage = weeklyStage(Date.now());
+  combat = { ...combat, week };
+  hud.update(state, combat, dps, clickDmg);
+  metaPanel.render(true);
+}
+
+/**
  * Roll the daily quests + process the login for the current day (§7.1/§7.2). Called
  * on boot and each tick, so a session that crosses UTC midnight rolls fresh quests
  * and grants the next login without a reload. Clock-neutral (part 1): a backward
@@ -1421,6 +2225,7 @@ function grantLoginReward(reward: LoginReward): void {
  */
 function maybeNewDay(): void {
   const day = dayNumber(Date.now());
+  maybeNewWeek();
   // Forward-clock repair (§9.2.2): a save stamped under a far-future clock must
   // not freeze dailies until reality catches up — clamp the high-waters to today
   // (neutral: nothing is re-granted today, everything resumes tomorrow).
@@ -1466,6 +2271,13 @@ const metaPanel = new Meta({
   openTop: () => void leaderboard.openTop(),
   openSubmit: () => leaderboard.openSubmit(lbPayload()),
   season: () => currentSeason,
+  // A5: Die Wochen-Karte liest dieselbe Wahrheit wie Strip und Kampf.
+  weekly: () => weekStage,
+  weekBest: () => weeklyBestZone(state.meta, runWeek),
+  frontier: () => Math.max(state.runMaxZone, combat.maxZone),
+  travel: (zone) => {
+    if (travelToZone(zone)) metaPanel.render(true);
+  },
 });
 
 // ---------- Golden-Peach on-screen button + ×2-boost badge (§6.1, B13c) ----------
@@ -1538,8 +2350,122 @@ peachBtn.addEventListener('click', () => {
   }
 });
 
+// ---------- ROADMAP-V2 A3: Truhen-Kobold (Button + Mini-Frenzy-Badge) ----------
+const goblinBtn = document.getElementById('goblinBtn') as HTMLButtonElement;
+const goblinBadge = document.getElementById('goblinBadge') as HTMLElement;
+const goblinCount = document.getElementById('goblinCount') as HTMLElement;
+/** Kantenlänge des Kobold-Buttons (deckungsgleich mit `.goblinBtn` in style.css). */
+const GOBLIN_SIZE = 64;
+/** Unterer Sperrstreifen (Ekstase-Knopf + Hinweiszeile + Mini-Frenzy-Badge). */
+const GOBLIN_BOTTOM_SAFE = 120;
+/** Der `nextAt`, zu dem der aktuell sichtbare Kobold gehört (0 = keiner). */
+let goblinSpawnId = 0;
+
+/** Die Spawn-Sperren des Events, aus der Live-Glue gelesen. */
+function goblinGate(): { hidden: boolean; boss: boolean; transitioning: boolean } {
+  return { hidden: document.hidden, boss: combat.boss, transitioning: world.transitioning };
+}
+
+/**
+ * Kobold-Zeitplan + Button, einmal pro Frame (dasselbe Muster wie der Pfirsich).
+ *
+ *  · ungeseedet ⇒ erste Runde würfeln,
+ *  · Fenster abgelaufen ⇒ verpasst, nächste Runde würfeln (er kommt nicht wieder),
+ *  · fällig, darf aber gerade NICHT auf die Bühne (Hintergrund-Tab, Bosskampf,
+ *    Bühnen-Wechsel) ⇒ um `GOBLIN_DEFER_S` vertagen, ohne einen RNG-Zug zu
+ *    verbrennen. Steht er schon auf der Bühne, bleibt er dort — ein mitten im
+ *    Fenster startender Boss soll ihn nicht wegzaubern.
+ */
+function updateGoblin(now: number): void {
+  const onStage = goblinSpawnId === goblin.nextAt && goblin.nextAt > 0;
+  if (goblin.nextAt <= 0) {
+    goblin = { ...goblin, nextAt: rollNextGoblinAt(now, rng), hits: 0 };
+  } else if (goblinExpired(goblin, now)) {
+    goblin = { ...goblin, nextAt: rollNextGoblinAt(now, rng), hits: 0 };
+  } else if (!onStage && now >= goblin.nextAt && !goblinSpawnAllowed(goblinGate())) {
+    goblin = { ...goblin, nextAt: now + GOBLIN_DEFER_S * 1000, hits: 0 };
+  }
+
+  const spawned = goblinVisible(goblin, now);
+  const show = spawned && !(isNarrow() && shopOpen());
+  if (spawned && goblinSpawnId !== goblin.nextAt) {
+    goblinSpawnId = goblin.nextAt;
+    goblinBtn.classList.remove('hit');
+    // X5: das freche „hehe" beim Auftauchen — einmal je Kobold, an derselben
+    // Kante wie der Button-Reset (ein Kobold, ein Ton).
+    audio.goblinSpawn();
+  }
+  if (show) {
+    // Hoppel-Bahn quer über die Bühne (pur in `goblinPos`, hier nur Pixel).
+    const p = goblinPos(goblin, now);
+    // Im 50/50-Layout ist die BÜHNE die rechte Hälfte — der Kobold hoppelt über
+    // die Insel, nicht über die Crew-Liste (im Portrait-Layout füllt die Bühne
+    // den ganzen Bildschirm, dort gilt der volle Rand).
+    const minX = isNarrow() ? PEACH_MARGIN : Math.round(window.innerWidth * 0.5) + PEACH_MARGIN;
+    const maxX = Math.max(minX, window.innerWidth - GOBLIN_SIZE - PEACH_MARGIN);
+    // Vertikal bleibt er in der UNTEREN Bildhälfte — dort liegt die Insel. Oben
+    // stünde er auf dem Zonen-Strip und der Rivalen-Card und verdeckte genau die
+    // Bühnen-Info, die A1 gerade dorthin geschrieben hat.
+    const minY = Math.max(PEACH_TOP_SAFE, Math.round(window.innerHeight * 0.5));
+    // …und über dem Ekstase-Knopf: `GOBLIN_BOTTOM_SAFE` deckt Ability-Bar +
+    // Hinweiszeile ab, damit der Kobold nie einen Knopf verdeckt.
+    const maxY = Math.max(minY, window.innerHeight - GOBLIN_SIZE - GOBLIN_BOTTOM_SAFE);
+    goblinBtn.style.left = `${Math.round(minX + p.x * (maxX - minX))}px`;
+    goblinBtn.style.top = `${Math.round(minY + p.y * (maxY - minY))}px`;
+    const left = GOBLIN_HITS - goblin.hits;
+    if (goblinCount.textContent !== String(left)) goblinCount.textContent = String(left);
+  }
+  goblinBtn.classList.toggle('hidden', !show);
+  const buff = goblinBuffLeft(goblin.buffUntil, now);
+  goblinBadge.classList.toggle('hidden', buff <= 0);
+  if (buff > 0) {
+    const txt = `×2 Klick · ${Math.ceil(buff)}s`;
+    if (goblinBadge.textContent !== txt) goblinBadge.textContent = txt;
+  }
+}
+
+goblinBtn.addEventListener('click', () => {
+  audio.unlock();
+  const now = Date.now();
+  const r = goblinHit(goblin, now);
+  if (!r.counted) return;
+  goblin = r.state;
+  audio.click();
+  if (!r.caught) {
+    // Treffer-Feedback: der Kobold zuckt (Animation per Reflow neu angestoßen,
+    // damit auch der vierte Treffer sichtbar ist).
+    goblinBtn.classList.remove('hit');
+    void goblinBtn.offsetWidth;
+    goblinBtn.classList.add('hit');
+    goblinCount.textContent = String(GOBLIN_HITS - goblin.hits);
+    return;
+  }
+  // Gefangen: Holztruhe + Mini-Frenzy, und die nächste Runde wird gewürfelt
+  // (`goblinHit` hat `nextAt` bewusst auf 0 gesetzt — der Wurf gehört der Glue,
+  // weil nur sie den seeded `Rng` hält).
+  goblin = { ...goblin, nextAt: rollNextGoblinAt(now, rng) };
+  goblinSpawnId = 0;
+  state.chests.inventory.wood += GOBLIN_CHESTS;
+  goblinBtn.classList.add('hidden');
+  toasts.show(
+    '👺',
+    'Kobold gefangen!',
+    `🪵 Holztruhe · ×2 Klick-Schaden für ${GOBLIN_BUFF_S} Sekunden`,
+  );
+  audio.goblinCatch(); // X5: eigener Erfolgs-Plink statt des generischen Jingles
+  if (effects.screenShake) shakeMag = Math.max(shakeMag, SHAKE_CRIT);
+  haptics.boss(effects.haptics);
+  hud.update(state, combat, dps, clickDmg);
+  const activeTab = document.querySelector('.tab.active') as HTMLElement | null;
+  if (activeTab?.dataset.t) renderActiveTab(activeTab.dataset.t); // die Truhe sofort zeigen
+  persist();
+});
+
 // ---------- resize ----------
 function resize(): void {
+  // G2: `frameCamera` rechnet die Distanz aus dem FOV — ein laufender Punch-In
+  // würde die Bühne dauerhaft falsch rahmen, also erst zurückstellen.
+  cancelCinematics();
   const w = window.innerWidth;
   const h = window.innerHeight;
   renderer.setSize(w, h);
@@ -1581,11 +2507,81 @@ const clock = new THREE.Clock();
 let acc = 0;
 let t0 = 0;
 // Headless-smoke hook (same spirit as `window.chLoot`): render time + the
-// live rival's look/facing, so the screenshot rig can time taunt/boss frames
-// under software-GL time dilation. Read-only; no gameplay surface.
+// live rival's look/facing + der G1-Bühnen-Versatz, so the screenshot rig can
+// time taunt/boss/Wechsel-Frames under software-GL time dilation. Read-only;
+// no gameplay surface.
 (
-  window as unknown as { chVs: () => { t0: number; theme: string; boss: boolean; rotY: number } }
-).chVs = () => ({ t0, theme: entity.theme, boss: entity.boss, rotY: entity.root.rotation.y });
+  window as unknown as {
+    chVs: () => {
+      t0: number;
+      theme: string;
+      boss: boolean;
+      rotY: number;
+      stageY: number;
+      swapping: boolean;
+      calls: number;
+      tris: number;
+      deckE: number;
+      deckI: number;
+      gim: string;
+      spot: boolean;
+      hpF: number;
+      mod: string;
+      zone: number;
+      remix: number;
+      move: string;
+      set: string;
+      gobOn: boolean;
+      gobHits: number;
+      gobBuff: number;
+      gobCaught: number;
+      cer: boolean;
+    };
+  }
+).chVs = () => ({
+  t0,
+  theme: entity.theme,
+  boss: entity.boss,
+  rotY: entity.root.rotation.y,
+  stageY: world.stageY,
+  swapping: world.transitioning,
+  // ROADMAP-V2 G3: Draw-Call-Budget (< 250/Bühne) direkt aus dem Renderer —
+  // der Verify-Lauf liest die Zahl je Theme, statt sie zu schätzen.
+  calls: renderer.info.render.calls,
+  tris: renderer.info.render.triangles,
+  // ROADMAP-V2 X2: der Deck-Emissive-Puls, direkt vom geteilten Deck-Material —
+  // damit der Headless-Beweis den Puls MISST statt ihn aus Pixeln zu raten.
+  deckE: floorMat.emissive.getHex(),
+  deckI: floorMat.emissiveIntensity,
+  // ROADMAP-V2 A2: welches Gimmick am laufenden Gate greift, ob gerade eine
+  // Spotlight-Phase läuft und der Rest-HP-Anteil — damit der Beweis-Lauf die
+  // Mechanik MISST (Phasen-Trigger, Wellen-Heilung) statt sie aus Pixeln zu raten.
+  gim: activeGimmick()?.id ?? '',
+  spot: spotlightOn,
+  hpF: hpFraction(combat),
+  // ROADMAP-V2 A1/A4/A3: Bühnen-Modifikator, Choreo-Set und Kobold-Zustand —
+  // der Beweis-Lauf liest sie, statt sie aus Pixeln zu raten.
+  mod: activeMods()
+    .map((m) => m.id)
+    .join('+'),
+  zone: combat.zone,
+  remix: combat.remix,
+  // ROADMAP-V2 A5: Wochen-Index, Wochen-Bühne + Wochen-Bestzone — der Beweis-Lauf
+  // liest die Wochen-Wahrheit, statt sie aus Pixeln zu raten.
+  week: combat.week,
+  weekZone: weekStage?.zone ?? 0,
+  weekMods: weekStage?.mods.map((m) => m.id).join('+') ?? '',
+  weekBest: weeklyBestZone(state.meta, runWeek),
+  move: choreo.current.name,
+  set: choreo.moveSet.map((i) => MOVES[i].name).join(' · '),
+  gobOn: goblinVisible(goblin, Date.now()),
+  gobHits: goblin.hits,
+  gobBuff: goblinBuffLeft(goblin.buffUntil, Date.now()),
+  gobCaught: goblin.caught,
+  // ROADMAP-V2 G4: läuft gerade eine Prestige-Blende? (Der Beweis-Lauf timet
+  // den Peak daran, statt ihn aus Pixeln zu raten.)
+  cer: ceremony.active,
+});
 let uiTimer = 0;
 let lastRenderMs = 0;
 let firstFrame = true;
@@ -1598,36 +2594,89 @@ function loop(nowMs: number): void {
   t0 += dt;
   state.stats.playTimeS += dt;
 
+  // G1: Der Bühnen-Wechsel friert den Kampf für seine 1.2 s ein — sonst würde
+  // Idle-DPS auf einen Rivalen einschlagen, der gar nicht auf der Bühne steht,
+  // und ein Kill mitten im Wechsel könnte den nächsten Wechsel auslösen.
+  const swapping = world.transitioning;
+  // ROADMAP-V2 A2: Der Kampf-Zustand des Gimmicks läuft VOR dem Idle-Schaden —
+  // sonst hinkte eine gerade gezündete Spotlight-Phase einen Frame hinterher und
+  // die Crew schlüge noch einmal durch.
+  const gimmickNow = combat.boss && !swapping ? gimmickForZone(combat.zone) : null;
+  if (combat.boss && !swapping) {
+    const g = tickGimmick(bossGimmick, gimmickNow, hpFraction(combat), dt);
+    bossGimmick = g.state;
+    spotlightOn = g.spotlight;
+    if (g.started) {
+      toasts.show('🔦', 'Spotlight!', `${SPOTLIGHT_S} s lang zählen NUR deine Klicks.`);
+      audio.bossHit();
+    }
+    if (g.heals > 0) {
+      // Wellen-Heilung: der Balken springt sichtbar zurück (`hud.pulseHeal`).
+      const hp = applyWaveHeal(combat.hp, combat.hpMax, waveHealAmount(combat.hpMax, g.heals));
+      combat = { ...combat, hp };
+      hud.pulseHeal();
+    }
+  } else if (spotlightOn) {
+    spotlightOn = false;
+  }
+  hud.setSpotlight(spotlightOn);
   // Idle DPS chips away at the current target; the Twerk-Coach auto-clicks at
   // 25 % of the click value (no crit/beat, §4.3.5) — Robo gear stars add cps (§5),
   // the same sum the offline accrual uses; boss timer ticks down.
-  if (dps > 0) applyHit(dps * dt, false);
+  if (dps > 0 && !swapping) applyHit(dps * dt, false);
   const cps = coachCps(state.heaven) + coachCpsBonus(state.gear);
-  if (cps > 0) applyHit(coachDps(clickDmg, cps) * dt, false);
-  if (combat.boss) {
+  if (cps > 0 && !swapping) applyHit(coachDps(clickDmg, cps) * dt, false);
+  if (combat.boss && !swapping) {
+    const gateZone = combat.zone; // vor dem möglichen Rückwurf festhalten (P1)
     const bt = tickBoss(combat, dt);
     combat = bt.state;
     if (bt.failed) {
       state.stats.bossTimeouts += 1;
       state.stats.bossStreak = 0; // a timeout breaks the no-timeout boss streak (§7.3)
-      toasts.show('⏱', 'Zeit um!', 'Farm die Bühne & fordere den Boss erneut.');
+      // P1: Dieses Gate ist für den laufenden Anlauf „nicht mehr sauber" — der
+      // Timeout-Stern bleibt dort verschlossen, bis der Boss gefallen ist.
+      state.bossFoulZone = gateZone;
+      toasts.show(
+        '⏱',
+        'Zeit um!',
+        `Zurück auf Bühne ${combat.zone} — farm BP, kauf Upgrades, dann fordere den Boss erneut.`,
+      );
       audio.bossLose();
+      updateBackground(); // eine Bühne zurück kann ein Theme zurück bedeuten
       syncEntity(); // the boss bounced us — back to the normal rival body
     }
   }
 
   // Combo soft-decay (§4.2.2, slowed by Showmaster gear §5) + tier-driven juice
-  // (music/ability bar), each frame.
-  comboState = comboStep(comboState, dt, comboDecayReduction(state.gear));
+  // (music/ability bar), each frame. A2 Space: im Gravitations-Kampf verfällt sie
+  // doppelt so schnell (das Gnaden-Fenster bleibt, nur der Verfall danach zählt ×2).
+  // A1 „Goldrausch" lässt sie 25 % schneller verfallen (`stageComboStep` ist bei
+  // Faktor 1 zahlengleich zu `comboStep`); Gravitation und Modifikator schließen
+  // sich aus, weil Boss-Bühnen keinen Modifikator tragen.
+  // P4 „Combo-Gedächtnis" (Ritual-Ast) hängt additiv im GLEICHEN Reduktions-Term
+  // wie die Showmaster-Sterne (`combo.decay` deckelt die Summe bei 1).
+  const comboRed = comboDecayReduction(state.gear) + comboGedachtnisReduction(state.heaven);
+  comboState =
+    gimmickNow?.id === 'gravity'
+      ? spaceComboStep(comboState, dt, comboRed)
+      : stageComboStep(comboState, dt, comboRed, stageFactors().comboDecay);
   const epochMs = Date.now();
   // Golden-Peach schedule (§6.1): despawn/reschedule the event, then sync the
   // on-screen 🍑 button + ×2-boost badge (clamped/despawned per B13c).
   updatePeachSchedule(epochMs);
   updatePeachButton(epochMs);
+  // A3: Kobold-Zeitplan + Hoppel-Position (kein Spawn im Hintergrund-Tab, im
+  // Bosskampf oder während der Bühnen-Wechsel läuft).
+  updateGoblin(epochMs);
   const tier = comboTier(comboState.stacks);
   const frenzy = isFrenzyActive(state.ability, epochMs);
   hud.setCombo(comboState.stacks, tier);
   audio.setIntensity(intensityFor(tier, frenzy));
+  // ROADMAP-V2 X5: die zweite Instrumenten-Lage des Themes hängt am EKSTASE-
+  // Fenster, nicht an der Intensitätsstufe — die erreicht auch eine heiße Combo
+  // (`intensityFor` gibt bei Tier 4 ebenfalls 3 zurück), das Fenster soll aber
+  // seinen eigenen Klang haben.
+  audio.setEkstase(frenzy);
   abilityBar.update(state.ability, epochMs, ekstaseChargeMax());
   pops.frame(epochMs); // flush any trailing damage batch (B7)
 
@@ -1660,6 +2709,25 @@ function loop(nowMs: number): void {
   const beatV = Math.max(0, Math.sin(choreo.phase * 2.2));
   beat.intensity = beatV * drive * 4;
   if (beatTracker.update(choreo.phase)) audio.beat(0.5 + drive * 0.08);
+  // G1: Aus-/Einfahrt der Bühne tickt im bestehenden Loop, VOR den Kulissen-
+  // Anims (nach einem Rebuild zeigt `world.anims` schon auf die neue Bühne).
+  world.update(dt);
+  // ROADMAP-V2 X2: Solange das Ekstase-Fenster offen ist, pulst das Deck-Emissive
+  // im SELBEN `beatV` wie Neonkanten und Lautsprecher-Dome. Nach `world.update`,
+  // damit ein Rebuild mitten im Wechsel die frische Theme-Ruhelage gemerkt hat.
+  world.setEkstase(frenzy && preset.ekstaseDeck, beatV);
+  stepCinematics(dt); // G2: Licht-Dim + Kamera-Punch des Boss-Auftritts
+  // Duo + Kontaktschatten stehen NICHT auf der Insel-Gruppe (die Cheek-Physik
+  // simuliert in Weltkoordinaten — Mitfahren würde die Federn zerren), also
+  // treten sie für die Dauer des Wechsels ab und mit der neuen Bühne wieder auf.
+  // Erst ausblenden, wenn das Deck wirklich unter den Füßen weggefahren ist
+  // (0.35 Einheiten ≈ 16 px), und wieder auftreten, sobald es zurück ist —
+  // so gibt es keinen Pop VOR der ersten Bewegung. Frisch gelesen, weil
+  // `world.update` den Wechsel eben beendet haben kann.
+  const offStage = world.stageY < -0.35;
+  playerSpin.visible = !offStage;
+  entity.root.visible = !offStage;
+  contactShadow.visible = !offStage;
   world.anims.forEach((a) => a(t0, beatV));
   // The rival twerks back — same beat envelope, its own loop (independent of the rig).
   entity.update(t0, beatV, drive);
@@ -1692,6 +2760,10 @@ function loop(nowMs: number): void {
     checkAchievements();
     maybeLeaderboardPrompt();
     hud.update(state, combat, dps, clickDmg);
+    // ROADMAP-V2 P3: Wand-Telemetrie an der Frontier-Boss-Bühne. Bewusst NUR
+    // hier im 0.25-s-Tick — die Kauf-Rangfolge scannt die Crew und hat im
+    // Klick-Pfad nichts verloren; das Ausblenden im Kampf erledigt `hud.update`.
+    hud.advise(state, combat, dps, clickDmg);
     syncTabVisibility(); // reveal a tab the instant its layer becomes reachable
     // keep the open shop tab's affordability/previews fresh while idling
     const active = document.querySelector('.tab.active') as HTMLElement | null;

@@ -69,9 +69,15 @@ export function isFrenzyActive(state: AbilityState, now: number): boolean {
   return now < state.frenzyUntil;
 }
 
-/** Click-damage multiplier from Ekstase: `FRENZY_MULT` while active, else 1. */
-export function frenzyMult(state: AbilityState, now: number): number {
-  return isFrenzyActive(state, now) ? FRENZY_MULT : 1;
+/**
+ * Click-damage multiplier from Ekstase: `mult` while active, else 1. `mult` defaults
+ * to `FRENZY_MULT` (×10); der Himmelsbaum-Knoten „Ekstase-Doktrin" (ROADMAP-V2 P4)
+ * reicht ×12 herein. Nicht-endliche/kleinere-als-1 Werte fallen auf ×1 zurück, damit
+ * ein kaputter Aufruf die Ekstase nie zu einem Malus macht.
+ */
+export function frenzyMult(state: AbilityState, now: number, mult: number = FRENZY_MULT): number {
+  if (!isFrenzyActive(state, now)) return 1;
+  return Number.isFinite(mult) && mult > 1 ? mult : 1;
 }
 
 /** Meter fill fraction in [0, 1] (for the ability bar), full at `chargeMax`. */
@@ -86,4 +92,45 @@ export function chargeFraction(
 export function frenzyFraction(state: AbilityState, now: number): number {
   if (!isFrenzyActive(state, now)) return 0;
   return Math.max(0, Math.min(1, (state.frenzyUntil - now) / FRENZY_DURATION_MS));
+}
+
+/**
+ * ROADMAP-V2 X2 — das LAUFENDE Ekstase-Fenster für den HUD-Countdown-Ring.
+ *
+ * `frenzyFraction` misst gegen die BASIS-Dauer (12 s) und pegelt daher bei einer
+ * durch Ekstase-Ausdauer/Gear verlängerten Ekstase sekundenlang auf 100 %. Der
+ * Ring soll aber die echte Rest-Laufzeit zeigen, und die einzige persistierte
+ * Zahl ist `frenzyUntil` — die Gesamtdauer steht nirgends im Save. Also wird sie
+ * beim ersten Frame des Fensters gemessen und mitgeführt: `until` identifiziert
+ * das Fenster, `totalMs` ist seine gemessene Länge. Ein Reload MITTEN in einer
+ * Ekstase startet den Ring folglich bei 100 % der Rest-Zeit — ehrlich, weil die
+ * verlorene Vorgeschichte nicht rekonstruierbar ist, und nie falsch herum.
+ */
+export interface FrenzyWindow {
+  /** `frenzyUntil` des getrackten Fensters (0 = kein Fenster offen). */
+  until: number;
+  /** Beim ersten Frame gemessene Gesamtlänge in ms (0 = kein Fenster offen). */
+  totalMs: number;
+}
+
+/** Ein leeres (geschlossenes) Fenster. */
+export function createFrenzyWindow(): FrenzyWindow {
+  return { until: 0, totalMs: 0 };
+}
+
+/** Fenster fortschreiben: schließt es beim Ablauf, misst ein neu geöffnetes. */
+export function trackFrenzyWindow(
+  prev: FrenzyWindow,
+  state: AbilityState,
+  now: number,
+): FrenzyWindow {
+  if (!isFrenzyActive(state, now)) return prev.until === 0 ? prev : createFrenzyWindow();
+  if (prev.until === state.frenzyUntil) return prev;
+  return { until: state.frenzyUntil, totalMs: Math.max(1, state.frenzyUntil - now) };
+}
+
+/** Rest-Anteil des getrackten Fensters in [0, 1] — die Ring-Füllung. */
+export function frenzyWindowFraction(win: FrenzyWindow, now: number): number {
+  if (win.totalMs <= 0) return 0;
+  return Math.max(0, Math.min(1, (win.until - now) / win.totalMs));
 }

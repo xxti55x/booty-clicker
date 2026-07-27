@@ -223,6 +223,11 @@ export const MOVES: readonly Move[] = [
 /**
  * Holds the live choreography state (current move, phase, blended pose) and
  * advances between moves. Replaces the prototype's moveIdx/moveTime/phase globals.
+ *
+ * ROADMAP-V2 A4 fügt genau EINE Ebene hinzu: einen **Vorrat** erlaubter Move-
+ * Indizes (`useSet`), in dem `advance()` kreist. Die Pose-Mathematik oben
+ * (`MOVES`, `fn`, `dur`) ist davon unberührt — A4 ändert nur, WELCHER Move
+ * gewählt wird, nie WIE er aussieht.
  */
 export class Choreographer {
   moveIdx = 0;
@@ -231,14 +236,49 @@ export class Choreographer {
   pose: Pose = zeroPose();
   /** Notified with the move name whenever the active move changes (HUD hook). */
   onMove?: (name: string) => void;
+  /** A4: der aktive Vorrat (Indizes in `MOVES`). Leer ⇒ Rundlauf über alle Moves. */
+  private set: readonly number[] = [];
 
   get current(): Move {
     return MOVES[this.moveIdx];
   }
 
   setMove(i: number): void {
-    this.moveIdx = i % MOVES.length;
+    this.moveIdx = ((i % MOVES.length) + MOVES.length) % MOVES.length;
     this.moveTime = 0;
     this.onMove?.(this.current.name);
+  }
+
+  /** Der aktive Vorrat (Kopie-frei, nur lesend — für Tests und den Beweis-Lauf). */
+  get moveSet(): readonly number[] {
+    return this.set;
+  }
+
+  /**
+   * A4: Vorrat setzen. Tanzt gerade ein Move, der nicht dazugehört, wird SOFORT
+   * auf den ersten Eintrag gewechselt — sonst bliebe der alte Bühnen-Move bis
+   * zum nächsten Klick-Schwellwert stehen und der Bühnen-Wechsel sähe nicht
+   * anders aus. Ein leeres Set schaltet zurück auf den Rundlauf über alle Moves.
+   */
+  useSet(indices: readonly number[]): void {
+    const clean = indices.filter((i) => Number.isInteger(i) && i >= 0 && i < MOVES.length);
+    this.set = clean;
+    if (clean.length > 0 && !clean.includes(this.moveIdx)) this.setMove(clean[0]);
+  }
+
+  /**
+   * A4: zum nächsten Move. Im Vorrat wird zyklisch weitergereicht; steht der
+   * laufende Move NICHT im Vorrat (z. B. der einmalige Sieges-Move nach einem
+   * Boss-Kill), fällt der nächste Wechsel auf dessen ersten Eintrag zurück —
+   * genau so ist „einmalig" ohne eigenen Zustand zu haben. Ohne Vorrat bleibt
+   * es der alte Rundlauf über `MOVES`.
+   */
+  advance(): void {
+    if (this.set.length === 0) {
+      this.setMove(this.moveIdx + 1);
+      return;
+    }
+    const at = this.set.indexOf(this.moveIdx);
+    this.setMove(this.set[at < 0 ? 0 : (at + 1) % this.set.length]);
   }
 }

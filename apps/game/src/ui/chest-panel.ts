@@ -14,6 +14,7 @@ import {
   type TokenId,
   tokenCount,
 } from '../game/chests';
+import { emptyState } from './empty';
 import { fmt } from './format';
 
 function byId(id: string): HTMLElement {
@@ -235,7 +236,19 @@ export class Chests {
       ? owned.map((s) => `<span class="ch-skin">${s.name}</span>`).join('')
       : `<span class="dim">Noch keine Truhen-Skins.</span>`;
 
+    // ROADMAP-V2 G6: Weder Schlüssel noch Truhen im Bestand ⇒ der Tab zeigt eine
+    // Reihe von Nullen. Ein Satz sagt, welche Quellen ihn füllen.
+    const bare =
+      state.chests.keys <= 0 && CHEST_TIERS.every((c) => state.chests.inventory[c.tier] <= 0);
+    const empty = bare
+      ? emptyState(
+          'chest',
+          'Boss-Siege, Combo-Feuer, der Truhen-Kobold und die Tagesbelohnung lassen Schlüssel und Truhen fallen.',
+        )
+      : '';
+
     byId('chestHead').innerHTML =
+      empty +
       `<div class="ch-keys">🔑 <b>${fmt(state.chests.keys)}</b> Schlüssel</div>` +
       `<div class="ch-sub"><span class="ch-lbl">🎖 Permanent-Token</span>${tokenHtml}</div>` +
       `<div class="ch-sub"><span class="ch-lbl">🌌 Truhen-Skins ${owned.length}/${CHEST_SKINS.length}</span>${skinHtml}</div>`;

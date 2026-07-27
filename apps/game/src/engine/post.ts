@@ -29,9 +29,12 @@ export function createPost(
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.4, // strength — dezent: Glühkanten, kein Nebel
+    0.45, // strength — dezent: Glühkanten, kein Nebel
     0.3, // radius
-    0.82, // threshold — nur echte Emissives überschreiten das
+    // Threshold arbeitet im LINEAREN HDR-Raum der Composer-Puffer (vor dem
+    // Tone-Mapping!) — bei 0.82 lag halbes Deck darüber und alles vermilchte.
+    // > 1.0 erreichen nur echte Überstrahler (Emissives × Exposure).
+    1.05,
   );
   composer.addPass(bloom);
   // OutputPass wendet Tone-Mapping + sRGB am Ende der Kette an (r150+-Kontrakt).

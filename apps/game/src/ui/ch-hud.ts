@@ -1,10 +1,23 @@
+import {
+  HINT_GAP_MAX,
+  type PurchaseHint,
+  bestPurchaseHint,
+  bossGap,
+  burstEstimate,
+  purchaseSignature,
+} from '../game/advisor';
+import { gimmickForZone, themeForZone } from '../game/boss-gimmicks';
 import type { ChState } from '../game/ch-state';
-import { type CombatState, bossTimeFraction, hpFraction, isBossZone } from '../game/combat';
+import { type CombatState, bossHp, bossTimeFraction, hpFraction, isBossZone } from '../game/combat';
 import { MONSTERS_PER_ZONE } from '../game/combat';
 import { comboTierName } from '../game/combo';
 import { soulBonusEff } from '../game/heaven';
+import type { StageMod } from '../game/stage-mods';
+import { type StageStars, starBitsFor, starsAt } from '../game/stars';
+import { isWeeklyZone, stageModsFor } from '../game/weekly';
 import { transcendGlobalMult } from '../game/transcend';
 import { fmt } from './format';
+import { shouldTween, tweenValue } from './tween';
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -28,7 +41,12 @@ const BOSSES = [
   'DJ Dämon',
 ];
 
-function rivalName(zone: number, boss: boolean): string {
+/**
+ * Der angezeigte Gegner-Name. Boss-Namen tragen die Krone schon im String —
+ * ROADMAP-V2 G2 nutzt genau diesen Namen fürs Auftritts-Banner, damit HUD und
+ * Banner nie auseinanderlaufen (eine Quelle, keine Kopie).
+ */
+export function rivalName(zone: number, boss: boolean): string {
   if (boss) return '👑 ' + BOSSES[Math.floor(zone / 5) % BOSSES.length];
   const pool = RIVALS[stripTheme(zone)];
   return pool[zone % pool.length];
@@ -40,13 +58,10 @@ function rivalName(zone: number, boss: boolean): string {
  * click hot-path and the per-frame loop never rebuild DOM needlessly. The moving
  * HP bar + boss timer are refreshed cheaply per frame via `frame()`.
  */
-/** Kulissen-Tier je Zone (5er-Blöcke = Boss-Gates) — Spiegel der main.ts-Rotation. */
-const STRIP_THEMES = ['club', 'synth', 'beach', 'space'] as const;
-function stripTheme(zone: number): (typeof STRIP_THEMES)[number] {
-  return STRIP_THEMES[Math.floor((zone - 1) / 5) % STRIP_THEMES.length];
-}
+/** Kulissen-Tier je Zone — dieselbe Quelle wie Kulisse + Boss-Gimmick (A2). */
+const stripTheme = themeForZone;
 /** Insel-Thumbnail-Farben je Kulisse (Oberseite / Unterseite). */
-const STRIP_COLORS: Record<(typeof STRIP_THEMES)[number], [string, string]> = {
+const STRIP_COLORS: Record<'club' | 'synth' | 'beach' | 'space', [string, string]> = {
   club: ['#8b5cf6', '#4c2f8a'],
   synth: ['#d65cd0', '#7a2f8a'],
   beach: ['#eed28a', '#3aa0c9'],
@@ -64,6 +79,50 @@ function islandSvg(zone: number): string {
   );
 }
 
+/**
+ * Die Stern-Pips einer Bühne (ROADMAP-V2 P1): ein ★ je auf DIESER Bühne
+ * möglichem Stern — Boss-Bühnen drei, normale zwei (ohne Timeout-Stern) —,
+ * gefüllt oder leer. Bewusst Text-Glyphen statt SVG: sie sitzen als eine Zeile
+ * unter der Bühnen-Nummer und kosten weder Draw-Call noch Layout-Sprung.
+ */
+/**
+ * Das Modifikator-Icon eines Strip-Slots (ROADMAP-V2 A1) — klein über der
+ * Bühnen-Nummer, leer auf jeder Bühne ohne Hausregel (< 11 und alle Boss-Gates).
+ * Bewusst nur das EMOJI: der Strip-Slot ist 46 px breit, ein Name passt dort
+ * nicht; der ganze Satz steht auf der Bühnen-Card und im `title` des Slots.
+ */
+function modBadge(zone: number, remix: number, week: number): string {
+  // A5: Auf der Bühne der Woche steht EIN 📅 statt zweier Mod-Icons. Zwei Emojis
+  // nebeneinander wären im 46-px-Slot Matsch, und das Kalenderblatt ist die
+  // Information, die man im Strip sucht („wo ist die Wochen-Bühne?"); WELCHE
+  // zwei Regeln dort liegen, sagen Tooltip und Bühnen-Card.
+  if (isWeeklyZone(zone, week)) return '<span class="zs-mod zs-week">📅</span>';
+  const m = stageModsFor(zone, remix, week)[0];
+  return m ? `<span class="zs-mod">${m.icon}</span>` : '';
+}
+
+/** „💰 Goldrausch + ⚡ Krit-Funken" — die Regeln einer Bühne als eine Zeile. */
+function modLabel(mods: readonly StageMod[]): string {
+  return mods.map((m) => `${m.icon} ${m.name}`).join(' + ');
+}
+
+function starPips(zone: number, stars: StageStars): string {
+  const mask = starsAt(stars, zone);
+  const pips = starBitsFor(zone)
+    .map((bit) => `<i class="${(mask & bit) !== 0 ? 'on' : ''}">★</i>`)
+    .join('');
+  return `<span class="zs-stars">${pips}</span>`;
+}
+
+/**
+ * Steht der Spieler an der Frontier-Boss-Bühne, deren Gate noch offen ist (und
+ * der Boss tanzt noch nicht)? Die gemeinsame Bedingung von „Boss herausfordern"
+ * und der P3-Telemetrie-Zeile — EINE Quelle, damit beide nie auseinanderlaufen.
+ */
+function atFrontierGate(combat: CombatState): boolean {
+  return isBossZone(combat.zone) && !combat.boss && combat.zone === combat.maxZone;
+}
+
 export class ChHud {
   private readonly zone = byId('zone');
   private readonly zoneKind = byId('zoneKind');
@@ -77,6 +136,10 @@ export class ChHud {
   private readonly prog = byId('zoneProgress');
   private readonly timer = byId('rivalTimer');
   private readonly zoneStrip = byId('zoneStrip');
+  private readonly bossBtn = byId('bossChallenge');
+  private readonly bossHint = byId('bossHint');
+  private readonly gimmickEl = byId('bossGimmick');
+  private readonly stageModEl = byId('stageMod');
 
   // Cached last-written values (change-detection, no DOM churn).
   private cZone = '';
@@ -92,6 +155,23 @@ export class ChHud {
   private cBoss: boolean | null = null;
   private cCombo = '';
   private cStrip = '';
+  private cChallenge: boolean | null = null;
+  // P3-Telemetrie: zuletzt geschriebene Zeile + Cache des Kauf-Tipps.
+  private cHint = '';
+  private hintSig = '';
+  private hintBuy: PurchaseHint | null = null;
+  // A1: zuletzt geschriebener Bühnen-Modifikator (Icon + Name).
+  private cMod = '';
+  // A2: zuletzt geschriebenes Gimmick-Label + Spotlight-Look der HP-Bar.
+  private cGimmick = '';
+  private cSpotlight: boolean | null = null;
+  // ROADMAP-V2 G6: der weiche BP-Zähler. `goldShown` ist der zuletzt GEZEIGTE
+  // Wert (Startpunkt eines neuen Tweens), `goldTarget` der echte Kontostand.
+  private goldShown = Number.NaN;
+  private goldTarget = 0;
+  private goldFrom = 0;
+  private goldAt = 0;
+  private goldRaf = 0;
 
   private setText(el: HTMLElement, next: string, cache: string): string {
     if (next !== cache) el.textContent = next;
@@ -104,7 +184,7 @@ export class ChHud {
     // Rendered as a stamped gold chip (`.zone-kind`), so plain text reads best.
     const kind = combat.boss ? 'BOSS' : isBossZone(combat.zone) ? 'VS' : '';
     this.cKind = this.setText(this.zoneKind, kind, this.cKind);
-    this.cGold = this.setText(this.gold, fmt(state.gold), this.cGold);
+    this.setGold(state.gold);
     this.cStats = this.setText(this.stats, `DPS ${fmt(dps)} · Klick ${fmt(clickDmg)}`, this.cStats);
 
     const hpf = state.heaven.hpf;
@@ -125,34 +205,188 @@ export class ChHud {
     }
 
     this.cRival = this.setText(this.rivalNameEl, rivalName(combat.zone, combat.boss), this.cRival);
-    this.updateZoneStrip(combat.zone, combat.maxZone);
+    // ROADMAP-V2 A2: das Gimmick-Label des Gates steht DAUERHAFT klein an der
+    // HP-Bar — das Banner sagt es einmal groß an, hier kann man es nachlesen,
+    // solange der Boss tanzt.
+    const gimmick = combat.boss ? gimmickForZone(combat.zone) : null;
+    const label = gimmick?.label ?? '';
+    if (label !== this.cGimmick) {
+      this.cGimmick = label;
+      this.gimmickEl.classList.toggle('hidden', label === '');
+      if (label !== '') {
+        this.gimmickEl.textContent = label;
+        this.gimmickEl.title = gimmick?.description ?? '';
+      }
+    }
+    this.updateZoneStrip(combat.zone, combat.maxZone, state.stageStars, combat.remix, combat.week);
+    // ROADMAP-V2 A1/A5: die Hausregeln der aktuellen Bühne auf der Bühnen-Card —
+    // je Regel Icon + Name + der eine Satz, auf der Wochen-Bühne also ZWEI Zeilen
+    // unter einer 📅-Überschrift. Im Bosskampf schweigt die Card (Boss-Bühnen
+    // tragen keine Regel, und die Card gehört dort dem Gimmick).
+    const mods = combat.boss ? [] : stageModsFor(combat.zone, combat.remix, combat.week);
+    const weekly = !combat.boss && isWeeklyZone(combat.zone, combat.week);
+    const modTxt = (weekly ? '📅' : '') + modLabel(mods);
+    if (modTxt !== this.cMod) {
+      this.cMod = modTxt;
+      this.stageModEl.classList.toggle('hidden', mods.length === 0);
+      this.stageModEl.classList.toggle('weekly', weekly);
+      if (mods.length > 0) {
+        const head = weekly ? '<b class="sm-week">📅 Bühne der Woche</b>' : '';
+        this.stageModEl.innerHTML =
+          head +
+          mods.map((m) => `<b>${m.icon} ${m.name}</b><span>${m.description}</span>`).join('');
+        this.stageModEl.title = mods.map((m) => m.description).join(' · ');
+      }
+    }
+    // „Boss herausfordern": nur an der Frontier-Boss-Bühne, solange ihr Gate
+    // unbesiegt ist und der Boss nicht schon tanzt.
+    const challenge = atFrontierGate(combat);
+    if (challenge !== this.cChallenge) {
+      this.cChallenge = challenge;
+      this.bossBtn.classList.toggle('hidden', !challenge);
+      // P3: Die Telemetrie-Zeile teilt die Sichtbarkeits-Bedingung des Buttons —
+      // sobald der Boss tanzt (oder man wegreist), verschwindet sie SOFORT, ohne
+      // auf den 0.25-s-Tick zu warten. Nur das Rechnen hängt am Tick.
+      if (!challenge) this.setHint('');
+    }
     this.frame(combat);
+  }
+
+  /**
+   * ROADMAP-V2 G6 — Der BP-Zähler zählt weich hoch statt zu springen.
+   *
+   * Die ANZEIGE-Quelle bleibt `fmt`: getweent wird nur der Wert, den `fmt`
+   * bekommt. Ein neuer Kontostand bricht den laufenden Tween ab und startet bei
+   * der aktuell gezeigten Zahl weiter (sonst zuckte der Zähler zurück), und der
+   * rAF läuft ausschließlich, solange sich wirklich etwas bewegt — winzige
+   * Idle-Ticks (`shouldTween`) und der allererste Wert werden direkt
+   * geschrieben, kosten also gar nichts.
+   */
+  private setGold(gold: number): void {
+    if (this.goldTarget === gold && !Number.isNaN(this.goldShown)) return;
+    this.goldTarget = gold;
+    if (Number.isNaN(this.goldShown) || !shouldTween(this.goldShown, gold)) {
+      this.stopGoldTween();
+      this.goldShown = gold;
+      this.cGold = this.setText(this.gold, fmt(gold), this.cGold);
+      return;
+    }
+    this.goldFrom = this.goldShown;
+    this.goldAt = performance.now();
+    if (this.goldRaf === 0) this.goldRaf = requestAnimationFrame(this.stepGold);
+  }
+
+  private stepGold = (now: number): void => {
+    const v = tweenValue(this.goldFrom, this.goldTarget, now - this.goldAt);
+    this.goldShown = v;
+    this.cGold = this.setText(this.gold, fmt(v), this.cGold);
+    if (v === this.goldTarget) {
+      this.goldRaf = 0;
+      return;
+    }
+    this.goldRaf = requestAnimationFrame(this.stepGold);
+  };
+
+  private stopGoldTween(): void {
+    if (this.goldRaf !== 0) {
+      cancelAnimationFrame(this.goldRaf);
+      this.goldRaf = 0;
+    }
+  }
+
+  /**
+   * Wand-Telemetrie (ROADMAP-V2 P3) — NUR aus dem 0.25-s-Tick aufrufen, nie pro
+   * Frame und nie aus dem Klick-Pfad: `bossGap`/`burstEstimate` sind billig, aber
+   * die Kauf-Rangfolge scannt die ganze Crew. Sie wird zusätzlich hinter einer
+   * Cache-Signatur (Gold/Level/Fähigkeiten) gehalten, läuft also nur nach einer
+   * echten Konto- oder Crew-Änderung erneut.
+   */
+  advise(state: ChState, combat: CombatState, dps: number, clickDmg: number): void {
+    if (!atFrontierGate(combat)) {
+      this.setHint('');
+      return;
+    }
+    const gap = bossGap(state, combat, dps, clickDmg);
+    if (!(gap < HINT_GAP_MAX)) {
+      this.setHint(''); // Lücke zu (oder unbekannt) ⇒ kein ungefragter Ratschlag
+      return;
+    }
+    const sig = purchaseSignature(state);
+    if (sig !== this.hintSig) {
+      this.hintSig = sig;
+      this.hintBuy = bestPurchaseHint(state);
+    }
+    const burst = fmt(burstEstimate(state, dps, clickDmg));
+    const boss = fmt(bossHp(combat.zone));
+    const tip = this.hintBuy
+      ? ` — Tipp: <b>${this.hintBuy.label}</b> · ${fmt(this.hintBuy.cost)} BP${
+          this.hintBuy.affordable ? '' : ' (sparen)'
+        }`
+      : '';
+    this.setHint(`Dein Burst ~${burst} · Boss ${boss}${tip}`);
+  }
+
+  /** Telemetrie-Zeile schreiben/verstecken (change-detected, kein DOM-Churn). */
+  private setHint(html: string): void {
+    if (html === this.cHint) return;
+    this.cHint = html;
+    this.bossHint.classList.toggle('hidden', html === '');
+    if (html !== '') this.bossHint.innerHTML = html;
   }
 
   /**
    * Bühnen-Bildleiste (Goal-Umbau: reine ANZEIGE, nicht klickbar — die Bühnen
    * wählt das Spiel selbst): fünf Insel-Thumbnails um die aktuelle Zone, die
    * aktive markiert, Boss-Gates (×5) mit Gold-Rand, kommende Zonen gedimmt.
+   * Unter jeder Nummer die P1-Stern-Pips der Bühne.
    */
-  private updateZoneStrip(zone: number, frontier: number): void {
-    const start = Math.max(1, zone - 2);
-    const sig = `${start}|${zone}|${frontier}`;
+  private updateZoneStrip(
+    zone: number,
+    frontier: number,
+    stars: StageStars,
+    remix: number,
+    week: number,
+  ): void {
+    // Nur ERREICHTE Bühnen zeigen (nichts Zukünftiges spoilern): das Fenster
+    // endet an der Frontier und jede Bühne ist klickbar — zurückreisen zum
+    // Farmen, wieder vor zur Boss-Bühne.
+    const end = Math.min(frontier, Math.max(zone + 2, 5));
+    const start = Math.max(1, end - 4);
+    // Die Sterne der SICHTBAREN Bühnen gehören in die Change-Detection: sonst
+    // bliebe ein frisch verdienter Pip bis zur nächsten Bühnen-Änderung leer.
+    let starSig = '';
+    for (let z = start; z <= end; z++) starSig += `${starsAt(stars, z)},`;
+    const sig = `${start}|${end}|${zone}|${frontier}|${remix}|${week}|${starSig}${starsAt(stars, frontier)}`;
     if (sig === this.cStrip) return;
     this.cStrip = sig;
-    const slots: string[] = [];
-    for (let z = start; z < start + 5; z++) {
+    const slot = (z: number): string => {
+      const weekly = isWeeklyZone(z, week);
       const cls = [
         'zs',
-        z === zone ? 'active' : '',
+        z === zone ? 'active' : 'go',
         z % 5 === 0 ? 'boss' : '',
-        z > frontier ? 'lockd' : '',
+        weekly ? 'wk' : '',
       ]
         .filter(Boolean)
         .join(' ');
-      slots.push(
-        `<span class="${cls}"
-           title="${z % 5 === 0 ? `Boss-Bühne ${z}` : `Bühne ${z}`}">${islandSvg(z)}<span>${z}</span></span>`,
-      );
+      const label = z % 5 === 0 ? `Boss-Bühne ${z}` : `Bühne ${z}`;
+      const mods = stageModsFor(z, remix, week);
+      // Die Regeln gehören in den Tooltip: so wählt man die Farm-Bühne schon im
+      // Strip, ohne erst hinreisen zu müssen — auf der Wochen-Bühne beide.
+      const title =
+        (z === zone ? label : `Zu ${label} reisen`) +
+        (weekly ? ' · 📅 Bühne der Woche' : '') +
+        (mods.length > 0 ? ` · ${modLabel(mods)}` : '');
+      return `<button type="button" class="${cls}" data-z="${z}"
+           title="${title}">${modBadge(z, remix, week)}${islandSvg(z)}<span>${z}</span>${starPips(z, stars)}</button>`;
+    };
+    const slots: string[] = [];
+    for (let z = start; z <= end; z++) slots.push(slot(z));
+    // Weit zurückgereist? Die Frontier bleibt IMMER erreichbar — als letzter
+    // Slot hinter einer „…"-Lücke (der Weg zurück zum Boss-Gate).
+    if (frontier > end) {
+      if (frontier > end + 1) slots.push('<span class="zs-gap">…</span>');
+      slots.push(slot(frontier));
     }
     this.zoneStrip.innerHTML = slots.join('');
   }
@@ -186,6 +420,30 @@ export class ChHud {
         this.cProg,
       );
     }
+  }
+
+  /**
+   * Spotlight-Look der Boss-HP-Bar (ROADMAP-V2 A2, Club): solange die Phase
+   * läuft, wechselt der Balken in den Phasen-Look und das Label pulst — der
+   * Spieler sieht am Balken selbst, dass gerade nur Klicks zählen. Change-
+   * detected, wird also gefahrlos pro Frame gerufen.
+   */
+  setSpotlight(on: boolean): void {
+    if (on === this.cSpotlight) return;
+    this.cSpotlight = on;
+    this.hpFill.classList.toggle('spotlight', on);
+    this.gimmickEl.classList.toggle('on', on);
+  }
+
+  /**
+   * Ein 🌊-Puls auf der HP-Bar (Beach): die Welle hat gerade geheilt. Die
+   * Animation wird per Reflow neu angestoßen, damit auch die dritte Welle
+   * desselben Kampfes sichtbar ist.
+   */
+  pulseHeal(): void {
+    this.hpFill.classList.remove('healed');
+    void this.hpFill.offsetWidth;
+    this.hpFill.classList.add('healed');
   }
 
   /** Combo readout with the tier name (e.g. "Combo ×27 · Heiß"). */

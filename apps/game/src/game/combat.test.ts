@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
+import { bossHpScale } from './boss-gimmicks';
 import {
   BOSS_TIME_S,
   bossHp,
   bossTimeFraction,
+  challengeBoss,
   createCombat,
   goldFor,
   hit,
@@ -26,7 +28,22 @@ describe('combat — zones & HP scaling', () => {
     expect(monsterHp(1)).toBe(10);
     expect(monsterHp(2)).toBeCloseTo(16, 6);
     expect(monsterHp(5)).toBeGreaterThan(monsterHp(4));
+    // Zone 1 ist kein Gate ⇒ kein Gimmick-Ausgleich, die rohe ×10-Kurve.
     expect(bossHp(1)).toBe(monsterHp(1) * 10);
+  });
+
+  // ROADMAP-V2 A2: An einem echten Gate zahlt der Boss sein Theme-Gimmick in
+  // Ausdauer (`GIMMICK_HP_SCALE`) — die Kurve bleibt exponentiell, aber jedes
+  // Theme sitzt an seiner eigenen Stufe. Der Faktor kommt aus der EINEN Quelle.
+  it('a gated boss carries its gimmick’s Ausdauer scale', () => {
+    for (const zone of [5, 10, 15, 20, 25]) {
+      expect(bossHp(zone)).toBeCloseTo(monsterHp(zone) * 10 * bossHpScale(zone), 9);
+    }
+    expect(bossHpScale(5)).toBeLessThan(1); // Spotlight kostet den Boss Ausdauer
+    expect(bossHpScale(20)).toBe(1); // Gravitation hilft dem Spieler ⇒ kein Rabatt
+    expect(bossHp(10)).toBeGreaterThan(bossHp(5)); // Kurve bleibt monoton …
+    expect(bossHp(15)).toBeGreaterThan(bossHp(10));
+    expect(bossHp(20)).toBeGreaterThan(bossHp(15));
   });
 
   it('marks every 5th zone as a boss zone', () => {
@@ -101,7 +118,7 @@ describe('combat — progression reducer', () => {
 });
 
 describe('combat — boss timer', () => {
-  it('counts down and expires, bouncing back to farming (no zone lost)', () => {
+  it('counts down and expires, bouncing back to the PREVIOUS stage to farm', () => {
     const boss = spawnFor(5, MONSTERS_PER_ZONE, 5);
     const mid = tickBoss(boss, 10);
     expect(mid.failed).toBe(false);
@@ -110,14 +127,32 @@ describe('combat — boss timer', () => {
     const dead = tickBoss(boss, BOSS_TIME_S + 1);
     expect(dead.failed).toBe(true);
     expect(dead.state.boss).toBe(false);
-    expect(dead.state.zone).toBe(5); // still zone 5
-    expect(dead.state.killsThisZone).toBe(0); // refarm the rivals
+    expect(dead.state.zone).toBe(4); // one stage back — farm & upgrade
+    expect(dead.state.maxZone).toBe(5); // frontier kept: boss stays reachable
+    expect(dead.state.killsThisZone).toBe(0);
   });
 
   it('is a no-op for a non-boss target', () => {
     const s = createCombat();
     expect(tickBoss(s, 5).failed).toBe(false);
     expect(tickBoss(s, 5).state).toEqual(s);
+  });
+});
+
+describe('combat — challengeBoss', () => {
+  it('spawns the frontier boss directly, skipping the rival wave', () => {
+    const s = spawnFor(5, 2, 5); // frontier boss stage, wave not cleared
+    const c = challengeBoss(s);
+    expect(c.boss).toBe(true);
+    expect(c.zone).toBe(5);
+    expect(c.hpMax).toBe(bossHp(5));
+  });
+
+  it('is a no-op off the frontier, on non-boss stages and mid-fight', () => {
+    expect(challengeBoss(spawnFor(5, 2, 10))).toEqual(spawnFor(5, 2, 10)); // old boss stage
+    expect(challengeBoss(spawnFor(4, 2, 4))).toEqual(spawnFor(4, 2, 4)); // no boss gate
+    const fighting = spawnFor(5, MONSTERS_PER_ZONE, 5);
+    expect(challengeBoss(fighting)).toEqual(fighting); // already the boss
   });
 });
 

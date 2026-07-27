@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ALL_BOARD,
   createApp,
   RATE_LIMIT_PER_MIN,
+  validateBoard,
   validateNickname,
   validateStat,
   validateTime,
@@ -18,9 +20,19 @@ function cmpNick(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/**
+ * In-memory repo. The v2 side is keyed by BOARD (X4) — a `Map` of board →
+ * rows —, exactly like the D1 adapter's two tables: `all` is its own board and
+ * every other key is isolated from it and from every other key.
+ */
 function fakeRepo(): ScoreRepo {
   const rows: ScoreRow[] = [];
-  const v2: ScoreRowV2[] = [];
+  const boards = new Map<string, ScoreRowV2[]>();
+  const of = (board: string): ScoreRowV2[] => {
+    const b = boards.get(board) ?? [];
+    boards.set(board, b);
+    return b;
+  };
   return {
     async insert(r) {
       rows.push(r);
@@ -31,7 +43,8 @@ function fakeRepo(): ScoreRepo {
     async top(limit) {
       return [...rows].sort((a, b) => a.bestTimeS - b.bestTimeS).slice(0, limit);
     },
-    async upsertV2(r) {
+    async upsertV2(r, board = ALL_BOARD) {
+      const v2 = of(board);
       const existing = v2.find((x) => x.nickname === r.nickname);
       if (!existing) {
         v2.push({ ...r });
@@ -45,9 +58,9 @@ function fakeRepo(): ScoreRepo {
       }
       return { ...existing };
     },
-    async rankForV2(r) {
+    async rankForV2(r, board = ALL_BOARD) {
       return (
-        v2.filter(
+        of(board).filter(
           (x) =>
             x.maxZone > r.maxZone ||
             (x.maxZone === r.maxZone && x.souls > r.souls) ||
@@ -55,8 +68,8 @@ function fakeRepo(): ScoreRepo {
         ).length + 1
       );
     },
-    async topV2(limit) {
-      return [...v2]
+    async topV2(limit, board = ALL_BOARD) {
+      return [...of(board)]
         .sort(
           (a, b) => b.maxZone - a.maxZone || b.souls - a.souls || cmpNick(a.nickname, b.nickname),
         )
@@ -102,8 +115,15 @@ function appWith(repo: ScoreRepo, limiter: RateLimiter) {
       },
       {},
     );
-  const topV2 = (limit?: number) =>
-    app.request(`/api/v2/scores/top${limit === undefined ? '' : `?limit=${limit}`}`, {}, {});
+  const topV2 = (limit?: number, board?: string) => {
+    const q = [
+      limit === undefined ? '' : `limit=${limit}`,
+      board === undefined ? '' : `board=${board}`,
+    ]
+      .filter(Boolean)
+      .join('&');
+    return app.request(`/api/v2/scores/top${q ? `?${q}` : ''}`, {}, {});
+  };
   return { post, top, postV2, topV2 };
 }
 
@@ -339,5 +359,134 @@ describe('GET /api/v2/scores/top', () => {
     const { topV2 } = appWith(fakeRepo(), fakeLimiter());
     expect((await topV2(9999)).status).toBe(200);
     expect((await topV2(-3)).status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// X4: der optionale `board`-Schlüssel (rein additiv)
+// ---------------------------------------------------------------------------
+
+describe('validateBoard', () => {
+  it('defaults a missing/empty board to the all-time board', () => {
+    expect(validateBoard(undefined)).toBe(ALL_BOARD);
+    expect(validateBoard(null)).toBe(ALL_BOARD);
+    expect(validateBoard('')).toBe(ALL_BOARD);
+    expect(validateBoard('all')).toBe(ALL_BOARD);
+  });
+
+  it('accepts lowercase keys of [a-z0-9-] up to 24 chars', () => {
+    expect(validateBoard('weekly-2951')).toBe('weekly-2951');
+    expect(validateBoard('0')).toBe('0');
+    expect(validateBoard('a'.repeat(24))).toBe('a'.repeat(24));
+  });
+
+  it('rejects uppercase, punctuation, oversized keys and non-strings', () => {
+    for (const bad of [
+      'Weekly-1',
+      'weekly_1',
+      'weekly 1',
+      '-weekly',
+      'weekly/1',
+      "a'; DROP TABLE scores_v2;--",
+      'a'.repeat(25),
+      42,
+      {},
+      [],
+    ]) {
+      expect(validateBoard(bad)).toBeNull();
+    }
+  });
+});
+
+describe('board-keyed leaderboards (X4)', () => {
+  it('keeps every board isolated — same nickname, independent scores', async () => {
+    const { postV2, topV2 } = appWith(fakeRepo(), fakeLimiter(100));
+    await postV2({ nickname: 'Twerkia', maxZone: 90, souls: 5, ascensions: 2 });
+    await postV2({
+      nickname: 'Twerkia',
+      maxZone: 12,
+      souls: 5,
+      ascensions: 2,
+      board: 'weekly-2951',
+    });
+    await postV2({
+      nickname: 'Bootyx',
+      maxZone: 40,
+      souls: 1,
+      ascensions: 0,
+      board: 'weekly-2951',
+    });
+
+    const all = (await (await topV2()).json()) as ScoreRowV2[];
+    expect(all.map((r) => [r.nickname, r.maxZone])).toEqual([['Twerkia', 90]]);
+
+    const weekly = (await (await topV2(50, 'weekly-2951')).json()) as ScoreRowV2[];
+    expect(weekly.map((r) => [r.nickname, r.maxZone])).toEqual([
+      ['Bootyx', 40],
+      ['Twerkia', 12],
+    ]);
+  });
+
+  it('starts the NEXT week empty — the key alone resets the board', async () => {
+    const { postV2, topV2 } = appWith(fakeRepo(), fakeLimiter(100));
+    await postV2({
+      nickname: 'Twerkia',
+      maxZone: 60,
+      souls: 1,
+      ascensions: 0,
+      board: 'weekly-2951',
+    });
+    expect(((await (await topV2(50, 'weekly-2951')).json()) as ScoreRowV2[]).length).toBe(1);
+    expect(((await (await topV2(50, 'weekly-2952')).json()) as ScoreRowV2[]).length).toBe(0);
+  });
+
+  it('ranks within the board, not across boards', async () => {
+    const { postV2 } = appWith(fakeRepo(), fakeLimiter(100));
+    // Drei tiefe Einträge auf dem Allzeit-Board …
+    for (const n of ['AaA', 'BbB', 'CcC']) {
+      await postV2({ nickname: n, maxZone: 500, souls: 9, ascensions: 3 });
+    }
+    // … drücken den ersten Wochen-Eintrag NICHT nach hinten.
+    const res = await postV2({
+      nickname: 'Neuling',
+      maxZone: 11,
+      souls: 0,
+      ascensions: 0,
+      board: 'weekly-2951',
+    });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ rank: 1 });
+  });
+
+  it('upserts per nickname WITHIN a board (only a greater maxZone wins)', async () => {
+    const { postV2, topV2 } = appWith(fakeRepo(), fakeLimiter(100));
+    const board = 'weekly-2951';
+    await postV2({ nickname: 'Twerkia', maxZone: 30, souls: 1, ascensions: 0, board });
+    await postV2({ nickname: 'Twerkia', maxZone: 12, souls: 9, ascensions: 9, board });
+    const rows = (await (await topV2(50, board)).json()) as ScoreRowV2[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].maxZone).toBe(30);
+    expect(rows[0].souls).toBe(1); // die unterdrückte Zeile ändert auch die Stats nicht
+  });
+
+  it('treats an explicit board=all exactly like no board at all', async () => {
+    const { postV2, topV2 } = appWith(fakeRepo(), fakeLimiter(100));
+    await postV2({ nickname: 'Twerkia', maxZone: 30, souls: 1, ascensions: 0 });
+    await postV2({ nickname: 'Bootyx', maxZone: 44, souls: 1, ascensions: 0, board: 'all' });
+    const rows = (await (await topV2(50, 'all')).json()) as ScoreRowV2[];
+    expect(rows.map((r) => r.nickname)).toEqual(['Bootyx', 'Twerkia']);
+  });
+
+  it('rejects an invalid board with 400 on submit and on top', async () => {
+    const { postV2, topV2 } = appWith(fakeRepo(), fakeLimiter(100));
+    const bad = await postV2({
+      nickname: 'Twerkia',
+      maxZone: 30,
+      souls: 1,
+      ascensions: 0,
+      board: 'Weekly 2951',
+    });
+    expect(bad.status).toBe(400);
+    expect((await topV2(50, 'WEEKLY')).status).toBe(400);
   });
 });
