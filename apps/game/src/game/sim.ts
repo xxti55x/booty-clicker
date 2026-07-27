@@ -190,6 +190,30 @@ export interface SimConfig {
 }
 
 // ---------------------------------------------------------------------------
+// ROADMAP-V2 P5 — die Bot-Profile der Anker, EINMAL definiert
+// ---------------------------------------------------------------------------
+// Die Anker-Tests (`sim.test.ts`) und das Balance-Ritual (`npm run balance`,
+// `scripts/balance.mjs`) müssen dieselben Kennlinien messen. Wären die Profile
+// zweimal getippt, driftete das Ritual irgendwann still von den Ankern weg —
+// also stehen sie hier, und beide Seiten importieren sie.
+
+/** Der §4.8-„aktive Spieler": 3 Klicks/s mit Juice, volle Loot-Ökonomie. */
+export const SIM_ACTIVE: SimConfig = { clickRate: 3, juice: true };
+
+/**
+ * Derselbe Bot unter den §4.8-KALIBRIER-Bedingungen: ohne Loot-Ökonomie. Die
+ * Pacing-Tabelle wurde unter genau diesen Annahmen gemessen (der Goldene
+ * Pfirsich und die Truhen sind ein bewusst zusätzlicher Beschleuniger).
+ */
+export const SIM_ACTIVE_CAL: SimConfig = { clickRate: 3, juice: true, economy: false };
+
+/** Die feste Lauflänge der Messungen: 45 min = 2700 Ein-Sekunden-Schritte. */
+export const SIM_RUN_S = 2700;
+
+/** Die Seeds der Langhorizont-Anker (E2/E3/erste Himmelfahrt). */
+export const SIM_SEEDS_HEAVY: readonly number[] = [1, 7, 12345];
+
+// ---------------------------------------------------------------------------
 // Loot-economy balancing (named constants, spec §5/§6) — data, not logic
 // ---------------------------------------------------------------------------
 

@@ -3,6 +3,152 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## ROADMAP-V2 Schritt 11 — X6 Mobile-QA + P5 Balance-Ritual
+
+- **Der schlimmste Mobil-Befund war kein Telefon im Hochformat, sondern das
+  QUERformat.** Portrait (402×850) hatte lauter kleine Wunden — Touch-Ziele
+  zwischen 20 und 37 px, die Hinweiszeile unter dem Mute-Knopf, 4 px Crew-Knopf
+  in der HUD-Karte, ein neunter Reiter hinter einem Seitwärts-Scroll _ohne
+  Balken_. Eine kleine Landscape (740×360) dagegen war ein Trümmerhaufen: die
+  Ekstase-Leiste lag zu 280 × 42 px auf der Rivalen-Karte, der Crew-Knopf zu
+  33 × 33 px auf dem Zonen-Strip, der Mute-Knopf auf Karte und Boss-Knopf, und
+  die Rivalen-Karte endete 26 px UNTER der Falz. Ursache: über 640 px Breite
+  greift das 50/50-Layout (Bühne rechts, Overlay-Spalte auf 75 %) — es fragt
+  aber nur nach BREITE. Ein Landscape-Telefon ist breit und flach, also bekam es
+  die Desktop-Maße auf 360 px Höhe. Lehre für die Zukunft: jede Layout-Abfrage
+  in diesem Projekt, die eine Spalte stapelt, braucht ihr Höhen-Gegenstück.
+- **Die Reparatur ist eine `max-height`-Abfrage, keine zweite Breiten-Abfrage.**
+  `@media (max-height: 480px)` schnürt die Kopf-Spalte zusammen (BP 40 → 24 px,
+  Karten-Polster halbiert, Strip-Kacheln 46 → 40 px = exakt die Touch-Grenze)
+  und legt Ekstase + Mute an den unteren Rand; ein zweiter Block
+  `(min-width: 641px) and (max-height: 480px)` verschiebt NUR die horizontale
+  Hälfte (Overlay-Spalte 75 % → 66 %, am Crew-Knopf vorbei). Getrennt, weil ein
+  640 × 360-Gerät die Höhen-Kur braucht, aber weiter das Bottom-Sheet-Layout
+  fährt. Der Block steht am ENDE des Stylesheets — `.zs`/`.zonestrip` werden
+  weiter oben definiert, und Media-Queries erben keine Spezifität.
+- **Die Tutorial-Zeile verschwindet auf flachen Viewports ganz.** Sie lag quer
+  über der Rivalen-Karte, und auf 360 px Höhe ist eine Zeile, die sich nach 26 s
+  ohnehin wegblendet, kein Platz wert. Sie ist die EINZIGE Sache, die X6
+  ausblendet — alles andere schrumpft nur.
+- **44 px statt 40 px, wo Platz ist.** Die Messlatte des Pakets war „≥ 40 px",
+  die Portrait-Fixes gehen auf 44 (Kauf-Mengen, Kulissen, Skin-Knöpfe,
+  Boss-Knopf, Board-Wechsler); in der flachen Landscape, wo jede Zeile zählt,
+  bleibt es bei 40. Die Reiter gehen auf 44 px Mindestbreite: neun Reiter à 56 px
+  ergaben 448 px auf einem 399 px breiten Blatt, „⚙️ Mehr" war praktisch
+  unerreichbar. Mit 44 px passen alle neun nebeneinander, und „Himmel" (die
+  längste Beschriftung, 9.5 px) passt weiterhin hinein.
+- **Der Zonen-Strip war schon in Ordnung — gemessen, nicht geraten.** Sieben
+  Slots (fünf Bühnen + „…"-Lücke + Frontier) belegen im Portrait 320 px in einer
+  370 px breiten Karte, jede Kachel 46 × 51 px inkl. Mod-Abzeichen und
+  Stern-Pips. Der Lücken-Slot ist mit 20 × 19 px klein, aber er ist ein
+  Trennzeichen und kein Knopf — er wurde bewusst NICHT aufgeblasen. Ebenfalls
+  gemessen und bewusst gelassen: `scrollWidth` des Strips liegt 4 px über der
+  Box, weil die aktive Kachel um 1.16 skaliert; die Karte hat 22 px Polster,
+  es wird nichts abgeschnitten.
+- **fps: SwiftShader taugt nur als RELATIV-Maß — und sagt hier etwas
+  Unerwartetes.** Über je 5 s gemessen (rAF-Delta, Bühne 12, Preset-Vorgabe
+  „high"): Portrait 402 × 850 → 1350 ms/Frame (0.7 fps), Landscape 740 × 360 →
+  536 ms/Frame (1.9 fps). Die Gerätepixel-Dichte ist dabei fast egal (DPR 2 → 1
+  bringt nur −5 % bzw. −9 %), also ist der Software-Rasterizer NICHT
+  füllraten-, sondern pass-gebunden. Draw-Calls: Portrait 179, Landscape und
+  Desktop je 236 — beide unter dem 250er-Budget, und das Hochformat hat sogar
+  WENIGER. Der Portrait-Rückstand ist damit eine Eigenschaft des
+  Software-Rasterizers über einem hohen, schmalen Puffer, keine Spiel-Eigenschaft
+  — die X6-Änderungen sind ohnehin reines CSS und bewegen ihn nicht.
+- **Offen und ehrlich benannt: das Mobil-Preset wählt sich nicht selbst.**
+  `settings.quality` steht per Vorgabe auf `high` (Pixel-Ratio-Deckel 2, Schatten,
+  Bloom, volle Ambient-Dichte); eine Geräte-Erkennung gibt es nicht. Die
+  Roadmap-Latte „60/30 fps Desktop/Mobil-Preset" hängt also an einer manuellen
+  Einstellung. Das zu drehen ist Logik, nicht Layout — X6 war ausdrücklich eine
+  CSS-Runde, also bleibt es hier als benannte Restschuld stehen statt als stille
+  Änderung.
+- **P5: `npm run balance` läuft über node + esbuild, nicht über den
+  Test-Runner.** Zwei Wege standen zur Wahl: ein `balance.report.test.ts`, das
+  eine Tabelle druckt und immer grün ist, oder ein Skript, das die TS-Module
+  bündelt und abtastet. Der Test-Runner-Weg hätte die Tabelle bei JEDEM
+  `npm test` mitlaufen lassen (+15 s) und einen Test erfunden, der nichts
+  behauptet. Das Skript folgt stattdessen dem Muster, das schon
+  `tools/blender/dump_poses.mjs` vorgibt: esbuild (über Vite ohnehin im Baum,
+  also keine neue Dependency) bündelt `game/sim.ts` + `game/weekly.ts` nach ESM,
+  node importiert und misst. Laufzeit 9.8 s gegen ein 60-s-Budget; das Skript
+  bricht selbst ab, wenn es das Budget reißt.
+- **Keine Zweitimplementierung — die Bot-Profile sind jetzt geteilt.**
+  `SIM_ACTIVE`, `SIM_ACTIVE_CAL`, `SIM_RUN_S` und `SIM_SEEDS_HEAVY` standen als
+  lokale Konstanten in `sim.test.ts` und wären im Skript ein zweites Mal
+  getippt worden — das driftet irgendwann. Sie stehen jetzt in `sim.ts`, und
+  BEIDE Seiten importieren sie; ein Test pinnt ihre Werte, damit eine Änderung
+  laut wird statt still jede Kennlinie zu verschieben. Die Zahlen selbst kommen
+  ausschließlich aus `simulateSingleRun`/`simulateRunChain`/
+  `simulateAscensionEra`/`simulateContinuous` — denselben Funktionen wie die
+  Anker, mit denselben Optionen.
+- **Die Tabelle nennt neben jedem Block seinen Anker.** Sie ist kein Gate (rot
+  wird nur `npm test`), sondern der Kontostand daneben: „t25 32.4 min · Anker
+  ~30 min ±25 %" liest man in zwei Sekunden, „E2-Verhältnis 1.86 · Anker ≤ 2.00"
+  auch. So sieht man eine Verschiebung, BEVOR ein Anker reißt — genau der Zweck,
+  den P5 der Roadmap versprochen hat.
+
+### Balance-Snapshot (2026-07-27, Seeds 1/7/12345 — `npm run balance`)
+
+```
+── 1 · Pacing im ersten Sitting · Bot 3 cps + Juice, OHNE Loot (§4.8-Kalibrierung)
+Seed    t10 [min]   t20 [min]   t25 [min]   t30 [min]   Wand-Bühne
+────────────────────────────────────────────────────────────────────
+1             1.7        13.7        35.8       n. e.           25
+7             1.7        13.9        33.9       n. e.           25
+12345         1.7        13.4        27.4       n. e.           25
+   Anker: t10 ~1.75 min ±25 % · t25 ~30 min ±25 % (+5) · Bühne 30 NICHT im ersten Sitting
+   Mittel: t10 1.7 min · t25 32.4 min · Wand ⌀ Bühne 25.0
+
+── 2 · Kumulierter Marsch · Bot 1 cps ohne Juice, MIT Loot (14 × 45 min)
+Seed    t50 [h]   t75 [h]   Beste Bühne   Seelen-Bank
+───────────────────────────────────────────────────────
+1          2.84      3.90            75          1295
+7          2.72      3.13            75          1295
+12345      2.29      3.20            75          1295
+   Anker: t75 in [3 h, 7.5 h] · Mittel t75 3.41 h
+
+── 3 · Erste Himmelfahrt · Bot 0.7 cps ohne Juice, OHNE Loot (RS-Lebenszeit ≥ 1000)
+Seed    Himmelfahrt [h]   Durststrecke [min]   +50 %-Stufen   Aszensionen   Tiefste Bühne
+───────────────────────────────────────────────────────────────────────────────────────────
+1                 17.36                 93.7             74             8              75
+7                 19.06                 98.1             71            10              75
+12345             17.17                 98.2             73             8              75
+   Anker: Himmelfahrt in [11.6 h, 19.4 h] · Durststrecke ≤ 105 min
+   Mittel: 17.86 h · längste Durststrecke 98.2 min
+
+── 4 · E2 weiche Wand · adaptive Aszension + Ahnen + Himmelfahrt + Baum
+Seed    +5-Stufen   schlimmstes Verhältnis   Aszensionen   Himmelfahrten   HPF   Baum-Stufen   Beste Bühne
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+1              15                     0.93            15               1     1             0            75
+7              15                     0.84            15               1     1             0            75
+12345          15                     1.86            13               1     1             0            75
+   Anker: ≥ 14 Stufen · Verhältnis ≤ 2.00 · ≥ 1 Himmelfahrt über ≥ 8 Aszensionen
+
+── 5 · E3 Lebendigkeit (20 Aszensionen) + E4 Klick-Vorsprung (45 min)
+Seed    E3 +50 %-Stufen   E3 größte Lücke [min]   aktiv   gemächlich   E4-Vorsprung
+─────────────────────────────────────────────────────────────────────────────────────
+1                    55                     6.0      30           23             +7
+7                    49                     5.5      45           20            +25
+12345                58                     4.6      35           30             +5
+   Anker: ≥ 10 Stufen · Lücke ≤ 90 min · E4-Vorsprung ≥ 4 Bühnen
+   Mittel: E4-Vorsprung +12.3 Bühnen · kleinster 5
+
+── 6 · Wochen-Anker · Bühne der Woche + Board-Saison (ISO-Kalender, A5/X4)
+Woche                 ISO   Bühne                         Regeln           Saison   Board-Schlüssel
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+2952 ◀ jetzt   KW 31/2026      44       Beat-Nacht + Peach-Party   7 (Woche 5/13)       weekly-2952
+2953           KW 32/2026      51   Konfetti-Regen + Peach-Party   7 (Woche 6/13)       weekly-2953
+2954           KW 33/2026      58   Konfetti-Regen + Peach-Party   7 (Woche 7/13)       weekly-2954
+2955           KW 34/2026      66        Zähe Menge + Beat-Nacht   7 (Woche 8/13)       weekly-2955
+2956           KW 35/2026      72          Goldrausch + Marathon   7 (Woche 9/13)       weekly-2956
+   Streuung über 52 Wochen: 43 verschiedene Bühnen (21…79), Schrittweite 7
+
+═══ fertig in 9.8 s (Budget < 60 s) ══════════════════════════════
+```
+
+Alle Werte decken sich mit den Anker-Tests (807 + 1 = 808 grün) — P5 hat keine
+Balance-Zahl bewegt, es macht sie nur sichtbar.
+
 ## ROADMAP-V2 Schritt 10 — A5 Bühne der Woche + X4 Leaderboard-UI
 
 - **2026-07-27 — A5 landete regulär (Commit „Buehne der Woche"), X4 wurde vom

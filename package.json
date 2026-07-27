@@ -15,6 +15,7 @@
     "preview": "npm run preview -w apps/game",
     "test": "npm run test --workspaces --if-present",
     "test:sim": "npm run test:sim -w apps/game",
+    "balance": "node apps/game/scripts/balance.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

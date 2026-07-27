@@ -7,6 +7,10 @@ import { spawnFor } from './combat';
 import { createGear, gearBonus, KULISSE_BUFFS, MAX_SKIN_LEVEL, MAX_SKIN_STARS } from './gear';
 import { TREE_NODES, greedyTreeSpend, treeLevel, treeNodeConfig, treeRefund } from './heaven';
 import {
+  SIM_ACTIVE,
+  SIM_ACTIVE_CAL,
+  SIM_RUN_S,
+  SIM_SEEDS_HEAVY,
   SIM_TREE_PRIORITY,
   farmZone,
   simulateAscensionEra,
@@ -81,11 +85,26 @@ import {
 // −20 % → −15 % Crew-DPS; mit den Roadmap-Rohwerten lief der empfindlichste Anker
 // (0.7-cps-Bot, seed 7) mit 20.35 h aus seinem Fenster.
 // ---------------------------------------------------------------------------
-const ACTIVE = { clickRate: 3, juice: true } as const; // full economy on (default)
-const ACTIVE_CAL = { clickRate: 3, juice: true, economy: false } as const; // §4.8 baseline
-const RUN_S = 2700;
+// P5: Die Profile stehen in `sim.ts` — dasselbe Modul, aus dem sich auch
+// `npm run balance` bedient, damit Ritual und Anker nie auseinanderlaufen.
+const ACTIVE = SIM_ACTIVE; // full economy on (default)
+const ACTIVE_CAL = SIM_ACTIVE_CAL; // §4.8 baseline
+const RUN_S = SIM_RUN_S;
 const SEEDS = [1, 7, 12345, 2024, 99999];
-const SEEDS_HEAVY = [1, 7, 12345]; // the long-horizon sims (E2/E3/first-Himmelfahrt)
+const SEEDS_HEAVY = SIM_SEEDS_HEAVY; // the long-horizon sims (E2/E3/first-Himmelfahrt)
+
+// ROADMAP-V2 P5: Die Bot-Profile sind ab jetzt die GEMEINSAME Quelle der
+// Anker-Tests und des Balance-Rituals (`npm run balance`). Wer sie verstellt,
+// verschiebt JEDE Kennlinie gleichzeitig — und zwar in beiden Werkzeugen. Dieser
+// Test macht so eine Änderung laut, statt sie still durchgehen zu lassen.
+describe('simulateEndless — P5 Bot-Profile (gemeinsame Quelle mit npm run balance)', () => {
+  it('die Profile stehen fest: 3 cps + Juice, Kalibrierung ohne Loot, 45-min-Läufe', () => {
+    expect(SIM_ACTIVE).toEqual({ clickRate: 3, juice: true });
+    expect(SIM_ACTIVE_CAL).toEqual({ clickRate: 3, juice: true, economy: false });
+    expect(SIM_RUN_S).toBe(2700);
+    expect([...SIM_SEEDS_HEAVY]).toEqual([1, 7, 12345]);
+  });
+});
 
 describe('simulateEndless — self-runtime (§9.5-AC4)', () => {
   it('a full 6×45-min run-chain simulates in well under 10 s', () => {
