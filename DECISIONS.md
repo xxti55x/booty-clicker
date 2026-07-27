@@ -3,6 +3,22 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## ROADMAP-V2 Schritt 10 — A5 Bühne der Woche + X4 Leaderboard-UI
+
+- **2026-07-27 — A5 landete regulär (Commit „Buehne der Woche"), X4 wurde vom
+  Reviewer geborgen.** Der Coding-Agent starb nach fertigem X4-Code (Client,
+  UI, additive Worker-Erweiterung inkl. Tests), aber vor Commit/Beweis — der
+  Reviewer (Fable) hat den Stand abgenommen: 807 Game-Tests + 29 API-Tests
+  grün, Build sauber, Headless-Beweis über den Ziele-Tab (Wochen-Karte mit
+  gestapelten Wochen-Mods, gesperrtem Reise-Button unterhalb der Frontier
+  und Wochen-Bestzone; Saison-Zeile/Board-Wechsler/Fehler-Retry per
+  gemockter API, die echte D1-API läuft headless nicht). Wochen-Regel: auf
+  der Wochen-Bühne ERSETZEN die zwei welt-einheitlichen Wochen-Mods (Seed =
+  ISO-Woche, nicht der Spieler-Seed) den A1-Mod — nie drei Regeln
+  gleichzeitig. Prozess-Lehre: Agenten-Läufe brauchen einen
+  Fallback-Check-in des Reviewers; ein still gestorbener Agent kostete hier
+  Stunden Wartezeit, die Arbeit selbst war unversehrt im Working Tree.
+
 ## ROADMAP-V2 Schritt 9 — P4 Himmelsbaum-Ausbau
 
 - **Drei Äste, 18 Knoten — und die fünf alten bleiben byte-gleich.** Twerk-Coach,

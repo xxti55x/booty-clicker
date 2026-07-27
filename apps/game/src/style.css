@@ -913,6 +913,57 @@ body {
 .wb-cap.hidden {
   display: none;
 }
+/* ---- ROADMAP-V2 X4: Saison-Zeile + Board-Wechsler über der Bestenliste ---- */
+.lb-season {
+  margin: 6px 0 2px;
+  font-family: var(--display);
+  font-size: 13px;
+  color: var(--gold-hi);
+  letter-spacing: 0.2px;
+}
+.lb-season.hidden {
+  display: none;
+}
+.lb-boards {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin: 8px 0 4px;
+  flex-wrap: wrap;
+}
+.lb-board {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--parch-soft);
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 210, 120, 0.28);
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+}
+.lb-board:hover {
+  border-color: rgba(255, 210, 120, 0.6);
+}
+.lb-board.on {
+  color: #1b1424;
+  background: linear-gradient(180deg, #ffd77a, #e8a72e);
+  border-color: rgba(255, 210, 120, 0.85);
+  font-weight: 800;
+}
+.lb-sub {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--parch-soft);
+  opacity: 0.85;
+}
+#lbTopRetry.hidden,
+#lbRetryBtn.hidden {
+  display: none;
+}
 .lb-list {
   max-height: 50vh;
   overflow-y: auto;

@@ -22,3 +22,22 @@ CREATE TABLE IF NOT EXISTS scores_v2 (
 );
 
 CREATE INDEX IF NOT EXISTS idx_scores_v2_max_zone ON scores_v2 (max_zone DESC);
+
+-- X4 (ROADMAP-V2): keyed boards alongside the all-time board above. `scores_v2`
+-- stays EXACTLY as it is — the all-time best-zone board keeps its table, its SQL
+-- and its data; a request without a `board` (or with `board=all`) never touches
+-- this table. Everything else lands here, keyed by board:
+--   `weekly-<ISO week index>`  — the game's weekly board (A5)
+-- A weekly board therefore resets by itself: next Monday the key changes and the
+-- new board starts empty. No cron job, no truncate, no season bookkeeping.
+CREATE TABLE IF NOT EXISTS scores_boards (
+  board      TEXT NOT NULL,
+  nickname   TEXT NOT NULL CHECK (length(nickname) BETWEEN 2 AND 16),
+  max_zone   INTEGER NOT NULL,
+  souls      REAL NOT NULL,
+  ascensions INTEGER NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (board, nickname)
+);
+
+CREATE INDEX IF NOT EXISTS idx_scores_boards_rank ON scores_boards (board, max_zone DESC);

@@ -313,13 +313,21 @@
         <input class="lb-input" id="lbNick" maxlength="16" placeholder="Nickname (2–16 Zeichen)" />
         <div class="msg" id="lbMsg"></div>
         <button class="btn" id="lbSubmitBtn" type="button">Absenden</button>
+        <!-- X4: Der Fehlerpfad war stumm — jetzt bleibt der Versuch hier stehen
+             und lässt sich EINZELN wiederholen, ohne den Nickname neu zu tippen. -->
+        <button class="btn ghost hidden" id="lbRetryBtn" type="button">🔄 Erneut versuchen</button>
         <button class="btn ghost" id="lbSkipBtn" type="button">Überspringen</button>
       </div>
     </div>
     <div class="overlay hidden" id="lbTop">
       <div class="dialog wide">
-        <div class="dt">🏅 Top 50</div>
+        <div class="dt">🏅 Bestenliste</div>
+        <!-- X4: Saison-Zeile + Board-Wechsler über der Liste. -->
+        <div class="lb-season" id="lbSeason"></div>
+        <div class="lb-boards" id="lbBoards"></div>
+        <div class="lb-sub" id="lbBoardNote"></div>
         <div class="lb-list" id="lbList"></div>
+        <button class="btn ghost hidden" id="lbTopRetry" type="button">🔄 Erneut versuchen</button>
         <button class="btn" id="lbClose" type="button">Schließen</button>
       </div>
     </div>

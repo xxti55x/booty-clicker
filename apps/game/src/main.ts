@@ -115,11 +115,13 @@ import {
 } from './game/stage-mods';
 import {
   type WeeklyStage,
+  boardSeasonFor,
   noteWeeklyBest,
   stageFactorsFor,
   stageModsFor,
   weekIndexOf,
   weeklyBestZone,
+  weeklyBoardKey,
   weeklyStage,
 } from './game/weekly';
 import {
@@ -2090,7 +2092,15 @@ interface LootGlue {
 
 // Leaderboard v2 (§7.4) — fail-silent & default-off. With no `VITE_API_BASE` every
 // call is a no-op and no submit modal ever auto-pops (the game stays fully playable).
-const leaderboard = new Leaderboard();
+// X4: Die UI bekommt Saison, Wochen-Board und den Toast-Kanal als Deps — sie
+// rechnet nichts selbst, sondern liest dieselbe Wochen-Wahrheit wie Karte + Strip.
+const leaderboard = new Leaderboard({
+  toast: (icon, title, sub) => toasts.show(icon, title, sub),
+  weekly: () => weekStage,
+  season: () => (weekStage ? boardSeasonFor(weekStage.week) : null),
+  weeklyBoardKey: () => (weekStage ? weeklyBoardKey(weekStage.week) : null),
+  weekBest: () => weeklyBestZone(state.meta, runWeek),
+});
 
 // Best-zone submit throttle: remember the deepest zone we've already offered to
 // submit (localStorage, NOT the CH save — v8 schema is frozen) so the prompt fires
