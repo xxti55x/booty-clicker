@@ -202,6 +202,19 @@ import {
   truhenFokusChestMult,
 } from './game/heaven';
 import { canAscend } from './game/ascension';
+import {
+  type DustSources,
+  WARMUP_S,
+  constellationComboWindowBonus,
+  constellationCritChanceBonus,
+  constellationOfflineCapBonusS,
+  constellationOfflineRateBonus,
+  constellationStartGold,
+  buyNode as buyConstellationNode,
+  hasWarmupStart,
+  secondWindKills,
+  syncDust,
+} from './game/constellation';
 import type { CeremonyKind } from './game/ceremony';
 import {
   CREW,
@@ -258,6 +271,7 @@ import { Ceremony } from './ui/ceremony';
 import { ChHud, rivalName } from './ui/ch-hud';
 import { ChSettings } from './ui/ch-settings';
 import { Chests } from './ui/chest-panel';
+import { Constellation } from './ui/constellation-panel';
 import { Crew } from './ui/crew';
 import { RetrainDialog } from './ui/retrain-dialog';
 import { Gear } from './ui/gear-panel';
@@ -522,12 +536,17 @@ function offlineOpts(): {
     capS:
       offlineCapS(state.heaven) +
       offlineCapBonus(state.gear) +
-      mythosOfflineCapBonusS(state.transcend),
+      mythosOfflineCapBonusS(state.transcend) +
+      // 2a ★ „Sternenwanderer": +2 h, additiv auf alles andere — genau wie im
+      // Ideen-Dokument versprochen („stackt mit allem").
+      constellationOfflineCapBonusS(state.constellation),
     // Peachiel × gold-gear × permanent gold-tokens (§6.2). The transient peach ×3
     // boost is a 60-s live event — immaterial to multi-hour offline accrual and a
     // stale boostUntil would be wrong — so it is deliberately excluded here.
     goldMult: goldMult(state),
-    rateBonus: offlineRateBonus(state.gear),
+    // Endless-Summer-Gear + die beiden Ausdauer-Knoten der Konstellation (2a)
+    // hängen im GLEICHEN additiven Term; `offlineGold` deckelt die Summe bei 100 %.
+    rateBonus: offlineRateBonus(state.gear) + constellationOfflineRateBonus(state.constellation),
   };
 }
 /**
@@ -836,6 +855,32 @@ function applyMythosFruhstart(): void {
 }
 
 /**
+ * IDEEN-GAMEPLAY 2a — was die Legenden-Konstellation einer FRISCHEN Tour
+ * mitgibt: das Startkapital der drei „Aufbruch"-Knoten und, mit dem
+ * Identitäts-Stern „Warm-up-Start", `WARMUP_S` Sekunden Kobold-Buff ab der
+ * ersten Sekunde.
+ *
+ * Läuft nach JEDEM der drei Resets — der Baum überlebt sie alle, also darf der
+ * Effekt an keiner Schicht hängen bleiben. Bewusst NICHT beim Boot oder Import:
+ * dort steht man mitten in einer laufenden Tour, und ein Neuladen dürfte nie
+ * Startkapital drucken.
+ *
+ * Der Buff nutzt das BESTEHENDE Kobold-Fenster (`goblin.buffUntil`, ×2 Klick)
+ * statt eines vierten Buff-Zustands: dieselbe Zahl, derselbe Rechenpfad im
+ * Klick-Term, kein neues Feld und keine zweite Anzeige.
+ */
+function applyConstellationStart(now = Date.now()): void {
+  const bp = constellationStartGold(state.constellation);
+  if (bp > 0) {
+    state.gold += bp;
+    state.stats.goldLifetime += bp;
+  }
+  if (hasWarmupStart(state.constellation)) {
+    goblin = { ...goblin, buffUntil: Math.max(goblin.buffUntil, now + WARMUP_S * 1000) };
+  }
+}
+
+/**
  * ROADMAP-V2 G4 — Die Zeremonie einer Prestige-Schicht anstoßen.
  *
  * Sie läuft IMMER erst, nachdem der Reset-Handler gebucht, zurückgesetzt und
@@ -871,6 +916,7 @@ const prestige = new Prestige({
     applyFruhstarter(prevCrew);
     applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
     applyMasteryFreeTiers(); // 1a: Legenden-Slot NACH dem Wiederanheuern buchen
+    applyConstellationStart(); // 2a: Startkapital + Warm-up-Buff der neuen Tour
     combat = newRunCombat();
     comboState = createCombo(state.combo.stacks); // run-scoped juice resets
     comboT3KeyAwardedThisRun = false; // the combo-Tier-3 key is once per run (§6.1)
@@ -911,6 +957,7 @@ const heaven = new Heaven({
     Object.assign(state, himmelfahrtState(state)); // mutate in place
     applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
     applyMasteryFreeTiers(); // 1a: die Meisterschaft überlebt auch L2
+    applyConstellationStart(); // 2a: die Konstellation überlebt auch L2
     combat = newRunCombat();
     comboState = createCombo(state.combo.stacks);
     comboT3KeyAwardedThisRun = false; // once per run (§6.1)
@@ -982,6 +1029,7 @@ if (transcendEnabled) {
       Object.assign(state, transcendState(state)); // mutate in place (banks TE, wipes L1+L2)
       applyMythosFruhstart(); // P2: der Knoten überlebt den tiefsten Reset und greift hier
       applyMasteryFreeTiers(); // 1a: die Meisterschaft überlebt auch den tiefsten Reset
+      applyConstellationStart(); // 2a: der Baum überlebt auch den tiefsten Reset
       // ---- re-seed, mirroring the Himmelfahrt handler exactly (L2-wipe hazard) ----
       combat = newRunCombat(); // zone/front travel reset to Bühne 1
       comboState = createCombo(state.combo.stacks); // run-scoped combo juice reset
@@ -1070,9 +1118,11 @@ const chSettings = new ChSettings({
     transcendPanel?.refresh(); // 🔮 L3 badge/mult must re-read the imported slice
     gearPanel.render();
     metaPanel.render(true);
+    constellationPanel.refresh(true); // 2a: der Import bringt sein eigenes Konto mit
     hud.update(state, combat, dps, clickDmg);
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     checkAchievements(); // an imported save may already satisfy fresh achievements
+    syncConstellationDust(); // … und damit womöglich frischen Sternenstaub
     persist();
   },
   reset: () => {
@@ -1159,8 +1209,10 @@ function renderActiveTab(key: string): void {
   else if (key === 'heaven') heaven.refresh();
   else if (key === 'transcend') transcendPanel?.refresh();
   else if (key === 'chest') chestPanel.render();
-  else if (key === 'meta') metaPanel.render();
-  else if (key === 'set') chSettings.render();
+  else if (key === 'meta') {
+    metaPanel.render();
+    constellationPanel.refresh(); // 2a: die Karte lebt im Ziele-Tab
+  } else if (key === 'set') chSettings.render();
 }
 for (const tab of Array.from(document.querySelectorAll<HTMLElement>('.tab'))) {
   tab.addEventListener('click', () => {
@@ -1773,7 +1825,9 @@ function doShake(x?: number, y?: number): void {
     COMBO_WINDOW_S +
       ancientComboWindowBonus(state.ancients) +
       comboWindowBonus(state.gear) +
-      crewSpec.comboWindowS,
+      crewSpec.comboWindowS +
+      // 2a „Langer Atem"/„Roter Faden": derselbe Term, nur permanent.
+      constellationComboWindowBonus(state.constellation),
   );
   drive = Math.min(drive + 1.2, 6);
 
@@ -1790,7 +1844,9 @@ function doShake(x?: number, y?: number): void {
         permTokenCritChance(state.permTokens) +
         crewSpec.critChance +
         // A1 „Krit-Funken": +5 pp, durch DENSELBEN 40-%-Deckel wie alles andere.
-        stage.crit,
+        stage.crit +
+        // 2a „Kalter Zünder"/„Scharfe Schneide"/„Blitzschlag": +0,5 pp je Stern.
+        constellationCritChanceBonus(state.constellation),
     ),
   );
   if (crit) {
@@ -2255,6 +2311,34 @@ function checkAchievements(): void {
     toasts.show(a.icon, 'Erfolg freigeschaltet!', a.name);
   }
   metaPanel.render();
+  syncConstellationDust(); // 2a: jeder Erfolg zahlt sofort 💫 aus
+  persist();
+}
+
+/**
+ * IDEEN-GAMEPLAY 2a — den Sternenstaub-Highwater an die drei Quellen angleichen
+ * (Bühnen-Sterne-Meilensteine, Erfolge, Boss-Gate-Erstkills ab Bühne 25).
+ *
+ * `syncDust` rechnet den ANSPRUCH aus lauter Lebenszeit-Highwatern und hebt
+ * `earned` darauf — es wird nie „gutgeschrieben", also kann ein Reload, ein
+ * Import oder ein zweiter Aufruf im selben Tick nichts doppelt zahlen. Gibt es
+ * nichts Neues, kommt dieselbe Referenz zurück und die Funktion ist ein No-op
+ * (deshalb darf sie billig im 0.25-s-Tick hängen).
+ */
+function syncConstellationDust(): void {
+  const src: DustSources = {
+    stars: totalStars(state.stageStars),
+    achievements: state.achievements.length,
+    // Tiefste JE erreichte Bühne — `lifetimeMaxZone` fällt bei Himmelfahrt und
+    // Transzendenz auf 1, der Gear-Latch `zoneEver` nie (§5.3).
+    deepestZone: Math.max(state.lifetimeMaxZone, state.gear.zoneEver, combat.maxZone),
+  };
+  const next = syncDust(state.constellation, src);
+  if (next === state.constellation) return;
+  const gain = next.earned - state.constellation.earned;
+  state.constellation = next;
+  constellationPanel.refresh(true);
+  toasts.show('💫', `+${fmt(gain)} Sternenstaub`, 'Für die Legenden-Konstellation (Ziele-Tab)');
   persist();
 }
 
@@ -2374,6 +2458,29 @@ const metaPanel = new Meta({
   frontier: () => Math.max(state.runMaxZone, combat.maxZone),
   travel: (zone) => {
     if (travelToZone(zone)) metaPanel.render(true);
+  },
+});
+
+/**
+ * IDEEN-GAMEPLAY 2a — die Sternbild-Karte. Sie montiert sich in den Platzhalter,
+ * den `Meta` im Ziele-Tab aufspannt, also MUSS sie nach `metaPanel` entstehen.
+ * Ein Kauf ist unumkehrbar (kein Respec), deshalb bestätigt das Panel ihn selbst
+ * (Arm-Knopf) und die Glue bucht hier nur noch.
+ */
+const constellationPanel = new Constellation({
+  state,
+  onBuy: (id) => {
+    const r = buyConstellationNode(state.constellation, id);
+    if (!r.bought) return;
+    state.constellation = r.constellation;
+    // Klick-/DPS-/BP-Knoten hängen in `dpsOf`/`clickDamageOf`/`goldMult` — der
+    // HUD-Wert muss den Kauf in derselben Sekunde zeigen.
+    recompute();
+    audio.buy();
+    hud.update(state, combat, dps, clickDmg);
+    constellationPanel.refresh(true);
+    toasts.show('💫', `Stern freigeschaltet: ${r.node?.name ?? ''}`, r.node?.desc ?? '');
+    persist();
   },
 });
 
@@ -2591,6 +2698,10 @@ hud.update(state, combat, dps, clickDmg);
 // loaded save so anything already earned shows unlocked immediately (§7.3).
 maybeNewDay();
 checkAchievements();
+// 2a: Der Anspruch aus Sternen/Erfolgen/Gates wird beim Boot einmal angeglichen —
+// bei einem frisch migrierten Save ist das ein No-op (die Migration hat ihn schon
+// rückwirkend gebucht), bei jedem anderen die billige Sicherheitsnaht.
+syncConstellationDust();
 if (currentSeason) {
   toasts.show(currentSeason.emoji, `Saison: ${currentSeason.name}`, currentSeason.hint);
 }
@@ -2762,7 +2873,9 @@ function loop(nowMs: number): void {
   if (cps > 0 && !swapping) applyHit(coachDps(clickDmg, cps) * dt, false);
   if (combat.boss && !swapping) {
     const gateZone = combat.zone; // vor dem möglichen Rückwurf festhalten (P1)
-    const bt = tickBoss(combat, dt);
+    // 2a ★ „Zweiter Wind": Der Rückwurf erstattet 3 von 10 Rivalen der
+    // Rückfall-Bühne — die Bühne startet dann sichtbar bei 3/10 statt 0/10.
+    const bt = tickBoss(combat, dt, secondWindKills(state.constellation));
     combat = bt.state;
     if (bt.failed) {
       state.stats.bossTimeouts += 1;
@@ -2901,6 +3014,7 @@ function loop(nowMs: number): void {
     // record (all no-ops when nothing changed / the leaderboard is off).
     maybeNewDay();
     checkAchievements();
+    syncConstellationDust(); // 2a: Sterne-Meilensteine + tiefe Boss-Gates zahlen aus
     maybeLeaderboardPrompt();
     hud.update(state, combat, dps, clickDmg);
     // ROADMAP-V2 P3: Wand-Telemetrie an der Frontier-Boss-Bühne. Bewusst NUR

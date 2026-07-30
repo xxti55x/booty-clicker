@@ -44,6 +44,7 @@ await build({
     join(GAME, 'src/game/mastery.ts'),
     join(GAME, 'src/game/gear.ts'),
     join(GAME, 'src/game/retrain.ts'),
+    join(GAME, 'src/game/constellation.ts'),
   ],
   bundle: true,
   format: 'esm',
@@ -56,11 +57,13 @@ const weekly = await import(pathToFileURL(join(tmp, 'weekly.js')).href);
 const mastery = await import(pathToFileURL(join(tmp, 'mastery.js')).href);
 const gear = await import(pathToFileURL(join(tmp, 'gear.js')).href);
 const retrain = await import(pathToFileURL(join(tmp, 'retrain.js')).href);
+const cs = await import(pathToFileURL(join(tmp, 'constellation.js')).href);
 const MASTERY_AT = mastery.MASTERY_RANKS.map((r) => r.at);
 
 const {
   SIM_ACTIVE,
   SIM_ACTIVE_CAL,
+  SIM_CONSTELLATION,
   SIM_RUN_S,
   SIM_SEEDS_HEAVY,
   simulateAscensionEra,
@@ -373,6 +376,80 @@ for (let i = 0; i < 52; i++) zonesSeen.add(weekly.weeklyStageFor(week0 + i)?.zon
 console.log(
   `   Streuung über 52 Wochen: ${zonesSeen.size} verschiedene Bühnen` +
     ` (${Math.min(...zonesSeen)}…${Math.max(...zonesSeen)}), Schrittweite ${weekly.WEEKLY_STEP}`,
+);
+
+// ---------------------------------------------------------------------------
+// 9 · Legenden-Konstellation (IDEEN-GAMEPLAY 2a) — Budget, Vorrat, Voll-Ausbau
+//     Anker: sim.test.ts „2a Legenden-Konstellation (Voll-Ausbau als eigenes Profil)"
+// ---------------------------------------------------------------------------
+console.log('\n── 9 · Legenden-Konstellation · Budget-Deckel + Lebens-Vorrat (2a)');
+const FULL = cs.CONSTELLATION_FULL;
+table(
+  ['Term', 'Knoten', 'Voll ausgebaut'],
+  [
+    ['Klick', '4 × +2 %', `×${cs.constellationClickMult(FULL).toFixed(3)}`],
+    ['Crew-DPS', '3 × +2 %', `×${cs.constellationDpsMult(FULL).toFixed(3)}`],
+    ['BP', '2 × +2 %', `×${cs.constellationGoldMult(FULL).toFixed(3)}`],
+    [
+      'Krit-EV',
+      `3 × +${(cs.constellationCritChanceBonus(FULL) * 100) / 3} pp`,
+      `×${cs.constellationCritEvFactor(FULL).toFixed(3)}`,
+    ],
+    ['Truhen-Luck', '2 × +3 %', `×${(1 + cs.constellationChestLuckBonus(FULL)).toFixed(3)}`],
+    ['Combo-Fenster', '2 × +0,2 s', '×1.000 (hebt keinen Multiplikator)'],
+    ['Σ Leistungs-Budget', '', `×${cs.constellationPowerBudget().toFixed(4)}  (Deckel ×1.5)`],
+    [
+      'Offline (Rate × Cap)',
+      '2 × +2 pp · +2 h',
+      `×${cs.constellationOfflineBudget().toFixed(4)}  (Deckel ×1.5)`,
+    ],
+  ],
+);
+// Der Lebens-Vorrat: was ein Spielstand bei gegebener Tiefe insgesamt schöpfen
+// kann. Sterne-Schätzung: 2 je Bühne („geclert" + „Combo") plus der Timeout-Stern
+// je Boss-Gate — die realistische Zahl eines aktiven Spielers, nicht das Maximum.
+const ACH_TOTAL = 28;
+const supplyRows = [];
+for (const [zone, achs] of [
+  [50, 20],
+  [100, 27],
+  [150, ACH_TOTAL],
+  [200, ACH_TOTAL],
+]) {
+  const stars = zone * 2 + Math.floor(zone / 5);
+  const fromStars = Math.floor(stars / cs.STAR_MILESTONE) * cs.DUST_PER_STAR_MILESTONE;
+  const fromAch = achs * cs.DUST_PER_ACHIEVEMENT;
+  const fromGates = cs.gatesCleared(zone) * cs.DUST_PER_GATE;
+  supplyRows.push([
+    `Bühne ${zone}`,
+    `${stars} → ${fromStars}`,
+    `${achs} → ${fromAch}`,
+    `${cs.gatesCleared(zone)} → ${fromGates}`,
+    fromStars + fromAch + fromGates,
+  ]);
+}
+table(['Stand', 'Sterne → 💫', 'Erfolge → 💫', 'Gates → 💫', 'Σ 💫'], supplyRows);
+console.log(
+  `   Voller Ausbau: ${cs.CONSTELLATION_FULL_COST} 💫 (3 Linien × ${cs.CONSTELLATION_LINE_COST}) —` +
+    ` Kostenleiter ${cs.CONSTELLATION_COSTS.join(' · ')}` +
+    `\n   ⇒ Abschluss um Bühne 130–150: ein Lebenswerk MIT Ende (danach ist die Währung wertlos).`,
+);
+console.log('\n   Voll-Ausbau im Bot (Profil „Konstellation komplett") vs. Basis:');
+const csRows = [];
+for (const seed of SEEDS) {
+  const a = simulateSingleRun({ ...SIM_ACTIVE_CAL, seed }, SIM_RUN_S);
+  const b = simulateSingleRun({ ...SIM_ACTIVE_CAL, constellation: true, seed }, SIM_RUN_S);
+  csRows.push([
+    seed,
+    `${min(a.timeToZone.get(25))} → ${min(b.timeToZone.get(25))}`,
+    `×${(a.timeToZone.get(25) / b.timeToZone.get(25)).toFixed(2)}`,
+    `${a.bestZone} → ${b.bestZone}`,
+  ]);
+}
+table(['Seed', 't25 [min]', 'Beschleunigung', 'Wand-Bühne'], csRows);
+console.log(
+  `   Profil: ${JSON.stringify(SIM_CONSTELLATION)}` +
+    `\n   Anker: Verschiebung ≤ ×1.5 auf t25, erster Himmelfahrt und Kettenlauf-t75.`,
 );
 
 rmSync(tmp, { recursive: true, force: true });

@@ -110,6 +110,15 @@ export class Meta {
         </div>
       </div>
       <div class="settings-section">
+        <h3>Legenden-Konstellation 💫</h3>
+        <!-- IDEEN-GAMEPLAY 2a: Das Sternbild-Panel (ui/constellation-panel.ts)
+             montiert sich hier hinein — es lebt bewusst im Ziele-Tab, weil seine
+             Währung genau aus den beiden Dingen entsteht, die dieser Tab ohnehin
+             zeigt (Bühnen-Sterne-Meilensteine + Erfolge). Die Sektion steht
+             direkt ÜBER der Erfolgs-Wand: Quelle und Senke untereinander. -->
+        <div id="metaConst"></div>
+      </div>
+      <div class="settings-section">
         <h3>Erfolge <span class="dim" id="metaAchCount"></span></h3>
         <div id="metaAchEmpty"></div>
         <div class="ach-grid" id="metaAch"></div>

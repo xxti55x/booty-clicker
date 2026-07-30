@@ -13,6 +13,8 @@ import {
   himmelfahrtState,
   transcendState,
 } from '../game/ch-state';
+import { CH_ACHIEVEMENT_IDS } from '../game/ch-achievements';
+import { createConstellation, dustEntitlement, dustHeld } from '../game/constellation';
 import { createGear } from '../game/gear';
 import { TREE_NODES, treeLevel } from '../game/heaven';
 import { createMeta, dailyQuests } from '../game/quests';
@@ -1497,5 +1499,97 @@ describe('ch-store — v14 migration & repair (Crew-Umschulung, 3b)', () => {
       crewRetrain: { boss: { '2': 'idle' } },
     };
     expect(deserializeCh(serializeCh(s, 1000))!.crewRetrain).toEqual({ boss: { '2': 'idle' } });
+  });
+});
+
+describe('ch-store — v15 migration & repair (Legenden-Konstellation, 2a)', () => {
+  it('zahlt einem v14-Save seinen Sternenstaub RÜCKWIRKEND aus', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 14;
+    delete raw.constellation;
+    // Ein gestandener Spielstand: 20 Erfolge, 34 Bühnen-Sterne (2 volle
+    // Meilensteine), Bestzone 62 (die Gates 25 … 60 sind gefallen = 8 Stück).
+    raw.achievements = CH_ACHIEVEMENT_IDS.slice(0, 20);
+    raw.stageStars = { '5': 7, '6': 5, '7': 5, '10': 7, '11': 5, '15': 7, '20': 7 }; // 3+2+2+3+2+3+3 = 18
+    raw.lifetimeMaxZone = 62;
+    raw.runMaxZone = 62;
+    raw.zone = 62;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    const want = dustEntitlement({ stars: 18, achievements: 20, deepestZone: 62 });
+    // 1 Meilenstein (18 Sterne) × 5 + 20 Erfolge × 3 + 8 Gates × 2 = 5 + 60 + 16.
+    expect(want).toBe(81);
+    expect(s!.constellation).toEqual({ earned: want, spent: 0, nodes: {} });
+    // Der Baum selbst startet leer — verdient ist verdient, gekauft ist nichts.
+    expect(dustHeld(s!.constellation)).toBe(want);
+  });
+
+  it('liest die Bestzone Himmelfahrt-fest aus dem Gear-Latch', () => {
+    // Nach einer Himmelfahrt steht `lifetimeMaxZone` auf 1, `gear.zoneEver` hält
+    // die echte Tiefe — die Gates dürfen dadurch nicht „ungefallen" werden.
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 14;
+    delete raw.constellation;
+    raw.achievements = [];
+    raw.lifetimeMaxZone = 1;
+    raw.runMaxZone = 1;
+    raw.zone = 1;
+    raw.gear = { ...createGear(), zoneEver: 80 };
+    const s = deserializeCh(JSON.stringify(raw));
+    // Bühne 80 ⇒ die Gates 25 … 75 sind gefallen (11 Stück) ⇒ 22 💫.
+    expect(s!.constellation.earned).toBe(22);
+  });
+
+  it('startet einen ganz frischen Spielstand bei null (nichts verdient, nichts geschenkt)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 14;
+    delete raw.constellation;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.constellation).toEqual(createConstellation());
+  });
+
+  it('round-trippt Konto und Ketten', () => {
+    const s: ChState = {
+      ...createChState(),
+      constellation: { earned: 140, spent: 12, nodes: { aufbruch: 3, tempo: 1 } },
+    };
+    const round = deserializeCh(serializeCh(s, 1000));
+    expect(round!.constellation).toEqual({
+      earned: 140,
+      spent: 12,
+      nodes: { aufbruch: 3, tempo: 1 },
+    });
+  });
+
+  it('rechnet `spent` beim Laden NEU — ein gelogenes Konto kauft keinen Rabatt', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.constellation = { earned: 500, spent: 0, nodes: { aufbruch: 4 } };
+    const s = deserializeCh(JSON.stringify(raw));
+    // 2 + 3 + 5 + 7 = 17 — unabhängig davon, was der Save behauptet.
+    expect(s!.constellation.spent).toBe(17);
+    expect(dustHeld(s!.constellation)).toBe(483);
+  });
+
+  it('hebt `earned` auf `spent`, statt gekaufte Sterne zu nuken', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.constellation = { earned: 0, spent: 0, nodes: { ausdauer: 8 } };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.constellation.nodes).toEqual({ ausdauer: 8 });
+    expect(s!.constellation.spent).toBe(70);
+    expect(s!.constellation.earned).toBe(70); // nach OBEN korrigiert (wie repairTranscend)
+    expect(dustHeld(s!.constellation)).toBe(0);
+  });
+
+  it('überlebt alle drei Resets im geladenen Zustand (die Kern-Zusage von 2a)', () => {
+    const s: ChState = {
+      ...createChState(),
+      rsLifetime: 5_000_000,
+      heaven: { hpf: 30, hpfLifetime: 300, ascensions2: 4, tree: {} },
+      constellation: { earned: 210, spent: 210, nodes: { aufbruch: 8, tempo: 8, ausdauer: 8 } },
+    };
+    const after = transcendState(himmelfahrtState(ascendState(s)));
+    expect(after.constellation).toEqual(s.constellation);
+    // Und der round-trip durch den Store ändert daran nichts.
+    expect(deserializeCh(serializeCh(after, 1000))!.constellation).toEqual(s.constellation);
   });
 });

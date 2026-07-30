@@ -3,6 +3,132 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## IDEEN-GAMEPLAY Schritt 4 — 2a Legenden-Konstellation
+
+- **Eine Währung, EINE Formel — und deshalb keine „schon ausgezahlt"-Zähler.**
+  Sternenstaub entsteht ausschließlich aus drei Quellen, die im Spiel allesamt
+  Lebenszeit-Highwater sind: Bühnen-Sterne-Meilensteine (`totalStars`, +5 je 15),
+  Erfolge (+3 je Stück) und Erst-Kills der Boss-Gates ab Bühne 25
+  (lifetimeMaxZone-getrieben, +2 je Gate). Weil jede der drei Zahlen nur wachsen
+  kann, ist auch der daraus gerechnete ANSPRUCH (`dustEntitlement`) monoton — und
+  damit ist `syncDust` kein Gutschreiben, sondern ein Angleichen:
+  `earned = max(earned, Anspruch)`. Ein Reload, ein Import, ein Reset, hundert
+  Aufrufe im selben Tick: immer dieselbe Zahl. Der Kontrast zu `starsAwarded`
+  (dem Meilenstein-Highwater der Truhen) ist Absicht — DORT wird eine Truhe
+  gebucht, ein echtes Ereignis, das ohne Zähler doppelt fiele. Hier wird nichts
+  gebucht, hier wird gerechnet. `spent` ist die zweite Zahl des Paares
+  („verbaut"), `dustHeld = earned − spent` das, was man ausgeben kann.
+- **Saison-Abschlüsse: bewusst WEGGELASSEN.** Das Ideen-Dokument nennt sie als
+  vierte Quelle. Die X4-„Saisons" sind clientseitig aber nur ein
+  Bestenlisten-KALENDER (`weekly.boardSeasonFor`): Der Client weiß, welche Saison
+  läuft, aber nie, ob jemand sie „abgeschlossen" hat — Platzierung und Teilnahme
+  leben serverseitig, und das Leaderboard-API ist optional (Default aus). Eine
+  Quelle, die ohne Server nicht existiert, darf keine permanente Währung drucken;
+  sie hinge sonst an einem Feature-Flag.
+- **Streng lineare Ketten statt eines Graphen — und was das für den Save spart.**
+  Jede der drei Konstellationen ist eine Linie (Knoten n braucht n−1). Damit ist
+  der GANZE Baum drei Zahlen: `nodes: { aufbruch: 4, tempo: 2, ausdauer: 0 }`. Es
+  gibt keine Lücke, die man darstellen müsste, und ein hand-editierter Save kann
+  keine unmögliche Form behaupten (`repairConstellation` klemmt nur auf 0…8).
+  `spent` wird beim Laden aus den Ketten NEU gerechnet (`constellationSpend`)
+  statt gelesen — zwei Quellen für dieselbe Zahl driften irgendwann —, und
+  `earned` wird bei Bedarf nach OBEN auf `spent` korrigiert (dieselbe Richtung wie
+  `repairTranscend`: was gekauft ist, war offenbar bezahlt; Knoten wegzunehmen
+  wäre das Nuken echten Fortschritts).
+- **Kein Respec — und deshalb ein Arm-Knopf.** Der Himmelsbaum hat einen Respec,
+  weil er Exklusiv-PAARE trägt (eine Wahl, die man bereuen kann). Hier gibt es
+  keine Wahl innerhalb einer Linie, nur die Reihenfolge zwischen den Linien — und
+  am Ende kauft man ohnehin alles. Ein Respec wäre also nur ein Umsortier-Knopf.
+  Dafür bestätigt das Panel JEDEN Kauf (arm → „Sicher? Sternenstaub gibt es nicht
+  zurück"), weil die Währung endlich ist.
+- **Das Budget: ×1.304, gerechnet statt behauptet.** Voll ausgebaut zahlt der Baum
+  Klick ×1.08 (4 × +2 %) · Crew-DPS ×1.06 (3 × +2 %) · BP ×1.04 (2 × +2 %) ·
+  Krit-EV ×1.033 (3 × +0,5 pp, gegen `CRIT_CHANCE`/`CRIT_MULT` gerechnet) ·
+  Truhen-Chance ×1.06 (2 × +3 %). Das PRODUKT — die konservative Lesart, denn
+  Klick und Crew-DPS multiplizieren sich nie miteinander — ist **×1.3041**, unter
+  dem ×1.5-Deckel des Ideen-Dokuments. `constellationPowerBudget()` rechnet genau
+  das aus dem Katalog, ein Test friert es ein, und `npm run balance` druckt die
+  Tabelle (Abschnitt 9). Das Combo-Fenster (2 × +0,2 s) zählt bewusst ×1.00: Es
+  hebt weder `COMBO_CAP` noch `comboMult`, nur die Gnadenfrist — bei durchgehendem
+  Klicken ist sein Beitrag exakt 0. Der Offline-Pfad hat ein EIGENES Budget
+  (Rate ×1.08 × Cap ×1.25 = **×1.35**), weil Offline-Ertrag nichts an der
+  Live-Rechnung multipliziert — und weil der Himmelsbaum dort mit 8 h → 24 h
+  längst ein Vielfaches vergibt.
+- **Der Lebens-Vorrat: 210 💫 = Abschluss um Bühne 130–150.** Kostenleiter je
+  Linie 2 · 3 · 5 · 7 · 9 · 12 · 14 · 18 = 70 💫, dreimal = 210. Dagegen der
+  Vorrat (Sterne konservativ mit 2 je Bühne plus Timeout-Stern je Gate geschätzt,
+  28 Erfolge im Katalog): Bühne 50 → 105 💫 · Bühne 100 → 181 · Bühne 150 → 244 ·
+  Bühne 200 → 299. Der erste Stern jeder Linie kostet bewusst nur 2 💫, sodass die
+  ersten zwei Erfolge sofort ALLE DREI Linien anreißen („probier alles an"), und
+  der Identitäts-Stern mit 18 💫 ist die eigentliche Sparstrecke. Ergebnis: ein
+  Lebenswerk MIT Ende — danach ist die Währung wertlos, genau der „Boden", den das
+  Ideen-Dokument für permanente Schichten verlangt.
+- **Startkapital: 700 BP waren falsch, 100 BP sind richtig — der Bot hat es
+  gezeigt.** Die erste Fassung der drei „Aufbruch"-Knoten gab 50/150/500 BP. Der
+  Anker-Bot fiel damit von t10 = 104 s auf 18 s (×5.8): Ein FLACHER BP-Betrag ist
+  auf Bühne 1 alles und auf Bühne 60 nichts. Jetzt 10/30/60 = 100 BP ≈ 15 s
+  Ertrag auf Bühne 1 — ein spürbarer Anschub (der erste Crew-Kauf ist geschenkt),
+  keine übersprungene Bühne.
+- **Sim-Profil „Konstellation komplett" (`SIM_CONSTELLATION`) — und warum der
+  NORMALE Bot den Baum links liegen lässt.** Ohne `config.constellation` faltet
+  jeder Getter ×1; alle Alt-Anker dieser Datei stehen deshalb byte-gleich da wie
+  vor 2a. Das ist die dokumentierte Untergrenze: Ein Spieler, der den Baum baut,
+  kann nur schneller sein. Das neue Profil misst den Deckel — voll ausgebauter
+  Baum gegen Basis:
+  · **t25** (45 min, Kalibrier-Bedingungen ohne Loot): ⌀ 1942 s → 1407 s =
+  **×1.38 schneller**. Über dem reinen Leistungs-Produkt (×1.304), weil dieser
+  Lauf bei NULL Meta startet — der „Warm-up-Start" verdoppelt dort die erste von
+  45 Minuten. Ein echter Besitzer des vollen Baums steht bei Bühne 130+; für ihn
+  ist das Rauschen. Der Anker misst also den GÜNSTIGSTEN denkbaren Fall.
+  · **Erste Himmelfahrt** (0.7 cps, ohne Loot, 7 Seeds): ⌀ 18.24 h → 14.82 h =
+  **×1.23**, Einzelwerte 1.15 … 1.36.
+  · **Kettenlauf** (6 × 45 min, volle Loot-Ökonomie): t75 ⌀ 6198 s → 5714 s =
+  **×1.09** — mit Truhen/Token ist der Baum fast unsichtbar.
+  Alles unter ×1.5, wie das Ideen-Dokument erwartet („gemessen deutlich kleiner …
+  weil additiv-klein").
+- **„Zweiter Wind" ist im Bot BEWUSST nicht gefaltet — mit Messung statt
+  Behauptung.** Der Knoten erstattet nach einem Boss-Timeout 3 von 10 Rivalen der
+  Rückfall-Bühne (`combat.tickBoss(state, dt, refundKills)` — pur und
+  unit-getestet, im Spiel voll verdrahtet). Faltet man ihn in den Bot, wird der
+  0.7-cps-Anker um das **2,5-fache LANGSAMER** (Seed 12345: 17,1 h → 42,9 h),
+  während JEDER andere Knoten ihn beschleunigt (isoliert gemessen: startGold 0.98 ·
+  warmup 0.99 · click 0.98 · dps 0.92 · gold 0.94 · luck 1.00). Der Grund ist eine
+  Eigenschaft der BOT-STRATEGIE, nicht des Knotens: Der Bot fordert den Boss nach
+  einem Fail sofort wieder heraus (`challengeBoss`) und überspringt dabei die
+  Rivalen-Welle der Boss-Bühne — drei erstattete Kills auf der Rückfall-Bühne
+  werden für ihn deshalb zu 30 % weniger Farm je Anlauf bei gleichbleibenden 30 s
+  Boss-Uhr pro Fehlversuch. Ein Mensch kehrt drei Kills früher ans Gate zurück und
+  farmt dann die REICHERE Boss-Bühne. Der Ausschluss steht damit in derselben
+  Tradition wie Twerk-Ekstase und die Boss-Schadens-Mults (Modul-Kopf `sim.ts`),
+  nur mit umgekehrtem Vorzeichen — und die Messung dazu ist im Anker-Test
+  festgeschrieben, damit niemand ihn „aus Versehen" wieder einschaltet.
+- **Platz: eigener Abschnitt im 📋 Ziele-Tab, KEIN zehnter Reiter.** Zwei Gründe.
+  (1) X6-Rechnung, headless nachgemessen: Neun Reiter × 44 px Mindestbreite =
+  396 px, verfügbar sind auf einem 390-px-Telefon 387 px (Bottom-Sheet minus
+  Safe-Area) — die Leiste steht also schon HEUTE 9 px über der Kante. Ein zehnter
+  Reiter machte 440 px und schöbe „Mehr" 53 px weit hinter ein Seitwärts-Scroll
+  OHNE Balken (`scrollbar-width: none`), also genau in den Fehler zurück, den X6
+  behoben hat.
+  (2) Thematisch: Die Währung entsteht ausschließlich aus dem, was DIESER Tab
+  ohnehin zeigt — Bühnen-Sterne-Meilensteine und Erfolge. Die Sektion steht direkt
+  über der Erfolgs-Wand: Quelle und Senke untereinander, und der Panel-Kopf kann
+  die Herkunft jedes Staubkorns mit Live-Zahlen erklären statt auf einen anderen
+  Reiter zu verweisen.
+- **Optik: der eine Ort im Spiel, der nicht nach Pergament aussieht.** Drei
+  dunkle Himmelsausschnitte, Verbindungslinien als `<line>`, Sterne als
+  vierzackige `<path>`-Blenden — alles Inline-SVG in der bestehenden
+  Stroke-Sprache, keine neue Dependency, keine Bild-Assets. Ein Linien-SEGMENT
+  leuchtet nur, wenn BEIDE seiner Sterne stehen, sodass das Sternbild Strich für
+  Strich wächst; der nächste kaufbare Stern pulsiert (das einzige, was man
+  anklicken kann). Vier Zacken statt fünf, weil eine 5-Zack-Silhouette bei 3 px
+  Radius zu Matsch wird.
+- **Der Warm-up-Buff leiht sich den Kobold, statt einen vierten Buff zu
+  erfinden.** „Warm-up-Start" setzt `goblin.buffUntil` auf `now + 60 s` — dieselbe
+  ×2-Klick-Zahl, derselbe Rechenpfad im Klick-Term, keine zweite Anzeige und kein
+  neues Feld. Größenordnung zur Einordnung: Der reguläre Kobold zahlt über einen
+  45-min-Lauf ~7 × 10 s ×2; der Warm-up legt einmalig 60 s dazu und schiebt sie
+  dorthin, wo eine frische Tour sie braucht.
+
 ## IDEEN-GAMEPLAY Schritt 3 — 3b Crew-Umschulung
 
 - **Eine Override-Map, EINE Lesekette.** `crewRetrain: Record<crewId,

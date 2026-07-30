@@ -209,13 +209,24 @@ export interface BossTickResult {
  * the PREVIOUS stage (zone − 1, clamped) to farm gold and buy upgrades; the
  * frontier (`maxZone`) is kept, so the boss stage stays reachable via the zone
  * strip and the boss can be re-challenged when stronger. Never a soft-lock.
+ *
+ * `refundKills` (IDEEN-GAMEPLAY 2a, „Zweiter Wind") lässt die Rückfall-Bühne mit
+ * bereits erledigten Rivalen starten — der Rückwurf kostet dann nur noch einen
+ * Teil der Welle. Der Wert wird auf `0 … MONSTERS_PER_ZONE − 1` geklemmt: Eine
+ * volle Welle würde auf einer Boss-Bühne sofort den nächsten Boss spawnen, und
+ * die Rückfall-Bühne ist per Konstruktion nie eine (zone − 1 eines Vielfachen
+ * von 5 ist keins) — der Deckel ist also reine Verteidigung gegen einen
+ * absurden Aufrufer, nicht Mechanik.
  */
-export function tickBoss(state: CombatState, dt: number): BossTickResult {
+export function tickBoss(state: CombatState, dt: number, refundKills = 0): BossTickResult {
   if (!state.boss) return { state, failed: false };
   const bossTimer = state.bossTimer - dt;
   if (bossTimer <= 0) {
+    const kills = Number.isFinite(refundKills)
+      ? Math.max(0, Math.min(MONSTERS_PER_ZONE - 1, Math.floor(refundKills)))
+      : 0;
     return {
-      state: spawnFor(Math.max(1, state.zone - 1), 0, state.maxZone, state.remix, state.week),
+      state: spawnFor(Math.max(1, state.zone - 1), kills, state.maxZone, state.remix, state.week),
       failed: true,
     };
   }

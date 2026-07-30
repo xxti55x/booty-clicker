@@ -35,6 +35,14 @@ import {
   goldGearMult,
   keyDropBonus,
 } from './gear';
+import {
+  type ConstellationState,
+  constellationChestLuckBonus,
+  constellationClickMult,
+  constellationDpsMult,
+  constellationGoldMult,
+  createConstellation,
+} from './constellation';
 import { type Gilds, createGilds } from './gild';
 import {
   type HeavenState,
@@ -284,6 +292,14 @@ export interface ChState {
    * Persistiert, damit ein Reload mitten im Retry den Fehlversuch nicht vergisst.
    */
   bossFoulZone: number;
+  /**
+   * Die Legenden-Konstellation (CH-save v15, IDEEN-GAMEPLAY 2a): Sternenstaub-
+   * Konto (`earned`/`spent`) plus die drei freigeschalteten Ketten. Die einzige
+   * Schicht, die ALLE drei Resets überlebt UND ihre eigene, endliche Währung
+   * hat — Sternenstaub entsteht nur aus Bühnen-Sterne-Meilensteinen, Erfolgen
+   * und Boss-Gate-Erstkills, also aus lauter Lebenszeit-Highwatern.
+   */
+  constellation: ConstellationState;
 }
 
 /** A brand-new run/profile. */
@@ -321,6 +337,7 @@ export function createChState(): ChState {
     stageStars: createStageStars(),
     starsAwarded: 0,
     bossFoulZone: 0,
+    constellation: createConstellation(),
   };
 }
 
@@ -340,6 +357,8 @@ type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'hea
   crewMastery?: CrewMastery;
   /** Crew-Umschulung (optional so pre-v14 callers/tests fold die Stock-Sorten). */
   crewRetrain?: CrewRetrain;
+  /** Legenden-Konstellation (optional so pre-v15 callers/tests fold ×1). */
+  constellation?: ConstellationState;
 };
 
 /**
@@ -369,7 +388,11 @@ export function dpsOf(state: DerivedInput): number {
     // v11.1 `idle`-Special („Groove"): hebt wie das Idle-Gear NUR die DPS-Seite.
     // 3b: mit der Umschul-Map, damit ein auf `idle` gerollter Slot hier exakt so
     // zählt wie ein von Haus aus `idle`-Mitglied.
-    (state.crewUp ? crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).idleMult : 1)
+    (state.crewUp ? crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).idleMult : 1) *
+    // 2a: die Ausdauer-Knoten der Legenden-Konstellation (+2 %/Knoten, ×1 ohne
+    // Baum). Wie der Meisterschafts-Perk bewusst NUR auf der Idle-Seite — die
+    // Konstellation hat für den Klick ihre eigenen Knoten (P1 bleibt unberührt).
+    (state.constellation ? constellationDpsMult(state.constellation) : 1)
   );
 }
 
@@ -392,7 +415,9 @@ export function clickDamageOf(state: DerivedInput): number {
     // der Baum das Klick:Idle-Verhältnis immer nur in EINE Richtung kippen.
     heavenClickMult(state.heaven) *
     (state.transcend ? transcendGlobalMult(state.transcend.te) : 1) *
-    (state.gear ? clickGearMult(state.gear) : 1)
+    (state.gear ? clickGearMult(state.gear) : 1) *
+    // 2a: die Klick-Knoten der Legenden-Konstellation (+2 %/Knoten, ×1 ohne Baum).
+    (state.constellation ? constellationClickMult(state.constellation) : 1)
   );
 }
 
@@ -412,6 +437,7 @@ export function goldMult(
     crewUp?: CrewUps;
     crewRetrain?: CrewRetrain;
     heaven?: HeavenState;
+    constellation?: ConstellationState;
   },
 ): number {
   return (
@@ -419,17 +445,26 @@ export function goldMult(
     goldGearMult(state.gear) *
     (state.permTokens ? permTokenGoldMult(state.permTokens) : 1) *
     (state.crewUp ? crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).goldMult : 1) *
-    (state.heaven ? goldeneHandeMult(state.heaven) : 1)
+    (state.heaven ? goldeneHandeMult(state.heaven) : 1) *
+    // 2a: „Anfängerglück" + „Tantiemen" der Konstellation (+2 %/Knoten, ×1 ohne Baum).
+    (state.constellation ? constellationGoldMult(state.constellation) : 1)
   );
 }
 
 /**
  * Summed Truhen-Luck fraction fed to `openChest` as `ctx.luck` (§6.3.4): the gear
  * chest-luck total (which already folds Tyrann-skin stars) + Truhilda's Ancient
- * chest-luck. Pure over `(gear, ancients)`; `applyLuck` clamps it to `LUCK_MAX_SHIFT`.
+ * chest-luck + die Truhen-Knoten der Konstellation (2a). Pure over
+ * `(gear, ancients, constellation)`; `applyLuck` clamps it to `LUCK_MAX_SHIFT`.
  */
-export function chestLuck(state: Pick<ChState, 'gear' | 'ancients'>): number {
-  return chestLuckBonus(state.gear) + ancientChestLuckBonus(state.ancients);
+export function chestLuck(
+  state: Pick<ChState, 'gear' | 'ancients'> & { constellation?: ConstellationState },
+): number {
+  return (
+    chestLuckBonus(state.gear) +
+    ancientChestLuckBonus(state.ancients) +
+    (state.constellation ? constellationChestLuckBonus(state.constellation) : 0)
+  );
 }
 
 /**
@@ -579,6 +614,8 @@ export function ascendState(state: ChState): ChState {
     // und fällt bewusst auf 0 zurück).
     stageStars: state.stageStars,
     starsAwarded: state.starsAwarded,
+    // Legenden-Konstellation (2a): der Baum, den KEINE Prestige-Schicht wipet.
+    constellation: state.constellation,
   };
 }
 
@@ -620,6 +657,8 @@ export function himmelfahrtState(state: ChState): ChState {
     // Bühnen-Sterne (P1) — Lebenszeit-Sammlung, überlebt auch L2.
     stageStars: state.stageStars,
     starsAwarded: state.starsAwarded,
+    // Legenden-Konstellation (2a) — überlebt auch L2, Konto wie Knoten.
+    constellation: state.constellation,
   };
 }
 
@@ -668,5 +707,8 @@ export function transcendState(state: ChState): ChState {
     // Bühnen-Sterne (P1) — Lebenszeit-Sammlung, überlebt auch L3.
     stageStars: state.stageStars,
     starsAwarded: state.starsAwarded,
+    // Legenden-Konstellation (2a) — der tiefste Reset des Spiels lässt sie
+    // unangetastet; das ist der ganze Sinn dieser Schicht.
+    constellation: state.constellation,
   };
 }

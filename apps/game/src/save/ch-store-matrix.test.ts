@@ -1,7 +1,7 @@
 /**
  * X7 — Save-Migrations-Matrix (ROADMAP-V2, „Save-Hygiene vor neuen Feldern").
  *
- * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v14). Pro Version
+ * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v15). Pro Version
  * zwei Inline-Fixtures (kein Datei-IO):
  *
  *   1. ein REALISTISCHER Save der jeweiligen Ära, der die volle Ladekette
@@ -32,6 +32,7 @@ import {
 } from '../game/ch-state';
 import { createGear } from '../game/gear';
 import { createHeaven } from '../game/heaven';
+import { dustEntitlement } from '../game/constellation';
 import { createMeta } from '../game/quests';
 import { createTranscend } from '../game/transcend';
 import { CH_SAVE_KEY, CH_SCHEMA, type ChStorage, deserializeCh, loadCh, saveCh } from './ch-store';
@@ -47,7 +48,7 @@ function memStorage(): ChStorage & { map: Map<string, string> } {
 }
 
 /** Every historical CH schema version, oldest first — the spine of the matrix. */
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 type SchemaVersion = (typeof VERSIONS)[number];
 
 const LAST_SEEN = 1_752_800_000_000;
@@ -200,6 +201,35 @@ const STARS_AWARDED = 0;
 const BOSS_FOUL_ZONE = 10;
 
 /**
+ * v15 (2a): Legenden-Konstellation. „Der Aufbruch" steht bis Stern 3 (2+3+5 =
+ * 10 💫), „Das Tempo" hat den ersten (2 💫) — zusammen 12 💫 verbaut, bei 96 💫
+ * je verdient. Bewusst ÜBER dem, was die drei Quellen dieses Fixtures gerade
+ * hergeben: `earned` ist ein Lebenszeit-Highwater und darf nie unter den
+ * Anspruch von IRGENDWANN fallen (der Save hat vor der Himmelfahrt tiefer
+ * gestanden, als `lifetimeMaxZone` heute behauptet).
+ */
+const CONSTELLATION = { earned: 96, spent: 12, nodes: { aufbruch: 3, tempo: 1 } };
+/**
+ * Was ein Save VOR v15 nach der Migration im Konto stehen haben muss: den
+ * RÜCKWIRKEND gerechneten Anspruch aus genau diesem Fixture. Er hängt an der
+ * ÄRA, denn ältere Saves haben schlicht weniger Quellen: Erfolge gibt es erst
+ * ab v8, Bühnen-Sterne erst ab v11 — die Boss-Gates dagegen stecken schon im
+ * v1-Kern (`lifetimeMaxZone` 55 ⇒ die Gates 25…50 sind gefallen, 6 × 2 = 12 💫).
+ * Der Baum selbst startet in jeder Ära leer.
+ */
+function constellationPreV15(v: SchemaVersion): { earned: number; spent: number; nodes: object } {
+  return {
+    earned: dustEntitlement({
+      stars: v >= 11 ? 7 : 0, // STAGE_STARS: 3 + 2 + 2, noch kein 15er-Meilenstein
+      achievements: v >= 8 ? ACHIEVEMENTS.length : 0,
+      deepestZone: CORE.lifetimeMaxZone,
+    }),
+    spent: 0,
+    nodes: {},
+  };
+}
+
+/**
  * Der eine Spielstand, ausgedrückt im Schema-Stand `v`: jede Slice erscheint
  * genau ab der Version, die sie eingeführt hat — so sieht die Kette exakt das,
  * was ein echter Save dieser Ära im localStorage hinterlassen hätte.
@@ -260,6 +290,7 @@ function saveAt(v: SchemaVersion): Record<string, unknown> {
     raw.bossFoulZone = BOSS_FOUL_ZONE;
   }
   if (v >= 13) raw.crewMastery = { ...CREW_MASTERY };
+  if (v >= 15) raw.constellation = { ...CONSTELLATION, nodes: { ...CONSTELLATION.nodes } };
   if (v >= 14) {
     raw.crewRetrain = { boss: { ...CREW_RETRAIN.boss }, hype: { ...CREW_RETRAIN.hype } };
     raw.retrainRolls = { ...RETRAIN_ROLLS };
@@ -341,6 +372,12 @@ function expectSlices(s: ChState, v: SchemaVersion): void {
   // die leere Map, es geht also nichts verloren.
   expect(s.crewRetrain).toEqual(v >= 14 ? CREW_RETRAIN : {});
   expect(s.retrainRolls).toEqual(v >= 14 ? RETRAIN_ROLLS : {});
+  // v15 — Legenden-Konstellation (2a). Ältere Ären starten mit LEEREM Baum, aber
+  // gefülltem Konto: Sternenstaub ist der Lohn für Dinge, die der Save schon
+  // BEWEIST (Erfolge stehen als Liste drin, Sterne sind summierbar, gefallene
+  // Boss-Gates stecken in der Bestzone) — anders als bei den Bühnen-Sternen
+  // selbst ist die Rückwirkung hier also nicht geraten, sondern gerechnet.
+  expect(s.constellation).toEqual(v >= 15 ? CONSTELLATION : constellationPreV15(v));
 }
 
 // ---------------------------------------------------------------------------
@@ -617,6 +654,26 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
       // Der restliche Meta-Slice bleibt unangetastet — der Schaden ist lokal.
       expect(s.meta.streak).toBe(META.streak);
       expect(s.meta.streakProtectWeek).toBe(META.streakProtectWeek);
+    },
+  },
+  15: {
+    what: 'Konstellation mit übervollen/negativen Ketten, Müll-Linie und NaN-Konto',
+    damage: (raw) => {
+      raw.constellation = {
+        earned: Number.NaN, // JSON ⇒ null ⇒ 0, wird aus `spent` wieder gehoben
+        spent: 0, // gelogen: die Knoten unten kosten 70 💫
+        nodes: { aufbruch: 99, tempo: -2, junk: 4, ausdauer: 'x' },
+      };
+    },
+    check: (s) => {
+      // Die Kette wird auf ihre acht Sterne gedeckelt, negative/typfalsche
+      // Linien fallen weg, eine unbekannte Linien-Id existiert nicht.
+      expect(s.constellation.nodes).toEqual({ aufbruch: 8 });
+      // `spent` wird NEU GERECHNET (2+3+5+7+9+12+14+18 = 70) — der gelogene
+      // Nullwert kauft sich keinen Rabatt …
+      expect(s.constellation.spent).toBe(70);
+      // … und `earned` wird nach OBEN korrigiert, statt echte Knoten zu nuken.
+      expect(s.constellation.earned).toBe(70);
     },
   },
 };

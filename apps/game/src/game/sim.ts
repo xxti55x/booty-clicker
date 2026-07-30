@@ -97,6 +97,19 @@ import {
   permTokenGoldMult,
 } from './chests';
 import { keyDropAmount, rivalChestChance } from './ch-state';
+import {
+  CONSTELLATION_FULL,
+  type ConstellationState,
+  constellationChestLuckBonus,
+  constellationClickMult,
+  constellationCritChanceBonus,
+  constellationDpsMult,
+  constellationGoldMult,
+  constellationStartGold,
+  createConstellation,
+  hasWarmupStart,
+  WARMUP_S,
+} from './constellation';
 import { CRIT_CHANCE, CRIT_CHANCE_CAP, CRIT_MULT, COMBO_CAP, comboMult } from './click';
 import {
   type GimmickRuntime,
@@ -121,7 +134,7 @@ import {
   travelTo,
 } from './combat';
 import { MAX_SKIN_LEVEL, shardCost } from './gear';
-import { GOBLIN_CHESTS, GOBLIN_SIM_CATCH, rollNextGoblinAt } from './goblin';
+import { GOBLIN_BUFF_MULT, GOBLIN_CHESTS, GOBLIN_SIM_CATCH, rollNextGoblinAt } from './goblin';
 import {
   REMIX_OFF,
   type StageModFactors,
@@ -211,6 +224,21 @@ export interface SimConfig {
    * over a run instead of quietly moving the walls.
    */
   stageMods?: boolean;
+  /**
+   * **IDEEN-GAMEPLAY 2a — die Legenden-Konstellation.** Standard `false`: Der
+   * normale Anker-Bot lässt den Baum links liegen und kauft NIE einen Stern,
+   * obwohl er (wie jeder Spieler) Sternenstaub verdienen würde — Erfolge und
+   * Bühnen-Sterne modelliert er ohnehin nicht, und Boss-Gates zählt er nur als
+   * Fortschritt. Das ist die bewusste, dokumentierte **Untergrenze**: Alle
+   * bestehenden Anker bleiben damit ZAHLENGLEICH (jeder Konstellations-Getter
+   * faltet ×1), und ein Spieler, der den Baum baut, ist höchstens schneller.
+   *
+   * `true` schaltet den VOLL ausgebauten Baum ein (`CONSTELLATION_FULL`) — das
+   * eigene Anker-Profil {@link SIM_CONSTELLATION}, an dem der Budget-Deckel
+   * gemessen wird: Wie weit verschiebt der komplette Lebenswerk-Baum t25 und
+   * die erste Himmelfahrt? (Antwort steht in `sim.test.ts` und in DECISIONS.md.)
+   */
+  constellation?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +258,15 @@ export const SIM_ACTIVE: SimConfig = { clickRate: 3, juice: true };
  * Pfirsich und die Truhen sind ein bewusst zusätzlicher Beschleuniger).
  */
 export const SIM_ACTIVE_CAL: SimConfig = { clickRate: 3, juice: true, economy: false };
+
+/**
+ * **„Konstellation komplett"** (IDEEN-GAMEPLAY 2a, Pflicht-Guardrail): derselbe
+ * aktive Spieler wie {@link SIM_ACTIVE}, aber mit dem VOLL ausgebauten
+ * Legenden-Baum. Der A/B-Partner von `SIM_ACTIVE` — die Differenz der Anker
+ * (t25, erste Himmelfahrt) IST die gemessene Wirkung des Baums und muss unter
+ * dem ×1.5-Budget bleiben.
+ */
+export const SIM_CONSTELLATION: SimConfig = { clickRate: 3, juice: true, constellation: true };
 
 /** Die feste Lauflänge der Messungen: 45 min = 2700 Ein-Sekunden-Schritte. */
 export const SIM_RUN_S = 2700;
@@ -300,6 +337,17 @@ interface Sim {
   ancients: AncientLevels;
   /** Prestige layer 2 (HPF + Himmelsbaum). */
   heaven: HeavenState;
+  /**
+   * 2a: Die Legenden-Konstellation. Leer im Normal-Bot (jeder Getter ×1), voll
+   * im Profil {@link SIM_CONSTELLATION}. Sie wird von KEINEM Reset-Pfad
+   * angefasst — genau wie im Spiel.
+   */
+  constellation: ConstellationState;
+  /**
+   * 2a ★ „Warm-up-Start": Globale Sekunde, bis zu der der Kobold-Buff (×2 Klick)
+   * dieser Tour läuft. Wird bei jedem Tour-Start neu gesetzt; 0 = kein Buff.
+   */
+  warmupUntilS: number;
   // ---- Loot economy (M12, §6) — meta: survives ascension AND Himmelfahrt ----
   /** Held 🔑 (spent opening chests). */
   keys: number;
@@ -387,7 +435,7 @@ function econSummary(sim: Sim): EconSummary {
   };
 }
 
-function newSim(seed: number, mods = true): Sim {
+function newSim(seed: number, mods = true, constellation = false): Sim {
   return {
     gold: 0,
     crew: {},
@@ -399,6 +447,8 @@ function newSim(seed: number, mods = true): Sim {
     rsLifetime: 0,
     ancients: {},
     heaven: createHeaven(),
+    constellation: constellation ? CONSTELLATION_FULL : createConstellation(),
+    warmupUntilS: 0,
     keys: 0,
     chestInv: { wood: 0, gold: 0, diamond: 0, mythic: 0 },
     permTokens: createPermTokens(),
@@ -456,6 +506,7 @@ function critFactor(
   crewUp: Record<string, number> = {},
   stageCrit = 0,
   heaven: HeavenState = createHeaven(),
+  constellation: ConstellationState = createConstellation(),
 ): number {
   if (!config.juice) return 1;
   const econ = econOn(config);
@@ -470,6 +521,9 @@ function critFactor(
     CRIT_CHANCE +
       spec.critChance +
       Math.max(0, stageCrit) +
+      // 2a: die drei Krit-Sterne der Konstellation (+0,5 pp je Stern) — durch
+      // DENSELBEN 40-%-Deckel wie im Spiel.
+      constellationCritChanceBonus(constellation) +
       (econ ? permTokenCritChance(permTokens) : 0),
   );
   // P4 „Präzisions-Shake": derselbe multiplikative Griff wie die Krit-Token (×1
@@ -536,6 +590,7 @@ function powerSplit(
   souls: number,
   ancients: AncientLevels,
   heaven: HeavenState,
+  constellation: ConstellationState,
   config: SimConfig,
   combo: number,
   crit: number,
@@ -553,6 +608,8 @@ function powerSplit(
     global *
     // P4 Kampf-Ast: „Klick-Doktrin" hebt NUR den Klick-Term (×1 ohne Knoten).
     heavenClickMult(heaven) *
+    // 2a: die vier Klick-Sterne (+2 % je Stern, ×1 ohne Baum).
+    constellationClickMult(constellation) *
     (config.clickGearMult ?? 1);
   // Idle gear (§5) + the permanent DPS-token pool (§6.2) + the crew's
   // `idle`-special tiers (v11.1 Groove) multiply crew DPS only — never the
@@ -564,6 +621,8 @@ function powerSplit(
     global *
     // P4 Kampf-Ast: „Schwerer Bass" × „Crew-Doktrin" — nur die Idle-Seite (×1 ohne).
     heavenDpsMult(heaven) *
+    // 2a: die drei Ausdauer-Sterne (+2 % je Stern, ×1 ohne Baum) — nur Idle.
+    constellationDpsMult(constellation) *
     (config.idleGearMult ?? 1) *
     shardIdle *
     (econOn(config) ? permTokenDpsMult(permTokens) : 1) *
@@ -580,6 +639,7 @@ function powerFor(
   souls: number,
   ancients: AncientLevels,
   heaven: HeavenState,
+  constellation: ConstellationState,
   config: SimConfig,
   combo: number,
   crit: number,
@@ -594,6 +654,7 @@ function powerFor(
     souls,
     ancients,
     heaven,
+    constellation,
     config,
     combo,
     crit,
@@ -613,6 +674,7 @@ function damageSplit(sim: Sim, config: SimConfig, combo: number, crit: number): 
     sim.souls,
     sim.ancients,
     sim.heaven,
+    sim.constellation,
     config,
     combo,
     crit,
@@ -685,6 +747,28 @@ function tickGoblin(sim: Sim, nowMs: number): void {
 }
 
 /**
+ * Truhen-Luck dieser Sekunde: Truhilda (0 ohne Kauf) + die beiden
+ * „Spürsinn"/„Witterung"-Sterne der Konstellation (0 ohne Baum) — derselbe
+ * additive Stack wie `ch-state.chestLuck` im Spiel.
+ */
+function chestLuckNow(sim: Sim): number {
+  return ancientChestLuckBonus(sim.ancients) + constellationChestLuckBonus(sim.constellation);
+}
+
+/**
+ * **2a — der Beginn einer Tour.** Startkapital der drei „Aufbruch"-Sterne aufs
+ * Konto, und mit „Warm-up-Start" läuft der Kobold-Buff (×2 Klick) die ersten
+ * {@link WARMUP_S} Sekunden. Beides ist EPISODISCH statt multiplikativ und
+ * gehört deshalb nicht ins Budget-Produkt, sondern genau hierher: Der Bot misst
+ * es, statt dass jemand es schätzt. Läuft an jeder Stelle, an der ein Treiber
+ * eine frische Tour startet (Kettenlauf, Wand-Aszension, Ära-Aszension).
+ */
+function startTour(sim: Sim, globalSec: number): void {
+  sim.gold += constellationStartGold(sim.constellation);
+  sim.warmupUntilS = hasWarmupStart(sim.constellation) ? globalSec + WARMUP_S : 0;
+}
+
+/**
  * Full BP (gold) multiplier this second: Peachiel × gold-tokens × live peach ×3 ×
  * the crew's `gold`-special ability tiers (v11 — part of the core crew layer, so
  * it folds even in the no-economy calibration configs, exactly as the game does).
@@ -694,13 +778,17 @@ function goldMultiplierNow(sim: Sim, config: SimConfig, nowMs: number): number {
   // P4 „Goldene Hände" (+10 %/Stufe) trifft JEDE BP-Quelle, also auch die
   // Kalibrier-Läufe ohne Loot-Ökonomie (×1 ohne Knoten).
   const hande = goldeneHandeMult(sim.heaven);
-  if (!econOn(config)) return ancientGoldMult(sim.ancients) * crewGold * hande;
+  // 2a „Anfängerglück" + „Tantiemen" (+2 % je Stern) treffen wie die „Goldenen
+  // Hände" JEDE BP-Quelle, also auch die Kalibrier-Läufe ohne Loot-Ökonomie.
+  const sterne = constellationGoldMult(sim.constellation);
+  if (!econOn(config)) return ancientGoldMult(sim.ancients) * crewGold * hande * sterne;
   return (
     ancientGoldMult(sim.ancients) *
     permTokenGoldMult(sim.permTokens) *
     incomeMultiplier(sim.boostUntilMs, nowMs) *
     crewGold *
-    hande
+    hande *
+    sterne
   );
 }
 
@@ -740,7 +828,7 @@ function foldReward(sim: Sim, reward: Reward, nowMs: number): void {
  * the step; the remainder stays as a backlog for later seconds.
  */
 function openChestsGreedy(sim: Sim, incomePerSec: number, nowMs: number): void {
-  const luck = ancientChestLuckBonus(sim.ancients); // Truhilda (0 unless bought)
+  const luck = chestLuckNow(sim); // Truhilda + die zwei Konstellations-Sterne
   const order: readonly ChestTier[] = ['mythic', 'diamond', 'gold', 'wood'];
   let guard = MAX_OPENS_PER_STEP;
   for (;;) {
@@ -900,6 +988,13 @@ function stepSecond(
   }
   if (combat.boss) {
     const bossZone = combat.zone;
+    // 2a ★ „Zweiter Wind" wird hier BEWUSST NICHT gefaltet (`refundKills` bleibt 0) —
+    // die ausführliche Begründung samt Messung steht im Modul-Kopf unter den
+    // Ausschlüssen. Kurz: Der Bot fordert den Boss nach einem Fail SOFORT wieder
+    // heraus (`challengeBoss`, zwei Zeilen tiefer) und überspringt dabei die
+    // Rivalen-Welle der Boss-Bühne; drei erstattete Kills auf der Rückfall-Bühne
+    // werden für ihn deshalb zu 30 % weniger Farm je Anlauf statt zu einem
+    // Vorsprung. Das ist eine Eigenschaft seiner Retry-Strategie, nicht des Knotens.
     const bt = tickBoss(combat, 1);
     if (bt.failed) sim.retryBossZone = bossZone; // Fallback auf die Vor-Bühne (Kern)
     combat = bt.state;
@@ -965,10 +1060,22 @@ function economyStep(
   // A1: „Krit-Funken" der Bühne, auf der gerade gekämpft wird. Auf einer
   // Boss-Bühne (und für jeden no-juice-Anker) ist der Zusatz 0.
   const stageCrit = combat.boss ? 0 : factorsForZone(combat.zone, combat.remix).crit;
-  const crit = critFactor(config, sim.permTokens, sim.crewUp, stageCrit, sim.heaven);
-  const dmg = damageSplit(sim, config, combo, crit);
+  const crit = critFactor(
+    config,
+    sim.permTokens,
+    sim.crewUp,
+    stageCrit,
+    sim.heaven,
+    sim.constellation,
+  );
+  const base = damageSplit(sim, config, combo, crit);
+  // 2a ★ „Warm-up-Start": die ersten 60 s jeder Tour zählt der Klick-Anteil ×2
+  // (dasselbe Kobold-Fenster wie im Spiel). Nur der KLICK-Term — der Buff ist
+  // ein Klick-Buff, die Crew merkt nichts davon (P1).
+  const warm = globalSec < sim.warmupUntilS ? GOBLIN_BUFF_MULT : 1;
+  const dmg: DamageSplit = warm > 1 ? { ...base, click: base.click * warm } : base;
   const goldMult = goldMultiplierNow(sim, config, nowMs);
-  const luck = ancientChestLuckBonus(sim.ancients);
+  const luck = chestLuckNow(sim);
   const keyMult = 1 + truhenMagnetBonus(sim.heaven);
   const goldBefore = sim.gold;
   const next = stepSecond(sim, combat, { ...dmg, combo }, goldMult, luck, keyMult, econ);
@@ -1071,7 +1178,7 @@ export interface ChainResult {
  * each new best zone for the endless-wall criterion (E2) and the §4.8 Bühne-80 target.
  */
 export function simulateRunChain(config: SimConfig, runs: number, runSeconds: number): ChainResult {
-  const sim = newSim(config.seed ?? 1, modsOn(config));
+  const sim = newSim(config.seed ?? 1, modsOn(config), config.constellation === true);
   const summaries: RunSummary[] = [];
   const timeToLifetime = new Map<number, number>();
   let globalT = 0;
@@ -1080,6 +1187,7 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
     sim.gold = 0;
     sim.crew = {};
     sim.crewUp = {};
+    startTour(sim, globalT); // 2a: jede Tour startet mit Kapital + Warm-up
     const res = runOnce(
       sim,
       runSeconds,
@@ -1117,7 +1225,9 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
 
 /** Play a single fresh run (0 souls); the E4 active-vs-casual comparison unit. */
 export function simulateSingleRun(config: SimConfig, seconds: number): RunResult {
-  return runOnce(newSim(config.seed ?? 1, modsOn(config)), seconds, config);
+  const sim = newSim(config.seed ?? 1, modsOn(config), config.constellation === true);
+  startTour(sim, 0); // 2a: Startkapital + Warm-up-Fenster der ersten Tour
+  return runOnce(sim, seconds, config);
 }
 
 /** Options for the adaptive-ascension continuous sim (the E2 measurement). */
@@ -1173,7 +1283,8 @@ export interface ContinuousResult {
  * plateau (souls stop growing) — the honest crew+gild+soul-only ceiling.
  */
 export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): ContinuousResult {
-  const sim = newSim(config.seed ?? 1, modsOn(config));
+  const sim = newSim(config.seed ?? 1, modsOn(config), config.constellation === true);
+  startTour(sim, 0); // 2a
   let combat = spawnFor(1, 0, 1, sim.remix);
   const timeToLifetime = new Map<number, number>();
   let globalT = 0;
@@ -1206,6 +1317,7 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
       sim.crew = {};
       sim.crewUp = {};
       remixOnAscend(sim); // A1: neue Aszension, neue Modifikator-Karte
+      startTour(sim, globalT); // 2a: frische Tour ⇒ Startkapital + Warm-up
       combat = spawnFor(1, 0, 1, sim.remix);
       lastAdvanceT = globalT;
       ascensions++;
@@ -1287,6 +1399,7 @@ function buyAncientsGreedy(sim: Sim, config: SimConfig, combo: number, crit: num
       sim.souls,
       sim.ancients,
       sim.heaven,
+      sim.constellation,
       config,
       combo,
       crit,
@@ -1306,6 +1419,7 @@ function buyAncientsGreedy(sim: Sim, config: SimConfig, combo: number, crit: num
         r.souls,
         r.ancients,
         sim.heaven,
+        sim.constellation,
         config,
         combo,
         crit,
@@ -1405,7 +1519,8 @@ export interface EraResult {
  * anti-plateau of §4.6.
  */
 export function simulateAscensionEra(config: SimConfig, opts: EraOptions): EraResult {
-  const sim = newSim(config.seed ?? 1, modsOn(config));
+  const sim = newSim(config.seed ?? 1, modsOn(config), config.constellation === true);
+  startTour(sim, 0); // 2a
   let combat = spawnFor(1, 0, 1, sim.remix);
   let globalT = 0;
   let lastAdvanceT = 0;
@@ -1452,6 +1567,7 @@ export function simulateAscensionEra(config: SimConfig, opts: EraOptions): EraRe
       sim.crewUp = {};
       buyAncientsGreedy(sim, config, combo, crit); // spend the freshly-earned souls
       remixOnAscend(sim); // A1: neue Aszension, neue Modifikator-Karte
+      startTour(sim, globalT); // 2a: frische Tour ⇒ Startkapital + Warm-up
       combat = spawnFor(1, 0, 1, sim.remix);
       lastAdvanceT = globalT;
       ascensions++;
@@ -1577,6 +1693,7 @@ export function simulateFloatGuard(config: SimConfig, opts: FloatGuardOptions): 
       rsLifetime,
       sim.ancients,
       heaven,
+      sim.constellation,
       config,
       combo,
       crit,

@@ -4061,3 +4061,207 @@ body {
     margin: 8px 0 6px;
   }
 }
+
+/* ---- IDEEN-GAMEPLAY 2a: Die Legenden-Konstellation (Sternbild-Karte) ----
+   Der eine Ort im Spiel, der NICHT nach Pergament aussieht: drei Ausschnitte
+   Nachthimmel im 📋 Ziele-Tab. Alles ist Inline-SVG in der Stroke-Sprache der
+   übrigen Ikonen (keine Bild-Assets, keine neue Dependency) — Linien zwischen
+   den Sternen, vierzackige Blenden als Sterne, Gold für „steht", Kohle für
+   „fehlt noch". */
+.cs-head {
+  background: linear-gradient(180deg, #17132a 0%, #0d0a1c 100%);
+  border: 2px solid #3b2f63;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  box-shadow: inset 0 1px 0 rgba(180, 160, 255, 0.18);
+}
+.cs-bank {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cs-dust {
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 800;
+  color: #ffe08a;
+  text-shadow: 0 0 10px rgba(255, 210, 120, 0.45);
+}
+.cs-prog {
+  font-size: 11px;
+  font-weight: 700;
+  color: #c9bff0;
+  margin-top: 4px;
+}
+.cs-src {
+  margin-top: 5px;
+  line-height: 1.45;
+}
+.cs-src b {
+  color: #ffe08a;
+}
+.cs-maps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cs-card {
+  background: radial-gradient(120% 140% at 20% 0%, #1d1740 0%, #0b0918 70%);
+  border: 2px solid #342a57;
+  border-radius: 12px;
+  padding: 8px 10px 7px;
+  cursor: pointer;
+  transition: 0.14s;
+}
+.cs-card:hover {
+  border-color: #55458c;
+}
+.cs-card.sel {
+  border-color: var(--gold-base);
+  box-shadow: 0 0 0 1px rgba(255, 207, 94, 0.35);
+}
+.cs-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.cs-nm {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 800;
+  color: #efe6ff;
+}
+.cs-cnt {
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffcf5e;
+}
+/* Der Himmel selbst: fest 62 px hoch, damit drei Karten zusammen in die
+   Bottom-Sheet-Höhe des Telefons passen (X6: ~55 vh). */
+.cs-sky {
+  display: block;
+  width: 100%;
+  height: 62px;
+  margin: 4px 0 5px;
+  overflow: visible;
+}
+.cs-link {
+  stroke: #372c5e;
+  stroke-width: 0.7;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.cs-link.on {
+  stroke: rgba(255, 207, 94, 0.75);
+  stroke-width: 1.1;
+  filter: drop-shadow(0 0 2px rgba(255, 207, 94, 0.7));
+}
+.cs-star {
+  fill: #2c2350;
+  stroke: #4a3c7d;
+  stroke-width: 0.5;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.cs-star.on {
+  fill: var(--gold-hi);
+  stroke: #fff6dc;
+  filter: drop-shadow(0 0 3px rgba(255, 210, 120, 0.9));
+}
+.cs-star.big {
+  stroke-width: 0.8;
+}
+.cs-star.big.on {
+  fill: #fff3cf;
+  filter: drop-shadow(0 0 5px rgba(255, 225, 150, 1));
+}
+/* Der nächste Stern ist das EINZIGE, was man kaufen kann — er trägt deshalb den
+   Goldrand der gekauften, aber (noch) nicht deren Füllung, und pulsiert. */
+.cs-star.next {
+  fill: #6a5aa8;
+  stroke: var(--gold-base);
+  stroke-width: 0.9;
+  animation: csPulse 1.8s ease-in-out infinite;
+}
+@keyframes csPulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    filter: none;
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 3px rgba(255, 207, 94, 0.85));
+  }
+}
+.cs-card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.cs-ds {
+  flex: 1;
+  line-height: 1.35;
+}
+.cs-foot {
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.cs-foot.ok {
+  color: #a8e831;
+}
+.cs-foot.bad {
+  color: #8d7fb8;
+}
+.cs-foot.done {
+  color: #ffcf5e;
+}
+.cs-detail {
+  background: linear-gradient(180deg, #17132a 0%, #0d0a1c 100%);
+  border: 2px solid #3b2f63;
+  border-radius: 12px;
+  padding: 10px 12px 11px;
+  margin-top: 9px;
+}
+.cs-det-nm {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 800;
+  color: #ffe08a;
+}
+.cs-det-ds {
+  font-size: 12px;
+  color: #d6cdf0;
+  margin-top: 3px;
+  line-height: 1.4;
+}
+.cs-det-id {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ff9ecb;
+  margin-top: 4px;
+}
+.cs-det-next {
+  margin-top: 6px;
+  line-height: 1.4;
+}
+.cs-detail .btn.armed {
+  background: linear-gradient(180deg, #ffd9ec, #ff9ecb 60%, #f06ba6);
+  color: #4a0f2c;
+}
+/* Auf dem Telefon steht die Karte in einem 55-vh-Bottom-Sheet: der Himmel wird
+   flacher, damit alle drei Sternbilder plus Detail-Zeile ohne Scroll-Jagd
+   nebeneinander lesbar bleiben. */
+@media (max-width: 640px) {
+  .cs-sky {
+    height: 50px;
+  }
+  .cs-dust {
+    font-size: 18px;
+  }
+}

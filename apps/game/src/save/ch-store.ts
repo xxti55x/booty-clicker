@@ -53,14 +53,28 @@ import {
   isQuestId,
 } from '../game/quests';
 import { isAchievementId } from '../game/ch-achievements';
-import { type StageStars, STAR_MILESTONE, createStageStars, starMaskFor } from '../game/stars';
+import {
+  type ConstellationState,
+  CONSTELLATION_NODE_COUNT,
+  CONSTELLATIONS,
+  constellationSpend,
+  createConstellation,
+  dustEntitlement,
+} from '../game/constellation';
+import {
+  type StageStars,
+  STAR_MILESTONE,
+  createStageStars,
+  starMaskFor,
+  totalStars,
+} from '../game/stars';
 import { type TranscendState, createTranscend } from '../game/transcend';
 import { SKINS } from '../character/skins';
 import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 14;
+export const CH_SCHEMA = 15;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -90,7 +104,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (v14, Crew-Umschulung): ChState + envelope. */
+/** The current persisted shape (v15, Legenden-Konstellation): ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -119,7 +133,7 @@ function isFiniteNumber(v: unknown): v is number {
  * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
  * The meta/juice fields (rng/stats/legacyImported/ability/combo/gilds/rsLifetime/
  * ancients/heaven/gear/chests/permTokens/peach/meta/achievements/transcend/
- * stageStars/crewMastery/crewRetrain) are
+ * stageStars/crewMastery/crewRetrain/constellation) are
  * deliberately NOT gated here: they are runtime bookkeeping and get repaired (fresh
  * seed / zeroed stats / false flag / default ability+combo / pruned gilds / clamped
  * highwater / sanitised ancients+heaven+gear / defaulted loot slices / defaulted
@@ -574,6 +588,45 @@ function repairStarsAwarded(v: unknown): number {
   return Math.floor(v / STAR_MILESTONE) * STAR_MILESTONE;
 }
 
+/**
+ * Repair die Legenden-Konstellation (v15, 2a). Drei Regeln, jede an ihrem
+ * eigenen Rand:
+ *
+ *  · **Die Ketten sind die Wahrheit.** Jede Linie wird auf 0 …
+ *    {@link CONSTELLATION_NODE_COUNT} geklemmt, unbekannte Linien-Ids fallen
+ *    weg — mehr Form gibt es nicht zu prüfen, weil eine streng lineare Kette
+ *    keine Lücke darstellen kann.
+ *  · **`spent` wird NEU GERECHNET** (`constellationSpend`) statt gelesen: Der
+ *    Ausgabe-Stand ist eine Funktion der Ketten, und zwei Quellen für dieselbe
+ *    Zahl driften irgendwann auseinander. Ein Save, der weniger behauptet, als
+ *    seine Knoten kosten, kann sich damit keinen Rabatt erschwindeln.
+ *  · **`earned` wird nach OBEN korrigiert** (`max(earned, spent)`) — dieselbe
+ *    Richtung wie bei `repairTranscend`: Was gekauft ist, war offenbar bezahlt;
+ *    die Knoten wegzunehmen wäre das Nuken echten Fortschritts. Nach unten
+ *    korrigiert nie jemand: `earned` ist ein Highwater, und die Boot-Synchro
+ *    (`syncDust`) hebt ihn ohnehin sofort wieder auf den Anspruch aus Sternen,
+ *    Erfolgen und Boss-Gates.
+ *
+ * Nie werfend; ein komplett kaputter Slice wird ein frischer, leerer Baum.
+ */
+function repairConstellation(v: unknown): ConstellationState {
+  if (!isRecord(v)) return createConstellation();
+  const nodes: Record<string, number> = {};
+  const src = isRecord(v.nodes) ? v.nodes : {};
+  for (const cfg of CONSTELLATIONS) {
+    const raw = src[cfg.id];
+    if (!isFiniteNumber(raw) || raw <= 0) continue;
+    const n = Math.min(CONSTELLATION_NODE_COUNT, Math.floor(raw));
+    if (n > 0) nodes[cfg.id] = n;
+  }
+  const spent = constellationSpend(nodes);
+  const earned = Math.max(
+    isFiniteNumber(v.earned) && v.earned > 0 ? Math.floor(v.earned) : 0,
+    spent,
+  );
+  return { earned, spent, nodes };
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
 function stateFromSave(save: ChSaveLatest): ChState {
   const souls = save.souls;
@@ -616,6 +669,7 @@ function stateFromSave(save: ChSaveLatest): ChState {
     starsAwarded: repairStarsAwarded(save.starsAwarded),
     // Reiner Run-Zustand: eine gültige Bühnen-Nummer oder 0 (kein offener Fehlversuch).
     bossFoulZone: isNonNegInt(save.bossFoulZone) ? save.bossFoulZone : 0,
+    constellation: repairConstellation(save.constellation),
   };
 }
 
@@ -852,6 +906,45 @@ function migrateChV13toV14(raw: Record<string, unknown>): Record<string, unknown
   };
 }
 
+/**
+ * v14 → v15: die **Legenden-Konstellation** (IDEEN-GAMEPLAY 2a) — ein leerer
+ * Baum mit einem RÜCKWIRKEND gefüllten Sternenstaub-Konto.
+ *
+ * Anders als bei den Bühnen-Sternen (v10→v11, die bewusst leer starten) ist die
+ * Rückwirkung hier nicht nur möglich, sondern zwingend: Sternenstaub ist per
+ * Definition der Lohn für Dinge, die der Save SCHON BEWEIST — freigeschaltete
+ * Erfolge stehen als Liste drin, die Sterne-Summe ist aus `stageStars`
+ * ausrechenbar, und die gefallenen Boss-Gates stecken in der tiefsten je
+ * erreichten Bühne. Ein Spieler mit 20 Erfolgen und Bühne 60 bekommt beim
+ * ersten Start nach dem Update also sofort sein Konto (hier: 60 + 5·… + …) und
+ * darf sich damit die ersten Knoten kaufen — er hat sie längst verdient.
+ *
+ * Gerechnet wird mit derselben Formel, die danach jede Sekunde läuft
+ * (`constellation.dustEntitlement`); die Boot-Synchro in der Glue wäre also
+ * ohnehin dieselbe Zahl. Die Migration nimmt sie nur vorweg, damit der Anspruch
+ * schon im Save steht und nicht erst durch einen Tick entsteht. Für jedes
+ * bestehende Feld verlustfrei.
+ */
+function migrateChV14toV15(raw: Record<string, unknown>): Record<string, unknown> {
+  const stars = totalStars(repairStageStars(raw.stageStars));
+  const achievements = repairAchievements(raw.achievements).length;
+  // Tiefste JE erreichte Bühne: `lifetimeMaxZone` fällt bei Himmelfahrt/Transzendenz
+  // auf 1 zurück, der Gear-Latch `zoneEver` nicht — deshalb das Maximum aus allen
+  // vier Zahlen (exakt die Regel aus `ch-state.unlockZone`, plus die Run-Werte).
+  const gear = isRecord(raw.gear) ? raw.gear : {};
+  const deepestZone = Math.max(
+    isFiniteNumber(raw.lifetimeMaxZone) ? raw.lifetimeMaxZone : 1,
+    isFiniteNumber(raw.runMaxZone) ? raw.runMaxZone : 1,
+    isFiniteNumber(raw.zone) ? raw.zone : 1,
+    isFiniteNumber(gear.zoneEver) ? gear.zoneEver : 1,
+  );
+  const constellation: ConstellationState = {
+    ...createConstellation(),
+    earned: dustEntitlement({ stars, achievements, deepestZone }),
+  };
+  return { ...raw, v: 15, constellation };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
@@ -866,6 +959,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
   11: migrateChV11toV12,
   12: migrateChV12toV13,
   13: migrateChV13toV14,
+  14: migrateChV14toV15,
 };
 
 /**
