@@ -12,6 +12,7 @@ import {
 import type { ChState } from '../game/ch-state';
 import { emptyState } from './empty';
 import { fmt } from './format';
+import { portraitTile } from './avatars';
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -73,8 +74,10 @@ export class Ancients {
       const foot = capped
         ? `<span class="cost">Max erreicht</span>`
         : `<span class="cost ${affordable ? '' : 'bad'}">Lv ${level + 1} · ${fmt(cost)} ✨</span>`;
+      // IDEEN-GAMEPLAY 4b: Ahnen sind benannte Charaktere (Twerkules!) und
+      // bekommen denselben Baukasten — Portrait vor dem Namen.
       return `<div class="item ${affordable ? '' : 'locked'}" data-id="${cfg.id}">
-          <div class="nm">${cfg.name}<span class="lv">Lv ${level}</span></div>
+          <div class="nm"><span class="nm-who">${portraitTile(cfg.id)}${cfg.name}</span><span class="lv">Lv ${level}</span></div>
           <div class="ds">${cfg.flavor} · ${cfg.label}${capTxt}</div>
           <div class="crew-foot">
             ${foot}

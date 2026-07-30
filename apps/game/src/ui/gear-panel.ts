@@ -336,10 +336,16 @@ export class Gear {
     }
 
     const stars5 = '★★★★★'.slice(0, stars) + '☆☆☆☆☆'.slice(0, MAX_SKIN_STARS - stars);
+    // IDEEN-GAMEPLAY 4a/4b: die 10 Playermodels brauchen KEINEN Baukasten — für
+    // sie existieren echte Renders. `public/avatars/skin-*.jpg` sind aus
+    // `models/renders/character-*.jpg` erzeugte 96×120-Büsten (~2 KB je Bild).
     return `<div class="skincard rarity-${cfg.rarity} ${equipped ? 'active' : ''} ${unlocked ? '' : 'locked'}" data-id="${id}">
       <div class="sc-head">
-        <span class="sc-icon">${cfg.icon}</span>
-        <span class="sc-rarity">${RARITY_LABEL[cfg.rarity]}</span>
+        <img class="sc-av" src="./avatars/skin-${id}.jpg" width="48" height="60" alt="" aria-hidden="true" loading="lazy" decoding="async">
+        <span class="sc-hmeta">
+          <span class="sc-icon">${cfg.icon}</span>
+          <span class="sc-rarity">${RARITY_LABEL[cfg.rarity]}</span>
+        </span>
       </div>
       <div class="sc-name">${cfg.name}</div>
       <div class="sc-buff">${buffTxt}<br>★ ${starTxt}</div>

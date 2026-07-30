@@ -2758,6 +2758,169 @@ body {
   }
 }
 
+/* ---- Avatare (IDEEN-GAMEPLAY 4a/4b) ----------------------------------------
+   Ein Portrait ist ein zwei Knoten großes `<svg><use/></svg>` auf das einmalige
+   `<symbol>`-Sprite (ui/avatars.ts). Die Tinte ERBT sich aus dem Umfeld
+   (Pergament-Tinte in der Karte, Gold-Tinte auf der Kachel), die Mitglieds-
+   Palette kommt als `--av-frame` in den Rahmen. */
+.av {
+  display: inline-flex;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 1px;
+  border: 2px solid var(--av-frame, var(--parch-line));
+  border-radius: 9px;
+  background: rgba(255, 252, 240, 0.62);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  /* Die Kachel steht IMMER auf Pergament (Crew-Card, Ahnen-Zeile) — die Tinte
+     kommt daher hier fest, statt sich vom hellen Body-Text zu erben. */
+  color: var(--parch-ink);
+}
+.av.av-lg {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+}
+.av-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* Klick-Sicherheit (Guardrail 4b + Ability-Kauf-Bugfix): kein Portrait-Knoten
+   liegt je im Delegations-Klickpfad — `closest('.ab.ready')`/`closest('.item')`
+   sieht immer die Kauf-Fläche selbst, nie die Grafik darauf. */
+.av,
+.av-svg,
+.ab-av,
+.ab-badge,
+.ab-check,
+.sc-av {
+  pointer-events: none;
+}
+/* Crew-Card: Portrait links, Name + Beschreibung daneben. */
+.crew-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+.crew-id {
+  flex: 1;
+  min-width: 0;
+}
+.crew-head .ds {
+  margin: 3px 0 0;
+}
+/* Ahnen-Zeile: Portrait vor dem Namen, Level bleibt rechtsbündig. */
+.nm-who {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+/* ---- Fähigkeits-Kachel mit Portrait + Sorten-Badge + Tier-Rahmen (4b) ---- */
+.ab-slots {
+  flex-wrap: wrap;
+  /* 9 px statt 5: Sorten-Badge und Haken ragen über den Kachelrand hinaus und
+     dürfen der Nachbar-Kachel nicht ins Bild laufen. */
+  gap: 9px;
+  row-gap: 10px;
+}
+.ab {
+  position: relative;
+  width: 32px;
+  height: 32px;
+}
+.ab .ab-av {
+  width: 100%;
+  height: 100%;
+}
+.ab-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  background: var(--parch);
+}
+.ab .ab-badge svg {
+  width: 10px;
+  height: 10px;
+}
+.ab-check {
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #2e7d32;
+  color: #eafbe6;
+}
+.ab .ab-check svg {
+  width: 9px;
+  height: 9px;
+}
+/* Tier-Rahmen: Kupfer → Silber → Gold → Platin → Prisma (je zwei Stufen). Steht
+   NACH den Sorten-Tönungen, damit der Rahmen die Tiefe zeigt und die Füllung
+   weiter die Sorte. */
+.ab.tr1 {
+  border-color: #b07a4a;
+}
+.ab.tr2 {
+  border-color: #98a3ad;
+}
+.ab.tr3 {
+  border-color: var(--gold-base);
+}
+.ab.tr4 {
+  border-color: #7fd8c4;
+}
+.ab.tr5 {
+  border-color: #c79bf0;
+}
+/* Gekaufte Kachel: das Portrait bleibt lesbar (dunkles Grün auf hellem Grund),
+   der Haken oben rechts trägt weiter das „erledigt". */
+.ab.done {
+  color: #1f5c23;
+  background: rgba(126, 190, 90, 0.3);
+}
+
+/* ---- Gear-Card: der echte Render als Avatar (4b) ---- */
+.sc-head {
+  gap: 6px;
+}
+.sc-av {
+  width: 42px;
+  height: 53px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: #2b2a3d;
+}
+.sc-hmeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.skincard.active .sc-av {
+  border-color: #a8e831;
+}
+.skincard.locked .sc-av {
+  filter: grayscale(0.85) brightness(0.55);
+}
+
 /* ---- Bühnen-Bildleiste (Goal: Zonen als Insel-Thumbnails) ---- */
 .zonestrip {
   display: flex;

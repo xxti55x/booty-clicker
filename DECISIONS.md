@@ -3,6 +3,80 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## IDEEN-GAMEPLAY Schritt 1 — 4a+4b Avatar-System
+
+- **Ein `<symbol>`-Sprite, zwei Knoten pro Zeile — die 0.25-s-Regel diktiert die
+  Architektur.** Die Crew-Liste wird im Idle-Tick komplett neu aus einem
+  HTML-String gebaut. Ein Portrait als eigenes SVG-Geflecht wäre pro Zeile ~15
+  Knoten gewesen, also bei 15 Mitgliedern × (1 Karte + n Fähigkeits-Kacheln)
+  mehrere hundert Knoten, die viermal pro Sekunde entstehen und sterben.
+  `mountAvatarSprite()` hängt die GEOMETRIE deshalb genau einmal beim Start in
+  den Body (50 Symbole = 25 Charaktere × 2 Posen); jede Zeile trägt nur noch
+  `<svg><use href="#av-dj"/></svg>`. Ein Test zählt die `<`-Zeichen im
+  Zeilen-Markup (genau 3) und verbietet dort jedes `<path`/`<circle` — dieser
+  Guardrail kann nicht still verrutschen.
+- **Die Tinte erbt sich, die Palette wird gebacken.** Innerhalb eines Symbols
+  sind alle Striche `currentColor` — dasselbe Prinzip wie die Tab-Ikonen. Das
+  Portrait ist damit auf der Pergament-Karte braun, auf einer gekauften
+  Fähigkeits-Kachel grün und auf der pulsenden Kauf-Kachel gold-tinten, ohne dass
+  irgendwer eine Farbe setzt. Die MITGLIEDS-Palette (Haar, Accessoire) steht
+  dagegen als Literal im Symbol, weil sie pro Charakter fix ist; nur die
+  Rahmenfarbe reist als `--av-frame` mit der Zeile mit. Ein `color`-Fallback auf
+  `--parch-ink` steht auf `.av` selbst — ohne ihn erbte die Crew-Card die HELLE
+  Body-Textfarbe (im ersten Beweis-Screenshot waren die 48-px-Portraits blass;
+  die Ahnen-Zeilen sahen richtig aus, weil sie in `.nm` liegen, das die
+  Pergament-Tinte schon setzte).
+- **Die Power-Pose ist reine Silhouette — Fäuste wurden zu „oIo".** Der erste
+  Entwurf gab der Power-Variante zwei geballte Fäuste links und rechts eines
+  Brustbeins. Im Portrait-Sheet las sich das als Buchstabenfolge, nicht als
+  Muskel. Der zweite Entwurf mit Funken in den Ecken schied ebenso aus: genau
+  dort sitzen bei der Hälfte des Kaders die Signaturen (Klemmbrett, Dreizack,
+  Solarpanel, Mischpult). Was trägt: kurzer Hals, breitere kantige Schultern,
+  Trapez-Falten, Brustbogen — plus Strichdicke 1.75 statt 1.4 und ein
+  Power-Gesicht (gesenkte Brauen, Schrei-Mund). Der Unterschied ist auf 32 px
+  sofort lesbar, ohne einen einzigen Pixel in den Accessoire-Zonen.
+- **Kopfform + Frisur variieren, damit das Accessoire nicht allein trägt.** 8
+  Kopfformen × 10 Frisuren, handgesetzt in `AVATAR_TABLE` — zwei Portraits
+  unterscheiden sich nie NUR über ihr Signatur-Objekt. Unbekannte Ids fallen auf
+  einen FNV-1a-Hash der Id zurück (ein künftig erfundenes Mitglied hat sofort ein
+  stabiles Gesicht statt gar keins); ein Test hält mit `hasHandSetPortrait` fest,
+  dass kein BESTEHENDES Mitglied still in diesen Fallback rutscht.
+- **Die 10 Skins bekommen echte Renders, keinen Baukasten — und dafür eigene
+  Thumbnails.** `models/renders/character-*.jpg` sind 576×576-Ganzkörper-Posen
+  und liegen NICHT im Vite-`public/`. Statt sie zu kopieren (10 × ~19 KB, und für
+  eine 42-px-Karte 13× zu groß) erzeugt ein einmaliger PIL-Lauf 96×120-Büsten:
+  Motiv-Bounding-Box gegen die einheitliche Hintergrundfarbe, Kopfmitte aus dem
+  obersten Fünftel, obere 52 % der Figur als 4:5-Ausschnitt, JPEG q80.
+  Ergebnis: `apps/game/public/avatars/skin-*.jpg`, **21.6 KB für alle zehn**
+  (1.7–2.5 KB je Bild). Erzeugt mit
+  `python3 <scratchpad>/make-skin-thumbs.py` (Skript im DECISIONS-Text
+  dokumentiert, nicht im Repo — es läuft einmal pro Render-Neuexport). Keine
+  neue Dependency, kein Build-Schritt: die Thumbnails sind eingecheckte Assets.
+  Bundle nach der Änderung: **836 KB JS** (Budget 1.5 MB), `dist` gesamt 945 KB.
+- **Der Tier-Rahmen sagt WIE TIEF, die Sorten-Tönung WAS, das Portrait WER.** Die
+  Fähigkeits-Kachel hatte bisher nur die Sorten-Farbe. Jetzt kommen drei
+  unabhängige Kanäle zusammen, ohne sich zu überlagern: Rahmenfarbe je zwei
+  Stufen eine Klasse höher (Kupfer→Silber→Gold→Platin→Prisma, gedeckelt), die
+  bestehende `k-*`-Füllung, und Portrait + Pose. Die gekaufte Kachel trägt
+  zusätzlich den Haken oben rechts — der Sorten-Badge unten rechts bleibt, damit
+  auch bezahlte Stufen noch verraten, was sie waren (vorher: nur ein Haken).
+- **Die Kauf-Fläche wurde GRÖSSER, nicht kleiner.** Die Kachel wächst von 28 auf
+  32 px, der Zeilen-Abstand von 5 auf 9 px (Badge und Haken ragen über den Rand)
+  und `.ab-slots` darf jetzt umbrechen. Jeder Portrait-Knoten steht auf
+  `pointer-events: none`, damit `closest('.ab.ready')` bzw. `closest('.item')`
+  weiter die Kauf-Fläche selbst sieht — die Delegations-Klicklogik in `crew.ts`
+  und der `pointerHeld`-Aufschub blieben unangetastet. Nachgewiesen headless:
+  ein 320-ms-Press EXAKT auf die Portrait-Grafik im Kauf-Button kauft beim
+  ERSTEN Mal, ein Klick exakt auf das 48-px-Karten-Portrait kauft ein Level, und
+  der alte `verify-abilityclick`-Lauf (10 Schnellklicks) zählt weiter alle zehn.
+- **Himmelsbaum und Mythos bleiben gesichtslos — bewusst.** Ihre Knoten sind
+  Konzepte, keine Personen (Grenze aus IDEEN-GAMEPLAY 4b). Ahnen dagegen sind
+  benannte Charaktere und bekommen denselben Baukasten mit eigener
+  Signatur-Zeile: Twerkules Lorbeer + Bart, Poposeidon Dreizack + Wellenbart,
+  Cheeksana Sturmauge, Glutaeus Gladiatorenhelm, Chronilla Sanduhr, Peachiel
+  Heiligenschein + Flügel, Wackelias Anker, Beatrix Taktstock + Note, Truhilda
+  Schlüssel, Ekstasius Flammenkrone.
+
 ## ROADMAP-V2 Nachzügler — G5 Gesichter leben
 
 - **Verstecken heißt `scale ≈ 0`, nicht `visible = false` — sonst frisst der

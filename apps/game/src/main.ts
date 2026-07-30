@@ -247,6 +247,7 @@ import { loadGame } from './save/store';
 import { Rng } from './util/rng';
 import { AbilityBar } from './ui/ability-bar';
 import { Ancients } from './ui/ancients';
+import { mountAvatarSprite } from './ui/avatars';
 import { Ceremony } from './ui/ceremony';
 import { ChHud, rivalName } from './ui/ch-hud';
 import { ChSettings } from './ui/ch-settings';
@@ -693,6 +694,12 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('beforeunload', persist);
 
 // ---------- shop panels ----------
+// IDEEN-GAMEPLAY 4a: die Portrait-Geometrie wandert GENAU EINMAL als
+// `<symbol>`-Sprite ins DOM, bevor irgendein Panel baut — die Zeilen der Crew-
+// und Ahnen-Listen referenzieren sie danach nur noch per `<use>` (die Crew-Liste
+// baut sich im 0.25-s-Tick komplett neu auf).
+mountAvatarSprite();
+
 const crew = new Crew({
   state,
   onBuy: () => {

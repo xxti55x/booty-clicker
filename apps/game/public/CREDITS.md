@@ -13,6 +13,14 @@ is entirely self-authored and free of third-party licences — effectively **CC0
 (public domain)**. If pre-recorded CC0 tracks are added later, list each source,
 author and licence here.
 
+## Bilder
+
+- **`avatars/skin-*.jpg`** — die Avatare der 10 Skin-Karten im Gear-Tab. Aus den
+  projekteigenen Blender-Renders (`models/renders/character-*.jpg`) erzeugte
+  96×120-Büsten, also ebenfalls vollständig selbst erstellt. Alle übrigen
+  Portraits (Crew, Ahnen) sind prozedurale SVGs aus `src/ui/avatars.ts` — keine
+  Bild-Assets, keine Emojis.
+
 ## Third-party code
 
 - **Three.js** — MIT License (https://threejs.org)

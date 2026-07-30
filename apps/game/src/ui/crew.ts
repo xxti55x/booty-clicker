@@ -21,6 +21,7 @@ import { clickGearMult, dpsGearMult } from '../game/gear';
 import { heavenGlobalMult, soulBonusEff } from '../game/heaven';
 import { fmt } from './format';
 import { abilityBurst, coinFly } from './fx';
+import { portraitSvg, portraitTile, tierClass } from './avatars';
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -46,6 +47,14 @@ const KIND_ICON: Record<AbilityKind, string> = {
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.4c1 3.3 4.3 4.8 4.3 8.8a6.6 6.6 0 0 1-1.8 4.7c.2-2.3-.7-3.7-2.5-5-1.8 1.3-2.7 2.7-2.5 5a6.6 6.6 0 0 1-1.8-4.7c0-4 3.3-5.5 4.3-8.8Zm0 19.2a4.6 4.6 0 0 1-3.4-1.5c2.3.2 4.5.2 6.8 0A4.6 4.6 0 0 1 12 21.6Z" fill="currentColor"/></svg>',
   idle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V11h3.6v9H4Zm6.2 0V4h3.6v16h-3.6Zm6.2 0V8H20v12h-3.6Z" fill="currentColor"/></svg>',
 };
+
+/** Portrait + Sorten-Badge einer Fähigkeits-Kachel (Power-Stufen flexen). */
+function slotArt(id: string, kind: AbilityKind, badge: string): string {
+  return (
+    portraitSvg(id, kind === 'power' ? 'power' : 'base', 'ab-av') +
+    `<span class="ab-badge">${badge}</span>`
+  );
+}
 
 export interface CrewDeps {
   state: ChState;
@@ -221,8 +230,11 @@ export class Crew {
         const slots: string[] = [];
         for (let t = 1; t <= ups; t++) {
           const k = abilityKind(cfg, t);
+          // 4b: auch die gekauften Kacheln zeigen WER und WAS — der Haken oben
+          // rechts bleibt das „gekauft"-Signal.
           slots.push(
-            `<span class="ab done" title="Fähigkeit ${t}: ${abilityKindLabel(k, outLabel)} — gekauft">${CHECK}</span>`,
+            `<span class="ab done ${tierClass(t)}" title="Fähigkeit ${t}: ${abilityKindLabel(k, outLabel)} — gekauft">` +
+              `${slotArt(cfg.id, k, KIND_ICON[k])}<span class="ab-check">${CHECK}</span></span>`,
           );
         }
         const k = abilityKind(cfg, ab.tier);
@@ -230,23 +242,28 @@ export class Crew {
         if (ab.unlocked) {
           const can = ab.cost <= s.gold;
           slots.push(
-            `<button class="ab ready k-${k} ${can ? '' : 'poor'}" data-ab="${cfg.id}" type="button"
-               title="Fähigkeit ${ab.tier}: ${abLabel} kaufen">${KIND_ICON[k]}</button>`,
+            `<button class="ab ready k-${k} ${tierClass(ab.tier)} ${can ? '' : 'poor'}" data-ab="${cfg.id}" type="button"
+               title="Fähigkeit ${ab.tier}: ${abLabel} kaufen">${slotArt(cfg.id, k, KIND_ICON[k])}</button>`,
           );
           slots.push(
             `<span class="ab-cost ${can ? '' : 'bad'}">${abLabel} · ${fmt(ab.cost)} BP</span>`,
           );
         } else {
           slots.push(
-            `<span class="ab lk" title="Fähigkeit ${ab.tier} (${abLabel}) ab Lv ${ab.level}">Lv${ab.level}</span>`,
+            `<span class="ab lk ${tierClass(ab.tier)}" title="Fähigkeit ${ab.tier} (${abLabel}) ab Lv ${ab.level}">Lv${ab.level}</span>`,
           );
         }
         abRow = `<div class="ab-slots">${slots.join('')}</div>`;
       }
       rows.push(
         `<div class="item ${affordable ? '' : 'locked'}" data-id="${cfg.id}">
-          <div class="nm">${cfg.name}${gildBadge}<span class="lv">Lv ${level}${ups > 0 ? ` · ×${abilityMult(cfg, ups)}` : ''}</span></div>
-          <div class="ds">${cfg.ds}</div>
+          <div class="crew-head">
+            ${portraitTile(cfg.id, 'base', 'av-lg')}
+            <div class="crew-id">
+              <div class="nm">${cfg.name}${gildBadge}<span class="lv">Lv ${level}${ups > 0 ? ` · ×${abilityMult(cfg, ups)}` : ''}</span></div>
+              <div class="ds">${cfg.ds}</div>
+            </div>
+          </div>
           <div class="crew-foot">
             <span class="cost ${affordable ? '' : 'bad'}">${label} · ${fmt(cost)} BP</span>
             <span class="dps">${level > 0 ? `${fmt(out)} ${outLabel}` : '—'}</span>
