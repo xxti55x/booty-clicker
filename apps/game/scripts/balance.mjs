@@ -45,6 +45,7 @@ await build({
     join(GAME, 'src/game/gear.ts'),
     join(GAME, 'src/game/retrain.ts'),
     join(GAME, 'src/game/constellation.ts'),
+    join(GAME, 'src/game/territory.ts'),
   ],
   bundle: true,
   format: 'esm',
@@ -58,6 +59,7 @@ const mastery = await import(pathToFileURL(join(tmp, 'mastery.js')).href);
 const gear = await import(pathToFileURL(join(tmp, 'gear.js')).href);
 const retrain = await import(pathToFileURL(join(tmp, 'retrain.js')).href);
 const cs = await import(pathToFileURL(join(tmp, 'constellation.js')).href);
+const terr = await import(pathToFileURL(join(tmp, 'territory.js')).href);
 const MASTERY_AT = mastery.MASTERY_RANKS.map((r) => r.at);
 
 const {
@@ -269,6 +271,22 @@ console.log(
 );
 
 // ---------------------------------------------------------------------------
+// Die geteilten Ketten des aktiven Bots (Abschnitte 6, 7 und 10)
+// ---------------------------------------------------------------------------
+// Meisterschaft (6), Splitter (7) und Ruf (10) lesen alle DIESELBEN Läufe — sie
+// unterscheiden sich nur darin, welches Feld des `ChainResult` sie auswerten.
+// Bis 1b fuhr jeder Abschnitt die Ketten selbst; mit einem dritten wären es
+// 3 × 159 Läufe gewesen (Laufzeit 49 s von 60 s Budget). Einmal fahren, dreimal
+// lesen: dieselben Zahlen, ein Drittel der Zeit.
+const CHAIN_RUNS = [1, 4, 16, 32];
+const chains = new Map(
+  CHAIN_RUNS.map((runs) => [
+    runs,
+    SEEDS.map((seed) => simulateRunChain({ ...SIM_ACTIVE, seed }, runs, SIM_RUN_S)),
+  ]),
+);
+
+// ---------------------------------------------------------------------------
 // 6 · Crew-Meisterschaft (IDEEN-GAMEPLAY 1a) — die Schwellen-Kalibrierung
 //     Anker: sim.test.ts „Crew-Meisterschaft (1a) wächst im Bot mit"
 // ---------------------------------------------------------------------------
@@ -285,9 +303,8 @@ const rankOf = (xp) => {
 };
 const RANK_NAMES = ['—', 'Bronze', 'Silber', 'Gold', 'Legende'];
 const masteryRows = [];
-for (const runs of [1, 4, 16, 32]) {
-  const per = SEEDS.map((seed) => {
-    const c = simulateRunChain({ ...SIM_ACTIVE, seed }, runs, SIM_RUN_S);
+for (const runs of CHAIN_RUNS) {
+  const per = chains.get(runs).map((c) => {
     const vals = Object.values(c.mastery);
     return { best: Math.max(0, ...vals), sum: vals.reduce((a, b) => a + b, 0) };
   });
@@ -321,14 +338,11 @@ const bossShardsUpTo = (bestZone) => {
   return s;
 };
 const shardRows = [];
-for (const runs of [1, 4, 16, 32]) {
-  const per = SEEDS.map((seed) => {
-    const c = simulateRunChain({ ...SIM_ACTIVE, seed }, runs, SIM_RUN_S);
-    return {
-      chest: c.econ.shards,
-      boss: c.runs.reduce((a, r) => a + bossShardsUpTo(r.bestZone), 0),
-    };
-  });
+for (const runs of CHAIN_RUNS) {
+  const per = chains.get(runs).map((c) => ({
+    chest: c.econ.shards,
+    boss: c.runs.reduce((a, r) => a + bossShardsUpTo(r.bestZone), 0),
+  }));
   const h = (runs * SIM_RUN_S) / 3600;
   const chest = mean(per.map((p) => p.chest));
   const boss = mean(per.map((p) => p.boss));
@@ -450,6 +464,56 @@ table(['Seed', 't25 [min]', 'Beschleunigung', 'Wand-Bühne'], csRows);
 console.log(
   `   Profil: ${JSON.stringify(SIM_CONSTELLATION)}` +
     `\n   Anker: Verschiebung ≤ ×1.5 auf t25, erster Himmelfahrt und Kettenlauf-t75.`,
+);
+
+// ---------------------------------------------------------------------------
+// 10 · Gebietsherrschaft (IDEEN-GAMEPLAY 1b) — Ruf-Kurve, Ruf/h je Theme, Budget
+//      Anker: sim.test.ts „1b Gebietsherrschaft (Ruf wächst passiv im Bot mit)"
+// ---------------------------------------------------------------------------
+// Ruf entsteht PASSIV aus Kills (Rivale +1, Boss +10) und gehört dem Theme SEINER
+// Bühne. Der Bot bucht ihn wie das Spiel und faltet den BP-Bonus in jeden Kill —
+// diese Tabelle ist die Eichlatte, aus der die Schwellen in `game/territory.ts`
+// abgeleitet sind (und der Grund, warum sie nicht geraten sind).
+console.log('\n── 10 · Gebietsherrschaft · Ruf je Theme (Bot 3 cps + Juice, MIT Loot)');
+const THEME_IDS = terr.ZONE_THEMES;
+const repRows = [];
+/** Ruf/h des stärksten Themes je Messpunkt — die letzte Zeile ist der Beharrungszustand. */
+const repRates = [];
+for (const runs of CHAIN_RUNS) {
+  const per = chains.get(runs).map((c) => c.territory);
+  const h = (runs * SIM_RUN_S) / 3600;
+  const vals = THEME_IDS.map((id) => mean(per.map((p) => p[id] ?? 0)));
+  const best = Math.max(...vals);
+  repRates.push(best / h);
+  repRows.push([
+    `${runs} × 45 min`,
+    hrs(runs * SIM_RUN_S),
+    ...vals.map((v) => Math.round(v)),
+    Math.round(best),
+    Math.round(best / h),
+    terr.territoryRank(best),
+  ]);
+}
+table(['Spielzeit', '[h]', ...THEME_IDS, 'stärkstes', 'Ruf/h', 'Stufe'], repRows);
+const ladder = Array.from({ length: terr.TERRITORY_MAX_RANK }, (_, i) => terr.repForRank(i + 1));
+// Die Rate des Beharrungszustands (letzte Zeile) trägt die Zeit-Schätzung: Ruf
+// wächst pro KILL, nicht pro Bühnen-Tiefe, ist also über die Kette linear.
+const repRate = repRates[repRates.length - 1];
+table(
+  ['Stufe', 'Ruf-Schwelle', 'BP auf eigenen Bühnen', 'aktives Spiel auf DIESEM Theme'],
+  ladder.map((at, i) => [
+    i + 1,
+    at,
+    `×${(1 + terr.TERRITORY_GOLD_PER_RANK * (i + 1)).toFixed(3)}`,
+    `${(at / repRate).toFixed(1)} h`,
+  ]),
+);
+console.log(
+  `   Kurve: ${terr.REP_BASE} × ${terr.REP_GROWTH}^(Stufe−1) · Rivale +${terr.REP_PER_RIVAL} Ruf · Boss +${terr.REP_PER_BOSS}` +
+    `\n   Budget: ×${terr.territoryPowerBudget().toFixed(3)} BP auf einer Theme-Bühne bei Stufe ${terr.TERRITORY_MAX_RANK}` +
+    ` (Deckel ×1.15) — auf JEDER anderen Bühne ×1.000, es gibt kein Produkt über die vier Leisten.` +
+    `\n   Anker: Stufe 1 im ersten Sitting · Stufe 3 nach ~3 h · Stufe 10 nach ~${(ladder[9] / repRate).toFixed(0)} h aktivem Spiel (= Wochen).` +
+    `\n   Trophäe: ab Stufe ${terr.TROPHY_MIN_RANK} Bronze · ab 6 Silber · ab 10 Gold (kosmetisch, G3-Ambient-Slot).`,
 );
 
 rmSync(tmp, { recursive: true, force: true });

@@ -3,6 +3,154 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## IDEEN-GAMEPLAY Schritt 5 — 1b Gebietsherrschaft
+
+- **Eine Zahl je Theme, eine Gewinn-Regel, eine Wirkung.** `territory:
+Record<theme, number>` ist die ganze Slice: vier monotone Lebenszeit-Zähler,
+  gefüllt AUSSCHLIESSLICH über `addRep` im Kill-Pfad (Rivalin +1, Boss +10 — ein
+  Gate ist zehn Rivalen wert, ein Theme-Zyklus zahlt also 50 + 10 = 60 Ruf).
+  Gelesen wird die Tafel an genau zwei Stellen: `territoryGoldMult(t, zone)` für
+  die Wirkung und `trophyTier(rank)` für die Optik. Die Theme-Zuordnung wird
+  nirgends nachgebaut — `territory.ts` RE-EXPORTIERT `themeForZone` aus
+  `boss-gimmicks.ts`, damit Kulisse, Zonen-Strip, Gimmick, Ruf, Bonus und Pokal
+  garantiert dieselbe Grenze sehen.
+- **Der Bonus ist BP — bewusst kein Schaden.** Das Ideen-Dokument nennt selbst
+  „+5 % BP auf Club-Bühnen", und die Messung gibt ihm recht: Boss-Gates sind
+  30-Sekunden-Schranken, und die A2-Kalibrierung hat gezeigt, wie empfindlich sie
+  auf Wirkungs-Prozente reagieren (das ungedämpfte Gimmick-Paket verschob damals
+  die Wand um ganze Bühnen). Ein BP-Term läuft dagegen in die ×1.075-Kostenleiter
+  der Crew, die jeden Einkommens-Zuwachs logarithmisch einebnet: mehr BP heißt
+  „ein paar Level früher", nie „ein Gate, das sonst zu wäre". Genau so liest sich
+  auch der gemessene Anker-Shift (unten): Das erste Sitting bewegt sich um NULL,
+  nur die Langhorizont-Läufe werden ein paar Prozent schneller.
+- **Das Budget: ×1.15 — und warum das auch bei VOLL-Ausbau aller vier Leisten
+  gilt.** +1,5 pp BP je Stufe × 10 Stufen = +15 %. Der Deckel bleibt ×1.15, ganz
+  gleich wie viele Leisten voll sind, weil ein Kill immer genau EINER Bühne
+  gehört und nur deren Theme zählt — es gibt hier kein Produkt über vier Leisten
+  (Club-Ruf ist auf einer Space-Bühne exakt ×1.00). Das ist die operative Lesart
+  von „kein Global-Creep", `territoryPowerBudget()` rechnet sie aus, und ein Test
+  friert sie ein — inklusive der Gegenprobe „alle vier auf Stufe 10, über 40
+  Bühnen geprüft: immer ×1.150" (Vorbild `constellationPowerBudget`).
+- **Die Kurve ist GEMESSEN, in zwei Durchgängen.** Der Bot rotiert wie jeder
+  Spieler durch alle vier Themen (`themeForZone` wechselt alle fünf Bühnen), also
+  liefert er die Ruf-Rate direkt. Erster Durchgang, Wirkung noch neutral
+  (`SIM_ACTIVE`, 3 cps + Juice, volle Loot-Ökonomie, Seeds 1/7/12345, jeweils das
+  STÄRKSTE Theme): 45 min → 273 Ruf (364/h) · 3 h → 1 457 (486/h) · 12 h → 6 504
+  (542/h) · 24 h → 12 701 (529/h). Die Rate ist nach der ersten Stunde KONSTANT
+  (~530 Ruf/h), denn Ruf hängt am Kill, nicht an der Bühnen-Tiefe — jede Tour
+  klettert dieselbe Strecke neu. Daraus die geometrische Leiter **250 × 1.8^(n−1)**
+  = 250 · 450 · 810 · 1 458 · 2 624 · 4 724 · 8 503 · 15 306 · 27 550 · **49 590**;
+  Stufe 10 also ~94 h aktives Spiel AUF DIESEM Theme. Die Alternativen wurden
+  mitgerechnet: 1.75 ⇒ 73 h („Wochen" schrumpfte zu einem langen Monat), 1.85 ⇒
+  120 h. 1.8 trifft die Größenordnung, die das Spiel schon kennt (Meisterschafts-
+  Legende ~100 h). Zweiter Durchgang MIT gefalteter Wirkung (die Rückkopplung
+  hebt die Rate, weil mehr BP etwas tiefer tragen): 273 (364/h) · 1 454 (485/h) ·
+  7 716 (643/h) · 16 218 (676/h) ⇒ Stufe 10 nach ~73 h. Die Leiter steht gegen die
+  KONSERVATIVE Zahl und liest sich mit Rückkopplung nur schneller.
+- **Der Ruf verteilt sich NICHT gleichmäßig — und das ist der Inhalt von 1b.**
+  Nach 24 h Kette: Club 7 676 · Synth 7 847 · **Beach 16 218** · Space 7 872. Der
+  Bot hängt an seiner Wand und farmt, was darunter liegt; in der langen Kette ist
+  das meist das Beach-Fünftel (11–15 / 31–35). Ein Anker friert das ein
+  (stärkstes/schwächstes Theme > 1.3). Genau diese Schieflage ist die zweite
+  Entscheidungs-Ebene, die das Ideen-Dokument wollte: WO man farmt, zählt.
+- **Start bei NULL — und warum das hier zwingend ist (Gegenstück zu 2a).** Die
+  Migration v15 → v16 sät leer. Beim Sternenstaub (v14→v15) war die Rückwirkung
+  möglich UND richtig, weil sich der Anspruch aus lauter Highwatern RECHNEN ließ,
+  die im Save stehen. Ruf entsteht dagegen aus Kills PRO THEME, und diese Zählung
+  hat das Spiel nie geführt: `stats.bossKills` kennt kein Theme, `lifetimeMaxZone`
+  keine Wiederholungen, `stageStars` kein WIE OFT. Jede Herleitung wäre eine
+  Erfindung — und eine erfundene Ruf-Zahl verschenkt echte Macht (BP-Prozente) für
+  einen Nachweis, den niemand erbracht hat. Dasselbe Muster wie die Bühnen-Sterne
+  in v10→v11 („bewusst leer"), hier zusätzlich mit dem Balance-Argument: Die
+  Leiste ist eine Wochen-Kurve; ein Startguthaben wären nicht ein paar Prozent,
+  sondern die ersten Stufen geschenkt. Ein Alt-Save rechnet nach dem Update
+  deshalb bit-gleich weiter (`territoryGoldMult` faltet auf jeder Bühne ×1), bis
+  er den ersten Kill macht.
+- **Der Bot MUSSTE falten — anders als bei 3b/2a gibt es hier keine
+  Untergrenzen-Ausrede.** Umschulung und Konstellation kann man liegen lassen;
+  Ruf entsteht ohne jede Entscheidung. Ein Bot ohne die Faltung hätte eine
+  Einkommens-Kurve gemessen, die kein echter Spielstand je hat. Gemessener
+  Anker-Shift (`npm run balance`, Seeds 1/7/12345, vorher → nachher):
+  · **Pacing im ersten Sitting UNVERÄNDERT** — t10 1.7 min, t25 32.4 min, Wand
+  ⌀ Bühne 25.0, alle drei Seeds byte-gleich. In 45 min steht die stärkste Leiste
+  gerade auf Stufe 1 (+1,5 % BP auf einem Fünftel der Bühnen), und das erst zum
+  Schluss.
+  · **Erste Himmelfahrt** (0.7 cps, ohne Loot — der empfindlichste Anker):
+  17.27/18.79/17.10 → 15.87/18.05/15.98 h, Mittel 17.72 → 16.63 h (−6,2 %).
+  Fenster [11.6 h, 19.4 h] hält mit Abstand.
+  · **Kumuliert t75** (1 cps, mit Loot): Mittel 3.16 → 3.17 h (Rauschen).
+  · **E2** unverändert 15 Stufen je Seed, schlimmstes Verhältnis 1.86 → 1.85.
+  · **E3** +50 %-Stufen 47/50/58 → 47/51/58, größte Lücke 48.7 → 30.7 min.
+  · **E4-Vorsprung** ⌀ +12.3 → +13.3 Bühnen, kleinster unverändert 5.
+  Kein Anker musste aufgerissen werden; die Verschiebung steht im Kopf von
+  `sim.test.ts`, damit sie beim nächsten Schritt nicht als Rauschen gilt.
+- **Das Balance-Ritual wurde dabei SCHNELLER, nicht langsamer.** Abschnitt 10
+  („Gebietsherrschaft": Ruf/h je Theme, Stufen-Leiter mit Zeitangaben, Budget)
+  braucht dieselben 1/4/16/32-Ketten wie Abschnitt 6 (Meisterschaft) und 7
+  (Splitter). Naiv dazugebaut lief das Ritual 49.0 s (von 60 s Budget); die drei
+  Abschnitte teilen sich die Ketten jetzt (`chains`-Map, einmal fahren, dreimal
+  lesen) und das GANZE Ritual läuft in **24.8 s** — schneller als die 36.3 s
+  vorher, bei bit-gleichen Zahlen.
+- **Platz: der ✨ Ruhm-Tab, gemessen statt geraten.** Ein zehnter Reiter bleibt
+  verboten (headless bei 390 × 844 nachgemessen: 9 Reiter à 44 px = 396 px gegen
+  387 px verfügbare Breite — schon heute 9 px drüber). Von den bestehenden
+  Reitern kam nur einer in Frage; `scrollHeight` der Tab-Bodys bei 390 px: Ziele
+  **2 665 px** · Crew **1 877 px** · Ruhm **901 px** (inklusive der 513 px, die die
+  neue Sektion selbst misst, vorher also ~390 px). Im Ziele-Tab — dem Ort der
+  Konstellation — wären die vier Leisten auf ~3 180 px und damit in die vierte
+  Bildschirmhöhe gerutscht. Der Ruhm-Tab ist zudem der thematisch richtige: Direkt
+  ÜBER den Leisten steht der Knopf, der die ganze Tour einkassiert („was du hier
+  einheimst, kostet dich alles; was darunter steht, kann dir niemand nehmen").
+- **Die Leiste ist in zehn Segmente geteilt, nicht ein glatter Balken.** Die
+  Ruf-STUFE ist die Zahl, die zahlt; zehn Kästchen kann man zählen, ohne die
+  Beschriftung zu lesen. Das laufende Segment füllt sich anteilig, damit auch
+  zwischen zwei Stufen sichtbar etwas passiert, und ab Trophäen-Stufe 2/3 wechselt
+  die Füllfarbe auf Silber/Gold — dieselbe Sprache wie der Pokal auf der Insel.
+  Die Leiste des Themes, auf dem man GERADE steht, trägt einen grünen Rahmen plus
+  „du stehst hier".
+- **Die Insel-Trophäe sitzt im G3-Ambient-Slot und hält dessen Regeln.** EIN
+  gebackenes Mesh (Sockel + Schaft + Kelch + Rand + zwei Henkel über
+  `island.bake`) plus dessen Ink-Hülle, kein Licht, keine Per-Frame-Allokation,
+  an der `islandGroup` (fährt beim G1-Wechsel mit). Drei Stufen statt zehn
+  (Bronze ab Ruf-Stufe 3, Silber ab 6, Gold bei 10), weil ein Pokal am Inselrand
+  nur wenige Dutzend Pixel misst. `World.setTrophy(tier, rebuild)` spiegelt
+  `setAmbientLife`: Ändert sich die Stufe, wird die laufende Bühne EINMAL neu
+  gebaut — mit `rebuild: false`, wenn die Glue ohnehin gleich die Kulisse
+  wechselt, sonst baute man erst die alte Bühne mit dem neuen Pokal und eine
+  Zeile später die neue. Zwei Fallen sind dabei aufgeschlagen: (1) `mergeGeometries`
+  scheitert STILL, wenn indizierte (Cylinder/Torus) und nicht-indizierte
+  (RoundedBox) Geometrien gemischt werden — der erste Headless-Lauf zeigte einen
+  leeren Pokal und eine Konsolen-Warnung; jetzt wird alles vorher entindiziert.
+  (2) Der erste Standort (hinterer rechter Rand) lag im Bild hinter der HUD-Karte;
+  er sitzt jetzt am VORDEREN LINKEN Rand, dem einzigen größeren freien Sand-Bogen
+  (Tanzfläche Mitte, Rivale hinten links, Publikum im +z-Bogen).
+- **Der Pokal folgt der BÜHNE, nicht der angezeigten Kulisse.** Wer die Kulisse
+  manuell festgepinnt hat (§5.5), sieht auf Bühne 12 trotzdem den Beach-Pokal —
+  weil er dort Beach-Ruf verdient und den Beach-Bonus bekommt. Ruf, Bonus und
+  Pokal lesen alle drei `themeForZone(combat.zone)`; alles andere wäre eine
+  zweite Wahrheit.
+- **Headless-Beweis** (Chromium/SwiftShader, Port 4188, präparierter v16-Save
+  mit gestaffelten Ständen: Club 3 200 = Stufe 5 · Synth 1 000 = Stufe 3 · Beach
+  130 = ohne Rang · Space 52 000 = Stufe 10): `1b-a-ruf-leisten.png` +
+  `1b-a2-leisten-zoom.png` (alle vier Zustände gleichzeitig, „du stehst hier" auf
+  Club, Gold-Segmente bei Space), `1b-b-insel-ohne-trophaee(-zoom).png` /
+  `1b-c2-insel-bronze-trophaee(-zoom).png` / `1b-c-insel-gold-trophaee(-zoom).png`
+  (dieselbe Beach-Bühne 12, dieselbe Kamera — kein Pokal / Bronze-Pokal /
+  Gold-Pokal) plus `1b-c3-insel-club-gold(-zoom).png` als Gegenprobe auf der
+  DUNKELSTEN Insel (Club, Bühne 2: der Pokal steht auch dort gegen den Boden),
+  `1b-d1-permanenz-vorher.png` + `1b-d2-permanenz-nachher.png` (eine
+  echte TRANSZENDENZ im Spiel: Bühne 62 → 1, Seelen 900 → 0, HPF 30 → 0,
+  RS-Lebenszeit 5.00M → 0, TE 0 → 3 — die vier Leisten stehen unverändert da,
+  Save-Vergleich im Log), `1b-e-rangaufstieg-toast.png` (Ruf 245 → 250 im
+  laufenden Spiel ⇒ Toast „🏆 Beach-Gast — Ruf-Stufe 1 · Sunset Beach: +1,5 % BP
+  auf diesen Bühnen") + `1b-e3-leisten-nach-aufstieg.png` (Beach danach auf Stufe
+  1 mit 295 Ruf, und weil der Lauf inzwischen auf Bühne 16 steht, ist der
+  „du stehst hier"-Rahmen zu Deep Space gewandert),
+  sowie `1b-m-portrait.png` / `1b-m-schmal.png`
+  / `1b-m-landscape.png` (390×844, 320×640, 740×380 — `documentElement.scrollWidth`
+  == `innerWidth` in allen dreien, kein horizontaler Überlauf). Bundle nach der
+  Änderung: **865 KB JS** (Budget 1.5 MB).
+
 ## IDEEN-GAMEPLAY Schritt 4 — 2a Legenden-Konstellation
 
 - **Eine Währung, EINE Formel — und deshalb keine „schon ausgezahlt"-Zähler.**

@@ -66,6 +66,7 @@ import {
 } from './heroes';
 import { type CrewMastery, createMastery } from './mastery';
 import { type CrewRetrain, type RetrainRolls, createRetrain, createRetrainRolls } from './retrain';
+import { type Territory, createTerritory } from './territory';
 import { incomeMultiplier } from './peach';
 import { type MetaState, createMeta } from './quests';
 import { type StageStars, createStageStars } from './stars';
@@ -300,6 +301,14 @@ export interface ChState {
    * und Boss-Gate-Erstkills, also aus lauter Lebenszeit-Highwatern.
    */
   constellation: ConstellationState;
+  /**
+   * Gebietsherrschaft (CH-save v16, IDEEN-GAMEPLAY 1b): der Ruf je Bühnen-Theme
+   * (Club/Synth/Beach/Space). Vier monotone Lebenszeit-Zähler — sie wachsen mit
+   * jedem Kill auf einer Bühne des jeweiligen Themes und werden von KEINEM der
+   * drei Resets angefasst. Ihre Stufen zahlen einen BP-Bonus, der ausschließlich
+   * auf Bühnen des eigenen Themes greift (`territory.territoryGoldMult`).
+   */
+  territory: Territory;
 }
 
 /** A brand-new run/profile. */
@@ -338,6 +347,7 @@ export function createChState(): ChState {
     starsAwarded: 0,
     bossFoulZone: 0,
     constellation: createConstellation(),
+    territory: createTerritory(),
   };
 }
 
@@ -616,6 +626,9 @@ export function ascendState(state: ChState): ChState {
     starsAwarded: state.starsAwarded,
     // Legenden-Konstellation (2a): der Baum, den KEINE Prestige-Schicht wipet.
     constellation: state.constellation,
+    // Gebietsherrschaft (1b): vier Lebenszeit-Zähler wie `totalClicks` — die
+    // Bühnen fallen auf 1 zurück, der Ruf für sie bleibt.
+    territory: state.territory,
   };
 }
 
@@ -659,6 +672,8 @@ export function himmelfahrtState(state: ChState): ChState {
     starsAwarded: state.starsAwarded,
     // Legenden-Konstellation (2a) — überlebt auch L2, Konto wie Knoten.
     constellation: state.constellation,
+    // Gebietsherrschaft (1b) — der Ruf überlebt auch L2.
+    territory: state.territory,
   };
 }
 
@@ -710,5 +725,7 @@ export function transcendState(state: ChState): ChState {
     // Legenden-Konstellation (2a) — der tiefste Reset des Spiels lässt sie
     // unangetastet; das ist der ganze Sinn dieser Schicht.
     constellation: state.constellation,
+    // Gebietsherrschaft (1b) — ebenso: Ruf ist verdient, nicht geliehen.
+    territory: state.territory,
   };
 }

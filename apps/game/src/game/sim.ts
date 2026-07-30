@@ -53,6 +53,14 @@
  *    (`grantFreeMasteryTiers`) wie die Glue. Über lange Ketten kauft der Bot
  *    zehntausende Level — ohne die Faltung wären die Anker blind für einen
  *    Machtterm, den ein echter Spieler längst trägt.
+ *  · **Gebietsherrschaft (1b)** ist ebenfalls VOLL gefaltet — und zwar zwingend:
+ *    Ruf entsteht PASSIV aus Kills, ohne jede Kauf-Entscheidung, also trägt ihn
+ *    jeder echte Spielstand zwangsläufig. Der Bot bucht pro Kill denselben Ruf auf
+ *    dasselbe Theme wie die Glue (`territory.addRep` über `themeForZone`) und
+ *    multipliziert den BP-Ertrag jedes Kills mit `territoryGoldMult` DER BÜHNE, auf
+ *    der er landet — ein Ruf-Faktor eines fremden Themes faltet dabei per
+ *    Konstruktion ×1. Ein Bot ohne diese Faltung hätte die Anker angelogen (sie
+ *    lägen zu langsam), deshalb sind sie mit 1b neu vermessen (DECISIONS.md).
  *  · **v11 crew specials** (even ability tiers): the `gold` specials fold into
  *    `goldMultiplierNow` and the `crit`/`critdmg` specials into `critFactor` — real
  *    economy/EV effects the bot earns exactly as the game grants them. The
@@ -172,6 +180,14 @@ import {
   totalRawDps,
 } from './heroes';
 import { type CrewMastery, addMastery, createMastery } from './mastery';
+import {
+  type Territory,
+  addRep,
+  createTerritory,
+  repForKill,
+  territoryGoldMult,
+  themeForZone,
+} from './territory';
 import {
   activateBoost,
   clampBoostUntil,
@@ -328,6 +344,14 @@ interface Sim {
    * Spiel — und wird von KEINEM Reset-Pfad angefasst (das ist der Kontrakt).
    */
   crewMastery: CrewMastery;
+  /**
+   * Gebietsherrschaft (1b): Ruf je Bühnen-Theme. Sie wächst im Bot GENAUSO
+   * passiv mit wie im Spiel — jeder Kill bucht auf das Theme seiner Bühne —, und
+   * kein Reset-Pfad fasst sie an. Sie MUSS gefaltet sein: Der Ruf entsteht ohne
+   * jede Kauf-Entscheidung, ein Bot ohne sie würde also einen Machtterm
+   * verschweigen, den ein echter Spielstand zwangsläufig trägt.
+   */
+  territory: Territory;
   gilds: Gilds;
   souls: number;
   lifetimeMaxZone: number;
@@ -441,6 +465,7 @@ function newSim(seed: number, mods = true, constellation = false): Sim {
     crew: {},
     crewUp: {},
     crewMastery: createMastery(),
+    territory: createTerritory(),
     gilds: {},
     souls: 0,
     lifetimeMaxZone: 1,
@@ -947,8 +972,17 @@ function stepSecond(
       remaining -= combat.hp / factor;
       const wasBoss = combat.boss;
       const bossZone = combat.zone;
+      // 1b: Die Bühne, auf der dieser Kill LANDET — sie bestimmt sowohl das
+      // Theme, dem der Ruf gutgeschrieben wird, als auch den Ruf-BP-Faktor
+      // (nach `hit` steht `combat.zone` womöglich schon eine Bühne weiter).
+      const killZone = combat.zone;
       const r = hit(combat, combat.hp);
-      sim.gold += Math.floor(r.gold * goldMult * (stage?.f.gold ?? 1));
+      sim.gold += Math.floor(
+        r.gold * goldMult * (stage?.f.gold ?? 1) * territoryGoldMult(sim.territory, killZone),
+      );
+      // 1b: Ruf entsteht NUR hier — ein Kill, ein Eintrag, auf dem Theme der
+      // Bühne. Dieselbe Buchung wie in der Glue (`main.ts:onKillProgress`).
+      sim.territory = addRep(sim.territory, themeForZone(killZone), repForKill(wasBoss));
       combat = r.state;
       if (wasBoss && r.advancedZone) sim.retryBossZone = 0; // Gate besiegt
       let onFrontier = false;
@@ -1110,6 +1144,12 @@ export interface RunResult {
    * Messgröße, an der die Rang-Schwellen kalibriert sind (`npm run balance`).
    */
   mastery: CrewMastery;
+  /**
+   * Snapshot der Gebietsherrschaft (1b): Ruf je Theme nach diesem Lauf.
+   * Kumulativ über die ganze Kette (kein Reset fasst sie an) — die Messgröße,
+   * an der die Ruf-Kurve geeicht ist (`npm run balance`, Abschnitt 10).
+   */
+  territory: Territory;
 }
 
 /**
@@ -1142,6 +1182,7 @@ function runOnce(
     seconds,
     econ: econSummary(sim),
     mastery: { ...sim.crewMastery },
+    territory: { ...sim.territory },
   };
 }
 
@@ -1163,6 +1204,8 @@ export interface ChainResult {
   timeToLifetime: Map<number, number>;
   /** Crew-Meisterschaft (1a) am Ende der Kette — Lebenszeit-Level je Mitglied. */
   mastery: CrewMastery;
+  /** Gebietsherrschaft (1b) am Ende der Kette — Ruf je Bühnen-Theme. */
+  territory: Territory;
   /**
    * Die kumulierte Loot-Ökonomie am Ende der Kette (sie überlebt jede Aszension).
    * Die 🧩-Zahl darin ist die Einkommens-Kurve, gegen die Splitter-Preise geeicht
@@ -1219,6 +1262,7 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
     maxBestZone,
     timeToLifetime,
     mastery: { ...sim.crewMastery },
+    territory: { ...sim.territory },
     econ: econSummary(sim),
   };
 }
@@ -1268,6 +1312,8 @@ export interface ContinuousResult {
   plateaued: boolean;
   /** Crew-Meisterschaft (1a) am Ende des Laufs — Lebenszeit-Level je Mitglied. */
   mastery: CrewMastery;
+  /** Gebietsherrschaft (1b) am Ende des Laufs — Ruf je Bühnen-Theme. */
+  territory: Territory;
 }
 
 /**
@@ -1361,6 +1407,7 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
     ascensions,
     himmelfahrten,
     mastery: { ...sim.crewMastery },
+    territory: { ...sim.territory },
     hpfHeld: sim.heaven.hpf,
     treeLevels: TREE_NODES.reduce((n, cfg) => n + treeLevel(sim.heaven, cfg.id), 0),
     maxBestZone: maxBest,

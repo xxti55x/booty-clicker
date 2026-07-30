@@ -18,6 +18,7 @@ import { createConstellation, dustEntitlement, dustHeld } from '../game/constell
 import { createGear } from '../game/gear';
 import { TREE_NODES, treeLevel } from '../game/heaven';
 import { createMeta, dailyQuests } from '../game/quests';
+import { createTerritory, rankOf, territoryGoldMult } from '../game/territory';
 import { createTranscend, transcendGlobalMult } from '../game/transcend';
 import { monsterHp } from '../game/combat';
 import {
@@ -1591,5 +1592,87 @@ describe('ch-store — v15 migration & repair (Legenden-Konstellation, 2a)', () 
     expect(after.constellation).toEqual(s.constellation);
     // Und der round-trip durch den Store ändert daran nichts.
     expect(deserializeCh(serializeCh(after, 1000))!.constellation).toEqual(s.constellation);
+  });
+});
+
+describe('ch-store — v16 migration & repair (Gebietsherrschaft, 1b)', () => {
+  it('startet einen v15-Save bei NULL — es gibt nichts zu rekonstruieren', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 15;
+    delete raw.territory;
+    // Ein gestandener Spielstand: tiefe Bühne, viele Boss-Kills, volle Sterne-
+    // Sammlung. NICHTS davon sagt, auf WELCHEM Theme diese Kills passiert sind —
+    // deshalb bleibt die Ruf-Tafel leer (anders als der Sternenstaub in v15,
+    // dessen Anspruch aus vorhandenen Highwatern GERECHNET werden kann).
+    raw.lifetimeMaxZone = 120;
+    raw.runMaxZone = 120;
+    raw.zone = 120;
+    raw.stats = { ...createStats(), bossKills: 400 };
+    raw.stageStars = { '5': 7, '10': 7, '15': 7, '20': 7 };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.territory).toEqual(createTerritory());
+    // Und damit ist der BP-Faktor auf jeder Bühne exakt neutral: Ein Alt-Save
+    // rechnet nach dem Update bit-gleich weiter, bis er den ersten Kill macht.
+    for (const zone of [1, 7, 13, 19]) expect(territoryGoldMult(s!.territory, zone)).toBe(1);
+  });
+
+  it('round-trippt die vier Zähler', () => {
+    const s: ChState = { ...createChState(), territory: { club: 2_700, synth: 900, beach: 120 } };
+    const round = deserializeCh(serializeCh(s, 1000));
+    expect(round!.territory).toEqual({ club: 2_700, synth: 900, beach: 120 });
+    expect(rankOf(round!.territory, 'club')).toBe(5);
+    expect(rankOf(round!.territory, 'synth')).toBe(3);
+    expect(rankOf(round!.territory, 'beach')).toBe(0);
+    expect(rankOf(round!.territory, 'space')).toBe(0);
+  });
+
+  it('kennt nur die vier echten Themen und putzt jeden anderen Schlüssel weg', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.territory = { club: 900.7, synth: -5, beach: 'x', space: null, vegas: 10_000, 7: 42 };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.territory).toEqual({ club: 900 });
+  });
+
+  it('repariert eine komplett kaputte Tafel, ohne anderen Fortschritt zu nuken', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.territory = 'garbage';
+    raw.souls = 77;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.territory).toEqual({});
+    expect(s!.souls).toBe(77);
+  });
+
+  it('klemmt den Ruf bewusst NICHT an die Bühnen-Highwater (Reset-Normalfall)', () => {
+    // Nach einer Himmelfahrt steht `lifetimeMaxZone` auf 1, während der Ruf hoch
+    // bleibt — genau sein Sinn. Ein Vergleich gegen den Spielstand hätte hier
+    // also gar keine richtige Richtung.
+    const s: ChState = {
+      ...createChState(),
+      zone: 1,
+      runMaxZone: 1,
+      lifetimeMaxZone: 1,
+      territory: { space: 60_000 },
+    };
+    expect(deserializeCh(serializeCh(s, 1000))!.territory).toEqual({ space: 60_000 });
+  });
+
+  it('überlebt alle drei Resets im geladenen Zustand (die Kern-Zusage von 1b)', () => {
+    const s: ChState = {
+      ...createChState(),
+      rsLifetime: 5_000_000,
+      heaven: { hpf: 30, hpfLifetime: 300, ascensions2: 4, tree: {} },
+      territory: { club: 2_700, synth: 900, beach: 120, space: 49_590 },
+    };
+    // Alle drei Schichten hintereinander: Aszension (L1) → Himmelfahrt (L2) →
+    // Transzendenz (L3). Der Ruf hängt an keiner von ihnen — auch nicht an der
+    // Gear-Slice, die die Skins/Level trägt.
+    const after = transcendState(himmelfahrtState(ascendState(s)));
+    expect(after.territory).toEqual(s.territory);
+    expect(deserializeCh(serializeCh(after, 1000))!.territory).toEqual(s.territory);
+    // Und die Wirkung steht danach unverändert da: Space voll, Club auf Stufe 5.
+    expect(territoryGoldMult(after.territory, 18)).toBeCloseTo(1.15, 10);
+    expect(territoryGoldMult(after.territory, 3)).toBeCloseTo(1.075, 10);
   });
 });

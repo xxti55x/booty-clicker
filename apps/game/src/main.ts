@@ -255,6 +255,15 @@ import {
   mythosPeachGapMult,
   transcendGlobalMult,
 } from './game/transcend';
+import {
+  addRep,
+  rankOf,
+  repForKill,
+  territoryGoldMult,
+  territoryTitle,
+  themeConfig,
+  trophyTier,
+} from './game/territory';
 import { isTranscendEnabled } from './game/flags';
 import { shouldShakeOnKey } from './game/input';
 import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
@@ -283,6 +292,7 @@ import { Pops } from './ui/pops';
 import { fmt, titleFor } from './ui/format';
 import { Onboarding } from './ui/onboarding';
 import { Prestige } from './ui/prestige';
+import { TerritoryPanel } from './ui/territory-panel';
 import { Toasts } from './ui/toasts';
 import { Transcend } from './ui/transcend-panel';
 import { World } from './world/backgrounds';
@@ -543,7 +553,9 @@ function offlineOpts(): {
     // Peachiel × gold-gear × permanent gold-tokens (§6.2). The transient peach ×3
     // boost is a 60-s live event — immaterial to multi-hour offline accrual and a
     // stale boostUntil would be wrong — so it is deliberately excluded here.
-    goldMult: goldMult(state),
+    // 1b: Der Ruf-Faktor der Bühne, auf der die Crew offline farmt — `offlineGold`
+    // rechnet ausdrücklich mit den Rivalen DIESER Bühne, also gilt ihr Theme.
+    goldMult: goldMult(state) * territoryGoldMult(state.territory, combat.zone),
     // Endless-Summer-Gear + die beiden Ausdauer-Knoten der Konstellation (2a)
     // hängen im GLEICHEN additiven Term; `offlineGold` deckelt die Summe bei 100 %.
     rateBonus: offlineRateBonus(state.gear) + constellationOfflineRateBonus(state.constellation),
@@ -652,6 +664,9 @@ function syncEntity(): void {
 let currentBg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
 let currentBgVariant = bgVariant(combat.zone);
 if (state.gear.bgAuto) state.gear.bg = currentBg;
+// 1b: Die Trophäen-Stufe VOR dem ersten `setBackground` setzen (wie die
+// G3-Ambient-Dichte), damit die Boot-Bühne den Pokal direkt mitbaut.
+syncTrophy(false);
 world.setBackground(currentBg, currentBgVariant);
 audio.setBackground(currentBg);
 recompute(); // fold the (possibly view-synced) kulisse buff into the derived numbers
@@ -938,6 +953,14 @@ const prestige = new Prestige({
   },
 });
 
+/**
+ * IDEEN-GAMEPLAY 1b — die vier Ruf-Leisten. Sie montieren sich in den
+ * Platzhalter, den `Prestige` im Ruhm-Tab aufspannt, müssen also NACH `prestige`
+ * entstehen. Reine Anzeige: Ruf entsteht ausschließlich aus Kills, hier gibt es
+ * nichts zu kaufen und nichts zu bestätigen.
+ */
+const territoryPanel = new TerritoryPanel({ state, zone: () => combat.zone });
+
 const ancients = new Ancients({
   state,
   onBuy: () => {
@@ -1119,6 +1142,7 @@ const chSettings = new ChSettings({
     gearPanel.render();
     metaPanel.render(true);
     constellationPanel.refresh(true); // 2a: der Import bringt sein eigenes Konto mit
+    territoryPanel.refresh(true); // 1b: … und seinen eigenen Ruf (Leisten + Pokal)
     hud.update(state, combat, dps, clickDmg);
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     checkAchievements(); // an imported save may already satisfy fresh achievements
@@ -1205,8 +1229,10 @@ function renderActiveTab(key: string): void {
   if (key === 'crew') crew.render();
   else if (key === 'gear') gearPanel.render();
   else if (key === 'anc') ancients.render();
-  else if (key === 'pr') prestige.refresh();
-  else if (key === 'heaven') heaven.refresh();
+  else if (key === 'pr') {
+    prestige.refresh();
+    territoryPanel.refresh(); // 1b: die Ruf-Leisten leben im Ruhm-Tab
+  } else if (key === 'heaven') heaven.refresh();
   else if (key === 'transcend') transcendPanel?.refresh();
   else if (key === 'chest') chestPanel.render();
   else if (key === 'meta') {
@@ -1344,7 +1370,13 @@ muteBtn.addEventListener('click', () => {
 function updateBackground(force = false): void {
   const bg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
   const variant = bgVariant(combat.zone); // recolour lap follows depth even on a manual kulisse
-  if (!force && bg === currentBg && variant === currentBgVariant) return;
+  if (!force && bg === currentBg && variant === currentBgVariant) {
+    // Die Kulisse bleibt — aber die BÜHNE kann trotzdem das Theme gewechselt
+    // haben (manuell gewählte Kulisse, `bgAuto` aus). Dann steht hier eine andere
+    // Trophäe, und nur sie braucht den Rebuild.
+    syncTrophy();
+    return;
+  }
   currentBg = bg;
   currentBgVariant = variant;
   if (state.gear.bgAuto && state.gear.bg !== bg) {
@@ -1352,8 +1384,23 @@ function updateBackground(force = false): void {
     recompute(); // Space +5 % dpsPct etc. follow the auto-rotation
   }
   cancelCinematics(); // ein laufender Boss-Punch darf nicht ins neue Licht-Rig schreiben
+  // 1b: Trophäen-Stufe VOR dem Wechsel setzen, aber ohne eigenen Rebuild — die
+  // neue Bühne wird gleich ohnehin gebaut und nimmt den Pokal mit.
+  syncTrophy(false);
   world.setBackground(bg, variant, { animate: !force && preset.stageTransition });
   audio.setBackground(bg); // idempotent for a same-key (variant-only) rebuild
+}
+
+/**
+ * IDEEN-GAMEPLAY 1b — die Insel-Trophäe der Bühne, auf der gerade gekämpft wird.
+ *
+ * Maßgeblich ist das Theme der ZONE (`bgForZone`), nicht die angezeigte Kulisse:
+ * Ruf, BP-Bonus und Pokal gehören alle drei dem Gebiet, in dem man steht — wer
+ * die Kulisse manuell festgepinnt hat (§5.5), sieht auf Bühne 12 trotzdem den
+ * Beach-Pokal, weil er dort Beach-Ruf verdient.
+ */
+function syncTrophy(rebuild = true): void {
+  world.setTrophy(trophyTier(rankOf(state.territory, bgForZone(combat.zone))), rebuild);
 }
 
 // ---------- ROADMAP-V2 G2: Boss-Auftritt + Sieg-Beat ----------
@@ -1612,6 +1659,35 @@ function awardStar(zone: number, bit: number): void {
   );
 }
 
+/**
+ * IDEEN-GAMEPLAY 1b — Ruf für EINEN Kill buchen.
+ *
+ * Der Ruf gehört dem Theme der Bühne, auf der der Kill landete (`bgForZone` —
+ * dieselbe eine Quelle wie Kulisse, Zonen-Strip und Boss-Gimmick), ein Boss zahlt
+ * das Zehnfache. Steigt dabei die Ruf-STUFE, ist das ein Moment: Toast, und wenn
+ * die Trophäen-Stufe mitgewachsen ist, steht der Pokal in derselben Sekunde am
+ * Inselrand (`syncTrophy` baut die laufende Bühne dafür einmal neu).
+ *
+ * Bewusst OHNE `persist()`/`recompute()`: Der Ruf-Faktor greift erst beim
+ * NÄCHSTEN Kill (er hängt nicht in `dps`/`clickDmg`), und gespeichert wird
+ * ohnehin im selben Tick wie alles andere.
+ */
+function awardRep(zone: number, boss: boolean): void {
+  const theme = bgForZone(zone);
+  const before = rankOf(state.territory, theme);
+  state.territory = addRep(state.territory, theme, repForKill(boss));
+  const rank = rankOf(state.territory, theme);
+  if (rank === before) return;
+  const pct = Math.round((territoryGoldMult(state.territory, zone) - 1) * 1000) / 10;
+  toasts.show(
+    '🏆',
+    `${territoryTitle(theme, rank)} — Ruf-Stufe ${rank}`,
+    `${themeConfig(theme)?.name ?? ''}: +${String(pct).replace('.', ',')} % BP auf diesen Bühnen`,
+  );
+  syncTrophy(); // eine neue Trophäen-Stufe stellt den Pokal sofort hin
+  territoryPanel.refresh(true);
+}
+
 function onKillProgress(
   r: ReturnType<typeof hit>,
   fromClick: boolean,
@@ -1629,9 +1705,19 @@ function onKillProgress(
   // Boss-Kill zahlt also unverändert.
   const killZone = r.advancedZone ? combat.zone - 1 : combat.zone;
   const stage = stageFactorsFor(killZone, combat.remix, combat.week);
-  const gold = Math.floor(r.gold * goldMult(state) * peachIncomeMult(state, now) * stage.gold);
+  // IDEEN-GAMEPLAY 1b: Der Ruf-Faktor der Bühne, auf der der Kill LANDETE —
+  // dieselbe `killZone` wie beim A1-BP-Faktor. Ein Ruf auf einem anderen Theme
+  // faltet hier per Konstruktion ×1 (das ist die ganze „kein Global-Creep"-Regel).
+  const gold = Math.floor(
+    r.gold *
+      goldMult(state) *
+      peachIncomeMult(state, now) *
+      stage.gold *
+      territoryGoldMult(state.territory, killZone),
+  );
   state.gold += gold;
   state.stats.goldLifetime += gold;
+  awardRep(killZone, wasBoss);
   if (wasBoss) {
     // Boss defeated (§7.3/§7.5): lifetime kill count, the no-timeout streak (reset on
     // a boss timeout in the loop) + its highwater, and the quest metric.
@@ -2100,7 +2186,15 @@ function ownChestSkin(id: string): void {
 function currentIncomePerSec(now: number): number {
   const hp = monsterHp(combat.zone);
   if (!(hp > 0) || !(dps > 0)) return 0;
-  return (dps / hp) * goldFor(combat.zone, false) * goldMult(state) * peachIncomeMult(state, now);
+  // 1b: derselbe Ruf-Faktor, den ein Kill auf DIESER Bühne bekommt — die
+  // Truhen-BP lesen damit dasselbe Einkommen, das die HUD zeigt.
+  return (
+    (dps / hp) *
+    goldFor(combat.zone, false) *
+    goldMult(state) *
+    peachIncomeMult(state, now) *
+    territoryGoldMult(state.territory, combat.zone)
+  );
 }
 
 /** Credit one resolved reward into the live state (§6.2 reward union). */

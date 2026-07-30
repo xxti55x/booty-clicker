@@ -1,7 +1,7 @@
 /**
  * X7 — Save-Migrations-Matrix (ROADMAP-V2, „Save-Hygiene vor neuen Feldern").
  *
- * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v15). Pro Version
+ * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v16). Pro Version
  * zwei Inline-Fixtures (kein Datei-IO):
  *
  *   1. ein REALISTISCHER Save der jeweiligen Ära, der die volle Ladekette
@@ -48,7 +48,7 @@ function memStorage(): ChStorage & { map: Map<string, string> } {
 }
 
 /** Every historical CH schema version, oldest first — the spine of the matrix. */
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] as const;
 type SchemaVersion = (typeof VERSIONS)[number];
 
 const LAST_SEEN = 1_752_800_000_000;
@@ -209,6 +209,14 @@ const BOSS_FOUL_ZONE = 10;
  * gestanden, als `lifetimeMaxZone` heute behauptet).
  */
 const CONSTELLATION = { earned: 96, spent: 12, nodes: { aufbruch: 3, tempo: 1 } };
+
+/**
+ * v16 (1b): Gebietsherrschaft. Vier Ruf-Zähler in ganz verschiedenen Ständen —
+ * Club knapp über Stufe 5 (2 700 ≥ 2 624), Synth auf Stufe 3, Beach ohne Rang
+ * (unter den 250 der ersten Stufe), Space gar nicht erst im Save (fehlt = 0).
+ * Genau diese Streuung ist der Punkt der Leiste: Wo man farmt, zählt.
+ */
+const TERRITORY = { club: 2_700, synth: 900, beach: 120 };
 /**
  * Was ein Save VOR v15 nach der Migration im Konto stehen haben muss: den
  * RÜCKWIRKEND gerechneten Anspruch aus genau diesem Fixture. Er hängt an der
@@ -295,6 +303,7 @@ function saveAt(v: SchemaVersion): Record<string, unknown> {
     raw.crewRetrain = { boss: { ...CREW_RETRAIN.boss }, hype: { ...CREW_RETRAIN.hype } };
     raw.retrainRolls = { ...RETRAIN_ROLLS };
   }
+  if (v >= 16) raw.territory = { ...TERRITORY };
   return raw;
 }
 
@@ -378,6 +387,12 @@ function expectSlices(s: ChState, v: SchemaVersion): void {
   // Boss-Gates stecken in der Bestzone) — anders als bei den Bühnen-Sternen
   // selbst ist die Rückwirkung hier also nicht geraten, sondern gerechnet.
   expect(s.constellation).toEqual(v >= 15 ? CONSTELLATION : constellationPreV15(v));
+  // v16 — Gebietsherrschaft (1b). Ältere Ären starten bei NULL, und zwar bewusst:
+  // Ruf entsteht nur aus Kills PRO THEME, und diese Zählung hat das Spiel nie
+  // geführt — weder `stats.bossKills` (kennt kein Theme) noch `lifetimeMaxZone`
+  // (kennt keine Wiederholungen) trügen sie. Anders als beim Sternenstaub (v15)
+  // gibt es hier also nichts zu rechnen; jede Herleitung wäre eine Erfindung.
+  expect(s.territory).toEqual(v >= 16 ? TERRITORY : {});
 }
 
 // ---------------------------------------------------------------------------
@@ -674,6 +689,26 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
       expect(s.constellation.spent).toBe(70);
       // … und `earned` wird nach OBEN korrigiert, statt echte Knoten zu nuken.
       expect(s.constellation.earned).toBe(70);
+    },
+  },
+  16: {
+    what: 'Ruf-Tafel mit erfundenem Gebiet, negativen, krummen und typfalschen Zählern',
+    damage: (raw) => {
+      raw.territory = {
+        club: 2_700.9, // krumm ⇒ abgerundet, echter Ruf bleibt
+        synth: -900, // negativ ⇒ raus (ein Highwater ist nie negativ)
+        beach: 'viel', // typfalsch ⇒ raus
+        space: Number.NaN, // JSON ⇒ null ⇒ raus
+        vegas: 99_999, // KEIN Bühnen-Theme ⇒ raus (es gibt keine Vegas-Bühne)
+      };
+    },
+    check: (s) => {
+      expect(s.territory).toEqual({ club: 2_700 });
+      // Bewusst NICHT gegen den Spielstand geklemmt: Ein Ruf-Zähler ist ein
+      // Highwater über ALLE Touren, während `zone`/`lifetimeMaxZone` bei
+      // Himmelfahrt und Transzendenz auf 1 zurückfallen — es gibt keine Zahl im
+      // Save, gegen die ein Vergleich stimmen würde.
+      expect(s.lifetimeMaxZone).toBe(CORE.lifetimeMaxZone);
     },
   },
 };

@@ -4265,3 +4265,115 @@ body {
     font-size: 18px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   IDEEN-GAMEPLAY 1b — Gebietsherrschaft: die vier Ruf-Leisten (Ruhm-Tab).
+   Die Leiste ist in ZEHN Segmente geteilt, weil die Ruf-Stufe die Zahl ist, die
+   zählt — zehn Kästchen kann man erfassen, ohne die Beschriftung zu lesen. Das
+   laufende Segment füllt sich anteilig. Die Leiste des Themes, auf dem man
+   gerade steht, trägt einen Rahmen (`.here`).
+--------------------------------------------------------------------------- */
+.tr-head {
+  line-height: 1.45;
+  margin-bottom: 9px;
+}
+.tr-row {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  padding: 9px 10px 8px;
+  margin-bottom: 8px;
+}
+.tr-row.here {
+  border-color: #a8e831;
+  box-shadow: 0 0 0 1px rgba(168, 232, 49, 0.25);
+  background: rgba(168, 232, 49, 0.05);
+}
+.tr-top {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.tr-ic {
+  font-size: 14px;
+}
+.tr-nm {
+  font-size: 12px;
+  font-weight: 800;
+  color: #e8e8ef;
+}
+.tr-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffd24d;
+}
+.tr-title.none {
+  color: #6d6d80;
+  font-weight: 400;
+}
+.tr-rank {
+  margin-left: auto;
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 800;
+  color: #e8e8ef;
+}
+.tr-rank i {
+  font-style: normal;
+  font-size: 10px;
+  color: #6d6d80;
+}
+.tr-bar {
+  display: flex;
+  gap: 3px;
+  margin: 7px 0 6px;
+}
+.tr-seg {
+  flex: 1;
+  height: 8px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.tr-seg i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #8b5cf6, #a8e831);
+  transition: width 0.2s ease-out;
+}
+.tr-row.t2 .tr-seg.on i {
+  background: linear-gradient(90deg, #9fb6d6, #e8f0ff);
+}
+.tr-row.t3 .tr-seg.on i {
+  background: linear-gradient(90deg, #e0a63a, #ffe08a);
+}
+.tr-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+.tr-bonus {
+  color: #6d6d80;
+}
+.tr-bonus.on {
+  color: #a8e831;
+  font-weight: 700;
+}
+.tr-max {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffd24d;
+}
+.tr-rep {
+  margin-top: 3px;
+}
+/* Auf dem Telefon steht der Ruhm-Tab im Bottom-Sheet: Bonus-Zeile und
+   Rest-Hinweis stapeln sich dort, statt in zwei Spalten zu quetschen. */
+@media (max-width: 640px) {
+  .tr-foot {
+    flex-direction: column;
+    gap: 2px;
+  }
+}

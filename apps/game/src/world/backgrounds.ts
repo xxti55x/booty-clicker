@@ -647,6 +647,90 @@ function audience(ctx: BuildCtx): void {
   });
 }
 
+/**
+ * **Die Insel-Trophäe** (IDEEN-GAMEPLAY 1b) — der Pokal am Inselrand.
+ *
+ * Rein kosmetisch: Sie steht auf JEDER Bühne des Themes, dessen Ruf-Stufe sie
+ * verdient hat, und auf keiner anderen. Gebaut wird sie im G3-Ambient-Slot —
+ * also im selben Batch-Budget wie Publikum und Glühwürmchen —, und sie hält
+ * dessen Regeln ein: EIN gebackenes Mesh (Sockel + Schaft + Kelch + Rand + zwei
+ * Henkel in einer Geometrie, `island.bake`) plus dessen Ink-Hülle, kein Licht,
+ * keine Per-Frame-Allokation. Sie hängt an der `islandGroup`, fährt beim
+ * G1-Wechsel also mit der Bühne aus und ein.
+ *
+ * `tier` ist {@link import('../game/territory').trophyTier}: 1 = Bronze (ab
+ * Ruf-Stufe 3), 2 = Silber (ab 6), 3 = Gold (Stufe 10). Drei Stufen statt zehn,
+ * weil ein Pokal am Inselrand nur wenige Dutzend Pixel misst — Material und
+ * Größe müssen den Unterschied auf einen Blick tragen.
+ *
+ * Der Standort ist der VORDERE linke Inselrand (aus Sicht der Diorama-Kamera):
+ * außerhalb der Tanzfläche, vor dem Publikum-Bogen (der im +z-Halbraum sitzt)
+ * und in der Bildhälfte, die auf dem Telefon NICHT von der HUD-Karte verdeckt
+ * wird — headless nachgeprüft, der erste Standort lag genau dahinter.
+ */
+const TROPHY_METAL: readonly { readonly color: number; readonly emissive: number }[] = [
+  { color: 0xc27b3a, emissive: 0x3a1d06 }, // Bronze
+  { color: 0xd4dcea, emissive: 0x33405a }, // Silber
+  { color: 0xffd24d, emissive: 0x6a4a05 }, // Gold
+];
+
+function trophy(ctx: BuildCtx, tier: number): void {
+  const t = Math.max(1, Math.min(TROPHY_METAL.length, Math.floor(tier)));
+  const metal = TROPHY_METAL[t - 1];
+  // Der Pokal wächst mit der Stufe — Bronze ist ein Pokal, Gold eine Ansage.
+  const s = 0.92 + t * 0.16;
+  // Cel-Metall: kräftige Eigenfarbe + Eigenglut, damit der Pokal auch auf der
+  // dunklen Club-Insel gegen den Boden steht (Toon kennt kein `metalness` — die
+  // „Politur" macht hier die Emissive, wie bei den Neonkanten der Insel).
+  const mat = toonMat({
+    color: new THREE.Color(metal.color),
+    emissive: new THREE.Color(metal.emissive),
+    emissiveIntensity: 0.85,
+    bands: 3,
+  });
+  const parts: THREE.Mesh[] = [];
+  const push = (geo: THREE.BufferGeometry, y: number, x = 0, rz = 0): void => {
+    // `mergeGeometries` verlangt EINE Sorte: RoundedBox kommt ohne Index,
+    // Cylinder/Torus mit — ungefiltert scheitert der Merge still und der Pokal
+    // wäre eine leere Geometrie (genau so ist es beim ersten Headless-Lauf
+    // passiert). Alles wird deshalb vorher entindiziert.
+    let g = geo;
+    if (geo.index) {
+      g = geo.toNonIndexed();
+      geo.dispose();
+    }
+    const m = new THREE.Mesh(g, mat);
+    m.position.set(x, y, 0);
+    m.rotation.z = rz;
+    parts.push(m);
+  };
+  push(new RoundedBoxGeometry(0.52 * s, 0.2 * s, 0.52 * s, 2, 0.05 * s), 0.1 * s);
+  push(new THREE.CylinderGeometry(0.1 * s, 0.16 * s, 0.26 * s, 10), 0.33 * s);
+  push(new THREE.CylinderGeometry(0.34 * s, 0.15 * s, 0.46 * s, 12, 1, true), 0.69 * s);
+  push(new THREE.TorusGeometry(0.33 * s, 0.035 * s, 6, 16), 0.92 * s, 0, Math.PI / 2);
+  // Zwei Henkel als halbe Ringe — sie machen aus dem Kelch einen POKAL.
+  push(new THREE.TorusGeometry(0.13 * s, 0.032 * s, 5, 12, Math.PI), 0.74 * s, 0.34 * s, -1.57);
+  push(new THREE.TorusGeometry(0.13 * s, 0.032 * s, 5, 12, Math.PI), 0.74 * s, -0.34 * s, 1.57);
+  const cup = O(bake(parts, mat), 0.022);
+  // Vorderer linker Inselrand (die Kamera schaut nach +z, +x ist screen LINKS):
+  // dort liegt der einzige größere freie Sand-/Deck-Bogen — die Tanzfläche ist
+  // Mitte, der Rivale steht hinten links, das Publikum im +z-Bogen, und die
+  // rechte Bildhälfte gehört auf dem Telefon der HUD-Karte.
+  const a = -1.25;
+  const r = ISLAND_R - 1.15;
+  cup.position.set(ISLAND_C.x + Math.cos(a) * r, TOP_Y, ISLAND_C.z + Math.sin(a) * r);
+  cup.rotation.y = 0.5;
+  ctx.islandGroup.add(cup);
+  // Wie das Publikum atmet der Pokal im Takt — dieselbe `beatV`-Hüllkurve, aber
+  // deutlich zarter (er steht still, er tanzt nicht). Keine Allokation im Loop.
+  const y0 = cup.position.y;
+  ctx.anims.push((_t, beatV) => {
+    const k = 1 + beatV * 0.035;
+    cup.scale.set(k, k, k);
+    cup.position.y = y0 + beatV * 0.03;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // The four stages
 // ---------------------------------------------------------------------------
@@ -1353,6 +1437,12 @@ export class World {
   private ekstaseOn = false;
   /** G3: Dichte-Faktor der Ambient-Elemente (aus dem Quality-Preset). */
   private ambientLife = 1;
+  /**
+   * 1b: Trophäen-Stufe der AKTUELLEN Bühne (0 = keine, 1–3 = Bronze/Silber/Gold).
+   * Sie gehört dem THEME, nicht der Welt — die Glue setzt sie bei jedem
+   * Bühnen-/Ruf-Wechsel, bevor sie die Kulisse wechselt.
+   */
+  private trophyTier = 0;
   /** Die zuletzt GEBAUTE Bühne — für einen Rebuild bei Dichte-Wechsel (G3). */
   private cur: { key: BackgroundKey; variant: number } | null = null;
 
@@ -1528,6 +1618,8 @@ export class World {
     // (das Publikum ist der Bühne eigen, nicht dem Theme), deshalb hier und
     // nicht in den vier `build`-Funktionen.
     audience(ctx);
+    // 1b: …und daneben, im selben Ambient-Slot, die verdiente Insel-Trophäe.
+    if (this.trophyTier > 0) trophy(ctx, this.trophyTier);
   }
 
   /** Bühnen-Versatz setzen (G1) — `y` in Welt-Einheiten, `tilt` in Radiant. */
@@ -1632,9 +1724,37 @@ export class World {
     if (this.cur && !this.trans) this.rebuild(this.cur.key, this.cur.variant);
   }
 
+  /**
+   * IDEEN-GAMEPLAY 1b — die Trophäen-Stufe der laufenden Bühne setzen (0 = keine).
+   *
+   * Dieselbe Mechanik wie {@link setAmbientLife}: Ändert sich der Wert, wird die
+   * aktuelle Bühne einmal neu gebaut, damit der Pokal sofort steht (ein
+   * Ruf-Aufstieg ist ein Moment, kein Wert für den nächsten Bühnen-Wechsel); ein
+   * LAUFENDER G1-Wechsel wird nicht gestört — er baut die neue Bühne ohnehin
+   * gleich mit der neuen Stufe. Rebuilds sind hier billig zu verantworten: Über
+   * ein ganzes Spielerleben gibt es je Theme höchstens drei Stufen-Wechsel.
+   *
+   * `rebuild: false` schaltet genau diesen Sofort-Rebuild ab — die Glue nutzt es,
+   * wenn sie im selben Atemzug ohnehin die Bühne wechselt (Theme-Grenze: neues
+   * Theme ⇒ neue Trophäen-Stufe UND neue Kulisse). Sonst würde erst die ALTE
+   * Bühne mit dem neuen Pokal gebaut und eine Zeile später die neue — zwei
+   * Rebuilds für ein Bild.
+   */
+  setTrophy(tier: number, rebuild = true): void {
+    const t = Math.max(0, Math.min(3, Math.floor(Number.isFinite(tier) ? tier : 0)));
+    if (t === this.trophyTier) return;
+    this.trophyTier = t;
+    if (rebuild && this.cur && !this.trans) this.rebuild(this.cur.key, this.cur.variant);
+  }
+
   /** Aktueller Höhen-Versatz der Bühne (0 = Ruhelage) — für den Headless-Beweis. */
   get stageY(): number {
     return this.islandGroup.position.y;
+  }
+
+  /** Die gesetzte Trophäen-Stufe (0…3) — für den Headless-Beweis. */
+  get trophy(): number {
+    return this.trophyTier;
   }
 
   /**

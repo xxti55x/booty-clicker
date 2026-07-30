@@ -24,6 +24,14 @@ import {
 import { MASTERY_RANKS, masteryRank } from './mastery';
 import { retrainCost } from './retrain';
 import {
+  TERRITORY_MAX_RANK,
+  ZONE_THEMES,
+  repForRank,
+  territoryGoldMult,
+  territoryPowerBudget,
+  territoryRank,
+} from './territory';
+import {
   SIM_ACTIVE,
   SIM_ACTIVE_CAL,
   SIM_CONSTELLATION,
@@ -102,6 +110,24 @@ import {
 // dafür gezähmt (siehe DECISIONS): „Zähe Menge" +30 % → +20 % Ausdauer und „Nebel"
 // −20 % → −15 % Crew-DPS; mit den Roadmap-Rohwerten lief der empfindlichste Anker
 // (0.7-cps-Bot, seed 7) mit 20.35 h aus seinem Fenster.
+//
+// **IDEEN-GAMEPLAY 1b (Gebietsherrschaft) — Anker-Lauf.** Der Bot bucht jetzt pro
+// Kill Ruf auf das Theme SEINER Bühne (Rivale +1, Boss +10) und multipliziert den
+// BP-Ertrag jedes Kills mit `territoryGoldMult` DIESER Bühne. Das ist der erste
+// Machtterm seit A1, der ohne Kauf-Entscheidung wächst — er MUSSTE gefaltet werden,
+// sonst hätten die Anker eine Einkommens-Kurve gemessen, die kein echter Save je hat.
+// Ergebnis (`npm run balance`, Seeds 1/7/12345, jeweils vorher → nachher):
+//   · Pacing im ersten Sitting UNVERÄNDERT (t10 1.7 min · t25 32.4 min · Wand
+//     ⌀ Bühne 25.0) — in 45 min steht die stärkste Leiste gerade auf Stufe 1,
+//     also +1.5 % BP auf einem Fünftel der Bühnen, und das erst zum Schluss.
+//   · Erste Himmelfahrt (0.7 cps, ohne Loot — der empfindlichste Anker):
+//     17.27/18.79/17.10 → 15.87/18.05/15.98 h, Mittel 17.72 → 16.63 h (−6.2 %).
+//     Fenster [11.6 h, 19.4 h] hält mit Abstand.
+//   · Kumuliert t75 (1 cps, mit Loot): Mittel 3.16 → 3.17 h (Rauschen).
+//   · E2 unverändert 15 Stufen je Seed, schlimmstes Verhältnis 1.86 → 1.85.
+//   · E3 +50 %-Stufen 47/50/58 → 47/51/58, größte Lücke 48.7 → 30.7 min (besser).
+//   · E4-Vorsprung ⌀ +12.3 → +13.3 Bühnen, kleinster unverändert 5.
+// Kein Anker musste aufgerissen werden.
 // ---------------------------------------------------------------------------
 // P5: Die Profile stehen in `sim.ts` — dasselbe Modul, aus dem sich auch
 // `npm run balance` bedient, damit Ritual und Anker nie auseinanderlaufen.
@@ -920,5 +946,96 @@ describe('simulateEndless — 2a Legenden-Konstellation (Voll-Ausbau als eigenes
     const withTree = simulateSingleRun({ ...SIM_ACTIVE_CAL, constellation: true, seed: 1 }, RUN_S);
     const without = simulateSingleRun({ ...SIM_ACTIVE_CAL, seed: 1 }, RUN_S);
     expect(withTree.timeToZone.get(25)!).toBeLessThan(without.timeToZone.get(25)!);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IDEEN-GAMEPLAY 1b — Gebietsherrschaft: Ruf wächst PASSIV mit
+// ---------------------------------------------------------------------------
+// Anders als die Konstellation (die man kaufen MUSS und die der Bot deshalb
+// links liegen lässt) entsteht Ruf ohne jede Entscheidung — aus Kills. Der Bot
+// trägt ihn also zwangsläufig, und diese Blöcke halten fest, (a) dass er
+// überhaupt läuft und keinen Reset kennt, (b) dass die Schwellen dort liegen, wo
+// die Kalibrier-Messung sie hingelegt hat, und (c) dass die Wirkung
+// theme-gebunden und gedeckelt bleibt.
+describe('simulateEndless — 1b Gebietsherrschaft (Ruf wächst passiv im Bot mit)', () => {
+  const strongest = (t: Record<string, number>): number => Math.max(0, ...Object.values(t));
+  const mean = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
+
+  it('bucht Ruf auf ALLE vier Themen — der Bot rotiert durch die Bühnen', () => {
+    const r = simulateSingleRun({ ...ACTIVE, seed: 1 }, RUN_S);
+    // In 45 min steht der Bot auf Bühne ~25, hat also alle vier Fünftel gesehen.
+    for (const theme of ZONE_THEMES) expect(r.territory[theme]).toBeGreaterThan(0);
+    for (const [id, rep] of Object.entries(r.territory)) {
+      expect(Number.isInteger(rep)).toBe(true);
+      expect(ZONE_THEMES).toContain(id as BackgroundKey);
+    }
+  });
+
+  it('verteilt den Ruf NICHT gleichmäßig — wo man farmt, zählt', () => {
+    // Der Bot hängt an seiner Wand und farmt, was darunter liegt. Genau das ist
+    // die zweite Entscheidungs-Ebene, die 1b wollte: Gemessen liegt das stärkste
+    // Theme über der 24-h-Kette rund doppelt so hoch wie das schwächste.
+    const c = simulateRunChain({ ...ACTIVE, seed: 1 }, 4, RUN_S);
+    const vals = ZONE_THEMES.map((t) => c.territory[t] ?? 0);
+    expect(Math.max(...vals) / Math.max(1, Math.min(...vals))).toBeGreaterThan(1.3);
+  });
+
+  it('überlebt jede Aszension der Kette (der Zähler kennt keinen Reset)', () => {
+    const one = simulateRunChain({ ...ACTIVE, seed: 1 }, 1, RUN_S);
+    const four = simulateRunChain({ ...ACTIVE, seed: 1 }, 4, RUN_S);
+    for (const theme of ZONE_THEMES) {
+      expect(four.territory[theme] ?? 0).toBeGreaterThanOrEqual(one.territory[theme] ?? 0);
+    }
+    expect(strongest(four.territory)).toBeGreaterThan(strongest(one.territory) * 2);
+  });
+
+  it('kalibriert: Stufe 1 fällt in der ERSTEN Sitzung, Stufe 3 noch lange nicht', () => {
+    for (const seed of SIM_SEEDS_HEAVY) {
+      const r = simulateSingleRun({ ...ACTIVE, seed }, RUN_S);
+      const best = strongest(r.territory);
+      // Gemessen 280…300 Ruf je Seed auf dem stärksten Theme (Schwelle 250).
+      expect(territoryRank(best)).toBeGreaterThanOrEqual(1);
+      expect(best).toBeLessThan(repForRank(3));
+    }
+  });
+
+  it('kalibriert: nach 3 h Kette steht Stufe 3, Stufe 6 erst nach ~12 h', () => {
+    const best3h = mean(
+      SIM_SEEDS_HEAVY.map((seed) =>
+        strongest(simulateRunChain({ ...ACTIVE, seed }, 4, RUN_S).territory),
+      ),
+    );
+    // Gemessen ⌀ 1 454 (Stufe 3 ab 810, Stufe 4 ab 1 458 — der Mittelwert liegt
+    // hier bewusst NAH an der Kante; der Anker prüft deshalb das Fenster).
+    expect(territoryRank(best3h)).toBeGreaterThanOrEqual(3);
+    expect(territoryRank(best3h)).toBeLessThan(6);
+  });
+
+  it('kalibriert: Stufe 10 ist Wochen weit weg (die Leitplanke des Ideen-Dokuments)', () => {
+    // 24 h ununterbrochenes Spiel ⇒ gemessen 16 218 Ruf = Stufe 8. Stufe 10
+    // verlangt 49 590, also ~73 h AUF DIESEM Theme — bei einer Stunde am Abend
+    // gut zwei Monate. Der Anker friert genau das ein: kein 24-h-Marathon darf
+    // eine Leiste voll machen.
+    const best24h = mean(
+      SIM_SEEDS_HEAVY.map((seed) =>
+        strongest(simulateRunChain({ ...ACTIVE, seed }, 32, RUN_S).territory),
+      ),
+    );
+    expect(territoryRank(best24h)).toBeGreaterThanOrEqual(7);
+    expect(territoryRank(best24h)).toBeLessThan(TERRITORY_MAX_RANK);
+  }, 30_000);
+
+  it('das Budget selbst: ×1.15 auf der eigenen Bühne, ×1.00 auf jeder anderen', () => {
+    expect(territoryPowerBudget()).toBeLessThanOrEqual(1.15);
+    const clubOnly = { club: repForRank(TERRITORY_MAX_RANK) };
+    expect(territoryGoldMult(clubOnly, 3)).toBeCloseTo(1.15, 10);
+    expect(territoryGoldMult(clubOnly, 13)).toBe(1);
+  });
+
+  it('bleibt deterministisch (gleicher Seed ⇒ identische Tafel)', () => {
+    const a = simulateRunChain({ ...ACTIVE, seed: 7 }, 2, RUN_S);
+    const b = simulateRunChain({ ...ACTIVE, seed: 7 }, 2, RUN_S);
+    expect(a.territory).toEqual(b.territory);
   });
 });

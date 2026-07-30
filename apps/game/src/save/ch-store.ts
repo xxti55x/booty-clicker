@@ -68,13 +68,14 @@ import {
   starMaskFor,
   totalStars,
 } from '../game/stars';
+import { type Territory, ZONE_THEMES, createTerritory } from '../game/territory';
 import { type TranscendState, createTranscend } from '../game/transcend';
 import { SKINS } from '../character/skins';
 import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 15;
+export const CH_SCHEMA = 16;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -104,7 +105,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (v15, Legenden-Konstellation): ChState + envelope. */
+/** The current persisted shape (v16, Gebietsherrschaft): ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -133,7 +134,7 @@ function isFiniteNumber(v: unknown): v is number {
  * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
  * The meta/juice fields (rng/stats/legacyImported/ability/combo/gilds/rsLifetime/
  * ancients/heaven/gear/chests/permTokens/peach/meta/achievements/transcend/
- * stageStars/crewMastery/crewRetrain/constellation) are
+ * stageStars/crewMastery/crewRetrain/constellation/territory) are
  * deliberately NOT gated here: they are runtime bookkeeping and get repaired (fresh
  * seed / zeroed stats / false flag / default ability+combo / pruned gilds / clamped
  * highwater / sanitised ancients+heaven+gear / defaulted loot slices / defaulted
@@ -627,6 +628,32 @@ function repairConstellation(v: unknown): ConstellationState {
   return { earned, spent, nodes };
 }
 
+/**
+ * Repair die Gebietsherrschaft (v16, 1b): je Theme ein nicht-negativer
+ * ganzzahliger Lebenszeit-Zähler. Nur die VIER echten Bühnen-Themen
+ * (`ZONE_THEMES`) bekommen ein Konto — ein erfundener Schlüssel („vegas") hätte
+ * keine Bühne, auf der er je wirken könnte, und würde die Leiste nur verwässern.
+ *
+ * Bewusst in KEINE Richtung an den Spielstand geklemmt (wie `repairCrewMastery`,
+ * anders als `repairCrewUps`): Ein Ruf-Zähler ist ein Highwater über ALLE Touren,
+ * während `zone`/`lifetimeMaxZone` nach Himmelfahrt und Transzendenz auf 1
+ * zurückfallen — es gibt schlicht keine Zahl im Save, gegen die ein Vergleich
+ * stimmen würde. Ein zu hoher Zähler ist außerdem harmlos gedeckelt: Die Wirkung
+ * endet bei Stufe 10 (+15 % BP auf den eigenen Bühnen), egal wie groß die Zahl
+ * darunter ist. Nie werfend; eine komplett kaputte Tafel wird leer.
+ */
+function repairTerritory(v: unknown): Territory {
+  if (!isRecord(v)) return createTerritory();
+  const out: Territory = {};
+  for (const theme of ZONE_THEMES) {
+    const raw = v[theme];
+    if (!isFiniteNumber(raw) || raw <= 0) continue;
+    const n = Math.floor(raw);
+    if (n > 0) out[theme] = n;
+  }
+  return out;
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
 function stateFromSave(save: ChSaveLatest): ChState {
   const souls = save.souls;
@@ -670,6 +697,7 @@ function stateFromSave(save: ChSaveLatest): ChState {
     // Reiner Run-Zustand: eine gültige Bühnen-Nummer oder 0 (kein offener Fehlversuch).
     bossFoulZone: isNonNegInt(save.bossFoulZone) ? save.bossFoulZone : 0,
     constellation: repairConstellation(save.constellation),
+    territory: repairTerritory(save.territory),
   };
 }
 
@@ -945,6 +973,29 @@ function migrateChV14toV15(raw: Record<string, unknown>): Record<string, unknown
   return { ...raw, v: 15, constellation };
 }
 
+/**
+ * v15 → v16: die **Gebietsherrschaft** (IDEEN-GAMEPLAY 1b) — vier Ruf-Zähler,
+ * die bewusst bei **0** starten.
+ *
+ * Anders als bei der Konstellation (v14→v15, wo der Anspruch aus lauter im Save
+ * vorhandenen Highwatern GERECHNET werden konnte) gibt es hier nichts zu
+ * rekonstruieren: Ruf entsteht ausschließlich aus KILLS pro Theme, und eine
+ * solche Zählung hat das Spiel nie geführt — weder `stats.bossKills` (kennt kein
+ * Theme) noch `lifetimeMaxZone` (kennt keine Wiederholungen) noch `stageStars`
+ * (kennt kein WIE OFT) tragen die Information. Jede Herleitung wäre eine
+ * Erfindung, und eine erfundene Ruf-Zahl verschenkt echte Macht (BP-Prozente)
+ * für einen Nachweis, den niemand erbracht hat.
+ *
+ * Das ist dieselbe Entscheidung wie bei den Bühnen-Sternen in v10→v11 („bewusst
+ * leer"), nur mit dem zusätzlichen Argument der Balance: Die Leiste ist eine
+ * Langzeit-Kurve über Wochen; ein rückwirkendes Startguthaben wäre nicht ein
+ * paar Prozent, sondern die ersten Stufen geschenkt. Alle bestehenden Felder
+ * bleiben unangetastet, die Migration ist verlustfrei.
+ */
+function migrateChV15toV16(raw: Record<string, unknown>): Record<string, unknown> {
+  return { ...raw, v: 16, territory: createTerritory() };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
@@ -960,6 +1011,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
   12: migrateChV12toV13,
   13: migrateChV13toV14,
   14: migrateChV14toV15,
+  15: migrateChV15toV16,
 };
 
 /**
