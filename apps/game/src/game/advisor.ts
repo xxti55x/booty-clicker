@@ -69,8 +69,13 @@ export const HINT_BUDGET_REACH = 3;
  */
 type BurstInput = Pick<ChState, 'ancients' | 'gear' | 'crewUp'> &
   Partial<Pick<ChState, 'transcend'>>;
-/** Die Felder, aus denen der Kauf-Tipp folgt. */
-type HintInput = Pick<ChState, 'gold' | 'crew' | 'crewUp' | 'gilds'>;
+/**
+ * Die Felder, aus denen der Kauf-Tipp folgt. `crewMastery` ist optional, damit
+ * ältere Aufrufer/Fixtures ohne die 1a-Tafel weiter dieselbe Rangfolge sehen
+ * (fehlt ⇒ jedes Mitglied faltet ×1).
+ */
+type HintInput = Pick<ChState, 'gold' | 'crew' | 'crewUp' | 'gilds'> &
+  Partial<Pick<ChState, 'crewMastery'>>;
 
 /**
  * Gesamter Boss-Schadens-Multiplikator (Ahnen × Gear × Crew-Specials × Mythos).
@@ -142,7 +147,13 @@ export interface PurchaseHint extends CrewBuy {
  */
 export function bestPurchaseHint(state: HintInput): PurchaseHint | null {
   const gold = Math.max(0, state.gold);
-  const buy = bestCrewBuy(state.crew, state.crewUp, state.gilds, gold * HINT_BUDGET_REACH);
+  const buy = bestCrewBuy(
+    state.crew,
+    state.crewUp,
+    state.gilds,
+    gold * HINT_BUDGET_REACH,
+    state.crewMastery ?? {},
+  );
   if (buy === null) return null;
   const cfg = CREW.find((c) => c.id === buy.id);
   if (!cfg) return null; // unbekanntes Mitglied ⇒ lieber schweigen als raten
@@ -158,10 +169,10 @@ export function bestPurchaseHint(state: HintInput): PurchaseHint | null {
 /**
  * Cache-Signatur des Kauf-Tipps: Er kann sich nur ändern, wenn sich Kontostand,
  * Crew-Level oder gekaufte Fähigkeiten ändern. Die HUD-Schicht rechnet den Tipp
- * nur bei einer neuen Signatur neu (P3-Throttle) — Vergoldungen fehlen hier
- * bewusst: sie skalieren alle Optionen eines Mitglieds gleich und ändern die
- * Rangfolge nur zusammen mit einem Level-/Fähigkeits-Kauf, der schon in der
- * Signatur steckt.
+ * nur bei einer neuen Signatur neu (P3-Throttle) — Vergoldungen und die
+ * Meisterschaft (1a) fehlen hier bewusst: beide skalieren alle Optionen eines
+ * Mitglieds gleich und können sich ohnehin nur zusammen mit einem Level-/
+ * Fähigkeits-Kauf ändern, der schon in der Signatur steckt.
  */
 export function purchaseSignature(state: HintInput): string {
   let sig = `${state.gold}`;

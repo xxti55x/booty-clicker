@@ -1332,3 +1332,86 @@ describe('ch-store — v11 migration & repair (Bühnen-Sterne, P1)', () => {
     }
   });
 });
+
+describe('ch-store — v13 migration & repair (Crew-Meisterschaft, 1a)', () => {
+  it('sät einen v12-Save aus seinem AKTUELLEN Crew-Stand (großzügig, aber beweisbar)', () => {
+    // Ein realistischer v12-Save: mitten im Lauf, ohne Meisterschafts-Feld.
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 12;
+    delete raw.crewMastery;
+    raw.gold = 5150;
+    raw.crew = { boss: 140, hype: 95, dj: 0 };
+    const store = memStorage();
+    store.setItem(CH_SAVE_KEY, JSON.stringify(raw));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    expect(s.gold).toBe(5150);
+    // „Die Level, die du JETZT hältst, hast du nachweislich einmal gekauft."
+    // Ein Lv-0-Mitglied bringt nichts mit (kein Eintrag, keine 0-Leiche).
+    expect(s.crewMastery).toEqual({ boss: 140, hype: 95 });
+  });
+
+  it('startet einen frisch aszendierten v12-Save leer (nichts zu beweisen)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 12;
+    delete raw.crewMastery;
+    raw.crew = {};
+    raw.souls = 900;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.crewMastery).toEqual({});
+    expect(s!.souls).toBe(900); // der Rest des Saves bleibt unangetastet
+  });
+
+  it('round-trippt die Tafel und putzt gebastelte Stände', () => {
+    const s: ChState = {
+      ...createChState(),
+      crew: { boss: 40 },
+      crewMastery: { boss: 9_400, hype: 1_200 },
+    };
+    const round = deserializeCh(serializeCh(s, 1000));
+    expect(round!.crewMastery).toEqual({ boss: 9_400, hype: 1_200 });
+
+    const raw = JSON.parse(serializeCh(s, 1000)) as Record<string, unknown>;
+    raw.crewMastery = { boss: 9_400.9, hype: -3, dj: 'x', junk: 5_000, legend: 0 };
+    const repaired = deserializeCh(JSON.stringify(raw));
+    // Krumm ⇒ abgerundet, negativ/typfalsch/0 ⇒ raus, Nicht-Mitglied ⇒ raus.
+    expect(repaired!.crewMastery).toEqual({ boss: 9_400 });
+  });
+
+  it('klemmt die Lebenszeit-Zahl bewusst NICHT an den aktuellen Crew-Stand', () => {
+    // Genau der Normalfall nach einem Reset: Level 0, Einsatz-XP hoch.
+    const s: ChState = { ...createChState(), crew: {}, crewMastery: { boss: 12_000 } };
+    expect(deserializeCh(serializeCh(s, 1000))!.crewMastery).toEqual({ boss: 12_000 });
+  });
+
+  it('repariert eine komplett kaputte Tafel, ohne anderen Fortschritt zu nuken', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.crewMastery = 'garbage';
+    raw.souls = 33;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.crewMastery).toEqual({});
+    expect(s!.souls).toBe(33);
+  });
+
+  it('trägt die Meisterschaft durch ALLE drei Prestige-Schichten', () => {
+    const base: ChState = {
+      ...createChState(),
+      crew: { boss: 120, hype: 80 },
+      crewUp: { boss: 2 },
+      runMaxZone: 60,
+      lifetimeMaxZone: 60,
+      rsLifetime: 500,
+      souls: 500,
+      heaven: { hpf: 0, hpfLifetime: 200, ascensions2: 1, tree: {} },
+      crewMastery: { boss: 9_400, hype: 1_200 },
+    };
+    for (const next of [ascendState(base), himmelfahrtState(base), transcendState(base)]) {
+      expect(next.crewMastery).toEqual({ boss: 9_400, hype: 1_200 });
+      // Gegenprobe: Level und Fähigkeits-Ledger fallen sehr wohl.
+      expect(next.crew).toEqual({});
+      expect(next.crewUp).toEqual({});
+    }
+  });
+});

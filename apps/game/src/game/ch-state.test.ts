@@ -26,6 +26,7 @@ import { createAncients } from './ancients';
 import { createGear, skinUnlocked } from './gear';
 import { createHeaven } from './heaven';
 import { clickDamageRaw, totalRawDps } from './heroes';
+import { MASTERY_RANKS, masteryOwnMult } from './mastery';
 import { PEACH_BOOST } from './peach';
 import { TRANSCEND_GLOBAL_BASE, createTranscend } from './transcend';
 
@@ -578,5 +579,58 @@ describe('ch-state — P4 Himmelsbaum im derived layer', () => {
   it('keyDropMult trägt den Truhen-Magneten weiterhin (Alt-Knoten, neuer Ast)', () => {
     expect(keyDropMult(plain)).toBeCloseTo(1, 6);
     expect(keyDropMult(withTree({ truhenmagnet: 1 }))).toBeCloseTo(1.25, 6);
+  });
+});
+
+describe('ch-state — Crew-Meisterschaft im derived layer (1a)', () => {
+  const GOLD = MASTERY_RANKS[2].at;
+
+  it('hebt NUR die DPS des gemeisterten Mitglieds, nicht die ganze Crew', () => {
+    const base = { ...createChState(), crew: { hype: 50, dj: 50 } };
+    const withMastery = { ...base, crewMastery: { hype: GOLD } };
+    const gain = dpsOf(withMastery) - dpsOf(base);
+    // Der Zuwachs ist exakt der Anteil der Hype-Girl-Linie × 6 %.
+    const hypeOnly = dpsOf({ ...base, crew: { hype: 50 } });
+    expect(gain).toBeCloseTo(hypeOnly * (masteryOwnMult(GOLD) - 1), 6);
+    expect(dpsOf(withMastery)).toBeCloseTo(
+      totalRawDps(base.crew, {}, {}, { hype: GOLD }) * (dpsOf(base) / totalRawDps(base.crew)),
+      6,
+    );
+  });
+
+  it('hebt beim Klick-Mitglied den Klick-Schaden (P1-Seite bleibt konsistent)', () => {
+    const base = { ...createChState(), crew: { boss: 80 } };
+    const withMastery = { ...base, crewMastery: { boss: GOLD } };
+    expect(clickDamageOf(withMastery)).toBeCloseTo(
+      clickDamageRaw(base.crew, {}, {}, { boss: GOLD }),
+      6,
+    );
+    expect(clickDamageOf(withMastery)).toBeGreaterThan(clickDamageOf(base));
+  });
+
+  it('faltet ×1 ohne Tafel (jeder Aufrufer ohne die 1a-Slice bleibt zahlengleich)', () => {
+    const s = { ...createChState(), crew: { hype: 40 } };
+    const { crewMastery: _drop, ...withoutSlice } = s;
+    expect(dpsOf(withoutSlice)).toBe(dpsOf(s));
+    expect(clickDamageOf(withoutSlice)).toBe(clickDamageOf(s));
+  });
+
+  it('überlebt alle drei Resets, während Level und Fähigkeiten fallen', () => {
+    const base = {
+      ...createChState(),
+      crew: { boss: 200 },
+      crewUp: { boss: 4 },
+      crewMastery: { boss: 60_000, hype: 150 },
+      runMaxZone: 60,
+      lifetimeMaxZone: 60,
+      rsLifetime: 1_500,
+      souls: 1_500,
+      heaven: { hpf: 0, hpfLifetime: 400, ascensions2: 2, tree: {} },
+    };
+    for (const next of [ascendState(base), himmelfahrtState(base), transcendState(base)]) {
+      expect(next.crewMastery).toEqual({ boss: 60_000, hype: 150 });
+      expect(next.crew).toEqual({});
+      expect(next.crewUp).toEqual({});
+    }
   });
 });

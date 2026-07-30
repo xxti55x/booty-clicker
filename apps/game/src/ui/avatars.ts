@@ -617,10 +617,23 @@ export function portraitSvg(id: string, pose: AvatarPose = 'base', cls = ''): st
 /**
  * Portrait plus Rahmen in der Mitglieds-Palette. `cls` wählt die Größe
  * (`av-lg` = 48 px auf der Crew-Card, ohne = 32 px).
+ *
+ * `frame` übersteuert die Rahmenfarbe (IDEEN-GAMEPLAY 1a: der Meisterschafts-
+ * Rang malt Kupfer/Silber/Gold um das Portrait). `--av-frame` war dafür schon in
+ * Schritt 4b als PER-ZEILE-Variable angelegt — hier wird der Haken nur
+ * eingehängt, es ändert sich kein einziger Selektor. Der Legenden-Rang bekommt
+ * seinen Regenbogen NICHT von hier, sondern von der Klasse `mr4`: eine
+ * CSS-Animation schlägt in der Kaskade auch die Inline-Deklaration, also darf
+ * die Variable ruhig gesetzt bleiben (sie ist der Fallback ohne Animation).
  */
-export function portraitTile(id: string, pose: AvatarPose = 'base', cls = ''): string {
+export function portraitTile(
+  id: string,
+  pose: AvatarPose = 'base',
+  cls = '',
+  frame?: string,
+): string {
   return (
-    `<span class="av${cls ? ` ${cls}` : ''}" style="--av-frame:${avatarFrame(id)}">` +
+    `<span class="av${cls ? ` ${cls}` : ''}" style="--av-frame:${frame ?? avatarFrame(id)}">` +
     `${portraitSvg(id, pose)}</span>`
   );
 }

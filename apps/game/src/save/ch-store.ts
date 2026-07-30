@@ -34,6 +34,7 @@ import {
   abilityTiersUnlocked,
   createCrewUps,
 } from '../game/heroes';
+import { type CrewMastery, createMastery } from '../game/mastery';
 import {
   DAILY_QUEST_SLOTS,
   MAX_REROLLS,
@@ -51,7 +52,7 @@ import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 12;
+export const CH_SCHEMA = 13;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -81,7 +82,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (v12, Wochen-Bestzone): ChState + envelope. */
+/** The current persisted shape (v13, Crew-Meisterschaft): ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -110,7 +111,7 @@ function isFiniteNumber(v: unknown): v is number {
  * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
  * The meta/juice fields (rng/stats/legacyImported/ability/combo/gilds/rsLifetime/
  * ancients/heaven/gear/chests/permTokens/peach/meta/achievements/transcend/
- * stageStars) are
+ * stageStars/crewMastery) are
  * deliberately NOT gated here: they are runtime bookkeeping and get repaired (fresh
  * seed / zeroed stats / false flag / default ability+combo / pruned gilds / clamped
  * highwater / sanitised ancients+heaven+gear / defaulted loot slices / defaulted
@@ -449,6 +450,33 @@ function repairCrewUps(v: unknown, crew: Record<string, number>): CrewUps {
 }
 
 /**
+ * Repair die Crew-Meisterschaft (v13, 1a): je Mitglied ein nicht-negativer
+ * ganzzahliger Lebenszeit-Zähler; Müll-Ids (kein Crew-Mitglied), negative,
+ * gebrochene und nicht-endliche Werte fallen raus, eine komplett kaputte Tafel
+ * wird leer.
+ *
+ * Bewusst NICHT gegen den aktuellen `crew`-Stand geklemmt — anders als beim
+ * Fähigkeits-Ledger (`repairCrewUps`, wo ein gebastelter Save sich sonst
+ * ungekaufte Stufen erschwindeln könnte) gibt es hier keine Richtung, in der ein
+ * Vergleich stimmt: Nach jedem Reset steht das Level auf 0, während die
+ * Lebenszeit-Zahl hoch bleibt (das ist der ganze Sinn), und umgekehrt kann ein
+ * Level aus GESCHENKTEN Quellen stammen (Himmelsbaum-„Frühstarter", Mythos-
+ * „Frühstart"), die nie Einsatz-XP gezahlt haben. Ein Highwater darf ohnehin nur
+ * wachsen; nach unten zu korrigieren hieße, echten Fortschritt zu nuken.
+ */
+function repairCrewMastery(v: unknown): CrewMastery {
+  if (!isRecord(v)) return createMastery();
+  const out: CrewMastery = {};
+  for (const cfg of CREW) {
+    const raw = v[cfg.id];
+    if (!isFiniteNumber(raw) || raw <= 0) continue;
+    const n = Math.floor(raw);
+    if (n > 0) out[cfg.id] = n;
+  }
+  return out;
+}
+
+/**
  * Repair the Bühnen-Sterne slice (v11, P1): keep only entries whose KEY is a real
  * zone number (positive integer) and mask each value down to the bits that zone can
  * actually carry (`starMaskFor` — a Nicht-Boss-Bühne has no timeout star), dropping
@@ -493,6 +521,7 @@ function stateFromSave(save: ChSaveLatest): ChState {
     runMaxZone: Math.max(save.runMaxZone, save.zone),
     crew: { ...save.crew },
     crewUp: repairCrewUps(save.crewUp, save.crew),
+    crewMastery: repairCrewMastery(save.crewMastery),
     souls,
     lifetimeMaxZone,
     totalClicks: save.totalClicks,
@@ -703,6 +732,38 @@ function migrateChV11toV12(raw: Record<string, unknown>): Record<string, unknown
   };
 }
 
+/**
+ * v12 → v13: die **Crew-Meisterschaft** (IDEEN-GAMEPLAY 1a) — Lebenszeit-Level je
+ * Mitglied als eigener, von keinem Reset berührter Highwater.
+ *
+ * Ein Alt-Save startet NICHT bei 0, sondern mit seinem AKTUELLEN `crew`-Stand:
+ * Die Level, die ein Spieler gerade hält, hat er nachweislich einmal gekauft —
+ * das ist die größzügige, aber ehrliche Untergrenze. (Alles davor ist
+ * unrekonstruierbar: Wie oft jemand vor seinen Aszensionen dieselbe Leiter
+ * hochgekauft hat, weiß der Save nicht. Bei 0 zu starten wäre die genauso
+ * falsche Behauptung „du hast noch nie ein Level gekauft" und würde ausgerechnet
+ * die treuesten Spielstände am härtesten treffen.) Ein frisch aszendierter
+ * Alt-Save mit leerer Crew startet folgerichtig leer und sammelt ab dem nächsten
+ * Kauf.
+ *
+ * Übernommen werden nur echte Crew-Ids mit positiven ganzen Zahlen — dieselbe
+ * Disziplin, die `repairCrewMastery` danach dauerhaft hält. Für jedes bestehende
+ * Feld verlustfrei.
+ */
+function migrateChV12toV13(raw: Record<string, unknown>): Record<string, unknown> {
+  const crew = isRecord(raw.crew) ? raw.crew : {};
+  const mastery: CrewMastery = {};
+  for (const cfg of CREW) {
+    const lv = crew[cfg.id];
+    if (isNonNegInt(lv) && lv > 0) mastery[cfg.id] = lv;
+  }
+  return {
+    ...raw,
+    v: 13,
+    crewMastery: mastery,
+  };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
@@ -715,6 +776,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
   9: migrateChV9toV10,
   10: migrateChV10toV11,
   11: migrateChV11toV12,
+  12: migrateChV12toV13,
 };
 
 /**

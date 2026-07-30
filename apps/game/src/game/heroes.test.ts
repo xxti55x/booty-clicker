@@ -16,6 +16,7 @@ import {
   abilityLevel,
   abilityMult,
   abilityTiersUnlocked,
+  bestCrewBuy,
   bulkCost,
   CLICK_BASE,
   CLICK_DPS_SHARE,
@@ -23,6 +24,7 @@ import {
   CREW,
   createCrew,
   crewSpecialBonuses,
+  grantFreeMasteryTiers,
   heroClick,
   heroDps,
   HERO_COST_GROWTH,
@@ -33,6 +35,8 @@ import {
   specialTiers,
   totalRawDps,
 } from './heroes';
+
+import { MASTERY_RANKS, masteryOwnMult } from './mastery';
 
 const boss = CREW[0]; // Booty-Boss: click hero, baseCost 5, baseDps 2 (click/level)
 const hype = CREW[1]; // Hype-Girl: first pure-DPS member, baseDps 5
@@ -225,5 +229,110 @@ describe('heroes — click damage', () => {
     const noUp = clickDamageRaw({ boss: 40 }, {}, {});
     const withUp = clickDamageRaw({ boss: 40 }, {}, { boss: 1 });
     expect(withUp - CLICK_BASE).toBeCloseTo((noUp - CLICK_BASE) * 2, 6);
+  });
+});
+
+describe('heroes — Crew-Meisterschaft (IDEEN-GAMEPLAY 1a)', () => {
+  const BRONZE = MASTERY_RANKS[0].at;
+  const GOLD = MASTERY_RANKS[2].at;
+
+  it('faltet den Eigen-Perk in die DPS eines Mitglieds — und NUR in seine', () => {
+    const plain = heroDps(hype, 40);
+    expect(heroDps(hype, 40, 0, 0, BRONZE)).toBeCloseTo(plain * 1.02, 9);
+    expect(heroDps(hype, 40, 0, 0, GOLD)).toBeCloseTo(plain * 1.06, 9);
+    // Die Meisterschaft des EINEN hebt die Crew-Summe nur um seinen Anteil.
+    const levels = { hype: 40, dj: 40 };
+    const soloBonus = heroDps(hype, 40, 0, 0, GOLD) - plain;
+    expect(totalRawDps(levels, {}, {}, { hype: GOLD })).toBeCloseTo(
+      totalRawDps(levels) + soloBonus,
+      6,
+    );
+  });
+
+  it('zahlt beim Klick-Mitglied auf den KLICK (dessen Level sind Klick-Schaden)', () => {
+    const plain = heroClick(boss, 60);
+    expect(heroClick(boss, 60, 0, 0, GOLD)).toBeCloseTo(plain * 1.06, 9);
+    // In `clickDamageRaw` landet er über die Boss-Linie UND über den DPS-Anteil.
+    const levels = { boss: 60, hype: 30 };
+    const withMastery = clickDamageRaw(levels, {}, {}, { boss: GOLD, hype: GOLD });
+    const expected =
+      CLICK_BASE +
+      heroClick(boss, 60, 0, 0, GOLD) +
+      CLICK_DPS_SHARE * totalRawDps(levels, {}, {}, { hype: GOLD });
+    expect(withMastery).toBeCloseTo(expected, 6);
+  });
+
+  it('faltet ×1, solange keine Tafel übergeben wird (jeder Alt-Aufrufer bleibt zahlengleich)', () => {
+    expect(heroDps(hype, 33)).toBe(heroDps(hype, 33, 0, 0, 0));
+    expect(totalRawDps({ hype: 33 })).toBe(totalRawDps({ hype: 33 }, {}, {}, {}));
+    expect(clickDamageRaw({ boss: 33 })).toBe(clickDamageRaw({ boss: 33 }, {}, {}, {}));
+    // Auch ein Mitglied UNTER Bronze ändert nichts.
+    expect(totalRawDps({ hype: 33 }, {}, {}, { hype: BRONZE - 1 })).toBeCloseTo(
+      totalRawDps({ hype: 33 }),
+      9,
+    );
+  });
+
+  it('multipliziert sauber mit Vergoldungen und Fähigkeiten (alles ein Produkt)', () => {
+    const full = heroDps(hype, 50, 2, 3, GOLD);
+    expect(full).toBeCloseTo(heroDps(hype, 50, 2, 3) * masteryOwnMult(GOLD), 6);
+  });
+
+  it('hebt die ROI-Rangfolge eines gemeisterten Mitglieds um genau seinen Perk', () => {
+    // Zwei Mitglieder, gleiche Ausgangslage: der Perk entscheidet die Reihenfolge.
+    const levels = { hype: 30, dj: 30 };
+    const plain = bestCrewBuy(levels, {}, {}, 1e9);
+    const tilted = bestCrewBuy(levels, {}, {}, 1e9, {
+      [plain!.id === 'hype' ? 'dj' : 'hype']: GOLD,
+    });
+    expect(plain).not.toBeNull();
+    expect(tilted).not.toBeNull();
+    // Der Grenznutzen des gemeisterten Mitglieds steigt um exakt 6 %.
+    const same = bestCrewBuy(levels, {}, {}, 1e9, { [plain!.id]: GOLD });
+    expect(same!.id).toBe(plain!.id);
+    expect(same!.roi).toBeCloseTo(plain!.roi * 1.06, 9);
+  });
+});
+
+describe('heroes — die Gratis-Erststufe des Legenden-Rangs (1a)', () => {
+  const LEGENDE = MASTERY_RANKS[3].at;
+
+  it('schenkt Stufe 1, sobald Level 25 erreicht ist', () => {
+    const r = grantFreeMasteryTiers({ hype: 25 }, {}, { hype: LEGENDE });
+    expect(r.granted).toEqual(['hype']);
+    expect(r.ups).toEqual({ hype: 1 });
+  });
+
+  it('schweigt unterhalb von Lv 25, unterhalb von Legende und bei schon Gekauftem', () => {
+    // Level zu niedrig — die Stufe existiert noch nicht.
+    expect(grantFreeMasteryTiers({ hype: 24 }, {}, { hype: LEGENDE }).granted).toEqual([]);
+    // Rang zu niedrig.
+    expect(grantFreeMasteryTiers({ hype: 80 }, {}, { hype: LEGENDE - 1 }).granted).toEqual([]);
+    // Schon eine Stufe im Ledger ⇒ nichts zu schenken (kein zweiter Gratis-Slot).
+    expect(grantFreeMasteryTiers({ hype: 80 }, { hype: 1 }, { hype: LEGENDE }).granted).toEqual([]);
+    expect(grantFreeMasteryTiers({ hype: 80 }, { hype: 3 }, { hype: LEGENDE }).granted).toEqual([]);
+  });
+
+  it('gibt den Ledger unverändert (identisch) zurück, wenn nichts zu tun ist', () => {
+    const ups = { hype: 2 };
+    expect(grantFreeMasteryTiers({ hype: 80 }, ups, {}).ups).toBe(ups);
+  });
+
+  it('ist idempotent — zweimal aufgerufen schenkt es kein zweites Mal', () => {
+    const first = grantFreeMasteryTiers({ hype: 90, dj: 30 }, {}, { hype: LEGENDE, dj: LEGENDE });
+    expect(first.granted).toEqual(['hype', 'dj']);
+    const second = grantFreeMasteryTiers({ hype: 90, dj: 30 }, first.ups, {
+      hype: LEGENDE,
+      dj: LEGENDE,
+    });
+    expect(second.granted).toEqual([]);
+    expect(second.ups).toEqual({ hype: 1, dj: 1 });
+  });
+
+  it('mutiert den übergebenen Ledger nie (die Glue entscheidet, ob sie bucht)', () => {
+    const ups = { dj: 2 };
+    const r = grantFreeMasteryTiers({ hype: 30, dj: 90 }, ups, { hype: LEGENDE });
+    expect(ups).toEqual({ dj: 2 });
+    expect(r.ups).toEqual({ dj: 2, hype: 1 });
   });
 });

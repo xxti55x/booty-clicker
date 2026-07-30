@@ -203,7 +203,13 @@ import {
 } from './game/heaven';
 import { canAscend } from './game/ascension';
 import type { CeremonyKind } from './game/ceremony';
-import { CREW, type CrewLevels, type CrewSpecialBonuses, crewSpecialBonuses } from './game/heroes';
+import {
+  CREW,
+  type CrewLevels,
+  type CrewSpecialBonuses,
+  crewSpecialBonuses,
+  grantFreeMasteryTiers,
+} from './game/heroes';
 import { buildAchievementCtx, newlyUnlocked } from './game/ch-achievements';
 import {
   type LoginReward,
@@ -434,6 +440,26 @@ function recompute(): void {
   clickDmg = clickDamageOf(state);
   crewSpec = crewSpecialBonuses(state.crewUp);
 }
+
+/**
+ * IDEEN-GAMEPLAY 1a — der Legenden-Perk: „die erste Fähigkeits-Stufe ist nach
+ * jedem Reset gratis". Die Entscheidung, WER etwas bekommt, ist pur
+ * (`grantFreeMasteryTiers`); hier wird sie nur gebucht. Aufgerufen beim Boot
+ * (ein Save aus der Zeit vor dem Rang bekommt seinen Slot sofort), nach jedem
+ * Crew-Level-Kauf (der Slot fällt in der Sekunde, in der Lv 25 erreicht ist —
+ * nicht erst beim nächsten Reset), nach jedem der drei Resets (dort trägt die
+ * Meisterschaft den Slot, nicht der Ledger) und nach einem Save-Import.
+ *
+ * Liefert die Namen der frisch beschenkten Mitglieder — leer heißt „nichts
+ * passiert", der Aufrufer spart sich dann Toast und Re-Render.
+ */
+function applyMasteryFreeTiers(): string[] {
+  const r = grantFreeMasteryTiers(state.crew, state.crewUp, state.crewMastery);
+  if (r.granted.length === 0) return [];
+  state.crewUp = r.ups;
+  return r.granted.map((id) => CREW.find((c) => c.id === id)?.name ?? id);
+}
+applyMasteryFreeTiers();
 recompute();
 
 // The active seasonal banner (§7.5) — a purely cosmetic, date-based flavor read
@@ -703,10 +729,29 @@ mountAvatarSprite();
 const crew = new Crew({
   state,
   onBuy: () => {
+    // 1a: erst den Legenden-Slot buchen, DANN rechnen — sonst zeigte die HUD
+    // eine Sekunde lang die Zahlen ohne die frisch geschenkte Stufe.
+    const freed = applyMasteryFreeTiers();
     recompute();
     audio.buy();
     hud.update(state, combat, dps, clickDmg);
+    if (freed.length > 0) {
+      toasts.show(
+        '🏆',
+        'Legenden-Bonus',
+        `${freed.join(', ')}: erste Fähigkeit gratis freigeschaltet.`,
+      );
+    }
     persist();
+  },
+  // 1a Meilenstein: ein Rang-Aufstieg ist ein Moment, kein stiller Zahlenwechsel.
+  onRankUp: (cfg, p) => {
+    audio.unlock();
+    toasts.show(
+      '🏆',
+      `Meisterschaft: ${p.name}`,
+      `${cfg.name} — ${p.rank < 4 ? `+${p.rank * 2} % Eigen-Leistung` : 'erste Fähigkeit ab sofort gratis'}`,
+    );
   },
 });
 
@@ -800,6 +845,7 @@ const prestige = new Prestige({
     Object.assign(state, ascendState(state)); // mutate in place — panels hold this ref
     applyFruhstarter(prevCrew);
     applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
+    applyMasteryFreeTiers(); // 1a: Legenden-Slot NACH dem Wiederanheuern buchen
     combat = newRunCombat();
     comboState = createCombo(state.combo.stacks); // run-scoped juice resets
     comboT3KeyAwardedThisRun = false; // the combo-Tier-3 key is once per run (§6.1)
@@ -839,6 +885,7 @@ const heaven = new Heaven({
     const hpfBefore = state.heaven.hpf; // G4: Betrag für den Aufzähler (nur Anzeige)
     Object.assign(state, himmelfahrtState(state)); // mutate in place
     applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
+    applyMasteryFreeTiers(); // 1a: die Meisterschaft überlebt auch L2
     combat = newRunCombat();
     comboState = createCombo(state.combo.stacks);
     comboT3KeyAwardedThisRun = false; // once per run (§6.1)
@@ -909,6 +956,7 @@ if (transcendEnabled) {
       const teBefore = state.transcend.te; // G4: Betrag für den Aufzähler (nur Anzeige)
       Object.assign(state, transcendState(state)); // mutate in place (banks TE, wipes L1+L2)
       applyMythosFruhstart(); // P2: der Knoten überlebt den tiefsten Reset und greift hier
+      applyMasteryFreeTiers(); // 1a: die Meisterschaft überlebt auch den tiefsten Reset
       // ---- re-seed, mirroring the Himmelfahrt handler exactly (L2-wipe hazard) ----
       combat = newRunCombat(); // zone/front travel reset to Bühne 1
       comboState = createCombo(state.combo.stacks); // run-scoped combo juice reset
@@ -973,6 +1021,7 @@ const chSettings = new ChSettings({
   },
   applyImported: (imported) => {
     Object.assign(state, imported); // mutate in place — panels hold this ref
+    applyMasteryFreeTiers(); // 1a: der importierte Save bringt seine eigene Meisterschaft mit
     rng = new Rng(state.rng); // resume the imported save's RNG stream
     // Der importierte Save bringt seinen EIGENEN Seed + Aszensions-Stand mit, also
     // gehört die Modifikator-Karte neu abgeleitet (vorher fiel sie hier still auf

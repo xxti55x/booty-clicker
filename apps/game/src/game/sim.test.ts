@@ -6,6 +6,8 @@ import { gimmickForZone } from './boss-gimmicks';
 import { spawnFor } from './combat';
 import { createGear, gearBonus, KULISSE_BUFFS, MAX_SKIN_LEVEL, MAX_SKIN_STARS } from './gear';
 import { TREE_NODES, greedyTreeSpend, treeLevel, treeNodeConfig, treeRefund } from './heaven';
+import { CREW } from './heroes';
+import { MASTERY_RANKS, masteryRank } from './mastery';
 import {
   SIM_ACTIVE,
   SIM_ACTIVE_CAL,
@@ -676,5 +678,64 @@ describe('simulateEndless — P4 Himmelsbaum-Strategie des Bots', () => {
   it('ein 1-HPF-Konto (die E2-Wand) kauft nichts — deshalb bewegt P4 keinen Anker', () => {
     const wall = { hpf: 1, hpfLifetime: 1, ascensions2: 1, tree: {} };
     expect(greedyTreeSpend(wall, SIM_TREE_PRIORITY)).toBe(wall);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1a — Crew-Meisterschaft im Bot (IDEEN-GAMEPLAY)
+// ---------------------------------------------------------------------------
+// Der Bot kauft über lange Läufe zehntausende Level, also MUSS die Meisterschaft
+// in ihm mitwachsen — sonst wären die Anker blind für einen Machtterm, den ein
+// echter Spieler längst trägt. Diese Blöcke halten beides fest: dass der Zähler
+// im Bot überhaupt läuft (und keinen Reset kennt) und dass die Schwellen dort
+// liegen, wo die Kalibrier-Messung sie hingelegt hat.
+describe('simulateEndless — Crew-Meisterschaft (1a) wächst im Bot mit', () => {
+  const CREW_IDS = CREW.map((c) => c.id);
+
+  it('bucht Einsatz-XP nur für gekaufte LEVEL — Σ ist plausibel und rein positiv', () => {
+    const r = simulateSingleRun({ ...ACTIVE, seed: 1 }, RUN_S);
+    const total = Object.values(r.mastery).reduce((a, b) => a + b, 0);
+    expect(total).toBeGreaterThan(0);
+    for (const [id, xp] of Object.entries(r.mastery)) {
+      expect(Number.isInteger(xp)).toBe(true);
+      expect(xp).toBeGreaterThan(0);
+      expect(CREW_IDS).toContain(id);
+    }
+  });
+
+  it('überlebt jede Aszension der Kette (der Zähler kennt keinen Reset)', () => {
+    const one = simulateRunChain({ ...ACTIVE, seed: 1 }, 1, RUN_S);
+    const four = simulateRunChain({ ...ACTIVE, seed: 1 }, 4, RUN_S);
+    const sum = (m: Record<string, number>): number => Object.values(m).reduce((a, b) => a + b, 0);
+    // Nach 4 Läufen steht deutlich mehr auf dem Konto als nach 1 — obwohl jeder
+    // Lauf die Crew-Level auf 0 zurücksetzt.
+    expect(sum(four.mastery)).toBeGreaterThan(sum(one.mastery) * 2);
+    for (const id of Object.keys(one.mastery)) {
+      expect(four.mastery[id]).toBeGreaterThanOrEqual(one.mastery[id]);
+    }
+  });
+
+  it('kalibriert: Bronze fällt in der ERSTEN Sitzung, Legende nicht annähernd', () => {
+    for (const seed of SIM_SEEDS_HEAVY) {
+      const r = simulateSingleRun({ ...ACTIVE, seed }, RUN_S);
+      const best = Math.max(0, ...Object.values(r.mastery));
+      // Das Mitglied, an dem der Bot hängt, erreicht Bronze in 45 min …
+      expect(masteryRank(best)).toBeGreaterThanOrEqual(1);
+      // … aber weder Silber noch irgendetwas darüber.
+      expect(best).toBeLessThan(MASTERY_RANKS[1].at);
+    }
+  });
+
+  it('kalibriert: nach 3 h Kette steht Silber, Gold noch lange nicht', () => {
+    const chain = simulateRunChain({ ...ACTIVE, seed: 1 }, 4, RUN_S); // 4 × 45 min
+    const best = Math.max(0, ...Object.values(chain.mastery));
+    expect(masteryRank(best)).toBe(2); // Silber erreicht, Gold nicht
+    expect(best).toBeLessThan(MASTERY_RANKS[2].at);
+  });
+
+  it('bleibt deterministisch (gleicher Seed ⇒ identische Tafel)', () => {
+    const a = simulateRunChain({ ...ACTIVE, seed: 7 }, 2, RUN_S);
+    const b = simulateRunChain({ ...ACTIVE, seed: 7 }, 2, RUN_S);
+    expect(a.mastery).toEqual(b.mastery);
   });
 });

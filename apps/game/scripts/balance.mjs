@@ -38,7 +38,11 @@ const t0 = Date.now();
 
 const tmp = mkdtempSync(join(tmpdir(), 'bc-balance-'));
 await build({
-  entryPoints: [join(GAME, 'src/game/sim.ts'), join(GAME, 'src/game/weekly.ts')],
+  entryPoints: [
+    join(GAME, 'src/game/sim.ts'),
+    join(GAME, 'src/game/weekly.ts'),
+    join(GAME, 'src/game/mastery.ts'),
+  ],
   bundle: true,
   format: 'esm',
   platform: 'node',
@@ -47,6 +51,8 @@ await build({
 });
 const sim = await import(pathToFileURL(join(tmp, 'sim.js')).href);
 const weekly = await import(pathToFileURL(join(tmp, 'weekly.js')).href);
+const mastery = await import(pathToFileURL(join(tmp, 'mastery.js')).href);
+const MASTERY_AT = mastery.MASTERY_RANKS.map((r) => r.at);
 
 const {
   SIM_ACTIVE,
@@ -256,9 +262,47 @@ console.log(
 );
 
 // ---------------------------------------------------------------------------
-// 6 · Wochen-Kalender (A5/X4) — serverlos deterministisch, also hier prüfbar
+// 6 · Crew-Meisterschaft (IDEEN-GAMEPLAY 1a) — die Schwellen-Kalibrierung
+//     Anker: sim.test.ts „Crew-Meisterschaft (1a) wächst im Bot mit"
 // ---------------------------------------------------------------------------
-console.log('\n── 6 · Wochen-Anker · Bühne der Woche + Board-Saison (ISO-Kalender, A5/X4)');
+// Einsatz-XP = Lebenszeit-Level je Mitglied. Der Bot zählt sie wie das Spiel und
+// kennt (wie das Spiel) keinen Reset — die Tabelle zeigt deshalb, WANN welcher
+// Rang fällt. Genau daraus sind die Schwellen in `game/mastery.ts` abgeleitet.
+console.log(
+  '\n── 6 · Meisterschaft · Einsatz-XP des stärksten Mitglieds (Bot 3 cps + Juice, MIT Loot)',
+);
+const rankOf = (xp) => {
+  let r = 0;
+  for (const at of MASTERY_AT) if (xp >= at) r++;
+  return r;
+};
+const RANK_NAMES = ['—', 'Bronze', 'Silber', 'Gold', 'Legende'];
+const masteryRows = [];
+for (const runs of [1, 4, 16, 32]) {
+  const per = SEEDS.map((seed) => {
+    const c = simulateRunChain({ ...SIM_ACTIVE, seed }, runs, SIM_RUN_S);
+    const vals = Object.values(c.mastery);
+    return { best: Math.max(0, ...vals), sum: vals.reduce((a, b) => a + b, 0) };
+  });
+  const best = mean(per.map((p) => p.best));
+  masteryRows.push([
+    `${runs} × 45 min`,
+    hrs(runs * SIM_RUN_S),
+    Math.round(best),
+    Math.round(mean(per.map((p) => p.sum))),
+    RANK_NAMES[rankOf(best)],
+  ]);
+}
+table(['Spielzeit', '[h]', 'bestes Mitglied', 'Σ ganze Crew', 'Rang'], masteryRows);
+console.log(
+  `   Schwellen: ${MASTERY_AT.map((at, i) => `${RANK_NAMES[i + 1]} ${at}`).join(' · ')}` +
+    `\n   Anker: Bronze im ersten Sitting · Silber nach ~3 h · Gold ~13 h · Legende ~100 h (~450 Level/Lauf im Beharrungszustand)`,
+);
+
+// ---------------------------------------------------------------------------
+// 7 · Wochen-Kalender (A5/X4) — serverlos deterministisch, also hier prüfbar
+// ---------------------------------------------------------------------------
+console.log('\n── 7 · Wochen-Anker · Bühne der Woche + Board-Saison (ISO-Kalender, A5/X4)');
 const week0 = weekly.weekIndexOf(Date.now());
 const weeks = [];
 for (let i = 0; i < 5; i++) {

@@ -1,7 +1,7 @@
 /**
  * X7 — Save-Migrations-Matrix (ROADMAP-V2, „Save-Hygiene vor neuen Feldern").
  *
- * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v11). Pro Version
+ * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v13). Pro Version
  * zwei Inline-Fixtures (kein Datei-IO):
  *
  *   1. ein REALISTISCHER Save der jeweiligen Ära, der die volle Ladekette
@@ -47,7 +47,7 @@ function memStorage(): ChStorage & { map: Map<string, string> } {
 }
 
 /** Every historical CH schema version, oldest first — the spine of the matrix. */
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] as const;
 type SchemaVersion = (typeof VERSIONS)[number];
 
 const LAST_SEEN = 1_752_800_000_000;
@@ -164,6 +164,22 @@ const TRANSCEND = { te: 4, teLifetime: 6, transcendences: 2, mythos: { diamantBo
 const CREW_UP = { boss: 2, hype: 1 };
 
 /**
+ * v13 (1a): Crew-Meisterschaft — Lebenszeit-Level je Mitglied. Bewusst ÜBER dem
+ * aktuellen `crew`-Stand (boss 80 ⇒ 900 je gekaufte Level): der Save hat schon
+ * aszendiert, die Leiter also mehrfach hochgekauft. Genau das kann eine
+ * Migration aus einem Alt-Save NICHT wissen — sie startet deshalb beim
+ * aktuellen Stand (`MASTERY_PRE_V13`).
+ */
+const CREW_MASTERY = { boss: 900, hype: 460, dj: 120, legend: 6 };
+/**
+ * Was ein Save VOR v13 nach der Migration in der Meisterschaft stehen haben
+ * muss: seinen AKTUELLEN Crew-Stand. „Die Level, die du JETZT hältst, hast du
+ * nachweislich einmal gekauft" — großzügig, aber ehrlich, und die einzige
+ * Untergrenze, die aus einem Alt-Save überhaupt ableitbar ist.
+ */
+const MASTERY_PRE_V13 = { ...CORE.crew };
+
+/**
  * v11 (P1): Bühnen-Sterne. Bühne 5 voll (Boss-Gate: geclert + ohne Timeout +
  * Combo), Bühne 10 halb, Bühne 7 als Nicht-Boss-Bühne mit ihren zwei möglichen
  * Sternen — Summe 3 + 2 + 2 = 7, also noch kein Meilenstein (15) fällig.
@@ -233,6 +249,7 @@ function saveAt(v: SchemaVersion): Record<string, unknown> {
     raw.starsAwarded = STARS_AWARDED;
     raw.bossFoulZone = BOSS_FOUL_ZONE;
   }
+  if (v >= 13) raw.crewMastery = { ...CREW_MASTERY };
   return raw;
 }
 
@@ -301,6 +318,10 @@ function expectSlices(s: ChState, v: SchemaVersion): void {
   expect(s.stageStars).toEqual(v >= 11 ? STAGE_STARS : {});
   expect(s.starsAwarded).toBe(v >= 11 ? STARS_AWARDED : 0);
   expect(s.bossFoulZone).toBe(v >= 11 ? BOSS_FOUL_ZONE : 0);
+  // v13 — Crew-Meisterschaft (1a). Ältere Ären starten NICHT bei 0, sondern beim
+  // gehaltenen Crew-Stand: der einzige Einsatz-XP-Betrag, den ein Alt-Save
+  // beweisen kann (siehe `migrateChV12toV13`).
+  expect(s.crewMastery).toEqual(v >= 13 ? CREW_MASTERY : MASTERY_PRE_V13);
 }
 
 // ---------------------------------------------------------------------------
@@ -520,6 +541,24 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
       expect(s.stageStars).toEqual({ '5': 7, '7': 5 });
       expect(s.starsAwarded).toBe(15);
       expect(s.bossFoulZone).toBe(0);
+    },
+  },
+  13: {
+    what: 'Meisterschaft mit Müll-Ids, negativen und gebrochenen Lebenszeit-Ständen',
+    damage: (raw) => {
+      raw.crewMastery = {
+        boss: 900.7, // krumm ⇒ abgerundet, echter Fortschritt bleibt
+        hype: -40, // negativ ⇒ raus (ein Highwater ist nie negativ)
+        dj: 'viele', // typfalsch ⇒ raus
+        legend: Number.NaN, // JSON ⇒ null ⇒ raus
+        junk: 5_000, // kein Crew-Mitglied ⇒ raus
+      };
+    },
+    check: (s) => {
+      expect(s.crewMastery).toEqual({ boss: 900 });
+      // Bewusst NICHT auf den Crew-Stand gehoben: die Reparatur repariert, sie
+      // erfindet nicht (hype hält Lv 30, seine kaputte XP-Zahl bleibt weg).
+      expect(s.crew).toEqual(CORE.crew);
     },
   },
   12: {

@@ -45,6 +45,14 @@
  *    `travelTo` re-farming of cleared zones are not modeled. Every one of these can
  *    only ADD power / speed the bot, so leaving them out keeps E1–E4 honest *lower*
  *    bounds (the real game is at least this fast), never optimistic ones.
+ *  · **Crew-Meisterschaft (1a)** ist VOLL gefaltet, nicht ausgenommen: der Bot bucht
+ *    jeden gekauften Level in `sim.crewMastery` (wie `ui/crew.ts` im Spiel), trägt
+ *    den Zähler durch JEDEN Reset-Pfad (er ist Lebenszeit-Meta) und liest den
+ *    Eigen-Perk über dieselbe eine Multiplikation in `heroDps`/`heroClick`. Auch
+ *    die Gratis-Erststufe des Legenden-Rangs bucht er über dieselbe pure Funktion
+ *    (`grantFreeMasteryTiers`) wie die Glue. Über lange Ketten kauft der Bot
+ *    zehntausende Level — ohne die Faltung wären die Anker blind für einen
+ *    Machtterm, den ein echter Spieler längst trägt.
  *  · **v11 crew specials** (even ability tiers): the `gold` specials fold into
  *    `goldMultiplierNow` and the `crit`/`critdmg` specials into `critFactor` — real
  *    economy/EV effects the bot earns exactly as the game grants them. The
@@ -134,7 +142,14 @@ import {
   truhenFokusChestMult,
   truhenMagnetBonus,
 } from './heaven';
-import { bestCrewBuy, clickDamageRaw, crewSpecialBonuses, totalRawDps } from './heroes';
+import {
+  bestCrewBuy,
+  clickDamageRaw,
+  crewSpecialBonuses,
+  grantFreeMasteryTiers,
+  totalRawDps,
+} from './heroes';
+import { type CrewMastery, addMastery, createMastery } from './mastery';
 import {
   activateBoost,
   clampBoostUntil,
@@ -261,6 +276,12 @@ interface Sim {
   crew: Record<string, number>;
   /** Bought crew abilities (v10 — paid milestone tiers, reset with `crew`). */
   crewUp: Record<string, number>;
+  /**
+   * Crew-Meisterschaft (1a): Lebenszeit-Level je Mitglied. Der Bot kauft über
+   * lange Läufe zehntausende Level, also wächst sie im Bot genauso mit wie im
+   * Spiel — und wird von KEINEM Reset-Pfad angefasst (das ist der Kontrakt).
+   */
+  crewMastery: CrewMastery;
   gilds: Gilds;
   souls: number;
   lifetimeMaxZone: number;
@@ -362,6 +383,7 @@ function newSim(seed: number, mods = true): Sim {
     gold: 0,
     crew: {},
     crewUp: {},
+    crewMastery: createMastery(),
     gilds: {},
     souls: 0,
     lifetimeMaxZone: 1,
@@ -500,6 +522,7 @@ interface DamageSplit {
 function powerSplit(
   crew: Record<string, number>,
   crewUp: Record<string, number>,
+  mastery: CrewMastery,
   gilds: Gilds,
   souls: number,
   ancients: AncientLevels,
@@ -515,7 +538,7 @@ function powerSplit(
   const global = heavenGlobalMult(hpf);
   // Click gear (§5) multiplies the click term only (P1: the strongest gear is click).
   const baseClick =
-    clickDamageRaw(crew, gilds, crewUp) *
+    clickDamageRaw(crew, gilds, crewUp, mastery) *
     sm *
     ancientClickMult(ancients) *
     global *
@@ -526,7 +549,7 @@ function powerSplit(
   // `idle`-special tiers (v11.1 Groove) multiply crew DPS only — never the
   // click term (P1, M11-AC5).
   const idle =
-    totalRawDps(crew, gilds, crewUp) *
+    totalRawDps(crew, gilds, crewUp, mastery) *
     sm *
     ancientDpsMult(ancients) *
     global *
@@ -543,6 +566,7 @@ function powerSplit(
 function powerFor(
   crew: Record<string, number>,
   crewUp: Record<string, number>,
+  mastery: CrewMastery,
   gilds: Gilds,
   souls: number,
   ancients: AncientLevels,
@@ -556,6 +580,7 @@ function powerFor(
   const p = powerSplit(
     crew,
     crewUp,
+    mastery,
     gilds,
     souls,
     ancients,
@@ -574,6 +599,7 @@ function damageSplit(sim: Sim, config: SimConfig, combo: number, crit: number): 
   return powerSplit(
     sim.crew,
     sim.crewUp,
+    sim.crewMastery,
     sim.gilds,
     sim.souls,
     sim.ancients,
@@ -890,12 +916,19 @@ function buyCrewGreedy(sim: Sim): void {
   let guard = 5000;
   for (;;) {
     if (guard-- <= 0) break;
-    const buy = bestCrewBuy(sim.crew, sim.crewUp, sim.gilds, sim.gold);
+    const buy = bestCrewBuy(sim.crew, sim.crewUp, sim.gilds, sim.gold, sim.crewMastery);
     if (buy === null) break;
     sim.gold -= buy.cost;
-    if (buy.kind === 'level') sim.crew[buy.id] = (sim.crew[buy.id] ?? 0) + 1;
-    else sim.crewUp[buy.id] = (sim.crewUp[buy.id] ?? 0) + 1;
+    if (buy.kind === 'level') {
+      sim.crew[buy.id] = (sim.crew[buy.id] ?? 0) + 1;
+      // 1a: JEDER gekaufte Level zählt in die Einsatz-XP — dieselbe Buchung wie
+      // im Spiel (`ui/crew.ts`), damit der Bot dieselben Ränge erlebt.
+      sim.crewMastery = addMastery(sim.crewMastery, buy.id, 1);
+    } else sim.crewUp[buy.id] = (sim.crewUp[buy.id] ?? 0) + 1;
   }
+  // 1a Legenden-Perk: die Gratis-Erststufe wird gutgeschrieben, sobald das Level
+  // die Tier-1-Schwelle erreicht — dieselbe pure Funktion, die die Glue fährt.
+  sim.crewUp = grantFreeMasteryTiers(sim.crew, sim.crewUp, sim.crewMastery).ups;
 }
 
 /**
@@ -955,6 +988,12 @@ export interface RunResult {
   seconds: number;
   /** Snapshot of the (cumulative) loot economy after this run. */
   econ: EconSummary;
+  /**
+   * Snapshot der Crew-Meisterschaft (1a) nach diesem Lauf: Lebenszeit-Level je
+   * Mitglied. Kumulativ über die ganze Kette (kein Reset fasst sie an) — die
+   * Messgröße, an der die Rang-Schwellen kalibriert sind (`npm run balance`).
+   */
+  mastery: CrewMastery;
 }
 
 /**
@@ -981,7 +1020,13 @@ function runOnce(
       }
     }
   }
-  return { bestZone: combat.maxZone, timeToZone, seconds, econ: econSummary(sim) };
+  return {
+    bestZone: combat.maxZone,
+    timeToZone,
+    seconds,
+    econ: econSummary(sim),
+    mastery: { ...sim.crewMastery },
+  };
 }
 
 /** One run's ascension summary within a chain. */
@@ -1000,6 +1045,8 @@ export interface ChainResult {
   maxBestZone: number;
   /** Global second at which each new lifetime-record zone was first reached. */
   timeToLifetime: Map<number, number>;
+  /** Crew-Meisterschaft (1a) am Ende der Kette — Lebenszeit-Level je Mitglied. */
+  mastery: CrewMastery;
 }
 
 /**
@@ -1043,7 +1090,13 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
       gained: sim.souls - before,
     });
   }
-  return { runs: summaries, finalBank: sim.souls, maxBestZone, timeToLifetime };
+  return {
+    runs: summaries,
+    finalBank: sim.souls,
+    maxBestZone,
+    timeToLifetime,
+    mastery: { ...sim.crewMastery },
+  };
 }
 
 /** Play a single fresh run (0 souls); the E4 active-vs-casual comparison unit. */
@@ -1087,6 +1140,8 @@ export interface ContinuousResult {
   finalBank: number;
   /** Whether the run stopped because souls stopped growing (the M9 wall, N1). */
   plateaued: boolean;
+  /** Crew-Meisterschaft (1a) am Ende des Laufs — Lebenszeit-Level je Mitglied. */
+  mastery: CrewMastery;
 }
 
 /**
@@ -1177,6 +1232,7 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
     timeToLifetime,
     ascensions,
     himmelfahrten,
+    mastery: { ...sim.crewMastery },
     hpfHeld: sim.heaven.hpf,
     treeLevels: TREE_NODES.reduce((n, cfg) => n + treeLevel(sim.heaven, cfg.id), 0),
     maxBestZone: maxBest,
@@ -1210,6 +1266,7 @@ function buyAncientsGreedy(sim: Sim, config: SimConfig, combo: number, crit: num
     const p0 = powerFor(
       sim.crew,
       sim.crewUp,
+      sim.crewMastery,
       sim.gilds,
       sim.souls,
       sim.ancients,
@@ -1228,6 +1285,7 @@ function buyAncientsGreedy(sim: Sim, config: SimConfig, combo: number, crit: num
       const p = powerFor(
         sim.crew,
         sim.crewUp,
+        sim.crewMastery,
         sim.gilds,
         r.souls,
         r.ancients,
@@ -1498,6 +1556,7 @@ export function simulateFloatGuard(config: SimConfig, opts: FloatGuardOptions): 
     const power = powerFor(
       sim.crew,
       sim.crewUp,
+      sim.crewMastery,
       sim.gilds,
       rsLifetime,
       sim.ancients,

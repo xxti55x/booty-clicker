@@ -56,6 +56,7 @@ import {
   crewSpecialBonuses,
   totalRawDps,
 } from './heroes';
+import { type CrewMastery, createMastery } from './mastery';
 import { incomeMultiplier } from './peach';
 import { type MetaState, createMeta } from './quests';
 import { type StageStars, createStageStars } from './stars';
@@ -187,6 +188,14 @@ export interface ChState {
    * every reset that clears levels clears the bought abilities too.
    */
   crewUp: CrewUps;
+  /**
+   * Crew-Meisterschaft (CH-save v13, IDEEN-GAMEPLAY 1a): Lebenszeit-Level je
+   * Mitglied. Ein reiner Highwater — er zählt bei JEDEM Level-Kauf hoch und ist
+   * die einzige Crew-Zahl, die KEINER der drei Resets anfasst (Aszension,
+   * Himmelfahrt, Transzendenz tragen ihn alle weiter). Treibt Rang-Perks
+   * (`mastery.ts`) und den Rahmen ums Portrait.
+   */
+  crewMastery: CrewMastery;
   /** Banked Ruhm-Seelen (permanent damage bonus). */
   souls: number;
   /** Deepest zone reached across ALL runs (drives soul gains). */
@@ -269,6 +278,7 @@ export function createChState(): ChState {
     runMaxZone: 1,
     crew: createCrew(),
     crewUp: createCrewUps(),
+    crewMastery: createMastery(),
     souls: 0,
     lifetimeMaxZone: 1,
     totalClicks: 0,
@@ -307,6 +317,8 @@ type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'hea
   transcend?: TranscendState;
   /** Bought crew abilities (optional so pre-v10 test fixtures fold ×1). */
   crewUp?: CrewUps;
+  /** Crew-Meisterschaft (optional so pre-v13 callers/tests fold ×1). */
+  crewMastery?: CrewMastery;
 };
 
 /**
@@ -316,12 +328,14 @@ type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'hea
  * neutral) × the gear DPS mult (§5) × the permanent-token crew-DPS mult (§6.2).
  * Idle DPS never draws crit/combo/beat/frenzy — active clicking stays king (P1).
  * `permTokens`/`transcend` are optional so callers/tests without those slices fold
- * the empty (×1) bonus.
+ * the empty (×1) bonus. Der Meisterschafts-Perk (1a) steckt NICHT als eigener
+ * Faktor hier, sondern PRO MITGLIED in `totalRawDps` — er ist per Definition
+ * kein globaler Term, sondern gehört genau dem Mitglied, das ihn erspielt hat.
  */
 export function dpsOf(state: DerivedInput): number {
   const hpf = state.heaven.hpf;
   return (
-    totalRawDps(state.crew, state.gilds, state.crewUp ?? {}) *
+    totalRawDps(state.crew, state.gilds, state.crewUp ?? {}, state.crewMastery ?? {}) *
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientDpsMult(state.ancients) *
     heavenGlobalMult(hpf) *
@@ -346,7 +360,7 @@ export function dpsOf(state: DerivedInput): number {
 export function clickDamageOf(state: DerivedInput): number {
   const hpf = state.heaven.hpf;
   return (
-    clickDamageRaw(state.crew, state.gilds, state.crewUp ?? {}) *
+    clickDamageRaw(state.crew, state.gilds, state.crewUp ?? {}, state.crewMastery ?? {}) *
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientClickMult(state.ancients) *
     heavenGlobalMult(hpf) *
@@ -512,6 +526,9 @@ export function ascendState(state: ChState): ChState {
     stats: state.stats,
     legacyImported: state.legacyImported,
     gilds: state.gilds,
+    // Crew-Meisterschaft (1a) ist ein LEBENSZEIT-Zähler wie `totalClicks` — die
+    // Level fallen, was man in sie investiert hat, bleibt.
+    crewMastery: state.crewMastery,
     transcend: state.transcend, // L3 survives every lower-layer reset (§4.5.3)
     ancients: state.ancients, // Ancients survive L1 (§4.5 reset table)
     heaven: state.heaven, // L2 state survives L1
@@ -548,6 +565,7 @@ export function himmelfahrtState(state: ChState): ChState {
     ...createChState(),
     heaven,
     gilds: state.gilds, // Vergoldungen survive Himmelfahrt (M10-AC2)
+    crewMastery: state.crewMastery, // Einsatz-XP überleben auch L2 (1a)
     transcend: state.transcend, // L3 survives every lower-layer reset (§4.5.3)
     totalClicks: state.totalClicks,
     rng: state.rng,
@@ -596,6 +614,7 @@ export function transcendState(state: ChState): ChState {
     ...createChState(), // fresh L1 tour + fresh L2 heaven (createHeaven())
     transcend, // the banked L3 slice survives (held TE + Mythos ledger carry over)
     gilds: state.gilds, // Vergoldungen survive every reset
+    crewMastery: state.crewMastery, // Einsatz-XP überleben auch den tiefsten Reset (1a)
     totalClicks: state.totalClicks,
     rng: state.rng,
     stats: state.stats,

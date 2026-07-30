@@ -15,11 +15,12 @@ import {
   nextAbility,
   nextLevelCost,
 } from '../game/heroes';
+import { type MasteryProgress, addMastery, masteryProgress, masteryRank } from '../game/mastery';
 import { soulMult } from '../game/ascension';
 import { ancientClickMult, ancientDpsMult } from '../game/ancients';
 import { clickGearMult, dpsGearMult } from '../game/gear';
 import { heavenGlobalMult, soulBonusEff } from '../game/heaven';
-import { fmt } from './format';
+import { fmt, fmtInt } from './format';
 import { abilityBurst, coinFly } from './fx';
 import { portraitSvg, portraitTile, tierClass } from './avatars';
 
@@ -48,6 +49,29 @@ const KIND_ICON: Record<AbilityKind, string> = {
   idle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V11h3.6v9H4Zm6.2 0V4h3.6v16h-3.6Zm6.2 0V8H20v12h-3.6Z" fill="currentColor"/></svg>',
 };
 
+/**
+ * Die Rahmenfarbe je Meisterschafts-Rang (1a): Kupfer → Silber → Gold →
+ * Legende. Der Legenden-Wert ist nur der FALLBACK — seinen Regenbogen-Schimmer
+ * malt die CSS-Animation `.av.mr4` (Animationen schlagen die Inline-Variable).
+ */
+const MASTERY_FRAME: readonly string[] = ['', '#c47a3a', '#cfd8e0', '#ffcf5e', '#c79bf0'];
+
+/** Die Meisterschafts-Zeile einer Crew-Card („Meisterschaft: Silber · 1.240/8.000"). */
+function masteryLine(p: MasteryProgress): string {
+  if (p.xp <= 0) return '';
+  const body =
+    p.rank === 0
+      ? `${fmtInt(p.xp)}/${fmtInt(p.next)} → ${p.nextName}`
+      : p.next > 0
+        ? `${p.name} · ${fmtInt(p.xp)}/${fmtInt(p.next)}`
+        : `${p.name} · ${fmtInt(p.xp)}`;
+  const title =
+    p.next > 0
+      ? `Einsatz-XP: ${fmtInt(p.xp)} von ${fmtInt(p.next)} Lebenszeit-Leveln bis ${p.nextName}`
+      : `Einsatz-XP: ${fmtInt(p.xp)} Lebenszeit-Level — höchster Rang erreicht`;
+  return `<div class="mr-line mr${p.rank}" title="${title}">Meisterschaft: ${body}</div>`;
+}
+
 /** Portrait + Sorten-Badge einer Fähigkeits-Kachel (Power-Stufen flexen). */
 function slotArt(id: string, kind: AbilityKind, badge: string): string {
   return (
@@ -60,6 +84,12 @@ export interface CrewDeps {
   state: ChState;
   /** Called after a successful purchase (refresh HUD, persist). */
   onBuy: () => void;
+  /**
+   * Ein Mitglied hat mit DIESEM Kauf einen Meisterschafts-Rang erreicht (1a) —
+   * die Glue feiert das mit einem Meilenstein-Toast. Optional, damit Tests die
+   * Card ohne Toast-Stack bauen können.
+   */
+  onRankUp?: (cfg: HeroConfig, progress: MasteryProgress) => void;
 }
 
 /**
@@ -69,6 +99,13 @@ export interface CrewDeps {
  * output, even tiers the member's THEMED SPECIAL (v11 — Gold, Krit, Boss,
  * Combo, Beat oder Ekstase). The slot row shows a pulsing kind-tinted buy
  * button once the level requirement is met.
+ *
+ * **1a — Crew-Meisterschaft.** Jeder gekaufte Level bucht Einsatz-XP
+ * (`addMastery`); die Card zeigt Rang-Rahmen ums Portrait, die Fortschritts-
+ * Zeile zum nächsten Rang und meldet einen Rang-Aufstieg über `onRankUp` an die
+ * Glue (Toast). Der Legenden-Slot wird NICHT hier gebucht, sondern von der Glue
+ * in `onBuy` — sie ist die einzige Stelle, die ihn auch nach einem Reset und
+ * beim Boot vergibt.
  */
 export class Crew {
   private readonly body = byId('tabCrew');
@@ -159,14 +196,22 @@ export class Crew {
 
   /** Level kaufen — `true`, wenn wirklich gekauft wurde (G6: Feedback-Gate). */
   private buy(cfg: HeroConfig): boolean {
-    const level = this.deps.state.crew[cfg.id] ?? 0;
+    const s = this.deps.state;
+    const level = s.crew[cfg.id] ?? 0;
     const count = Math.max(0, this.countFor(cfg, level));
     if (count <= 0) return false;
     const cost = bulkCost(cfg, level, count);
-    if (cost > this.deps.state.gold) return false;
-    this.deps.state.gold -= cost;
-    this.deps.state.crew[cfg.id] = level + count;
+    if (cost > s.gold) return false;
+    s.gold -= cost;
+    s.crew[cfg.id] = level + count;
+    // 1a: JEDER gekaufte Level zählt in die Einsatz-XP — auch ×10/Max, auch der
+    // allererste („Anheuern"). Der Rang wird VOR und NACH der Buchung gelesen,
+    // damit der Meilenstein-Toast genau einmal feuert.
+    const before = masteryRank(s.crewMastery[cfg.id] ?? 0);
+    s.crewMastery = addMastery(s.crewMastery, cfg.id, count);
+    const after = masteryProgress(s.crewMastery[cfg.id] ?? 0);
     this.deps.onBuy();
+    if (after.rank > before) this.deps.onRankUp?.(cfg, after);
     this.render();
     return true;
   }
@@ -211,9 +256,10 @@ export class Crew {
       const cost = count > 0 ? bulkCost(cfg, level, count) : nextLevelCost(cfg, level);
       const affordable = count > 0 && cost <= s.gold;
       const gild = s.gilds[cfg.id] ?? 0;
+      const mp = masteryProgress(s.crewMastery[cfg.id] ?? 0);
       const out = cfg.click
-        ? heroClick(cfg, level, gild, ups) * clickMult
-        : heroDps(cfg, level, gild, ups) * dpsMult;
+        ? heroClick(cfg, level, gild, ups, mp.xp) * clickMult
+        : heroDps(cfg, level, gild, ups, mp.xp) * dpsMult;
       const outLabel = cfg.click ? 'Klick' : 'DPS';
       const gildBadge =
         gild > 0 ? `<span class="gild" title="×1.25 pro Vergoldung">🏅${gild}</span>` : '';
@@ -258,10 +304,16 @@ export class Crew {
       rows.push(
         `<div class="item ${affordable ? '' : 'locked'}" data-id="${cfg.id}">
           <div class="crew-head">
-            ${portraitTile(cfg.id, 'base', 'av-lg')}
+            ${portraitTile(
+              cfg.id,
+              'base',
+              `av-lg${mp.rank > 0 ? ` mr mr${mp.rank}` : ''}`,
+              mp.rank > 0 ? MASTERY_FRAME[mp.rank] : undefined,
+            )}
             <div class="crew-id">
               <div class="nm">${cfg.name}${gildBadge}<span class="lv">Lv ${level}${ups > 0 ? ` · ×${abilityMult(cfg, ups)}` : ''}</span></div>
               <div class="ds">${cfg.ds}</div>
+              ${masteryLine(mp)}
             </div>
           </div>
           <div class="crew-foot">

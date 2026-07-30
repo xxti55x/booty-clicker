@@ -2812,6 +2812,61 @@ body {
 .crew-head .ds {
   margin: 3px 0 0;
 }
+/* ---- Meisterschafts-Rang (IDEEN-GAMEPLAY 1a) --------------------------------
+   Der Rang malt den Rahmen ums Portrait: Kupfer → Silber → Gold → Regenbogen.
+   Die FARBE reist als `--av-frame` mit der Zeile mit (ui/crew.ts setzt sie
+   inline, der Rahmen-Selektor `.av` von 4b bleibt unverändert) — hier stehen nur
+   der zusätzliche Schein und der Legenden-Schimmer. Die Animation schlägt in der
+   Kaskade auch die Inline-Deklaration, deshalb kann `mr4` den Rahmen färben. */
+.av.mr {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 0 0 1px rgba(70, 44, 12, 0.35),
+    0 0 6px var(--av-frame);
+}
+.av.mr4 {
+  animation: mrshimmer 3.2s linear infinite;
+}
+@keyframes mrshimmer {
+  0% {
+    border-color: #ff6ab0;
+  }
+  25% {
+    border-color: #ffcf5e;
+  }
+  50% {
+    border-color: #6ee7a8;
+  }
+  75% {
+    border-color: #6ec3e3;
+  }
+  100% {
+    border-color: #ff6ab0;
+  }
+}
+/* Die Fortschritts-Zeile unter der Beschreibung („Meisterschaft: Silber ·
+   1.240/8.000"). Klein, in der Rang-Farbe, nie im Klickpfad. */
+.mr-line {
+  margin-top: 3px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  color: var(--parch-soft);
+  pointer-events: none;
+}
+.mr-line.mr1 {
+  color: #a4632c;
+}
+.mr-line.mr2 {
+  color: #6f7c88;
+}
+.mr-line.mr3 {
+  color: #96660c;
+}
+.mr-line.mr4 {
+  color: #8b3fd0;
+}
+
 /* Ahnen-Zeile: Portrait vor dem Namen, Level bleibt rechtsbündig. */
 .nm-who {
   display: flex;

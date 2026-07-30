@@ -3,6 +3,107 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## IDEEN-GAMEPLAY Schritt 2 — 1a Crew-Meisterschaft
+
+- **Einsatz-XP sind gekaufte LEVEL, nicht gehaltene.** `crewMastery` ist ein
+  reiner Highwater je Mitglied: `Crew.buy` bucht jeden gekauften Level (auch
+  ×10/Max, auch das „Anheuern"), und KEIN Reset fasst ihn an — `ascendState`,
+  `himmelfahrtState` und `transcendState` tragen ihn alle drei weiter, während
+  Level und Fähigkeits-Ledger fallen. Geschenkte Level (Himmelsbaum-
+  „Frühstarter", Mythos-„Frühstart") zahlen bewusst NICHTS ein: Meisterschaft
+  soll Einsatz messen, nicht Ausstattung. Deshalb klemmt `repairCrewMastery` die
+  Zahl auch in KEINE Richtung an `crew` — nach jedem Reset steht das Level auf 0
+  und die Lebenszeit-Zahl hoch (das ist der ganze Sinn), und ein Level aus einer
+  Geschenk-Quelle hat nie XP gezahlt. Ein Highwater darf ohnehin nur wachsen.
+- **Die Schwellen sind gemessen, nicht geraten — und deutlich höher als die
+  Skizze.** Der Bot zählt die Einsatz-XP jetzt mit (`sim.ts` → `RunResult.mastery`),
+  `npm run balance` druckt die Kennlinie als eigenen Abschnitt 6. Gemessen
+  (Profil `SIM_ACTIVE`, 3 cps + Juice, volle Loot-Ökonomie, Seeds 1/7/12345, das
+  jeweils STÄRKSTE Mitglied): 45 min → 167/234/167 · 3 h → 1 448 · 12 h → 6 951 ·
+  24 h → 14 345 · 72 h → 43 487. Nach den ersten Stunden wächst der Zähler fast
+  linear mit ~450 Level je 45-min-Lauf (die ×1.075-Kostenleiter frisst jeden
+  Meta-Zuwachs logarithmisch wieder auf). Daraus: **Bronze 150** (fällt in der
+  ersten Sitzung, aber nur für das Mitglied, an dem man hängt — Platz 2 lag bei
+  138, Platz 3 bei 116), **Silber 1 200** (~3 h), **Gold 8 000** (~13 h),
+  **Legende 60 000** (~100 h aktives Spiel ⇒ bei einer Stunde am Abend die
+  „vielen Wochen" aus dem Ideen-Dokument). Die skizzierten 100/500/2 500/10 000
+  hätten Legende an EINEM Wochenende ausgeliefert; die Leiter ist deshalb bewusst
+  über-linear gespreizt. Zwei Anker in `sim.test.ts` frieren die Messung ein
+  (Bronze nach einem Sitting, Silber nach vier Läufen — Gold noch nicht).
+- **Drei Ränge zahlen Prozente, der vierte zahlt einen SLOT.** +2 % Eigen-Output
+  je Rang, gedeckelt bei drei Rängen ⇒ exakt die +6 % der Leitplanke (das
+  Ideen-Dokument erlaubte ≤ +8 %). Legende zahlt bewusst keinen vierten
+  Prozentpunkt, sondern die Gratis-Erststufe: Permanenz, die man SIEHT (der Slot
+  steht nach jedem Reset sofort da), statt einer weiteren stillen Zahl im
+  DPS-Produkt. Der Faktor hängt in genau EINER Multiplikation
+  (`heroDps`/`heroClick`), also lesen Spiel, Sim-Bot, Kauf-Tipp und Crew-Card
+  dieselbe Zahl; beim Klick-Mitglied trifft er folgerichtig den Klick.
+- **Der Gratis-Slot ist eine pure Funktion, kein Sonderfall im Kauf-Code.**
+  `grantFreeMasteryTiers(levels, ups, mastery)` liefert einen neuen Ledger plus
+  die frisch beschenkten Ids (und bei „nichts zu tun" den IDENTISCHEN Ledger
+  zurück, damit der Aufrufer gratis prüfen kann). Die Glue ruft sie an vier
+  Stellen: Boot, nach jedem Crew-Level-Kauf, nach jedem der drei Resets und nach
+  einem Save-Import; der Bot an einer (nach `buyCrewGreedy`). Damit fällt der
+  Slot in der Sekunde, in der Lv 25 steht — nicht erst beim nächsten Reset — und
+  ist trotzdem idempotent (zweimal aufgerufen schenkt er kein zweites Mal).
+  Headless verifiziert: frisch aszendiert, 3× ×10 auf den Booty-Boss ⇒ Lv 30,
+  `crewUp.boss = 1`, Kontostand 5 000 000 → 4 999 485 BP (= exakt die 515 BP
+  Level-Kosten, die 274 BP der Fähigkeits-Stufe wurden NICHT abgebucht).
+- **`--av-frame` war schon der Haken — es ändert sich kein Selektor.** Schritt 4b
+  hatte die Rahmenfarbe als PER-ZEILE-Variable angelegt; `portraitTile` bekommt
+  nur einen optionalen `frame`-Parameter, und die Crew-Card schickt Kupfer/
+  Silber/Gold hinein. Der Legenden-Regenbogen läuft NICHT über die Variable,
+  sondern über die Klasse `mr4` mit einer `border-color`-Keyframe-Animation: Eine
+  CSS-Animation schlägt in der Kaskade auch die Inline-Deklaration, die Variable
+  bleibt also der Fallback. Die Fortschritts-Zeile („Meisterschaft: Silber ·
+  1.450/8.000") steht unter der Beschreibung — mit `fmtInt` (deutsche
+  Tausenderpunkte, kein `toLocaleString`: in jsdom/Node ist auf ICU kein Verlass),
+  weil `fmt` daraus „1.45K/8.00K" gemacht hätte, was als Fortschrittsanzeige
+  unbrauchbar ist.
+- **Schema v13 statt v12 — die Wochen-Bestzone hatte v12 schon verbraucht.** Die
+  Migration v12→v13 sät die Meisterschaft aus dem AKTUELLEN `crew`-Stand: Die
+  Level, die ein Spieler gerade hält, hat er nachweislich einmal gekauft. Bei 0
+  zu starten wäre die genauso falsche Behauptung „du hast nie ein Level gekauft"
+  und träfe ausgerechnet die treuesten Spielstände; alles davor ist aus einem
+  Alt-Save nicht rekonstruierbar. Ein frisch aszendierter Alt-Save startet
+  folgerichtig leer. Die X7-Matrix hat den Bump wie vorgesehen sofort rot
+  gemeldet und ihr Fixture-Paar erzwungen (v13-Tafel bewusst ÜBER dem Crew-Stand,
+  weil der Save schon aszendiert hat).
+- **Balance-Snapshot vorher/nachher (`npm run balance`, Seeds 1/7/12345).**
+  Pacing im ersten Sitting UNVERÄNDERT (t10 1.7 min, t25 32.4 min, Wand ⌀ Bühne
+  25.0) — in 45 min erreicht nur EIN Mitglied Bronze, das sind +2 % auf eine
+  Linie ≈ +0.5 % Gesamtleistung. Erste Himmelfahrt 17.86 h → 17.72 h (−0.8 %).
+  E2: unverändert 15 Stufen je Seed, schlimmstes Verhältnis 0.93/0.84/1.86 →
+  0.93/0.83/1.86 (Anker ≤ 2.00), Aszensionen 15/15/13 → 14/13/13. E4-Vorsprung
+  über fünf Seeds IDENTISCH (+7/+25/+5/+10/+14). t75 (1 cps, mit Loot) im Mittel
+  3.41 h → 3.16 h; der BINDENDE Wert ändert sich dabei nicht (schnellster Seed
+  3.13 h vorher wie nachher — Seed 1 rutscht von 3.90 h ins Feld), Anker-Fenster
+  [3 h, 7.5 h] hält.
+- **Die einzige auffällige Zahl — E3 „größte Lücke" — ist ein Wand-Effekt, kein
+  Einbruch.** Über acht Seeds gemessen: +50-%-Stufen 52.8 → 55.1 im Mittel (also
+  MEHR Machtsprünge), größte Lücke aber 17.5 min → 48.7 min im schlimmsten Seed.
+  Nachgemessen, wo die Lücke sitzt: bei Seed 7 zwischen Stufe 49 und 50, bei 11
+  zwischen 46 und 47, bei 12345 zwischen 57 und 58 — IMMER die allerletzte, also
+  im Plateau NACH dem Erreichen der z75-Wand, nie im Aufstieg. Der Bot kommt mit
+  der Meisterschaft früher an die Wand und sitzt den Rest seiner 20 Aszensionen
+  dort; während des Kletterns bleiben die Lücken bei ≤ 6.5 min. Anker (≤ 90 min)
+  behält damit 1.8× Luft, E3 bleibt grün, keine Nachjustierung nötig.
+- **Der ROI-Greedy sieht den Perk — bewusst.** `bestCrewBuy` bekommt die Tafel
+  als optionalen Parameter (fehlt ⇒ ×1, jeder Alt-Aufrufer bleibt zahlengleich).
+  Der Meisterschafts-Faktor kürzt sich im Grenznutzen NICHT heraus, er hebt die
+  Rangfolge eines gemeisterten Mitglieds um genau seine 2–6 %. Bot und
+  in-game-Kauf-Tipp (`advisor.ts`) lesen weiter dieselbe eine Funktion; die
+  Tipp-Cache-Signatur braucht die Tafel nicht, weil sie sich nur ZUSAMMEN mit
+  einem Level-Kauf ändern kann, der schon drinsteht.
+- **Headless-Beweis** (Chromium/SwiftShader, Port 4188, präparierter v13-Save mit
+  gestaffelten Rängen): `1a-a-crew-raenge.png` (alle vier Rahmen gleichzeitig —
+  Legende/Gold/Silber/Bronze plus ein rangloses Mitglied mit „96/150 → Bronze"),
+  `1a-b-card-fortschritt.png` + `1a-b2-card-legende.png` (Card-Nahaufnahmen),
+  `1a-c-rangaufstieg-toast.png` (ein Kauf über die Silber-Schwelle ⇒ Toast
+  „Meisterschaft: Silber — DJ Wumms — +4 % Eigen-Leistung"),
+  `1a-d-legende-gratisslot.png` (frisch aszendiert, Slot geschenkt + Toast
+  „Legenden-Bonus"). Bundle nach der Änderung: **839 KB JS** (Budget 1.5 MB).
+
 ## IDEEN-GAMEPLAY Schritt 1 — 4a+4b Avatar-System
 
 - **Ein `<symbol>`-Sprite, zwei Knoten pro Zeile — die 0.25-s-Regel diktiert die
