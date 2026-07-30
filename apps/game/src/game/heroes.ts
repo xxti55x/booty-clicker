@@ -42,9 +42,16 @@
  * `dpsOf` like the idle gear does).
  */
 import { type CrewMastery, masteryFreeFirstTier, masteryOwnMult } from './mastery';
+import { type CrewRetrain, retrainedKind } from './retrain';
 
 export type AbilityKind =
   'power' | 'gold' | 'crit' | 'critdmg' | 'boss' | 'combo' | 'beat' | 'ekstase' | 'idle';
+
+/**
+ * Die Sorten, die eine SPEZIAL-Stufe zahlen kann — alles außer `power`. Der
+ * Roll-Pool der Umschulung (3b) ist genau diese Menge (`SPECIAL_KINDS`).
+ */
+export type SpecialKind = Exclude<AbilityKind, 'power'>;
 
 /**
  * v11.1 „Abwechslung": Mitglieder folgen unterschiedlichen TIER-RHYTHMEN statt
@@ -72,7 +79,7 @@ export interface HeroConfig {
   /** Slot-1 marker: levels raise CLICK damage instead of idle DPS. */
   readonly click?: boolean;
   /** This member's themed special — granted on its special tiers (v11). */
-  readonly special: Exclude<AbilityKind, 'power'>;
+  readonly special: SpecialKind;
   /** Tier-Rhythmus-Index in `TIER_PATTERNS` (v11.1 Abwechslung). */
   readonly rhythm: 0 | 1 | 2;
 }
@@ -309,10 +316,34 @@ export function abilityTiersUnlocked(level: number): number {
  * member's TIER-RHYTHMUS (`TIER_PATTERNS[cfg.rhythm]`, 4er-Zyklus). Every
  * pattern carries 2 power + 2 special per cycle, so the long-run balance is
  * rhythm-independent; only the ORDER differs per member.
+ *
+ * **3b — die EINE Lesekette.** Ist der Slot ein SPEZIAL-Slot und trägt die
+ * Umschul-Map (`retrain`) für ihn einen Eintrag, gewinnt dieser Eintrag über
+ * `cfg.special`. POWER-Slots ignorieren jeden Override: Der Rhythmus (WELCHE
+ * Stufen Spezial sind) ist unantastbar, nur die SORTE rollt. Spiel-Glue,
+ * `crewSpecialBonuses`, Sim, Kauf-Tipp und Crew-Card fragen alle hier — es gibt
+ * keinen zweiten Pfad zur Sorte eines Slots. Ohne Map (Default `{}`) verhält
+ * sich die Funktion exakt wie vor 3b, also falten Alt-Aufrufer unverändert.
  */
-export function abilityKind(cfg: HeroConfig, tier: number): AbilityKind {
+export function abilityKind(cfg: HeroConfig, tier: number, retrain: CrewRetrain = {}): AbilityKind {
   const pat = TIER_PATTERNS[cfg.rhythm];
-  return pat[(Math.max(1, Math.floor(tier)) - 1) % pat.length] === 'power' ? 'power' : cfg.special;
+  const t = Math.max(1, Math.floor(tier));
+  if (pat[(t - 1) % pat.length] === 'power') return 'power';
+  return retrainedKind(retrain, cfg.id, t) ?? cfg.special;
+}
+
+/**
+ * Die 1-basierte Nummer eines Spezial-Slots innerhalb seines Mitglieds
+ * (Stufe 2 im Muster 0 ⇒ Slot 1, Stufe 4 ⇒ Slot 2, …) — **0**, wenn `tier` eine
+ * Power-Stufe ist. Genau diese Nummer treibt die Umschul-Kosten (3b:
+ * `retrainCost`), und sie ist rhythmus-bewusst: Im Muster „P P S S" ist Stufe 3
+ * der erste Spezial-Slot, im Muster „P S P S" die Stufe 2.
+ */
+export function retrainSlotOrdinal(cfg: HeroConfig, tier: number): number {
+  const pat = TIER_PATTERNS[cfg.rhythm];
+  const t = Math.max(1, Math.floor(tier));
+  if (pat[(t - 1) % pat.length] === 'power') return 0;
+  return specialTiers(cfg, t);
 }
 
 /** How many POWER tiers are among a member's first `bought` tiers (rhythm-aware). */
@@ -366,9 +397,16 @@ export interface CrewSpecialBonuses {
  * combo/beat windows are capped here (they gate skill checks); crit chance and
  * the Ekstase reduction are clamped by their existing pipeline caps at the
  * call sites.
+ *
+ * **3b — umgeschulte Slots.** Trägt die Umschul-Map für ein Mitglied Einträge,
+ * kann dessen Sorte je Stufe verschieden sein; dann wird Stufe für Stufe über
+ * `abilityKind` gezählt — dieselbe Funktion, die auch die Card beschriftet. Für
+ * jedes Mitglied OHNE Eintrag bleibt der alte O(1)-Pfad (`specialTiers`)
+ * erhalten: Ein Save ohne Umschulung — und damit jeder Sim-Lauf, denn der Bot
+ * schult nie um — rechnet exakt so schnell und exakt dieselben Zahlen wie vor 3b.
  */
-export function crewSpecialBonuses(ups: CrewUps): CrewSpecialBonuses {
-  const n: Record<Exclude<AbilityKind, 'power'>, number> = {
+export function crewSpecialBonuses(ups: CrewUps, retrain: CrewRetrain = {}): CrewSpecialBonuses {
+  const n: Record<SpecialKind, number> = {
     gold: 0,
     crit: 0,
     critdmg: 0,
@@ -378,7 +416,18 @@ export function crewSpecialBonuses(ups: CrewUps): CrewSpecialBonuses {
     ekstase: 0,
     idle: 0,
   };
-  for (const cfg of CREW) n[cfg.special] += specialTiers(cfg, ups[cfg.id] ?? 0);
+  for (const cfg of CREW) {
+    const bought = Math.max(0, Math.floor(ups[cfg.id] ?? 0));
+    const slots = retrain[cfg.id];
+    if (!slots) {
+      n[cfg.special] += specialTiers(cfg, bought);
+      continue;
+    }
+    for (let t = 1; t <= bought; t++) {
+      const kind = abilityKind(cfg, t, retrain);
+      if (kind !== 'power') n[kind] += 1;
+    }
+  }
   return {
     goldMult: 1 + SPECIAL_GOLD * n.gold,
     critChance: SPECIAL_CRIT_CHANCE * n.crit,
@@ -389,6 +438,34 @@ export function crewSpecialBonuses(ups: CrewUps): CrewSpecialBonuses {
     ekstaseChargeRed: SPECIAL_EKSTASE * n.ekstase,
     idleMult: 1 + SPECIAL_IDLE * n.idle,
   };
+}
+
+/**
+ * Der NAME einer Sorte (was sie ist), Gegenstück zu `abilityKindLabel` (was sie
+ * zahlt). Der Umschul-Dialog stellt beide übereinander — „Boss-Schaden" über
+ * „+25% Boss-Schaden" liest sich als Karte, zwei nackte Prozentzeilen nicht.
+ */
+export function abilityKindName(kind: AbilityKind): string {
+  switch (kind) {
+    case 'power':
+      return 'Verstärkung';
+    case 'gold':
+      return 'Gold';
+    case 'crit':
+      return 'Krit-Chance';
+    case 'critdmg':
+      return 'Krit-Schaden';
+    case 'boss':
+      return 'Boss-Schaden';
+    case 'combo':
+      return 'Combo-Fenster';
+    case 'beat':
+      return 'Beat-Fenster';
+    case 'ekstase':
+      return 'Ekstase-Ladung';
+    case 'idle':
+      return 'Groove (Crew-DPS)';
+  }
 }
 
 /** Short German UI label for an ability tier of `kind` (power appends the out-label). */

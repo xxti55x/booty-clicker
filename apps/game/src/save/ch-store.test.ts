@@ -1415,3 +1415,87 @@ describe('ch-store — v13 migration & repair (Crew-Meisterschaft, 1a)', () => {
     }
   });
 });
+
+describe('ch-store — v14 migration & repair (Crew-Umschulung, 3b)', () => {
+  it('startet einen v13-Save mit leerer Map (Stock-Sorten überall, kein Verlust)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 13;
+    delete raw.crewRetrain;
+    delete raw.retrainRolls;
+    raw.gold = 7_400;
+    raw.crew = { boss: 140 };
+    raw.crewUp = { boss: 2 };
+    const store = memStorage();
+    store.setItem(CH_SAVE_KEY, JSON.stringify(raw));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    // Wer nie umgeschult hat, trägt überall die Stock-Sorte — die leere Map sagt
+    // genau das, also ist die Migration verlustfrei und rückwirkungsfrei.
+    expect(s.crewRetrain).toEqual({});
+    expect(s.retrainRolls).toEqual({});
+    expect(s.gold).toBe(7_400);
+    expect(s.crewUp).toEqual({ boss: 2 });
+  });
+
+  it('round-trippt Overrides und Eskalator', () => {
+    const s: ChState = {
+      ...createChState(),
+      crew: { boss: 200 },
+      crewUp: { boss: 4 },
+      crewRetrain: { boss: { '2': 'idle', '4': 'gold' } },
+      retrainRolls: { boss: 3 },
+    };
+    const round = deserializeCh(serializeCh(s, 1000));
+    expect(round!.crewRetrain).toEqual({ boss: { '2': 'idle', '4': 'gold' } });
+    expect(round!.retrainRolls).toEqual({ boss: 3 });
+  });
+
+  it('lässt keinen Override auf eine POWER-Stufe durch (die Leitplanke von 3b)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    // Booty-Boss folgt P S P S: Stufe 1 und 3 sind Power und dürfen NIE rollen.
+    raw.crewRetrain = { boss: { '1': 'gold', '2': 'beat', '3': 'idle' } };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.crewRetrain).toEqual({ boss: { '2': 'beat' } });
+  });
+
+  it('putzt Müll-Sorten, Müll-Ids und Nicht-Normalform-Schlüssel', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.crewRetrain = {
+      boss: { '2': 'power', '4': 'quatsch', '02': 'gold', '2.0': 'gold', x: 'gold' },
+      junk: { '2': 'gold' },
+      hype: 'garbage',
+    };
+    raw.retrainRolls = { boss: -2, hype: 2.7, junk: 9 };
+    const s = deserializeCh(JSON.stringify(raw));
+    // Nichts davon überlebt: `power` ist keine Sorte, `quatsch` keine Sorte,
+    // „02"/„2.0" sind keine Normalform (zwei Schlüssel zeigten sonst auf EINEN
+    // Slot), `junk` ist kein Mitglied.
+    expect(s!.crewRetrain).toEqual({});
+    expect(s!.retrainRolls).toEqual({ hype: 2 });
+  });
+
+  it('repariert eine komplett kaputte Slice, ohne anderen Fortschritt zu nuken', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.crewRetrain = 'garbage';
+    raw.retrainRolls = 42;
+    raw.souls = 77;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.crewRetrain).toEqual({});
+    expect(s!.retrainRolls).toEqual({});
+    expect(s!.souls).toBe(77);
+  });
+
+  it('klemmt die Map bewusst NICHT an den Fähigkeits-Ledger (Reset-Normalfall)', () => {
+    // Nach jedem Reset steht `crewUp` auf 0, während die erkaufte Sorte bleibt —
+    // genau ihr Sinn. Sie muss den Reload also auch ohne gekauften Slot überleben.
+    const s: ChState = {
+      ...createChState(),
+      crew: {},
+      crewUp: {},
+      crewRetrain: { boss: { '2': 'idle' } },
+    };
+    expect(deserializeCh(serializeCh(s, 1000))!.crewRetrain).toEqual({ boss: { '2': 'idle' } });
+  });
+});

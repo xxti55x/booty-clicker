@@ -68,14 +68,14 @@ export const HINT_BUDGET_REACH = 3;
  * zählt der Mythos-Knoten „Boss-Brecher" als ungekauft (×1).
  */
 type BurstInput = Pick<ChState, 'ancients' | 'gear' | 'crewUp'> &
-  Partial<Pick<ChState, 'transcend'>>;
+  Partial<Pick<ChState, 'transcend' | 'crewRetrain'>>;
 /**
  * Die Felder, aus denen der Kauf-Tipp folgt. `crewMastery` ist optional, damit
  * ältere Aufrufer/Fixtures ohne die 1a-Tafel weiter dieselbe Rangfolge sehen
  * (fehlt ⇒ jedes Mitglied faltet ×1).
  */
 type HintInput = Pick<ChState, 'gold' | 'crew' | 'crewUp' | 'gilds'> &
-  Partial<Pick<ChState, 'crewMastery'>>;
+  Partial<Pick<ChState, 'crewMastery' | 'crewRetrain'>>;
 
 /**
  * Gesamter Boss-Schadens-Multiplikator (Ahnen × Gear × Crew-Specials × Mythos).
@@ -87,7 +87,9 @@ function bossDamageMult(state: BurstInput): number {
   return (
     ancientBossDmgMult(state.ancients) *
     bossDmgMult(state.gear) *
-    crewSpecialBonuses(state.crewUp).bossMult *
+    // 3b: mit der Umschul-Map — wer einen Slot auf `boss` gerollt hat, sieht das
+    // sofort in der Wand-Telemetrie, sonst würde sie ihn systematisch unterschätzen.
+    crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).bossMult *
     (state.transcend ? bossBreakerDmgMult(state.transcend) : 1)
   );
 }
@@ -162,7 +164,12 @@ export function bestPurchaseHint(state: HintInput): PurchaseHint | null {
   const label =
     buy.kind === 'level'
       ? `${cfg.name} Lv ${level + 1}`
-      : `${cfg.name} · ${abilityKindLabel(abilityKind(cfg, bought + 1), cfg.click ? 'Klick' : 'DPS')}`;
+      : `${cfg.name} · ${abilityKindLabel(
+          // 3b: Der Tipp benennt die Stufe, die WIRKLICH kommt — bei einem
+          // umgeschulten Slot also seine neue Sorte.
+          abilityKind(cfg, bought + 1, state.crewRetrain ?? {}),
+          cfg.click ? 'Klick' : 'DPS',
+        )}`;
   return { ...buy, name: cfg.name, label, affordable: buy.cost <= gold };
 }
 

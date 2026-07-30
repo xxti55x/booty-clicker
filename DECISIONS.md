@@ -3,6 +3,124 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## IDEEN-GAMEPLAY Schritt 3 — 3b Crew-Umschulung
+
+- **Eine Override-Map, EINE Lesekette.** `crewRetrain: Record<crewId,
+Record<tierIndex, AbilityKind>>` (leer = Stock-Sorte) wird ausschließlich in
+  `abilityKind(cfg, tier, retrain)` gelesen — und alles, was je nach der Sorte
+  eines Slots fragt, geht durch genau diese Funktion: die Crew-Card (Kachel,
+  Badge, Tooltip), der Kauf-Tipp (`advisor.bestPurchaseHint`), die
+  Wand-Telemetrie (`bossDamageMult`) und vor allem die Faltung
+  `crewSpecialBonuses`. Die faltete vorher `cfg.special` direkt; jetzt zählt sie
+  für ein Mitglied MIT Einträgen Stufe für Stufe über `abilityKind` und behält
+  für jedes Mitglied OHNE Einträge den alten O(1)-Pfad (`specialTiers`). Damit
+  rechnet ein Save ohne Umschulung — also jeder Sim-Lauf — bitgleich und
+  gleich schnell wie vor 3b, und ein umgeschulter Slot wirkt überall exakt wie
+  ein von Haus aus so geborener. Zweitpfade gibt es keine.
+- **Der Rhythmus ist unantastbar, nur die SORTE rollt.** `abilityKind` prüft
+  ZUERST das Muster (`TIER_PATTERNS`): Auf einer Power-Stufe wird jeder Override
+  ignoriert, `retrainSlotOrdinal` liefert dort 0 und die UI zeigt gar keinen
+  Knopf. `repairCrewRetrain` wirft beim Laden zusätzlich jeden Eintrag weg, der
+  auf einer Power-Stufe sitzt — ein handgeschriebener Save kann das 2P+2S-
+  Verhältnis also nicht kippen (die eine Leitplanke des Ideen-Dokuments).
+- **Kosten gemessen, nicht geraten: 40 · 2^(Slot−1).** `npm run balance` druckt
+  die Splitter-Kurve jetzt als eigenen Abschnitt 7 — Truhen-🧩 aus der
+  Sim-Ökonomie plus der Boss-Faucet `bossShardReward`, den das Spiel pro
+  Boss-Kill zahlt und den der Bot nicht modelliert (er wird aus der gemessenen
+  Bühnen-Kurve rekonstruiert: jeder Lauf clert die Boss-Bühnen 5, 10, … bis zu
+  seiner Wand). Gemessen (`SIM_ACTIVE`, 3 cps + Juice, Seeds 1/7/12345):
+  45 min → 12 + 36 = **48 🧩** (64/h) · 3 h → 52 + 323 = **375** (125/h) ·
+  12 h → 78 + 1 579 = **1 656** (138/h) · 24 h → 121 + 3 253 = **3 375**
+  (141/h). Der Beharrungszustand liegt also bei ~140 🧩/h — und der Boss-Faucet
+  trägt 96 % davon, die Truhen sind nur die Würze. Daraus die Leiter: **Slot 1
+  40 🧩** (die erste Umschulung fällt am ersten Abend, ≈ 20 min Spielzeit),
+  Slot 2 80, Slot 3 160, Slot 4 320 (≈ 2.3 h), Slot 5 640. Die Verdopplung je
+  Slot spiegelt bewusst den bestehenden Splitter-Sink (Skin-Level `shardCost`,
+  ×1.25/Level ⇒ Lv 10 = 100 🧩, Lv 20 = 870, Lv 25 = 2 650): Beide Leitern
+  wachsen geometrisch und konkurrieren über die ganze Spielzeit um dieselben
+  Splitter, statt dass eine die andere ab Stunde 3 trivialisiert. Zwei Anker in
+  `sim.test.ts` frieren die Messung ein (erste Umschulung im ersten Sitting
+  bezahlbar, Slot 3 dort noch nicht; 100–200 🧩/h im Beharrungszustand).
+- **Währungs-Eskalation statt Echtzeit-Abklingzeit — bewusst gegen die Skizze.**
+  Das Ideen-Dokument schrieb „Splitter + Abklingzeit". Ein 24-h-Cooldown
+  bestraft aber genau die Spielweise, für die dieses Spiel gebaut ist: Wer
+  abends 20 Minuten spielt, sieht seinen zweiten Roll frühestens am nächsten
+  Abend und muss sich dafür einen Timer merken. Stattdessen kostet **jeder
+  weitere Roll am SELBEN Mitglied in derselben Aszension ×2** (`retrainRolls`,
+  Run-Zustand: Alle drei Resets setzen ihn auf 0 zurück). Dieselbe Bremse gegen
+  Roll-Spam, aber sie löst sich durch WEITERSPIELEN statt durch Warten — und sie
+  ist selbstbegrenzend, weil nach einem Reset ohnehin erst wieder Level und
+  Slots gekauft werden müssen, bevor überhaupt etwas zu rollen ist.
+- **Zwei Lebensdauern, zwei Felder.** `crewRetrain` ist PERMANENT (überlebt
+  Aszension, Himmelfahrt, Transzendenz — wie Vergoldungen und Meisterschaft);
+  sonst wäre der Splitter-Einsatz nach der nächsten Aszension verpufft, denn die
+  Slots selbst fallen mit `crewUp`. `retrainRolls` ist RUN-Zustand und fällt
+  überall mit. Genau deshalb sind es zwei Felder und nicht ein verschachteltes:
+  Wer verschiedene Lebensdauern in eine Slice packt, muss sie in jedem
+  Reset-Pfad wieder auseinanderklauben.
+- **Angebot statt Blind-Roll — und die Ziehung sitzt HINTER der Bezahlung.**
+  `retrainOffers(current, r1, r2)` zieht aus dem Pool ohne die aktuelle Sorte,
+  entfernt die erste Ziehung vor der zweiten: zwei Angebote, garantiert
+  voneinander und von der aktuellen verschieden. Beide Floats kommen aus dem
+  persistierten Spiel-Strom (`rng.next()`) — derselben Quelle wie Krits, Truhen
+  und Vergoldungen. Gewürfelt wird ERST beim Druck auf „Für X 🧩 umschulen",
+  nicht beim Öffnen des Dialogs: Sonst könnte man das Angebot gratis ansehen,
+  den Dialog schließen und mit verschobenem Cursor neu würfeln — Save-Scumming
+  ohne Save. Bezahlt wird der ROLL, nicht das Ergebnis; „behalten" ist deshalb
+  immer erlaubt und macht den Kauf nie schlechter als vorher.
+- **UI: der Knopf sitzt an der Kachel, der Dialog gehört dem Charakter.** Jeder
+  GEKAUFTE Spezial-Slot trägt unten links ein 16-px-Werkzeug (Schraubenschlüssel
+  in der Stroke-Sprache, kein Emoji) — die anderen drei Ecken sind vergeben
+  (Haken oben rechts, Sorten-Badge unten rechts). Optisch 16 px, TREFFERFLÄCHE
+  28 px über ein `::after`-Inset; nach links wächst die nur in die 9-px-Lücke
+  der Slot-Reihe und höchstens auf eine bereits gekaufte (nicht klickbare)
+  Nachbarkachel — der Kauf-Knopf steht in der Reihe immer rechts von allen
+  gekauften Kacheln. Im delegierten Klick-Handler wird `.ab-rt` ZUERST geprüft
+  und beendet den Handler (sonst kaufte derselbe Klick zusätzlich die
+  Level-Zeile darunter — die Lektion aus dem Ability-Kauf-Bugfix). Der Dialog
+  zeigt das Portrait GROSS (72 px, `av-xl`, auf flachen Geräten 52 px), darunter
+  „Aktuell" und — nach der Bezahlung — „Angebot — wähle eine" mit beiden Karten
+  UNTEREINANDER: nebeneinander brachen Namen wie „Ekstase-Ladung" mitten im
+  Wort. `.btn.ghost` ist für die dunkle HUD gebaut und wäre auf Pergament fast
+  unlesbar, also bekommt der Dialog dieselbe Form in Pergament-Tinte; bei
+  92 vh scrollt er in sich, statt im Querformat aus dem Bild zu laufen.
+- **Der Bot schult NIE um — dokumentierte Untergrenze.** Der Sim hält keine
+  Override-Map, seine Läufe sind damit zahlengleich zu einem Save ohne jede
+  Umschulung; die Anker bleiben unverändert (nachgemessen: t10 1.7 min, t25
+  32.4 min, Wand Bühne 25, erste Himmelfahrt 17.72 h, E2 15 Stufen bei
+  Verhältnis ≤ 1.86, E4-Vorsprung ⌀ +12.3, Meisterschafts-Kennlinie identisch).
+  Das ist Absicht: Umschulen kostet nur Splitter, die der Bot ohnehin bankt, und
+  kann die Sorten-Verteilung im Zweifel nur VERBESSERN — ein optimal
+  umschulender Bot wäre schneller als jeder Spieler, und die Anker müssen die
+  langsamere Wahrheit messen. Die FALTUNG kann es trotzdem: Ein präparierter
+  Zustand mit Override ändert `crewSpecialBonuses`, `dpsOf` und `goldMult` genau
+  um den erwarteten Faktor (Tests in `heroes.test.ts`/`ch-state.test.ts`).
+- **Save-Schema v14 + X7-Fixture-Paar.** Die Migration v13 → v14 sät bewusst
+  LEER: Wer nie Splitter bezahlt hat, trägt überall die Stock-Sorte — genau das
+  sagt die leere Map, die Migration ist also verlustfrei UND rückwirkungsfrei
+  (anders als bei 1a gibt es hier nichts zu rekonstruieren). Die Matrix hat den
+  Bump wie vorgesehen sofort rot gemeldet; ihr neues Paar prüft den gesunden
+  v14-Save (zwei umgeschulte Slots + Eskalator-Stand) und den kaputten
+  (Override auf einer Power-Stufe, `power` als Sorte, Nicht-Normalform-Schlüssel
+  „04", Müll-Id) — übrig bleibt genau der eine legale Eintrag.
+- **Headless-Beweis** (Chromium/SwiftShader, Port 4188, präparierter v14-Save
+  mit 500 🧩 und gekauften Spezial-Slots): `3b-a-knopf-am-slot.png` +
+  `3b-zoom-slots.png` (Werkzeug NUR an den Spezial-Slots — gemessen
+  `boss#2, boss#4, hype#3, hype#4, dj#2, dj#3`, also exakt die Rhythmus-Slots),
+  `3b-b1-dialog-vorschau.png` (Portrait groß, aktuelle Sorte, „Für 40 🧩
+  umschulen"), `3b-b2-dialog-angebote.png` (zwei Angebote: beat + ekstase,
+  Splitter 500 → 460), `3b-c1-nach-roll-toast.png` (Toast „Umgeschult! ·
+  Stufe 2: Beat-Fenster") + `3b-zoom-slots-nachher.png` (das Badge der Kachel
+  ist von Krit-Schaden auf die Beat-Note gewechselt), `3b-d-eskalation.png`
+  (zweiter Roll am selben Mitglied: „Für 80 🧩 umschulen · 1. Umschulung dieser
+  Aszension"; ein anderes Mitglied kostet weiter 40), `3b-e-klick-regression.png`
+  (ein Klick auf den Umschul-Knopf lässt Level UND Kontostand unberührt; EIN
+  Klick auf den Kauf-Slot kauft die Stufe (dj 3 → 4), EIN Klick auf die Zeile
+  ein Level (Türsteher 150 → 151)) sowie `3b-m-portrait/-schmal/-landscape.png`
+  (390×844, 320×640, 740×380 — kein horizontaler Überlauf, im Querformat
+  scrollt der Dialog in sich). Bundle nach der Änderung: **846 KB JS**
+  (Budget 1.5 MB).
+
 ## IDEEN-GAMEPLAY Schritt 2 — 1a Crew-Meisterschaft
 
 - **Einsatz-XP sind gekaufte LEVEL, nicht gehaltene.** `crewMastery` ist ein

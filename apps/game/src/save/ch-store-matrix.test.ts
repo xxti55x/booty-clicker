@@ -1,7 +1,7 @@
 /**
  * X7 — Save-Migrations-Matrix (ROADMAP-V2, „Save-Hygiene vor neuen Feldern").
  *
- * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v13). Pro Version
+ * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v14). Pro Version
  * zwei Inline-Fixtures (kein Datei-IO):
  *
  *   1. ein REALISTISCHER Save der jeweiligen Ära, der die volle Ladekette
@@ -47,7 +47,7 @@ function memStorage(): ChStorage & { map: Map<string, string> } {
 }
 
 /** Every historical CH schema version, oldest first — the spine of the matrix. */
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] as const;
 type SchemaVersion = (typeof VERSIONS)[number];
 
 const LAST_SEEN = 1_752_800_000_000;
@@ -180,6 +180,16 @@ const CREW_MASTERY = { boss: 900, hype: 460, dj: 120, legend: 6 };
 const MASTERY_PRE_V13 = { ...CORE.crew };
 
 /**
+ * v14 (3b): Crew-Umschulung. `boss` folgt Muster 0 (P S P S), Stufe 2 ist also
+ * sein erster Spezial-Slot — hier auf `idle` gerollt (Stock wäre `critdmg`).
+ * `hype` folgt Muster 1 (P P S S), Stufe 3 ist sein erster Spezial-Slot — auf
+ * `gold` gerollt (Stock wäre `combo`). Dazu ein Eskalator-Stand: An `boss` wurde
+ * in DIESER Aszension schon zweimal gerollt, der nächste Roll kostet also ×4.
+ */
+const CREW_RETRAIN = { boss: { '2': 'idle' }, hype: { '3': 'gold' } };
+const RETRAIN_ROLLS = { boss: 2 };
+
+/**
  * v11 (P1): Bühnen-Sterne. Bühne 5 voll (Boss-Gate: geclert + ohne Timeout +
  * Combo), Bühne 10 halb, Bühne 7 als Nicht-Boss-Bühne mit ihren zwei möglichen
  * Sternen — Summe 3 + 2 + 2 = 7, also noch kein Meilenstein (15) fällig.
@@ -250,6 +260,10 @@ function saveAt(v: SchemaVersion): Record<string, unknown> {
     raw.bossFoulZone = BOSS_FOUL_ZONE;
   }
   if (v >= 13) raw.crewMastery = { ...CREW_MASTERY };
+  if (v >= 14) {
+    raw.crewRetrain = { boss: { ...CREW_RETRAIN.boss }, hype: { ...CREW_RETRAIN.hype } };
+    raw.retrainRolls = { ...RETRAIN_ROLLS };
+  }
   return raw;
 }
 
@@ -322,6 +336,11 @@ function expectSlices(s: ChState, v: SchemaVersion): void {
   // gehaltenen Crew-Stand: der einzige Einsatz-XP-Betrag, den ein Alt-Save
   // beweisen kann (siehe `migrateChV12toV13`).
   expect(s.crewMastery).toEqual(v >= 13 ? CREW_MASTERY : MASTERY_PRE_V13);
+  // v14 — Crew-Umschulung (3b). Ältere Ären starten LEER: Wer nie Splitter für
+  // eine Umschulung bezahlt hat, trägt überall die Stock-Sorte — genau das sagt
+  // die leere Map, es geht also nichts verloren.
+  expect(s.crewRetrain).toEqual(v >= 14 ? CREW_RETRAIN : {});
+  expect(s.retrainRolls).toEqual(v >= 14 ? RETRAIN_ROLLS : {});
 }
 
 // ---------------------------------------------------------------------------
@@ -559,6 +578,28 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
       // Bewusst NICHT auf den Crew-Stand gehoben: die Reparatur repariert, sie
       // erfindet nicht (hype hält Lv 30, seine kaputte XP-Zahl bleibt weg).
       expect(s.crew).toEqual(CORE.crew);
+    },
+  },
+  14: {
+    what: 'Umschul-Map auf einer POWER-Stufe, mit Müll-Sorten, -Ids und -Schlüsseln',
+    damage: (raw) => {
+      raw.crewRetrain = {
+        boss: {
+          '1': 'gold', // Stufe 1 ist im Muster 0 eine POWER-Stufe ⇒ raus
+          '2': 'idle', // echter Spezial-Slot ⇒ bleibt
+          '4': 'power', // `power` ist keine Spezial-Sorte ⇒ raus
+          '04': 'gold', // Nicht-Normalform ⇒ raus (zwei Schlüssel, ein Slot)
+          x: 'gold', // keine Stufen-Nummer ⇒ raus
+        },
+        hype: { '3': 'quatsch' }, // unbekannte Sorte ⇒ raus, Mitglied fällt ganz weg
+        junk: { '2': 'gold' }, // kein Crew-Mitglied ⇒ raus
+      };
+      raw.retrainRolls = { boss: 2.8, hype: -1, junk: 4 };
+    },
+    check: (s) => {
+      // Der Rhythmus ist unantastbar: Nur echte Spezial-Slots überleben.
+      expect(s.crewRetrain).toEqual({ boss: { '2': 'idle' } });
+      expect(s.retrainRolls).toEqual({ boss: 2 });
     },
   },
   12: {

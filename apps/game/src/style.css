@@ -3822,3 +3822,242 @@ body {
     width: min(340px, 42vw);
   }
 }
+
+/* ---- 3b: Crew-Umschulung — Knopf am Slot + Reforge-Dialog ---------------- */
+/* Der Umschul-Knopf sitzt UNTEN LINKS an der gekauften Kachel — die drei
+   anderen Ecken sind vergeben (Haken oben rechts, Sorten-Badge unten rechts). */
+.ab-rt {
+  position: absolute;
+  left: -6px;
+  bottom: -6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1.5px solid #6d5433;
+  border-radius: 50%;
+  background: var(--parch);
+  color: #6d5433;
+  cursor: pointer;
+  /* Der Klickpfad der Delegation greift den Knopf über `.closest('.ab-rt')` ab;
+     das SVG darin darf also nie selbst Ziel sein (sonst zeigte `closest` auf ein
+     Kind ohne `data-rt`). */
+  line-height: 0;
+}
+.ab-rt svg {
+  width: 11px;
+  height: 11px;
+  pointer-events: none;
+}
+/* Der Knopf ist optisch 16 px klein (mehr Platz hat die Kachel-Ecke nicht), seine
+   TREFFERFLÄCHE aber 28 px — unsichtbar aufgeblasen statt größer gemalt. Nach
+   links wächst sie nur in die 9-px-Lücke der Slot-Reihe und höchstens auf eine
+   bereits gekaufte (nicht klickbare) Nachbarkachel, nie auf den Kauf-Knopf:
+   der steht in der Reihe IMMER rechts von allen gekauften Kacheln. */
+.ab-rt::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+.ab-rt:active {
+  transform: translateY(1px);
+}
+.ab-rt:hover {
+  background: #fff3d4;
+  border-color: #3f2f16;
+  color: #3f2f16;
+}
+
+.dialog.rt {
+  max-width: 340px;
+  width: 88vw;
+  /* Im kurzen Querformat (740×380) ist der Dialog höher als das Fenster — dann
+     scrollt er IN SICH, statt oben und unten aus dem Bild zu laufen. */
+  max-height: 92vh;
+  overflow-y: auto;
+}
+/* Der Dialog blendet seine Knöpfe je Phase um (Vorschau ⇄ bezahltes Angebot).
+   `.hidden` ist im Projekt bewusst pro Element definiert, nicht global — hier
+   also die drei Knöpfe dieses Dialogs. */
+#rtRoll.hidden,
+#rtKeep.hidden,
+#rtClose.hidden {
+  display: none;
+}
+/* `.btn.ghost` ist für die dunkle HUD gebaut (helle Schrift auf Schwarz) — auf
+   dem Pergament des Dialogs wäre „Behalten" damit fast unlesbar, obwohl es eine
+   vollwertige Wahl ist. Also dieselbe Form, aber in Pergament-Tinte. */
+/* Die Statuszeile lebt hier auf Pergament, nicht auf der dunklen HUD — die
+   HUD-Grün-/Rot-Töne wären darauf kaum lesbar. */
+.dialog.rt .msg.ok {
+  color: #2e6b1f;
+}
+.dialog.rt .msg.bad {
+  color: #a32b1c;
+}
+.dialog.rt .msg {
+  color: var(--parch-soft);
+}
+.dialog.rt .btn.ghost {
+  background: rgba(90, 66, 30, 0.14);
+  color: #4a3a1c;
+  border-color: rgba(90, 66, 30, 0.38);
+  box-shadow: 0 3px 0 rgba(90, 66, 30, 0.28);
+}
+/* Das große Portrait ist die Szene: „an DIESEM Charakter wird geschmiedet." */
+.rt-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 10px;
+  text-align: left;
+}
+.av.av-xl {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  padding: 2px;
+}
+.rt-who {
+  min-width: 0;
+}
+.rt-name {
+  font-family: var(--display);
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--parch-ink);
+}
+.rt-slot {
+  font-size: 11.5px;
+  color: var(--parch-soft);
+}
+/* „Aktuell" und „Angebot" stehen als Überschrift ÜBER ihrer Karte, nicht daneben:
+   so fluchten beide Karten auf derselben Kante und die Sorte davor/danach lässt
+   sich direkt vergleichen. */
+.rt-now {
+  margin-bottom: 8px;
+  text-align: left;
+}
+.rt-k {
+  display: block;
+  margin-bottom: 4px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: var(--parch-soft);
+  text-transform: uppercase;
+}
+/* Die zwei Angebote stehen UNTEREINANDER, nicht nebeneinander: Sorten-Namen wie
+   „Ekstase-Ladung" brechen in einer halben Dialogbreite mitten im Wort, und die
+   Karten sollen exakt so breit lesen wie die „Aktuell"-Zeile darüber. */
+.rt-offers {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.rt-offers.hidden {
+  display: none;
+}
+.rt-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 2px solid var(--parch-line);
+  border-radius: 12px;
+  background: #fff8e6;
+  color: var(--parch-ink);
+  text-align: left;
+  font: inherit;
+}
+.rt-card.now {
+  cursor: default;
+  opacity: 0.85;
+}
+.rt-card.offer {
+  cursor: pointer;
+  box-shadow: 0 3px 0 rgba(20, 10, 2, 0.28);
+}
+.rt-card.offer:hover {
+  border-color: #3f2f16;
+}
+.rt-card.offer:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(20, 10, 2, 0.28);
+}
+.rt-glyph {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1.5px solid currentColor;
+  font-size: 14px;
+  line-height: 1;
+}
+.rt-ct {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.rt-ct b {
+  font-size: 12.5px;
+}
+.rt-eff {
+  font-size: 11px;
+  color: var(--parch-soft);
+}
+/* Sorten-Tönung der Karten — dieselben Hues wie die Kauf-Kacheln (v11). */
+.rt-card.k-gold {
+  color: #6b4a00;
+  background: linear-gradient(180deg, #fff3cf, #f7e2a8);
+}
+.rt-card.k-crit,
+.rt-card.k-critdmg {
+  color: #7a1f11;
+  background: linear-gradient(180deg, #ffe0d2, #f7c4a8);
+}
+.rt-card.k-boss {
+  color: #4a1a5e;
+  background: linear-gradient(180deg, #f1e2f7, #ddc2ec);
+}
+.rt-card.k-combo {
+  color: #1d5c2a;
+  background: linear-gradient(180deg, #e4f6d9, #c9ecb4);
+}
+.rt-card.k-beat {
+  color: #12475e;
+  background: linear-gradient(180deg, #dcf2fa, #b8e6f5);
+}
+.rt-card.k-ekstase {
+  color: #7a1148;
+  background: linear-gradient(180deg, #ffdcec, #ffc0dd);
+}
+.rt-card.k-idle {
+  color: #114a44;
+  background: linear-gradient(180deg, #d8f6ee, #b4ecdd);
+}
+
+/* Und auf sehr flachen Geräten schrumpft zuerst das, was nur schmückt: Portrait
+   und Abstände. Die Wahl selbst (zwei Karten + Knöpfe) bleibt unangetastet. */
+@media (max-height: 480px) {
+  .dialog.rt {
+    padding: 14px 18px;
+  }
+  .av.av-xl {
+    width: 52px;
+    height: 52px;
+    border-radius: 12px;
+  }
+  .rt-hero {
+    margin: 8px 0 6px;
+  }
+}

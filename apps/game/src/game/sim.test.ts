@@ -4,10 +4,18 @@ import { SKINS } from '../character/skins';
 import type { BackgroundKey, SkinKey } from '../types';
 import { gimmickForZone } from './boss-gimmicks';
 import { spawnFor } from './combat';
-import { createGear, gearBonus, KULISSE_BUFFS, MAX_SKIN_LEVEL, MAX_SKIN_STARS } from './gear';
+import {
+  bossShardReward,
+  createGear,
+  gearBonus,
+  KULISSE_BUFFS,
+  MAX_SKIN_LEVEL,
+  MAX_SKIN_STARS,
+} from './gear';
 import { TREE_NODES, greedyTreeSpend, treeLevel, treeNodeConfig, treeRefund } from './heaven';
 import { CREW } from './heroes';
 import { MASTERY_RANKS, masteryRank } from './mastery';
+import { retrainCost } from './retrain';
 import {
   SIM_ACTIVE,
   SIM_ACTIVE_CAL,
@@ -737,5 +745,55 @@ describe('simulateEndless — Crew-Meisterschaft (1a) wächst im Bot mit', () =>
     const a = simulateRunChain({ ...ACTIVE, seed: 7 }, 2, RUN_S);
     const b = simulateRunChain({ ...ACTIVE, seed: 7 }, 2, RUN_S);
     expect(a.mastery).toEqual(b.mastery);
+  });
+});
+
+describe('simulateEndless — Splitter-Einkommen trägt die Umschul-Leiter (3b)', () => {
+  /**
+   * Die Eichlatte der Umschul-Kosten, eingefroren. Zwei Faucets zählen: die
+   * Truhen-🧩 der Sim-Ökonomie (`econ.shards`) und der Boss-Faucet
+   * `bossShardReward`, den das Spiel pro Boss-Kill zahlt — den modelliert der Bot
+   * NICHT (er bankt nur Truhen), also wird er hier aus der gemessenen
+   * Bühnen-Kurve rekonstruiert: Jeder Lauf clert die Boss-Bühnen 5, 10, … bis zu
+   * seiner Wand.
+   */
+  const bossShardsUpTo = (bestZone: number): number => {
+    let s = 0;
+    for (let z = 5; z <= bestZone; z += 5) s += bossShardReward(z);
+    return s;
+  };
+  const shardsAfter = (seed: number, runs: number): number => {
+    const c = simulateRunChain({ ...ACTIVE, seed }, runs, RUN_S);
+    return c.econ.shards + c.runs.reduce((a, r) => a + bossShardsUpTo(r.bestZone), 0);
+  };
+
+  it('zahlt die ERSTE Umschulung im ersten Sitting, aber nicht mehr als eine Handvoll', () => {
+    for (const seed of SIM_SEEDS_HEAVY) {
+      const s = shardsAfter(seed, 1);
+      // Slot 1 kostet 40 🧩 — in 45 min drin (gemessen ⌀ 48) …
+      expect(s).toBeGreaterThanOrEqual(retrainCost(1, 0));
+      // … aber die Leiter bleibt ein Sparziel: kein Slot-3-Roll (160) am ersten Abend.
+      expect(s).toBeLessThan(retrainCost(3, 0));
+    }
+  });
+
+  it('bleibt über die Kette ein echter Sink (die Leiter überholt das Einkommen nicht)', () => {
+    // ~3 h: Slot 4 (320) ist bezahlbar, aber nicht die ganze Crew auf einmal.
+    const s3h = shardsAfter(1, 4);
+    expect(s3h).toBeGreaterThan(retrainCost(4, 0));
+    // 24 h: Der Beharrungszustand liegt bei rund 140 🧩/h (gemessen 141) — die
+    // Eskalation (×2 je weiterem Roll) bremst also spürbar, ohne zu blockieren.
+    const s24h = shardsAfter(1, 32);
+    expect(s24h / 24).toBeGreaterThan(100);
+    expect(s24h / 24).toBeLessThan(200);
+  });
+
+  it('modelliert im Bot selbst KEINE Umschulung (dokumentierte Untergrenze)', () => {
+    // Der Bot hält keine Override-Map; sein Lauf ist damit zahlengleich zu dem
+    // eines Saves ohne jede Umschulung — genau das macht die Anker konservativ.
+    const a = simulateRunChain({ ...ACTIVE, seed: 7 }, 2, RUN_S);
+    const b = simulateRunChain({ ...ACTIVE, seed: 7 }, 2, RUN_S);
+    expect(a.econ).toEqual(b.econ);
+    expect(a.maxBestZone).toBe(b.maxBestZone);
   });
 });

@@ -57,6 +57,7 @@ import {
   totalRawDps,
 } from './heroes';
 import { type CrewMastery, createMastery } from './mastery';
+import { type CrewRetrain, type RetrainRolls, createRetrain, createRetrainRolls } from './retrain';
 import { incomeMultiplier } from './peach';
 import { type MetaState, createMeta } from './quests';
 import { type StageStars, createStageStars } from './stars';
@@ -196,6 +197,22 @@ export interface ChState {
    * (`mastery.ts`) und den Rahmen ums Portrait.
    */
   crewMastery: CrewMastery;
+  /**
+   * Crew-Umschulung (CH-save v14, IDEEN-GAMEPLAY 3b): pro Mitglied die
+   * Spezial-Slots, deren SORTE gegen Splitter umgerollt wurde (Stufen-Index →
+   * Sorte; fehlt = Stock-Sorte des Mitglieds). Wie die Meisterschaft eine
+   * PERMANENTE Schicht: Die Slots selbst (`crewUp`) fallen bei jedem Reset und
+   * werden neu gekauft — sie kommen dann in der umgeschulten Sorte zurück, sonst
+   * wäre der Splitter-Einsatz nach der nächsten Aszension verpufft.
+   */
+  crewRetrain: CrewRetrain;
+  /**
+   * Bezahlte Umschul-Rolls je Mitglied in der LAUFENDEN Aszension (3b) — der
+   * Kosten-Eskalator (jeder weitere Roll am selben Mitglied ×2). Bewusst RUN-
+   * Zustand und damit das Gegenstück zu `crewRetrain`: Die Bremse gegen
+   * Roll-Spam soll sich durch Weiterspielen lösen, nicht durch Warten.
+   */
+  retrainRolls: RetrainRolls;
   /** Banked Ruhm-Seelen (permanent damage bonus). */
   souls: number;
   /** Deepest zone reached across ALL runs (drives soul gains). */
@@ -279,6 +296,8 @@ export function createChState(): ChState {
     crew: createCrew(),
     crewUp: createCrewUps(),
     crewMastery: createMastery(),
+    crewRetrain: createRetrain(),
+    retrainRolls: createRetrainRolls(),
     souls: 0,
     lifetimeMaxZone: 1,
     totalClicks: 0,
@@ -319,6 +338,8 @@ type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'hea
   crewUp?: CrewUps;
   /** Crew-Meisterschaft (optional so pre-v13 callers/tests fold ×1). */
   crewMastery?: CrewMastery;
+  /** Crew-Umschulung (optional so pre-v14 callers/tests fold die Stock-Sorten). */
+  crewRetrain?: CrewRetrain;
 };
 
 /**
@@ -346,7 +367,9 @@ export function dpsOf(state: DerivedInput): number {
     (state.gear ? dpsGearMult(state.gear) : 1) *
     (state.permTokens ? permTokenDpsMult(state.permTokens) : 1) *
     // v11.1 `idle`-Special („Groove"): hebt wie das Idle-Gear NUR die DPS-Seite.
-    (state.crewUp ? crewSpecialBonuses(state.crewUp).idleMult : 1)
+    // 3b: mit der Umschul-Map, damit ein auf `idle` gerollter Slot hier exakt so
+    // zählt wie ein von Haus aus `idle`-Mitglied.
+    (state.crewUp ? crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).idleMult : 1)
   );
 }
 
@@ -387,6 +410,7 @@ export function goldMult(
   state: Pick<ChState, 'ancients' | 'gear'> & {
     permTokens?: PermTokens;
     crewUp?: CrewUps;
+    crewRetrain?: CrewRetrain;
     heaven?: HeavenState;
   },
 ): number {
@@ -394,7 +418,7 @@ export function goldMult(
     ancientGoldMult(state.ancients) *
     goldGearMult(state.gear) *
     (state.permTokens ? permTokenGoldMult(state.permTokens) : 1) *
-    (state.crewUp ? crewSpecialBonuses(state.crewUp).goldMult : 1) *
+    (state.crewUp ? crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).goldMult : 1) *
     (state.heaven ? goldeneHandeMult(state.heaven) : 1)
   );
 }
@@ -529,6 +553,11 @@ export function ascendState(state: ChState): ChState {
     // Crew-Meisterschaft (1a) ist ein LEBENSZEIT-Zähler wie `totalClicks` — die
     // Level fallen, was man in sie investiert hat, bleibt.
     crewMastery: state.crewMastery,
+    // Crew-Umschulung (3b) ebenso: Die Slots fallen mit `crewUp`, ihre erkaufte
+    // SORTE bleibt und steht wieder da, sobald der Slot neu gekauft ist. Der
+    // Roll-Eskalator (`retrainRolls`) fällt hier bewusst weg — er ist Run-Zustand
+    // und `createChState()` liefert ihn frisch leer.
+    crewRetrain: state.crewRetrain,
     transcend: state.transcend, // L3 survives every lower-layer reset (§4.5.3)
     ancients: state.ancients, // Ancients survive L1 (§4.5 reset table)
     heaven: state.heaven, // L2 state survives L1
@@ -566,6 +595,7 @@ export function himmelfahrtState(state: ChState): ChState {
     heaven,
     gilds: state.gilds, // Vergoldungen survive Himmelfahrt (M10-AC2)
     crewMastery: state.crewMastery, // Einsatz-XP überleben auch L2 (1a)
+    crewRetrain: state.crewRetrain, // Umgeschulte Sorten überleben auch L2 (3b)
     transcend: state.transcend, // L3 survives every lower-layer reset (§4.5.3)
     totalClicks: state.totalClicks,
     rng: state.rng,
@@ -615,6 +645,7 @@ export function transcendState(state: ChState): ChState {
     transcend, // the banked L3 slice survives (held TE + Mythos ledger carry over)
     gilds: state.gilds, // Vergoldungen survive every reset
     crewMastery: state.crewMastery, // Einsatz-XP überleben auch den tiefsten Reset (1a)
+    crewRetrain: state.crewRetrain, // Umgeschulte Sorten ebenso (3b)
     totalClicks: state.totalClicks,
     rng: state.rng,
     stats: state.stats,

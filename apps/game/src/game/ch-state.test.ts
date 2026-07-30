@@ -25,7 +25,7 @@ import {
 import { createAncients } from './ancients';
 import { createGear, skinUnlocked } from './gear';
 import { createHeaven } from './heaven';
-import { clickDamageRaw, totalRawDps } from './heroes';
+import { SPECIAL_GOLD, SPECIAL_IDLE, clickDamageRaw, totalRawDps } from './heroes';
 import { MASTERY_RANKS, masteryOwnMult } from './mastery';
 import { PEACH_BOOST } from './peach';
 import { TRANSCEND_GLOBAL_BASE, createTranscend } from './transcend';
@@ -630,6 +630,57 @@ describe('ch-state — Crew-Meisterschaft im derived layer (1a)', () => {
     for (const next of [ascendState(base), himmelfahrtState(base), transcendState(base)]) {
       expect(next.crewMastery).toEqual({ boss: 60_000, hype: 150 });
       expect(next.crew).toEqual({});
+      expect(next.crewUp).toEqual({});
+    }
+  });
+});
+
+describe('ch-state — Crew-Umschulung im derived layer (3b)', () => {
+  /** Booty-Boss (Rhythmus P S P S, Stock `critdmg`) mit vier gekauften Stufen. */
+  const base = {
+    ...createChState(),
+    crew: { boss: 200, producer: 200 },
+    crewUp: { boss: 4 },
+  };
+
+  it('hebt die Idle-Seite, sobald ein Slot auf `idle` gerollt ist', () => {
+    const rolled = { ...base, crewRetrain: { boss: { '2': 'idle' as const } } };
+    // Ein `idle`-Special ist +20 % CREW-DPS — der Klick bleibt unberührt (P1).
+    expect(dpsOf(rolled)).toBeCloseTo(dpsOf(base) * (1 + SPECIAL_IDLE), 6);
+    expect(clickDamageOf(rolled)).toBeCloseTo(clickDamageOf(base), 6);
+  });
+
+  it('hebt den BP-Multiplikator, sobald ein Slot auf `gold` gerollt ist', () => {
+    const rolled = { ...base, crewRetrain: { boss: { '4': 'gold' as const } } };
+    expect(goldMult(rolled)).toBeCloseTo(goldMult(base) * (1 + SPECIAL_GOLD), 9);
+  });
+
+  it('faltet die Stock-Sorten ohne Map (jeder Aufrufer vor 3b bleibt zahlengleich)', () => {
+    const { crewRetrain: _drop, ...withoutSlice } = base;
+    expect(dpsOf(withoutSlice)).toBe(dpsOf(base));
+    expect(goldMult(withoutSlice)).toBe(goldMult(base));
+    // Ein Override auf einer POWER-Stufe ist wirkungslos (der Rhythmus bleibt).
+    expect(dpsOf({ ...base, crewRetrain: { boss: { '3': 'idle' as const } } })).toBe(dpsOf(base));
+  });
+
+  it('ist permanent: die Sorten überleben alle drei Resets, der Eskalator nicht', () => {
+    const s = {
+      ...base,
+      crewRetrain: { boss: { '2': 'idle' as const } },
+      retrainRolls: { boss: 3 },
+      runMaxZone: 60,
+      lifetimeMaxZone: 60,
+      rsLifetime: 1_500,
+      souls: 1_500,
+      heaven: { hpf: 0, hpfLifetime: 400, ascensions2: 2, tree: {} },
+    };
+    for (const next of [ascendState(s), himmelfahrtState(s), transcendState(s)]) {
+      // Die erkaufte Sorte bleibt — sonst wäre der Splitter-Einsatz nach der
+      // nächsten Aszension verpufft …
+      expect(next.crewRetrain).toEqual({ boss: { '2': 'idle' } });
+      // … der Kosten-Eskalator dagegen ist Run-Zustand und startet neu.
+      expect(next.retrainRolls).toEqual({});
+      // Die Slots selbst fallen mit dem Ledger und werden neu gekauft.
       expect(next.crewUp).toEqual({});
     }
   });

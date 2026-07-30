@@ -14,7 +14,9 @@ import {
   maxAffordable,
   nextAbility,
   nextLevelCost,
+  retrainSlotOrdinal,
 } from '../game/heroes';
+import { retrainCost, retrainRollCount } from '../game/retrain';
 import { type MasteryProgress, addMastery, masteryProgress, masteryRank } from '../game/mastery';
 import { soulMult } from '../game/ascension';
 import { ancientClickMult, ancientDpsMult } from '../game/ancients';
@@ -72,6 +74,13 @@ function masteryLine(p: MasteryProgress): string {
   return `<div class="mr-line mr${p.rank}" title="${title}">Meisterschaft: ${body}</div>`;
 }
 
+/**
+ * Das Werkzeug-Icon des Umschul-Knopfes (3b) — Schraubenschlüssel in derselben
+ * Stroke-Sprache wie die Tab-Ikonen, kein Emoji.
+ */
+const TOOL_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 3.6a5.4 5.4 0 0 0-5 8.9L4 18.2l1.8 1.8 5.7-5.7a5.4 5.4 0 0 0 7.4-6.6l-3 3-2.3-2.3 3-3a5.4 5.4 0 0 0-1.9-.8Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
+
 /** Portrait + Sorten-Badge einer Fähigkeits-Kachel (Power-Stufen flexen). */
 function slotArt(id: string, kind: AbilityKind, badge: string): string {
   return (
@@ -90,6 +99,12 @@ export interface CrewDeps {
    * Card ohne Toast-Stack bauen können.
    */
   onRankUp?: (cfg: HeroConfig, progress: MasteryProgress) => void;
+  /**
+   * Der Umschul-Knopf an einem GEKAUFTEN Spezial-Slot wurde gedrückt (3b) — die
+   * Glue öffnet den Dialog (Portrait groß, zwei Angebote, Kosten). Optional,
+   * damit Tests die Card ohne Dialog bauen können.
+   */
+  onRetrain?: (cfg: HeroConfig, tier: number) => void;
 }
 
 /**
@@ -106,6 +121,12 @@ export interface CrewDeps {
  * Glue (Toast). Der Legenden-Slot wird NICHT hier gebucht, sondern von der Glue
  * in `onBuy` — sie ist die einzige Stelle, die ihn auch nach einem Reset und
  * beim Boot vergibt.
+ *
+ * **3b — Crew-Umschulung.** Jede GEKAUFTE Spezial-Kachel trägt zusätzlich einen
+ * Werkzeug-Knopf; er meldet nur (`onRetrain`), gekauft und gewürfelt wird im
+ * Dialog. Welche SORTE eine Kachel zeigt, liest die Card über dieselbe
+ * `abilityKind(cfg, tier, retrain)` wie Spiel und Sim — die Kachel eines
+ * umgeschulten Slots wechselt damit ohne Sonderfall ihr Badge und ihr Label.
  */
 export class Crew {
   private readonly body = byId('tabCrew');
@@ -145,6 +166,16 @@ export class Crew {
     const list = byId('crewList');
     list.addEventListener('click', (ev) => {
       const t = ev.target as HTMLElement;
+      // 3b: Der Umschul-Knopf sitzt IN einer gekauften Kachel, die wiederum in der
+      // Zeile sitzt — er wird deshalb ZUERST geprüft und beendet den Handler, sonst
+      // würde derselbe Klick zusätzlich die Level-Zeile darunter kaufen.
+      const rt = t.closest<HTMLElement>('.ab-rt');
+      if (rt?.dataset.rt) {
+        const cfg = CREW.find((c) => c.id === rt.dataset.rt);
+        const tier = Number(rt.dataset.rtTier);
+        if (cfg && Number.isInteger(tier) && tier > 0) this.deps.onRetrain?.(cfg, tier);
+        return;
+      }
       const ab = t.closest<HTMLElement>('.ab.ready');
       if (ab?.dataset.ab) {
         const cfg = CREW.find((c) => c.id === ab.dataset.ab);
@@ -245,7 +276,7 @@ export class Crew {
       ancientDpsMult(s.ancients) *
       global *
       dpsGearMult(s.gear) *
-      crewSpecialBonuses(s.crewUp).idleMult;
+      crewSpecialBonuses(s.crewUp, s.crewRetrain).idleMult;
     const clickMult = sm * ancientClickMult(s.ancients) * global * clickGearMult(s.gear);
     const rows: string[] = [];
     CREW.forEach((cfg, i) => {
@@ -275,15 +306,25 @@ export class Crew {
           '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12.5l5 5L19.5 7" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         const slots: string[] = [];
         for (let t = 1; t <= ups; t++) {
-          const k = abilityKind(cfg, t);
+          const k = abilityKind(cfg, t, s.crewRetrain);
+          // 3b: Jeder GEKAUFTE Spezial-Slot trägt den Umschul-Knopf (Werkzeug-Icon
+          // in der Stroke-Sprache) — Power-Slots nicht, deren Sorte ist der
+          // Rhythmus selbst und rollt nie.
+          const slot = retrainSlotOrdinal(cfg, t);
+          const rt =
+            slot > 0
+              ? `<button class="ab-rt" data-rt="${cfg.id}" data-rt-tier="${t}" type="button"
+                   title="Fähigkeit ${t} umschulen (${fmt(retrainCost(slot, retrainRollCount(s.retrainRolls, cfg.id)))} 🧩)"
+                   aria-label="Fähigkeit ${t} von ${cfg.name} umschulen">${TOOL_ICON}</button>`
+              : '';
           // 4b: auch die gekauften Kacheln zeigen WER und WAS — der Haken oben
           // rechts bleibt das „gekauft"-Signal.
           slots.push(
             `<span class="ab done ${tierClass(t)}" title="Fähigkeit ${t}: ${abilityKindLabel(k, outLabel)} — gekauft">` +
-              `${slotArt(cfg.id, k, KIND_ICON[k])}<span class="ab-check">${CHECK}</span></span>`,
+              `${slotArt(cfg.id, k, KIND_ICON[k])}<span class="ab-check">${CHECK}</span>${rt}</span>`,
           );
         }
-        const k = abilityKind(cfg, ab.tier);
+        const k = abilityKind(cfg, ab.tier, s.crewRetrain);
         const abLabel = abilityKindLabel(k, outLabel);
         if (ab.unlocked) {
           const can = ab.cost <= s.gold;

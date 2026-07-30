@@ -59,6 +59,15 @@
  *    `boss`/`combo`/`beat`/`ekstase` specials are utility the bot does NOT model
  *    (same lower-bound rationale as the boss-damage mults above); it still BUYS
  *    them, bundle-valued as gates to the next power tier (see `buyCrewGreedy`).
+ *  · **Crew-Umschulung (3b)**: Der Bot schult NIE um — er hält keine Override-Map,
+ *    also faltet `crewSpecialBonuses` für ihn exakt die Stock-Sorten wie vor 3b
+ *    (die Anker bleiben dadurch zahlengleich). Das ist die bewusste, dokumentierte
+ *    UNTERGRENZE: Umschulen kostet nur Splitter, die der Bot ohnehin bankt, und
+ *    kann die Sorten-Verteilung im Zweifel nur VERBESSERN — ein Bot, der optimal
+ *    umschult, wäre schneller als jeder Spieler, und die Anker müssen die
+ *    langsamere Wahrheit messen. Die FALTUNG selbst kann es trotzdem: Sie liest
+ *    dieselbe `abilityKind`-Kette wie das Spiel, ein Save mit Overrides rechnet
+ *    also überall korrekt (`heroes.test.ts`, `ch-state.test.ts`).
  */
 import { applyAscension, soulMult, soulsForMaxZone } from './ascension';
 import {
@@ -1047,6 +1056,12 @@ export interface ChainResult {
   timeToLifetime: Map<number, number>;
   /** Crew-Meisterschaft (1a) am Ende der Kette — Lebenszeit-Level je Mitglied. */
   mastery: CrewMastery;
+  /**
+   * Die kumulierte Loot-Ökonomie am Ende der Kette (sie überlebt jede Aszension).
+   * Die 🧩-Zahl darin ist die Einkommens-Kurve, gegen die Splitter-Preise geeicht
+   * werden (3b: die Umschul-Kosten) — `npm run balance` druckt sie aus.
+   */
+  econ: EconSummary;
 }
 
 /**
@@ -1096,6 +1111,7 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
     maxBestZone,
     timeToLifetime,
     mastery: { ...sim.crewMastery },
+    econ: econSummary(sim),
   };
 }
 

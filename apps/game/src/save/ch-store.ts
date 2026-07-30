@@ -33,8 +33,16 @@ import {
   CREW,
   abilityTiersUnlocked,
   createCrewUps,
+  retrainSlotOrdinal,
 } from '../game/heroes';
 import { type CrewMastery, createMastery } from '../game/mastery';
+import {
+  type CrewRetrain,
+  type RetrainRolls,
+  createRetrain,
+  createRetrainRolls,
+  isSpecialKind,
+} from '../game/retrain';
 import {
   DAILY_QUEST_SLOTS,
   MAX_REROLLS,
@@ -52,7 +60,7 @@ import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 13;
+export const CH_SCHEMA = 14;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -82,7 +90,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (v13, Crew-Meisterschaft): ChState + envelope. */
+/** The current persisted shape (v14, Crew-Umschulung): ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -111,7 +119,7 @@ function isFiniteNumber(v: unknown): v is number {
  * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
  * The meta/juice fields (rng/stats/legacyImported/ability/combo/gilds/rsLifetime/
  * ancients/heaven/gear/chests/permTokens/peach/meta/achievements/transcend/
- * stageStars/crewMastery) are
+ * stageStars/crewMastery/crewRetrain) are
  * deliberately NOT gated here: they are runtime bookkeeping and get repaired (fresh
  * seed / zeroed stats / false flag / default ability+combo / pruned gilds / clamped
  * highwater / sanitised ancients+heaven+gear / defaulted loot slices / defaulted
@@ -477,6 +485,63 @@ function repairCrewMastery(v: unknown): CrewMastery {
 }
 
 /**
+ * Repair die Crew-Umschulung (v14, 3b): die Override-Map wird gegen die REGELN
+ * gelesen, nicht nur gegen Typen — ein Eintrag überlebt nur, wenn
+ *
+ *  · die Mitglieds-Id ein echtes Crew-Mitglied ist,
+ *  · der Stufen-Schlüssel eine positive ganze Zahl in Normalform ist („4", nicht
+ *    „04"/„4.0" — sonst zeigten zwei Schlüssel auf denselben Slot),
+ *  · diese Stufe im Rhythmus des Mitglieds WIRKLICH ein Spezial-Slot ist
+ *    (`retrainSlotOrdinal > 0`) und
+ *  · der Wert eine echte Spezial-Sorte ist (nie `power`).
+ *
+ * Der dritte Punkt ist der eigentliche Schutz: Ohne ihn könnte ein
+ * handgeschriebener Save eine POWER-Stufe zur Spezial-Stufe erklären und damit
+ * das 2P+2S-Verhältnis kippen — die eine Leitplanke, die 3b nicht anfassen darf.
+ * Bewusst NICHT gegen `crewUp` geklemmt: Nach jedem Reset steht der Ledger auf 0,
+ * während die erkaufte Sorte bleibt (genau ihr Sinn). Nie werfend; eine komplett
+ * kaputte Map wird leer.
+ */
+function repairCrewRetrain(v: unknown): CrewRetrain {
+  if (!isRecord(v)) return createRetrain();
+  const out: CrewRetrain = {};
+  for (const cfg of CREW) {
+    const slots = v[cfg.id];
+    if (!isRecord(slots)) continue;
+    const clean: CrewRetrain[string] = {};
+    let any = false;
+    for (const [key, kind] of Object.entries(slots)) {
+      const tier = Number(key);
+      if (!Number.isInteger(tier) || tier < 1 || String(tier) !== key) continue;
+      if (retrainSlotOrdinal(cfg, tier) <= 0) continue; // niemals auf eine Power-Stufe
+      if (!isSpecialKind(kind)) continue;
+      clean[key] = kind;
+      any = true;
+    }
+    if (any) out[cfg.id] = clean;
+  }
+  return out;
+}
+
+/**
+ * Repair den Umschul-Eskalator (v14, 3b): je Mitglied eine nicht-negative ganze
+ * Zahl. Nur echte Crew-Ids, Müll fällt raus. Ein zu HOHER Zähler schadet nur
+ * seinem Besitzer (teurere Rolls), deshalb wird er nicht gedeckelt — und ein zu
+ * niedriger ist ohnehin nach der nächsten Aszension die Wahrheit.
+ */
+function repairRetrainRolls(v: unknown): RetrainRolls {
+  if (!isRecord(v)) return createRetrainRolls();
+  const out: RetrainRolls = {};
+  for (const cfg of CREW) {
+    const raw = v[cfg.id];
+    if (!isFiniteNumber(raw) || raw <= 0) continue;
+    const n = Math.floor(raw);
+    if (n > 0) out[cfg.id] = n;
+  }
+  return out;
+}
+
+/**
  * Repair the Bühnen-Sterne slice (v11, P1): keep only entries whose KEY is a real
  * zone number (positive integer) and mask each value down to the bits that zone can
  * actually carry (`starMaskFor` — a Nicht-Boss-Bühne has no timeout star), dropping
@@ -522,6 +587,8 @@ function stateFromSave(save: ChSaveLatest): ChState {
     crew: { ...save.crew },
     crewUp: repairCrewUps(save.crewUp, save.crew),
     crewMastery: repairCrewMastery(save.crewMastery),
+    crewRetrain: repairCrewRetrain(save.crewRetrain),
+    retrainRolls: repairRetrainRolls(save.retrainRolls),
     souls,
     lifetimeMaxZone,
     totalClicks: save.totalClicks,
@@ -764,6 +831,27 @@ function migrateChV12toV13(raw: Record<string, unknown>): Record<string, unknown
   };
 }
 
+/**
+ * v13 → v14: die **Crew-Umschulung** (IDEEN-GAMEPLAY 3b) — eine leere Override-Map
+ * und ein leerer Roll-Eskalator.
+ *
+ * Bewusst OHNE Rückwirkung: Ein Alt-Save hat nie Splitter für eine Umschulung
+ * bezahlt, also trägt jeder seiner Slots die Stock-Sorte seines Mitglieds — genau
+ * das sagt die leere Map (`abilityKind` fällt ohne Eintrag auf `cfg.special`
+ * zurück). Der Bump ist trotzdem echt und nicht bloß ein `repair`-Default: Die
+ * persistierte FORM hat sich geändert, und die X7-Matrix hängt an der
+ * Versionsnummer — sie erzwingt das v13-Fixture-Paar, bevor die Migration als
+ * fertig gilt. Für jedes bestehende Feld verlustfrei.
+ */
+function migrateChV13toV14(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    v: 14,
+    crewRetrain: createRetrain(),
+    retrainRolls: createRetrainRolls(),
+  };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
@@ -777,6 +865,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
   10: migrateChV10toV11,
   11: migrateChV11toV12,
   12: migrateChV12toV13,
+  13: migrateChV13toV14,
 };
 
 /**

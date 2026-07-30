@@ -42,6 +42,8 @@ await build({
     join(GAME, 'src/game/sim.ts'),
     join(GAME, 'src/game/weekly.ts'),
     join(GAME, 'src/game/mastery.ts'),
+    join(GAME, 'src/game/gear.ts'),
+    join(GAME, 'src/game/retrain.ts'),
   ],
   bundle: true,
   format: 'esm',
@@ -52,6 +54,8 @@ await build({
 const sim = await import(pathToFileURL(join(tmp, 'sim.js')).href);
 const weekly = await import(pathToFileURL(join(tmp, 'weekly.js')).href);
 const mastery = await import(pathToFileURL(join(tmp, 'mastery.js')).href);
+const gear = await import(pathToFileURL(join(tmp, 'gear.js')).href);
+const retrain = await import(pathToFileURL(join(tmp, 'retrain.js')).href);
 const MASTERY_AT = mastery.MASTERY_RANKS.map((r) => r.at);
 
 const {
@@ -300,9 +304,53 @@ console.log(
 );
 
 // ---------------------------------------------------------------------------
-// 7 · Wochen-Kalender (A5/X4) — serverlos deterministisch, also hier prüfbar
+// 7 · Splitter-Einkommen (IDEEN-GAMEPLAY 3b) — die Eichlatte der Umschul-Kosten
+//     Anker: sim.test.ts „Splitter-Einkommen trägt die Umschul-Leiter (3b)"
 // ---------------------------------------------------------------------------
-console.log('\n── 7 · Wochen-Anker · Bühne der Woche + Board-Saison (ISO-Kalender, A5/X4)');
+// Zwei Quellen, beide echt: Die Sim-Ökonomie bankt die 🧩 aus TRUHEN (`econ.shards`),
+// und das Spiel zahlt zusätzlich pro Boss-Kill `bossShardReward` — der Bot modelliert
+// diesen zweiten Faucet nicht, also wird er hier aus der GEMESSENEN Bühnen-Kurve
+// rekonstruiert (jeder Lauf clert die Boss-Bühnen 5, 10, … bis zu seiner Wand).
+console.log('\n── 7 · Splitter-Einkommen · Bot 3 cps + Juice, MIT Loot (Truhen + Boss-Faucet)');
+const bossShardsUpTo = (bestZone) => {
+  let s = 0;
+  for (let z = 5; z <= bestZone; z += 5) s += gear.bossShardReward(z);
+  return s;
+};
+const shardRows = [];
+for (const runs of [1, 4, 16, 32]) {
+  const per = SEEDS.map((seed) => {
+    const c = simulateRunChain({ ...SIM_ACTIVE, seed }, runs, SIM_RUN_S);
+    return {
+      chest: c.econ.shards,
+      boss: c.runs.reduce((a, r) => a + bossShardsUpTo(r.bestZone), 0),
+    };
+  });
+  const h = (runs * SIM_RUN_S) / 3600;
+  const chest = mean(per.map((p) => p.chest));
+  const boss = mean(per.map((p) => p.boss));
+  shardRows.push([
+    `${runs} × 45 min`,
+    hrs(runs * SIM_RUN_S),
+    Math.round(chest),
+    Math.round(boss),
+    Math.round(chest + boss),
+    Math.round((chest + boss) / h),
+  ]);
+}
+table(['Spielzeit', '[h]', '🧩 Truhen', '🧩 Bosse', 'Σ 🧩', '🧩/h'], shardRows);
+console.log(
+  `   Umschul-Leiter (3b): ` +
+    [1, 2, 3, 4, 5].map((slot) => `Slot ${slot} ${retrain.retrainCost(slot, 0)}`).join(' · ') +
+    `\n   … jeder weitere Roll am selben Mitglied in derselben Aszension ×${retrain.RETRAIN_ROLL_GROWTH}` +
+    ` (Slot 1: ${[0, 1, 2, 3].map((r) => retrain.retrainCost(1, r)).join(' → ')})` +
+    `\n   Gegenprobe (bestehender Sink): Skin-Level 10 = ${gear.shardCost(10)} 🧩 · Level 20 = ${gear.shardCost(20)} · Level 25 = ${gear.shardCost(25)}`,
+);
+
+// ---------------------------------------------------------------------------
+// 8 · Wochen-Kalender (A5/X4) — serverlos deterministisch, also hier prüfbar
+// ---------------------------------------------------------------------------
+console.log('\n── 8 · Wochen-Anker · Bühne der Woche + Board-Saison (ISO-Kalender, A5/X4)');
 const week0 = weekly.weekIndexOf(Date.now());
 const weeks = [];
 for (let i = 0; i < 5; i++) {

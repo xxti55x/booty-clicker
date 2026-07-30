@@ -32,6 +32,7 @@ import {
   nextAbility,
   nextLevelCost,
   powerTiers,
+  retrainSlotOrdinal,
   specialTiers,
   totalRawDps,
 } from './heroes';
@@ -334,5 +335,89 @@ describe('heroes — die Gratis-Erststufe des Legenden-Rangs (1a)', () => {
     const r = grantFreeMasteryTiers({ hype: 30, dj: 90 }, ups, { hype: LEGENDE });
     expect(ups).toEqual({ dj: 2 });
     expect(r.ups).toEqual({ dj: 2, hype: 1 });
+  });
+});
+
+describe('heroes — Crew-Umschulung: die EINE Lesekette (IDEEN-GAMEPLAY 3b)', () => {
+  const boss = CREW[0]; // Rhythmus 0: P S P S · Stock-Sorte critdmg
+  const hype = CREW[1]; // Rhythmus 1: P P S S · Stock-Sorte combo
+  const dj = CREW[2]; // Rhythmus 2: P S S P · Stock-Sorte beat
+
+  it('liest den Override VOR der Stock-Sorte — ohne Map bleibt alles wie vor 3b', () => {
+    expect(abilityKind(boss, 2)).toBe('critdmg');
+    expect(abilityKind(boss, 2, {})).toBe('critdmg');
+    expect(abilityKind(boss, 2, { boss: { '2': 'idle' } })).toBe('idle');
+    // Der Override gilt genau für SEINEN Slot, nicht für die anderen des Mitglieds.
+    expect(abilityKind(boss, 4, { boss: { '2': 'idle' } })).toBe('critdmg');
+    // … und nicht für andere Mitglieder.
+    expect(abilityKind(hype, 3, { boss: { '2': 'idle' } })).toBe('combo');
+  });
+
+  it('lässt POWER-Stufen unantastbar — der Rhythmus rollt nie mit', () => {
+    const map = { boss: { '1': 'gold' as const, '3': 'idle' as const } };
+    expect(abilityKind(boss, 1, map)).toBe('power');
+    expect(abilityKind(boss, 3, map)).toBe('power');
+    // Jedes Muster behält seine 2 P + 2 S je Zyklus, egal was die Map behauptet.
+    for (const cfg of CREW) {
+      const all = { [cfg.id]: { '1': 'gold', '2': 'gold', '3': 'gold', '4': 'gold' } } as never;
+      const power = [1, 2, 3, 4].filter((t) => abilityKind(cfg, t, all) === 'power').length;
+      expect(power).toBe(powerTiers(cfg, 4));
+    }
+  });
+
+  it('nummeriert die Spezial-Slots rhythmus-bewusst (das treibt den Preis)', () => {
+    // P S P S: Stufen 2/4/6 sind Slot 1/2/3, die ungeraden sind Power ⇒ 0.
+    expect(retrainSlotOrdinal(boss, 1)).toBe(0);
+    expect(retrainSlotOrdinal(boss, 2)).toBe(1);
+    expect(retrainSlotOrdinal(boss, 4)).toBe(2);
+    expect(retrainSlotOrdinal(boss, 6)).toBe(3);
+    // P P S S: der ERSTE Spezial-Slot ist hier Stufe 3.
+    expect(retrainSlotOrdinal(hype, 2)).toBe(0);
+    expect(retrainSlotOrdinal(hype, 3)).toBe(1);
+    expect(retrainSlotOrdinal(hype, 4)).toBe(2);
+    // P S S P: zwei Specials in Folge.
+    expect(retrainSlotOrdinal(dj, 2)).toBe(1);
+    expect(retrainSlotOrdinal(dj, 3)).toBe(2);
+    expect(retrainSlotOrdinal(dj, 4)).toBe(0);
+    // Die Nummer wächst monoton und lückenlos über die Spezial-Stufen.
+    let seen = 0;
+    for (let t = 1; t <= 20; t++) {
+      const n = retrainSlotOrdinal(dj, t);
+      if (n > 0) expect(n).toBe(++seen);
+    }
+    expect(seen).toBe(specialTiers(dj, 20));
+  });
+
+  it('faltet umgeschulte Slots wie gekaufte — die Sorte wandert, die Anzahl nicht', () => {
+    // Booty-Boss, 6 Stufen ⇒ 3 Specials (Stufen 2/4/6), Stock alle `critdmg`.
+    const stock = crewSpecialBonuses({ boss: 6 });
+    expect(stock.critDmg).toBeCloseTo(3 * SPECIAL_CRIT_DMG, 9);
+    expect(stock.idleMult).toBe(1);
+    // Zwei davon auf `idle` umgeschult: 1 × critdmg + 2 × idle, Summe unverändert 3.
+    const rolled = crewSpecialBonuses({ boss: 6 }, { boss: { '2': 'idle', '6': 'idle' } });
+    expect(rolled.critDmg).toBeCloseTo(SPECIAL_CRIT_DMG, 9);
+    expect(rolled.idleMult).toBeCloseTo(1 + 2 * SPECIAL_IDLE, 9);
+    // Ein Override auf einem NOCH NICHT gekauften Slot zahlt nichts (er ist nicht da).
+    const unbought = crewSpecialBonuses({ boss: 2 }, { boss: { '4': 'gold' } });
+    expect(unbought.goldMult).toBe(1);
+    expect(unbought.critDmg).toBeCloseTo(SPECIAL_CRIT_DMG, 9);
+  });
+
+  it('rechnet mit leerer Map exakt dieselben Zahlen wie ohne (der Bot-Pfad)', () => {
+    const ups = { boss: 6, hype: 7, dj: 9, producer: 4, influencer: 5 };
+    expect(crewSpecialBonuses(ups, {})).toEqual(crewSpecialBonuses(ups));
+    // Auch ein Override, der die Stock-Sorte wiederholt, ändert keine Zahl.
+    expect(crewSpecialBonuses(ups, { boss: { '2': 'critdmg' } })).toEqual(crewSpecialBonuses(ups));
+  });
+
+  it('respektiert die Fenster-Deckel auch für umgeschulte Sorten', () => {
+    // Ein tiefer Stapel auf `beat` umgeschult läuft in denselben Deckel wie ein
+    // von Haus aus beat-lastiger Save — die Umschulung öffnet keine Hintertür.
+    const deep = crewSpecialBonuses(
+      { influencer: 200 },
+      { influencer: Object.fromEntries(Array.from({ length: 200 }, (_, i) => [i + 1, 'beat'])) },
+    );
+    expect(deep.beatWindowMs).toBe(SPECIAL_BEAT_CAP_MS);
+    expect(deep.goldMult).toBe(1);
   });
 });

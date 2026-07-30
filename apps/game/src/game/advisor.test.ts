@@ -206,3 +206,46 @@ describe('advisor — purchaseSignature (P3-Throttle)', () => {
     expect(purchaseSignature(elsewhere)).toBe(purchaseSignature(base));
   });
 });
+
+describe('advisor — liest die Umschulung mit (3b)', () => {
+  it('zählt einen auf `boss` gerollten Slot im Burst wie einen Stock-Boss-Slot', () => {
+    // Booty-Boss (Rhythmus P S P S, Stock `critdmg`) mit vier gekauften Stufen.
+    const stock = stateWith({ crewUp: { boss: 4 } });
+    const rolled = stateWith({ crewUp: { boss: 4 }, crewRetrain: { boss: { '2': 'boss' } } });
+    // Ein `boss`-Special ist +25 % Boss-Schaden — genau das muss die Wand-Telemetrie
+    // sehen, sonst unterschätzt sie den Spieler nach seiner Umschulung systematisch.
+    expect(burstEstimate(rolled, 100, 40)).toBeCloseTo(burstEstimate(stock, 100, 40) * 1.25, 6);
+    // Gegenprobe: eine Sorte ohne Boss-Bezug lässt den Burst unverändert.
+    const idle = stateWith({ crewUp: { boss: 4 }, crewRetrain: { boss: { '2': 'idle' } } });
+    expect(burstEstimate(idle, 100, 40)).toBeCloseTo(burstEstimate(stock, 100, 40), 6);
+  });
+
+  it('benennt im Kauf-Tipp die Sorte, die WIRKLICH kommt', () => {
+    // Eine tiefe Crew, bei der bei JEDEM Mitglied als nächstes ein Spezial-Slot
+    // ansteht (Muster 1 braucht dafür zwei gekaufte Stufen, die anderen eine) —
+    // der Tipp muss also eine SORTE benennen, nicht die Verstärkung.
+    const crew: CrewLevels = {};
+    const ups: Record<string, number> = {};
+    for (const c of CREW) {
+      crew[c.id] = 400;
+      ups[c.id] = c.rhythm === 1 ? 2 : 1;
+    }
+    const stock = stateWith({ gold: 1e12, crew, crewUp: ups });
+    const hint = bestPurchaseHint(stock);
+    expect(hint?.kind).toBe('ability');
+    expect(hint!.id).toBe('boss'); // die Klick-Linie hat hier den besten Grenznutzen
+    expect(hint!.label).toContain('Krit-Schaden'); // Stock-Sorte des Booty-Boss
+
+    // Genau dieser Slot umgeschult ⇒ der Tipp nennt die neue Sorte.
+    const rolled = stateWith({
+      gold: 1e12,
+      crew,
+      crewUp: ups,
+      crewRetrain: { boss: { '2': 'gold' } },
+    });
+    const after = bestPurchaseHint(rolled);
+    expect(after!.id).toBe('boss');
+    expect(after!.cost).toBe(hint!.cost); // derselbe Kauf, nur anders beschriftet
+    expect(after!.label).toContain('BP');
+  });
+});

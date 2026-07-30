@@ -259,6 +259,7 @@ import { ChHud, rivalName } from './ui/ch-hud';
 import { ChSettings } from './ui/ch-settings';
 import { Chests } from './ui/chest-panel';
 import { Crew } from './ui/crew';
+import { RetrainDialog } from './ui/retrain-dialog';
 import { Gear } from './ui/gear-panel';
 import { Heaven } from './ui/heaven-panel';
 import { Haptics } from './ui/haptics';
@@ -434,11 +435,13 @@ let dps = 0;
 let clickDmg = 1;
 // Crew-wide special-ability bonuses (v11) — cached alongside dps/clickDmg since
 // they only change on the same events (ability buy, prestige, import).
-let crewSpec: CrewSpecialBonuses = crewSpecialBonuses(state.crewUp);
+// 3b: mit der Umschul-Map — ein umgeschulter Slot wirkt überall wie ein von Haus
+// aus so geborener (die Map ist der EINZIGE Unterschied, den die Faltung sieht).
+let crewSpec: CrewSpecialBonuses = crewSpecialBonuses(state.crewUp, state.crewRetrain);
 function recompute(): void {
   dps = dpsOf(state);
   clickDmg = clickDamageOf(state);
-  crewSpec = crewSpecialBonuses(state.crewUp);
+  crewSpec = crewSpecialBonuses(state.crewUp, state.crewRetrain);
 }
 
 /**
@@ -753,6 +756,28 @@ const crew = new Crew({
       `${cfg.name} — ${p.rank < 4 ? `+${p.rank * 2} % Eigen-Leistung` : 'erste Fähigkeit ab sofort gratis'}`,
     );
   },
+  // 3b: Der Werkzeug-Knopf an einem gekauften Spezial-Slot öffnet den Dialog.
+  onRetrain: (cfg, tier) => retrainDialog.show(cfg, tier),
+});
+
+/**
+ * 3b — der Umschul-Dialog. Er zieht seine zwei Angebote aus DEMSELBEN
+ * persistierten Strom wie Krits/Truhen/Vergoldungen (`rng.next()`), bucht
+ * Splitter und Eskalator direkt im State und meldet jede Änderung über
+ * `onChange` zurück: neu rechnen (die Sorte kann DPS/BP verschieben), HUD und
+ * Crew-Card auffrischen, sichern.
+ */
+const retrainDialog = new RetrainDialog({
+  state,
+  roll: () => rng.next(),
+  onChange: () => {
+    recompute();
+    hud.update(state, combat, dps, clickDmg);
+    crew.render();
+    gearPanel.render();
+    persist();
+  },
+  toast: (icon, title, sub) => toasts.show(icon, title, sub),
 });
 
 // 🎽 Gear/Skins (§5): equipping rebuilds the 3D rig for the new skin and re-folds
