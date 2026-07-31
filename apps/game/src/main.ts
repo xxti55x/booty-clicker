@@ -75,6 +75,7 @@ import {
   himmelfahrtState,
   keyDropAmount,
   keyDropMult,
+  loadoutBonus,
   peachIncomeMult,
   rivalChestChance,
   transcendState,
@@ -510,6 +511,19 @@ function pathB(): GearBonus {
 }
 
 /**
+ * **IDEEN-GAMEPLAY 1c + 3a — der Affix-Fold des Loadouts**, nach demselben
+ * Muster wie {@link pathB}: Klick, Crew-DPS, BP und Truhen-Luck laufen zentral
+ * durch `ch-state`; die übrigen Affix-Terme (Krit-Chance/Sequin, Krit-
+ * Multiplikator, Combo-Fenster, Coach-cps/Servo, Offline-Rate, Boss-Schaden)
+ * liest dieser Getter an genau der Summen-Stelle des jeweiligen Gear-Stats —
+ * die Sim faltet über `foldAffixes` bereits dieselben Terme, hier zieht das
+ * Live-Spiel nach.
+ */
+function loadout(): GearBonus {
+  return loadoutBonus(state);
+}
+
+/**
  * 2b: Gemerkter Knoten-Stand des GETRAGENEN Skins, damit ein Aufstieg ein
  * Moment wird statt einer stillen Zahl. Er wird bei jedem Tick und bei jedem
  * Boss-Kill geprüft — beides sind Ein-Vergleich-Operationen, also darf das im
@@ -616,8 +630,9 @@ function offlineOpts(): {
   return {
     clickDmg,
     // 2b: Der Robo-Pfad zahlt Coach-cps — sein Stern-Stat, exakt wie im
-    // Ideen-Dokument („Robo: Coach-cps").
-    coachCps: coachCps(state.heaven) + coachCpsBonus(state.gear) + pathB().coachCps,
+    // Ideen-Dokument („Robo: Coach-cps"). 3a: „Servo-Boost" im selben Term.
+    coachCps:
+      coachCps(state.heaven) + coachCpsBonus(state.gear) + pathB().coachCps + loadout().coachCps,
     // Nachtschicht (Himmelsbaum) + Beach-Gear + der Mythos-Knoten „Nachtschwärmer"
     // (+4 h, ROADMAP-V2 P2) — dieselbe Summe füttert die X3-Willkommen-zurück-Card,
     // deren Cap-Zeile den Ausbau also sofort spiegelt.
@@ -639,7 +654,8 @@ function offlineOpts(): {
     rateBonus:
       offlineRateBonus(state.gear) +
       constellationOfflineRateBonus(state.constellation) +
-      pathB().offlineRate, // 2b: nur über Diamant-Booty (`allPct`)
+      pathB().offlineRate + // 2b: nur über Diamant-Booty (`allPct`)
+      loadout().offlineRate, // 1c „Nachtschwärmer": derselbe additive Term
   };
 }
 /**
@@ -2105,7 +2121,9 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
       ancientBossDmgMult(state.ancients) *
       bossDmgMult(state.gear) *
       // 2b: `bossDmg` erreicht der Pfad nur über Diamant-Booty (`allPct`).
-      (1 + pathB().bossDmg) *
+      // 1c/3a: „Gate-Brecher"/„Glut-Fokus" im SELBEN 1+x-Griff — additiv
+      // untereinander (und strukturell gedeckelt), multiplikativ zum Rest.
+      (1 + pathB().bossDmg + loadout().bossDmg) *
       crewSpec.bossMult *
       bossBreakerDmgMult(state.transcend)
     : dmg;
@@ -2187,7 +2205,9 @@ function doShake(x?: number, y?: number): void {
       comboWindowBonus(state.gear) +
       crewSpec.comboWindowS +
       // 2a „Langer Atem"/„Roter Faden": derselbe Term, nur permanent.
-      constellationComboWindowBonus(state.constellation),
+      constellationComboWindowBonus(state.constellation) +
+      // 1c „Langer Atem"-Affix: Sekunden im selben additiven Fenster.
+      loadout().comboWindow,
   );
   drive = Math.min(drive + 1.2, 6);
 
@@ -2202,6 +2222,7 @@ function doShake(x?: number, y?: number): void {
         ancientCritChanceBonus(state.ancients) +
         critChanceBonus(state.gear) +
         pathB().critChance + // 2b (nur Diamant-Booty über `allPct`)
+        loadout().critChance + // 3a „Sequin-Crit": pp durch denselben 40-%-Deckel
         permTokenCritChance(state.permTokens) +
         crewSpec.critChance +
         // A1 „Krit-Funken": +5 pp, durch DENSELBEN 40-%-Deckel wie alles andere.
@@ -2234,8 +2255,13 @@ function doShake(x?: number, y?: number): void {
     // Combo-tier + Disco/Lava gear (§5) + Booty-Boss/A-Promi `critdmg`-specials
     // (v11) raise the crit multiplier; Neon-Ninja gear widens on-beat ×.
     // 2b: Der Disco-King-Pfad zahlt Krit-Multiplikator-PUNKTE — sein Stern-Stat.
+    // 1c „Wuchtschlag": Multiplikator-PUNKTE, additiv wie alle Nachbarn.
     critMultBonus:
-      tierCritMultBonus(tier) + critMultBonus(state.gear) + pathB().critMult + crewSpec.critDmg,
+      tierCritMultBonus(tier) +
+      critMultBonus(state.gear) +
+      pathB().critMult +
+      loadout().critMult +
+      crewSpec.critDmg,
     // Permanent „+1 % Krit-Schaden" tokens scale the whole crit multiplier (§6.2) —
     // MAL dem P4-Knoten „Präzisions-Shake" (+25 %), der genau dieselbe Skala meint.
     critMultFactor: permTokenCritMult(state.permTokens) * heavenCritMultFactor(state.heaven),
@@ -3259,7 +3285,8 @@ function loop(nowMs: number): void {
   // 25 % of the click value (no crit/beat, §4.3.5) — Robo gear stars add cps (§5),
   // the same sum the offline accrual uses; boss timer ticks down.
   if (dps > 0 && !swapping) applyHit(dps * dt, false);
-  const cps = coachCps(state.heaven) + coachCpsBonus(state.gear) + pathB().coachCps;
+  const cps =
+    coachCps(state.heaven) + coachCpsBonus(state.gear) + pathB().coachCps + loadout().coachCps;
   if (cps > 0 && !swapping) applyHit(coachDps(clickDmg, cps) * dt, false);
   if (combat.boss && !swapping) {
     const gateZone = combat.zone; // vor dem möglichen Rückwurf festhalten (P1)

@@ -3,6 +3,35 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Review-Fix nach Schritt 7 — sechs Affix-Terme erreichen jetzt das Live-Spiel (1c/3a)
+
+- **Der Befund (aus dem Schritt-7-Abschlussbericht, im Review bestätigt):** Der
+  Loadout-Fold aus Schritt 6 (`ch-state.loadoutBonus`) floss nur über die vier
+  zentralen Ableitungen (`dpsOf`/`clickDamageOf`/`goldMult`/Truhen-Luck) ins
+  Spiel. Die Sorten **Sequin-Crit (Krit-Chance), Wuchtschlag (Krit-
+  Multiplikator), Langer Atem (Combo-Fenster), Servo (Coach-cps), Nachtschwärmer
+  (Offline-Rate) und Gate-Brecher/Glut (Boss-Schaden)** standen auf den Kacheln
+  und falteten in der SIM — aber ihre Summen-Stellen in `main.ts` lasen nur
+  `…Bonus(state.gear) + pathB()`. Anzeige und Bot versprachen also Wirkung, die
+  der Klick nie sah.
+- **Der Fix folgt exakt dem 2b-Muster:** ein `loadout()`-Getter neben `pathB()`
+  (beide liefern einen `GearBonus`), und je Call-Site EINE Addition im
+  bestehenden Term — Krit-Chance durch denselben 40-%-Deckel, Krit-Multiplikator
+  als Punkte, Combo-Sekunden ins selbe Fenster, Coach-cps an beiden Stellen
+  (Tick + Offline), Offline-Rate in den gedeckelten `rateBonus`, Boss-Schaden in
+  den bestehenden `1 + x`-Griff neben dem Pfad (additiv untereinander,
+  multiplikativ zum Rest — die Reihenfolge, die `foldAffixes` mit dem
+  strukturellen +75-%-Deckel je Term erzwingt).
+- **Warum das keine Anker bewegt:** Die Sim faltete diese Terme schon vorher
+  (`simLoadout` → `foldAffixes`, dieselbe eine Funktion) — der Fix zieht das
+  Live-Spiel zur Sim nach, nicht umgekehrt. `npm run balance` vor/nach:
+  byte-gleich. Tests 1 161, Lint/Prettier/Build grün.
+- **Bewusst NICHT angefasst:** `advisor.bossDamageMult` spiegelt den Loadout-
+  Boss-Term (wie schon den 2b-Pfad-Term) nicht — die P3-Wand-Telemetrie ist
+  damit um die Affix-Größe konservativ. Falsche Richtung tut hier nicht weh
+  (der Advisor unterschätzt den Spieler minimal); ein Spiegel-Nachzieher wäre
+  Kosmetik und keine Korrektur.
+
 ## IDEEN-GAMEPLAY Schritt 7 — 2b Skin-Pfade + 3c Erben-Moment + 1d Legenden-Level
 
 - **Ein Knoten ist ein FÜNFTEL Stern — die Leitplanke steht damit strukturell,
