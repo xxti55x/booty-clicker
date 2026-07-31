@@ -2,7 +2,10 @@
  * **Die Skin-Schmiede** (IDEEN-GAMEPLAY 3a) — Reforging der Playermodels.
  *
  * Jeder der zehn Skins bekommt bis zu {@link FORGE_SLOTS} Schmiede-Slots,
- * freigeschaltet über seinen Skin-LEVEL ({@link FORGE_UNLOCK_LEVELS} = 10/25/40).
+ * freigeschaltet über seinen Skin-LEVEL ({@link FORGE_UNLOCK_LEVELS} = 10/25/32;
+ * V2-4: Slot 3 lag mit Level 40 bei Σ 301 060 🧩 ≈ 2 150 h — praktisch
+ * unerreichbar; Level 32 = Σ 50 580 🧩 ≈ 361 h ist die LÄNGSTE Jagd des Spiels,
+ * aber eine mit Ankunft).
  * Ein Slot trägt genau EIN gerolltes Affix aus demselben Pool wie die Relikte
  * (`affixes.ts`), erweitert um die eine skin-exklusive Sorte dieses Skins.
  * **Reforge** heißt: gegen **Schmiede-Glut** (🔥) einen neuen Roll KAUFEN und ihn
@@ -110,7 +113,7 @@ export function emptyForgeSlot(): ForgeSlot {
  * Modul-Kopf) — die Zahlen sind also nicht bloß abgeschrieben, sondern in
  * Spielzeit übersetzt.
  */
-export const FORGE_UNLOCK_LEVELS: readonly number[] = [10, 25, 40];
+export const FORGE_UNLOCK_LEVELS: readonly number[] = [10, 25, 32];
 
 /** Wie viele Slots ein Skin mit `level` offen hat (0…{@link FORGE_SLOTS}). */
 export function forgeSlotsUnlocked(level: number): number {

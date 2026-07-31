@@ -3,6 +3,26 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## V2-4 — Zwei dokumentierte Gameplay-Schulden beglichen (Schmiede-Slot 3, Advisor-Spiegel)
+
+- **Schmiede-Slot 3: Level 40 → 32, aus der Kostenkurve gerechnet.** Die
+  10/25/40-Leiter stammte wörtlich aus dem Ideen-Dokument; der 1c/3a-Agent hat
+  ihre Reichweite gemessen und bewusst NICHT verbogen (Σ 301 060 🧩 ≈ 2 150 h —
+  praktisch unerreichbar, als Nachzieher-Kandidat dokumentiert). Der Nachzieher
+  ist das hier: Level 32 = Σ 50 580 🧩 ≈ **361 h** bei den gemessenen
+  ~140 🧩/h — die LÄNGSTE Jagd des Spiels (über Skin-Pfad-Knoten 5 ≈ 103 h und
+  Ruf-Stufe 10 ≈ 73 h), aber eine mit Ankunft. Slots 1/2 (2,6 h / 76 h) waren
+  richtig geeicht und bleiben. Sim-Anker unberührt: der Bot modelliert kein
+  Skin-Gear, das Schmiede-Profil injiziert seine Affixe direkt — die Leiter
+  gate-t nur Menschen. Balance-Abschnitt 11 druckt die neue Reihe.
+- **Advisor spiegelt jetzt den VOLLEN Boss-Stack.** `advisor.bossDamageMult`
+  kannte Skin-Pfad (2b, via `allPct`) und Loadout-Affixe („Gate-Brecher"/
+  „Glut-Fokus") nicht — die P3-Wand-Telemetrie unterschätzte Träger systematisch
+  (nach dem Schritt-7-Review als bewusst-konservativ dokumentiert, jetzt
+  geschlossen). Der Spiegel nutzt DENSELBEN 1+x-Griff wie der Kampf-Stack in
+  `main.ts` und dieselben Fold-Funktionen (`skinPathOf`/`loadoutBonus`) — kein
+  zweiter Rechenweg; fehlende Slices (alte Fixtures) falten ×1.
+
 ## V2-2 — Auto-Qualität: Signal-Wahl + FPS-Governor (X6-Restschuld geschlossen)
 
 - **`quality: 'auto'` ist der neue Default, und Provenienz schlägt Wert.** Der
