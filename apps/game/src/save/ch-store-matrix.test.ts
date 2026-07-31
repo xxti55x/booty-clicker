@@ -1,7 +1,7 @@
 /**
  * X7 — Save-Migrations-Matrix (ROADMAP-V2, „Save-Hygiene vor neuen Feldern").
  *
- * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v16). Pro Version
+ * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v17). Pro Version
  * zwei Inline-Fixtures (kein Datei-IO):
  *
  *   1. ein REALISTISCHER Save der jeweiligen Ära, der die volle Ladekette
@@ -30,6 +30,7 @@ import {
   createPeach,
   createStats,
 } from '../game/ch-state';
+import { createForge } from '../game/forge';
 import { createGear } from '../game/gear';
 import { createHeaven } from '../game/heaven';
 import { dustEntitlement } from '../game/constellation';
@@ -48,7 +49,7 @@ function memStorage(): ChStorage & { map: Map<string, string> } {
 }
 
 /** Every historical CH schema version, oldest first — the spine of the matrix. */
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] as const;
 type SchemaVersion = (typeof VERSIONS)[number];
 
 const LAST_SEEN = 1_752_800_000_000;
@@ -217,6 +218,66 @@ const CONSTELLATION = { earned: 96, spent: 12, nodes: { aufbruch: 3, tempo: 1 } 
  * Genau diese Streuung ist der Punkt der Leiste: Wo man farmt, zählt.
  */
 const TERRITORY = { club: 2_700, synth: 900, beach: 120 };
+
+/**
+ * v17 (1c): Relikte. Drei gefundene Stücke in verschiedenen Formen — eines mit
+ * zwei Affixen, zwei mit einem —, davon zwei getragen und eines nur in der
+ * Sammlung. Der Gate-Highwater steht auf 55: Bühne 55 hat schon gewürfelt, das
+ * nächste berechtigte Gate ist 60. Pity 2 = zwei Gates ohne Drop seit dem
+ * letzten Relikt.
+ */
+const RELICS = {
+  owned: [
+    { id: 1, zone: 50, affixes: [{ id: 'click', q: 2 }] },
+    {
+      id: 2,
+      zone: 55,
+      affixes: [
+        { id: 'boss', q: 3 },
+        { id: 'gold', q: 0 },
+      ],
+    },
+    { id: 3, zone: 55, affixes: [{ id: 'luck', q: 1 }] },
+  ],
+  slots: [2, 0, 1],
+  nextId: 4,
+  pity: 2,
+  deepestGate: 55,
+};
+
+/**
+ * v17 (3a): die Skin-Schmiede. Der getragene Disco-King hat Level 12, also
+ * genau EINEN offenen Slot — er trägt sein skin-exklusives „Sequin-Crit". Der
+ * zweite Slot ist leer, hat aber schon sieben trockene Rolls gesehen (die
+ * Mindest-Qualität steht dort also bereits auf „Solide"). Dazu ein zweiter Skin
+ * mit einem geschmiedeten Slot, den sein Level (4) gerade NICHT freigeschaltet
+ * hat — er bleibt im Save stehen und faltet trotzdem ×1.
+ */
+const FORGE = {
+  ember: 140,
+  slots: {
+    disco: [
+      { affix: { id: 'sequin', q: 3 }, dry: 0 },
+      { affix: null, dry: 7 },
+      { affix: null, dry: 0 },
+    ],
+    classic: [
+      { affix: { id: 'click', q: 1 }, dry: 3 },
+      { affix: null, dry: 0 },
+      { affix: null, dry: 0 },
+    ],
+  },
+};
+
+/**
+ * Was ein Save VOR v17 nach der Migration in den Relikten stehen haben muss:
+ * eine LEERE Sammlung, aber einen GESETZTEN Gate-Highwater. Die Sammlung ist
+ * leer, weil gefallene Relikte, die nie gefallen sind, erfunden wären; der
+ * Highwater ist gesetzt, weil dieses Fixture Bühne 55 erreicht hat und damit
+ * jedes Gate bis einschließlich 50 nachweislich geclert hat — ohne die Saat
+ * bekäme es genau diese Gates beim nächsten Rückweg ein zweites Mal ausgezahlt.
+ */
+const RELICS_PRE_V17 = { owned: [], slots: [0, 0, 0], nextId: 1, pity: 0, deepestGate: 50 };
 /**
  * Was ein Save VOR v15 nach der Migration im Konto stehen haben muss: den
  * RÜCKWIRKEND gerechneten Anspruch aus genau diesem Fixture. Er hängt an der
@@ -304,6 +365,22 @@ function saveAt(v: SchemaVersion): Record<string, unknown> {
     raw.retrainRolls = { ...RETRAIN_ROLLS };
   }
   if (v >= 16) raw.territory = { ...TERRITORY };
+  if (v >= 17) {
+    raw.relics = {
+      ...RELICS,
+      slots: [...RELICS.slots],
+      owned: RELICS.owned.map((r) => ({ ...r, affixes: r.affixes.map((a) => ({ ...a })) })),
+    };
+    raw.forge = {
+      ...FORGE,
+      slots: Object.fromEntries(
+        Object.entries(FORGE.slots).map(([k, row]) => [
+          k,
+          row.map((s) => ({ affix: s.affix ? { ...s.affix } : null, dry: s.dry })),
+        ]),
+      ),
+    };
+  }
   return raw;
 }
 
@@ -393,6 +470,14 @@ function expectSlices(s: ChState, v: SchemaVersion): void {
   // (kennt keine Wiederholungen) trügen sie. Anders als beim Sternenstaub (v15)
   // gibt es hier also nichts zu rechnen; jede Herleitung wäre eine Erfindung.
   expect(s.territory).toEqual(v >= 16 ? TERRITORY : {});
+  // v17 — Relikte (1c) + Schmiede (3a). Zwei GEGENSÄTZLICHE Entscheidungen im
+  // selben Bump: Die Schmiede startet komplett leer (Glut und gerollte Affixe
+  // lassen sich aus nichts herleiten — eine erfundene Qualität hätte niemand
+  // gewürfelt), der Relikt-Gate-Highwater dagegen wird ZWINGEND gesät. Ohne ihn
+  // bekäme ein Alt-Save jedes längst geclerte Gate ab Bühne 50 noch einmal
+  // ausgezahlt; die Zahl ist gerechnet (`clearedGateFor`), nicht geraten.
+  expect(s.relics).toEqual(v >= 17 ? RELICS : RELICS_PRE_V17);
+  expect(s.forge).toEqual(v >= 17 ? FORGE : createForge());
 }
 
 // ---------------------------------------------------------------------------
@@ -709,6 +794,76 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
       // Himmelfahrt und Transzendenz auf 1 zurückfallen — es gibt keine Zahl im
       // Save, gegen die ein Vergleich stimmen würde.
       expect(s.lifetimeMaxZone).toBe(CORE.lifetimeMaxZone);
+    },
+  },
+  17: {
+    what: 'Relikte mit Doppel-Ids/Müll-Affixen und eine Schmiede mit Phantom-Skin',
+    damage: (raw) => {
+      raw.relics = {
+        owned: [
+          // gültig, aber mit einem Müll-Affix und einer übervollen Qualität
+          {
+            id: 1,
+            zone: 50,
+            affixes: [
+              { id: 'click', q: 99 },
+              { id: 'nope', q: 1 },
+            ],
+          },
+          // dieselbe Id ein zweites Mal ⇒ der zweite Treffer fliegt raus
+          { id: 1, zone: 60, affixes: [{ id: 'gold', q: 1 }] },
+          // zwei Affixe DERSELBEN Sorte ⇒ das zweite fällt weg
+          {
+            id: 5,
+            zone: 65,
+            affixes: [
+              { id: 'dps', q: 2 },
+              { id: 'dps', q: 3 },
+            ],
+          },
+          // gar kein gültiges Affix ⇒ das ganze Relikt fällt weg
+          { id: 6, zone: 70, affixes: [{ id: 'phantom', q: 2 }] },
+          { id: -3, zone: 75, affixes: [{ id: 'boss', q: 1 }] }, // Id ≤ 0 ⇒ raus
+        ],
+        slots: [1, 1, 404], // dasselbe Relikt doppelt + eine unbekannte Id
+        nextId: 2, // gelogen: Id 5 ist vergeben
+        pity: -4, // negativ ⇒ 0
+        deepestGate: 65.9, // krumm ⇒ abgerundet
+      };
+      raw.forge = {
+        ember: -50, // negativ ⇒ 0
+        slots: {
+          disco: [
+            { affix: { id: 'sequin', q: 2 }, dry: -1 },
+            { affix: { id: 'nope', q: 1 }, dry: 2 },
+          ],
+          vegasking: [{ affix: { id: 'click', q: 3 }, dry: 0 }], // KEIN echter Skin ⇒ raus
+        },
+      };
+    },
+    check: (s) => {
+      // Zwei Relikte überleben: das erste (Müll-Affix weg, Qualität geklemmt)
+      // und das dritte (die doppelte Sorte fällt weg).
+      expect(s.relics.owned).toEqual([
+        { id: 1, zone: 50, affixes: [{ id: 'click', q: 3 }] },
+        { id: 5, zone: 65, affixes: [{ id: 'dps', q: 2 }] },
+      ]);
+      // Ein Relikt kann nie zweimal wirken, eine unbekannte Id nie einmal.
+      expect(s.relics.slots).toEqual([1, 0, 0]);
+      // `nextId` wird über die größte vergebene Id gehoben — sonst zeigte ein
+      // Slot später auf ein FREMDES Relikt.
+      expect(s.relics.nextId).toBe(6);
+      expect(s.relics.pity).toBe(0);
+      expect(s.relics.deepestGate).toBe(65);
+      // Schmiede: nur echte Skin-Ids, Müll-Affix wird ein leerer Slot, der
+      // Trocken-Zähler dort bleibt aber stehen (er ist bezahlt).
+      expect(s.forge.ember).toBe(0);
+      expect(Object.keys(s.forge.slots)).toEqual(['disco']);
+      expect(s.forge.slots.disco).toEqual([
+        { affix: { id: 'sequin', q: 2 }, dry: 0 },
+        { affix: null, dry: 2 },
+        { affix: null, dry: 0 },
+      ]);
     },
   },
 };

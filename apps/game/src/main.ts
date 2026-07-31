@@ -281,8 +281,13 @@ import { ChHud, rivalName } from './ui/ch-hud';
 import { ChSettings } from './ui/ch-settings';
 import { Chests } from './ui/chest-panel';
 import { Constellation } from './ui/constellation-panel';
+import { equipBestRelics, equipRelic, gateRelicRoll, meltRelic, relicById } from './game/relics';
+import { addEmber, emberForDuplicate, shardsForEmber } from './game/forge';
+import { affixConfig } from './game/affixes';
 import { Crew } from './ui/crew';
 import { RetrainDialog } from './ui/retrain-dialog';
+import { ForgeDialog } from './ui/forge-dialog';
+import { RelicPanel } from './ui/relic-panel';
 import { Gear } from './ui/gear-panel';
 import { Heaven } from './ui/heaven-panel';
 import { Haptics } from './ui/haptics';
@@ -819,6 +824,18 @@ const retrainDialog = new RetrainDialog({
 // too; the kulisse chooser drives the background + auto-rotation toggle.
 const gearPanel = new Gear({
   state,
+  // 3a: Der Schmiede-Dialog gehört dem Skin, an dem geschmiedet wird — die
+  // Karte reicht nur Id und Slot durch.
+  openForge: (id, slot) => forgeDialog.show(id, slot),
+  // 3a: Splitter → Glut, Stück für Stück (der Kurs ist bewusst ungünstig).
+  exchangeShards: (ember) => {
+    const cost = shardsForEmber(ember);
+    if (ember <= 0 || state.gear.shards < cost) return;
+    state.gear.shards -= cost;
+    state.forge = addEmber(state.forge, ember);
+    audio.buy();
+    persist();
+  },
   onEquip: () => {
     char = buildCharacter(scene, SKINS[state.gear.skin], char);
     adoptPlayerIntoSpin();
@@ -960,6 +977,32 @@ const prestige = new Prestige({
  * nichts zu kaufen und nichts zu bestätigen.
  */
 const territoryPanel = new TerritoryPanel({ state, zone: () => combat.zone });
+
+/**
+ * 3a — der Schmiede-Dialog. Er zieht aus DEMSELBEN persistierten Strom wie
+ * Krits, Truhen und die Umschulung (`rng.next()`), bucht Glut und Pity direkt im
+ * State und meldet jede Änderung über `onChange` zurück.
+ */
+const forgeDialog = new ForgeDialog({
+  state,
+  roll: () => rng.next(),
+  onChange: () => afterLoadoutChange(),
+  toast: (icon, title, sub) => toasts.show(icon, title, sub),
+});
+
+/**
+ * Das gemeinsame Nachspiel jeder Loadout-Änderung (1c + 3a). Affixe hängen in
+ * `dpsOf`/`clickDamageOf`/`goldMult`/`chestLuck` — ein getauschtes Relikt oder
+ * ein angenommener Wurf verschiebt also sofort echte Zahlen, und beide Panels
+ * zeigen dieselbe Glut.
+ */
+function afterLoadoutChange(): void {
+  recompute();
+  hud.update(state, combat, dps, clickDmg);
+  relicPanel.refresh(true);
+  gearPanel.render();
+  persist();
+}
 
 const ancients = new Ancients({
   state,
@@ -1110,6 +1153,36 @@ const chestPanel = new Chests({
   open: (tier) => openChestFromInventory(tier),
 });
 
+/**
+ * IDEEN-GAMEPLAY 1c — die Relikt-Sektion im 🎁 Truhen-Tab. Sie montiert sich in
+ * den Platzhalter, den `Chests` beim Aufbau des Tab-Bodys aufspannt, muss also
+ * NACH `chestPanel` entstehen.
+ *
+ * Jede der drei Aktionen (tragen, beste tragen, einschmelzen) verschiebt echte
+ * Macht — deshalb hängt an jeder dasselbe Nachspiel: neu rechnen, HUD und
+ * Skin-Karten auffrischen (die Schmiede-Zeile zeigt die Glut), sichern.
+ */
+const relicPanel = new RelicPanel({
+  state,
+  equip: (slot, id) => {
+    state.relics = equipRelic(state.relics, slot, id);
+    afterLoadoutChange();
+  },
+  equipBest: () => {
+    state.relics = equipBestRelics(state.relics);
+    afterLoadoutChange();
+  },
+  melt: (id) => {
+    const rel = relicById(state.relics, id);
+    if (!rel) return;
+    const res = meltRelic(state.relics, id);
+    state.relics = res.relics;
+    state.forge = addEmber(state.forge, res.ember);
+    toasts.show('🔥', 'Eingeschmolzen', `Relikt von Bühne ${rel.zone} → +${res.ember} Glut`);
+    afterLoadoutChange();
+  },
+});
+
 const chSettings = new ChSettings({
   getState: () => {
     syncMaxZones();
@@ -1143,6 +1216,7 @@ const chSettings = new ChSettings({
     metaPanel.render(true);
     constellationPanel.refresh(true); // 2a: der Import bringt sein eigenes Konto mit
     territoryPanel.refresh(true); // 1b: … und seinen eigenen Ruf (Leisten + Pokal)
+    relicPanel.refresh(true); // 1c: … und seine eigene Relikt-Sammlung
     hud.update(state, combat, dps, clickDmg);
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     checkAchievements(); // an imported save may already satisfy fresh achievements
@@ -1234,8 +1308,10 @@ function renderActiveTab(key: string): void {
     territoryPanel.refresh(); // 1b: die Ruf-Leisten leben im Ruhm-Tab
   } else if (key === 'heaven') heaven.refresh();
   else if (key === 'transcend') transcendPanel?.refresh();
-  else if (key === 'chest') chestPanel.render();
-  else if (key === 'meta') {
+  else if (key === 'chest') {
+    chestPanel.render();
+    relicPanel.refresh(); // 1c: die Relikte leben im Truhen-Tab
+  } else if (key === 'meta') {
     metaPanel.render();
     constellationPanel.refresh(); // 2a: die Karte lebt im Ziele-Tab
   } else if (key === 'set') chSettings.render();
@@ -1688,6 +1764,40 @@ function awardRep(zone: number, boss: boolean): void {
   territoryPanel.refresh(true);
 }
 
+/**
+ * IDEEN-GAMEPLAY 1c — das Boss-Gate `zone` auf ein Relikt würfeln lassen.
+ *
+ * Alles Interessante steckt in `gateRelicRoll`: Es prüft selbst, ob das Gate
+ * überhaupt berechtigt ist (Boss-Bühne, ab Bühne 50, tiefer als
+ * jedes bisher gewürfelte), schreibt den Highwater fort und führt den Pity. Ist
+ * nichts zu tun, kommt dieselbe Referenz zurück und diese Funktion ist ein
+ * No-op — der häufigste Fall, denn die meisten Boss-Kills sind Wiederholungen.
+ *
+ * Ein gefundenes Relikt wandert NICHT automatisch in einen Slot: Was man trägt,
+ * ist eine Entscheidung (die der Knopf „✨ Beste tragen" abnimmt, wenn man sie
+ * nicht treffen will). Nur ein LEERER Slot wird gefüllt — ein leerer Slot ist
+ * keine Entscheidung, sondern ein Versäumnis.
+ */
+function awardRelic(zone: number): void {
+  const res = gateRelicRoll(state.relics, zone, rng);
+  if (res.relics === state.relics) return; // Gate war nicht berechtigt
+  state.relics = res.relics;
+  const relic = res.relic;
+  if (!relic) {
+    relicPanel.refresh(true); // der Pity-Zähler ist gewandert
+    return;
+  }
+  const free = state.relics.slots.indexOf(0);
+  if (free >= 0) state.relics = equipRelic(state.relics, free, relic.id);
+  const names = relic.affixes
+    .map((a) => affixConfig(a.id)?.name ?? '')
+    .filter(Boolean)
+    .join(' + ');
+  toasts.show('💎', 'Relikt gefunden!', `Bühne ${zone} · ${names}`);
+  audio.buy();
+  afterLoadoutChange();
+}
+
 function onKillProgress(
   r: ReturnType<typeof hit>,
   fromClick: boolean,
@@ -1804,6 +1914,12 @@ function onKillProgress(
         `Boss besiegt!`,
         `${chestEmoji(tier)} · +${keys} 🔑 · +${shards} 🧩 (Bühne ${combat.zone})`,
       );
+      // IDEEN-GAMEPLAY 1c: Ab Bühne 50 würfelt JEDES Gate genau EINMAL im Leben
+      // auf ein Relikt (`relics.deepestGate` gattert das selbst — deshalb steht
+      // hier keine zusätzliche Frontier-Prüfung, und Wiederholungen per
+      // `travelTo`/`challengeBoss` zahlen nichts). Dieselbe eine Funktion, die
+      // auch der Bot fährt.
+      awardRelic(bossZone);
       audio.bossWin();
       victoryDance = true; // A4: der Sieges-Move, einmalig (siehe `syncChoreoSet`)
       bossConfetti(); // G2: Sieg-Beat über der Bühne
@@ -2256,7 +2372,18 @@ function openChestFromInventory(tier: ChestTier): readonly Reward[] | null {
   state.chests.pity = res.pity;
   const credited: Reward[] = [];
   for (const raw of res.rewards) {
+    // 3a: Ein Jackpot-Skin, den man schon besitzt, wird EINGESCHMOLZEN. Die 🧩
+    // aus `resolveDuplicate` (§6.3.2) bleiben unangetastet — sie sind zugesagt
+    // und tragen die in 3b geeichte Umschul-Leiter; die Glut kommt OBENDRAUF.
+    // Genau das meinte „Duplikate sind heute wertlos": Sie waren es nicht,
+    // aber sie waren auch nie mehr als ein Splitter-Häppchen.
+    const dup = raw.kind === 'jackpot' && ownedChestSkins().has(raw.jackpot.skin);
     const reward = raw.kind === 'jackpot' ? resolveDuplicate(raw, ownedChestSkins()) : raw;
+    if (dup && raw.kind === 'jackpot') {
+      const ember = emberForDuplicate(raw.jackpot.tier);
+      state.forge = addEmber(state.forge, ember);
+      toasts.show('🔥', 'Duplikat eingeschmolzen', `+${ember} Schmiede-Glut`);
+    }
     creditReward(reward);
     credited.push(reward);
   }

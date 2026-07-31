@@ -3,6 +3,251 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## IDEEN-GAMEPLAY Schritt 6 — 1c Relikte + 3a Skin-Schmiede
+
+- **EIN Pool, zwei Systeme — und das ist die ganze Architektur.** `affixes.ts`
+  kennt weder Relikte noch Schmiede: Es ist reine Arithmetik über ein PAAR aus
+  Sorte und Qualität (9 geteilte Sorten + 3 skin-exklusive, 4 Qualitätsstufen).
+  `relics.ts` und `forge.ts` ziehen beide daraus, und beide laufen am Ende durch
+  dieselbe eine Funktion `foldAffixes` in `ch-state.loadoutBonus`. Im Save steht
+  nur `{ id, q }` — der WERT wird immer gerechnet (`affixValue`), nie
+  gespeichert: Ein Katalog, der sich ändert, ändert damit rückwirkend jedes
+  getragene Affix, statt Saves mit eingefrorenen Zahlen zu hinterlassen. Dasselbe
+  Prinzip wie bei den Skin-Buffs (`perLevel · Level`).
+- **Die Qualitäts-Spanne: ×0.4 / ×0.6 / ×0.8 / ×1.0 bei Gewichten 45/30/18/7.**
+  Der Katalog-Wert IST damit der Höchstwert („Makellos" = volle Basis), ein
+  Makellos-Roll ist 7 % wahrscheinlich und exakt 2,5-mal so stark wie ein
+  Grob-Roll. Die Basen sind so gewählt, dass jede Stufe eine runde Zahl ergibt
+  (0.04 ⇒ 1,6 / 2,4 / 3,2 / 4,0 %) — die UI muss nie „3,75 %" zeigen.
+- **Der Deckel ist STRUKTURELL, nicht arithmetisch.** `AFFIX_STAT_CAP = +0.75`
+  klemmt jeden Prozent-Term IM FOLD. Das ist kein Zierrat: Der Höchstfall aus
+  neun Affixen liegt beim Boss-Term rechnerisch bei +105 % (6 × 10 % Relikt +
+  3 × 15 % Glut-DoT) — die Zahlen allein hielten die Leitplanke also NICHT. Mit
+  dem Deckel ist sie unabhängig vom Katalog wahr, und ein Test prüft das für
+  JEDEN Prozent-Stat über 50 gestapelte Affixe.
+- **Das Budget, erschöpfend gerechnet statt geschätzt.** Höchstfall sind neun
+  Affixe (3 Relikt-Slots × bis zu 2 + 3 Schmiede-Slots). `affixPowerBudget()`
+  probiert ALLE Aufteilungen der sechs Relikt-Plätze (nur geteilte Sorten) und
+  der drei Schmiede-Plätze (auch exklusive) auf die sechs Produkt-Terme durch —
+  462 × 56 = 25 872 Fälle in Millisekunden. Ein Greedy hätte hier nicht gereicht:
+  Die Plätze sind ungleich (nur die Schmiede darf „Sequin-Crit" ziehen), und für
+  ungleiche Einheiten ist Greedy nicht beweisbar optimal. Ergebnis, als Test
+  eingefroren und in Abschnitt 11 gedruckt:
+  · **Einzel-Term ×1.7500** (Richtwert ×2) — der Deckel greift.
+  · **Leistungs-Produkt ×1.4298** (Richtwert ×1.5), Terme wie bei 2a:
+  Klick × Crew-DPS × BP × Krit-EV × Truhen-Luck.
+  · **Boss-Term ×1.7500, GETRENNT** (A2): Boss-Schaden läuft gegen die
+  30-s-Gates, nicht gegen die Farm-Geschwindigkeit — ihn ins Produkt zu rechnen
+  hieße, zwei Dinge zu multiplizieren, die nie zusammen wirken. Einordnung: Der
+  Tyrann-Skin zahlt auf Lv 50 allein +600 % Boss-Schaden, und der Bot modelliert
+  Boss-Mults per dokumentiertem Ausschluss gar nicht — die Anker messen also
+  weiterhin die langsamere Wahrheit.
+  · **Offline ×1.3600**, eigener Pfad wie bei 2a (dort ×1.35).
+- **Die skin-exklusiven Affixe liegen BEWUSST außerhalb des Produkts — und das
+  war eine Messung, keine Meinung.** Die erste Fassung gab Robo ein „Servo-Takt"
+  auf Crew-DPS (doppelte Basis). Weil alle drei Schmiede-Slots demselben Skin
+  gehören, stapelte der Budget-Rechner dort +24 % DPS und landete bei **×1.58** —
+  über dem Richtwert. Jetzt zahlt Servo-Takt auf `coachCps` (Robos eigener
+  Stern-Stat), Glut-DoT auf Boss-Schaden und Sequin-Crit auf Krit-Chance: alle
+  drei auf Termen, die das Standard-Produkt nicht oder nur mit kleinem Hebel
+  enthält. Ein Test friert die Regel ein.
+- **Krit-Schaden war falsch angeschrieben — und das fiel erst durch die Affixe
+  auf.** Das Spiel ADDIERT `critMultBonus` auf `CRIT_MULT` (5), es sind
+  MULTIPLIKATOR-PUNKTE. Das Gear-Panel schrieb 0.06 aber als „+6 % Krit-Schaden"
+  an (in Wahrheit ×5 → ×5.06, also +1,2 %). Mit einem Affix daneben hätten zwei
+  Kacheln („+4 % Klick" vs. „+20 % Krit-Schaden") die Größenordnung glatt
+  verdreht. Die Term-Tabelle ist deshalb aus dem Gear-Panel nach `ui/affix-text.ts`
+  gewandert (eine Sprache für alle Buff-Zahlen), und `critMult` heißt jetzt
+  überall **„Krit-Multiplikator"** und wird als Punkt-Zahl gezeigt. Der Sim-Term
+  wurde in derselben Runde korrigiert (er multiplizierte, statt zu addieren).
+- **Die Drop-Regel: FRONTIER-Gates statt Farm-Gates — aus drei Gründen.** Ein
+  Relikt fällt nur an einem Boss-Gate, das tiefer liegt als jedes je gewürfelte
+  (`relics.deepestGate`). (1) **Gegen den Farm-Exploit**: Das Spiel erlaubt
+  `travelTo` auf jede geclerte Bühne und `challengeBoss` direkt am Gate — ohne
+  Highwater könnte man Bühne 50 endlos wiederholen und alle 30 Sekunden würfeln.
+  (2) **Gegen die Prestige-Wäsche**: Der Zähler fällt bei KEINEM der drei Resets,
+  sonst zahlte jede Transzendenz die Leiter 50…∞ neu aus. (3) **Weil der Bot dann
+  dieselbe Zahl misst wie das Spiel** — die Sim gattert ihren Loot ohnehin auf den
+  Frontier, mit derselben Regel im Spiel ist die gemessene Kurve keine
+  Untergrenze mehr, sondern die Wahrheit. Beides ist headless nachgewiesen (siehe
+  `1c3a-d4`).
+- **Rate + Pity, gemessen.** 25 % je neuem Gate, Garantie spätestens am 4. (die
+  Zahl von `PITY_DIAMOND` — wer die Truhen-Garantie kennt, muss die Relikt-
+  Garantie nicht neu lernen). Erwartung: **ein Relikt je 2,73 Gates = je ~14
+  Bühnen Vorstoß**. Gemessen (`SIM_ACTIVE`, Seeds 1/7/12345):
+  · **45 min: 0 Relikte** — die Wand steht bei Bühne 25, Gate 50 ist außer Reichweite.
+  · **3 h: 1,3** (tiefstes Gate 70, also 5,0 berechtigte Gates).
+  · **12 h: 1,3** · **24 h: 1,7** (Gate 72).
+  Zwischen Stunde 3 und Stunde 24 bewegt sich fast nichts — und das ist KEIN
+  Fehler der Drop-Rate, sondern die M9-Wand des Kettenlaufs (er hängt bei Bühne
+  ~73). Die Gegenprobe mit vollem Prestige-Stack (E2-Treiber) endet bei Bühne 80,
+  6 Gates, 1–2 Relikten. Relikte hängen an der TIEFE, nicht an der Spielzeit —
+  hochgerechnet: Bühne 100 ⇒ 10 Gates ⇒ ~4 Relikte, Bühne 150 ⇒ ~7, Bühne 300 ⇒
+  ~18. Die drei Trage-Slots sind damit um Bühne ~90 gefüllt, alles danach ist
+  Verbesserung statt Erstausstattung. Genau das meint „Endgame-Loot oberhalb der
+  Mythos-Truhen": Das System startet, wo die Truhen-Leiter aufhört.
+- **Die Glut-Ökonomie: Duplikate zahlen ZUSÄTZLICH, nicht stattdessen.** Das
+  Ideen-Dokument nennt Duplikate „heute wertlos" — sie waren es nicht (§6.3.2
+  zahlt 5/20/60/200 🧩), aber sie waren auch nie mehr als ein Splitter-Häppchen.
+  `resolveDuplicate` bleibt deshalb **unangetastet** (die 🧩 sind zugesagt und
+  tragen die in 3b geeichte Umschul-Leiter), und die Glut kommt obendrauf:
+  **2 / 5 / 12 / 30 🔥** je Truhen-Stufe. Das Einschmelzen passiert automatisch —
+  ein Duplikat-Fach wäre eine Schachtel um eine Zahl. Dazu zwei kleinere
+  Quellen: der **Splitter-Umtausch 20 🧩 → 1 🔥** (bewusst ungünstig: bei den in
+  3b gemessenen ~140 🧩/h ergibt ein VOLLSTÄNDIGER Umtausch 7 🔥/h, nicht einmal
+  ein Slot-2-Reforge je Stunde — ein Überlauf-Ventil, kein Haupt-Faucet) und das
+  **Einschmelzen überzähliger Relikte** (2 … 16 🔥), das den Kreis zwischen 1c
+  und 3a schließt.
+- **Reforge-Kosten 12 / 24 / 48 🔥 je Slot, Lock ×3 — und warum genau 3.** Der
+  Pool eines Schmiede-Slots hat 10 Sorten. Wer eine BESTIMMTE Sorte in besserer
+  Qualität will, trifft ohne Lock mit 1/10 · P(bessere Qualität), mit Lock mit
+  P(bessere Qualität) — der Lock ist also exakt eine **Verzehnfachung** der
+  Trefferquote. ×10 zu verlangen wäre erwartungswert-neutral und damit sinnlos
+  (niemand würde je locken); ×3 macht daraus ein klares Geschäft, für das man
+  trotzdem echte Währung liegen lässt. Bezahlt wird der Verzicht auf das
+  Gegenteil: Ein freier Roll kann eine ANDERE, für den Build bessere Sorte
+  bringen. **Keine Roll-Eskalation wie bei 3b** — dort war sie nötig, weil
+  Splitter im Überfluss fließen; Glut ist die knappe Währung dieses Systems, die
+  Knappheit IST die Bremse, und ein zweiter Zähler darüber bestrafte nur die
+  Spieler, die sie ohnehin spüren.
+- **Das Qualitäts-Pity, exakt.** Jeder Schmiede-Slot führt einen Trocken-Zähler:
+  Ein bezahlter Roll, dessen ANGEBOT eine echt höhere Qualität hat als das
+  getragene Affix, setzt ihn auf 0 — unabhängig davon, ob der Spieler annimmt
+  (bezahlt wurde der Roll, und der Wurf WAR eine Verbesserung). Jeder andere
+  zählt +1. Die Mindest-Qualität des nächsten Rolls ist `min(3, ⌊dry / 5⌋)`. Also:
+  nach 5 trockenen Rolls nichts unter „Solide", nach 10 nichts unter „Fein", nach
+  15 ist „Makellos" **garantiert** — spätestens der 16. Roll trifft. Ein leerer
+  Slot zählt als Qualität −1, der erste Roll darauf ist also immer eine
+  Verbesserung. Die Trockenstrecke steht im Dialog als Klartext („noch 3 bis zur
+  nächsten Stufe"), damit niemand raten muss.
+- **Die Schmiede-Slots sind teuer — und DAS ist die eigentliche Balance.** Sie
+  hängen an `gear.skinLevels` (10/25/40, wie das Ideen-Dokument vorgibt), und
+  `shardCost` wächst mit ×1.25/Level. Kumuliert gemessen: **Slot 1 = 370 🧩**
+  (~2,6 h), **Slot 2 = 10 660 🧩** (~76 h), **Slot 3 = 301 060 🧩** (~2 150 h).
+  Der rechnerische Höchstfall des Budgets beschreibt also einen Spielstand, den
+  fast niemand je hält — die Leitplanke misst absichtlich diesen Extremfall.
+  Zweite Bremse: Die Slots eines NICHT ausgerüsteten Skins falten ×1 (exakt wie
+  `gearBonus` nur den aktiven Skin liest). Man schmiedet an EINEM Lieblings-
+  Charakter, nicht an zehn parallel — genau deshalb dürfen die exklusiven Affixe
+  überhaupt die doppelte Basis tragen.
+- **Sim: Relikte in JEDEM Profil, Schmiede als eigenes.** Relikte fallen passiv
+  aus Boss-Gates, ohne jede Kauf-Entscheidung — wie der Ruf (1b) trägt sie also
+  zwangsläufig jeder echte Spielstand, ein Bot ohne sie verschwiege einen
+  Machtterm. Sie sind deshalb bewusst NICHT an `econOn` gehängt (sie sind kein
+  Loot-Beschleuniger im Sinne der §4.8-Kalibrierung, sondern eine Progressions-
+  Schicht), und der Bot trägt automatisch die drei bestgerollten
+  (`equipBestRelics` — eine build-blinde Zahl, kein Macht-Optimierer). Die
+  Schmiede dagegen bekommt das Profil **`SIM_FORGE`** („Schmiede voll", drei
+  makellose Slots); der Normal-Bot schmiedet NIE — dieselbe dokumentierte
+  Untergrenze wie bei 3b und 2a.
+- **Gemessener Anker-Shift** (`npm run balance`, Seeds 1/7/12345, gegen die in
+  Schritt 5 protokollierten Zahlen):
+  · **Pacing im ersten Sitting UNVERÄNDERT** — t10 1.7 min, t25 32.4 min, Wand
+  ⌀ Bühne 25.0, byte-gleich. Kein Lauf dieser Länge erreicht Bühne 50, es gibt
+  dort schlicht kein Relikt.
+  · **Erste Himmelfahrt** (0.7 cps, ohne Loot — der empfindlichste Anker):
+  16.63 → **16.74 h** (+0,7 %, Rauschen). Der Lauf endet bei Bühne 75, sieht also
+  nur die Gates 50…75.
+  · **Kumuliert t75**: 3.17 → **3.13 h**.
+  · **E2** unverändert 15 Stufen je Seed, schlimmstes Verhältnis 1.85.
+  · **E3** +50 %-Stufen 47/51/58 → **53/55/59**, größte Lücke 30.7 → **16.1 min**
+  — die Relikte machen die Kurve LEBENDIGER, nicht schneller: mehr kleine
+  Sprünge, kürzere Durststrecken.
+  · **E4-Vorsprung** unverändert ⌀ +13.3 Bühnen, kleinster 5.
+  · **Ruf (1b) nach 24 h Kette**: stärkstes Theme 16 218 → **18 196** (+12 %,
+  Stufe unverändert 8) — Relikte heben die Kills/h ein wenig, also auch den Ruf.
+  · **Schmiede-Profil A/B** (t25, Kalibrier-Bedingungen): ×1.18 / ×1.15 / ×1.18 —
+  deutlich unter dem Produkt-Budget ×1.4298, weil drei Slots nur ein Drittel des
+  Höchstfalls sind.
+  Kein Anker musste aufgerissen werden.
+- **Save v17 mit ZWEI gegensätzlichen Migrations-Entscheidungen im selben
+  Schritt.** Die **Schmiede startet komplett leer**: Glut entsteht aus
+  Duplikat-Jackpots und getauschten Splittern, und beides hat das Spiel nie
+  gezählt; ein geschmiedetes Affix wäre vollends erfunden (es hätte eine gerollte
+  Qualität, die niemand gerollt hat). Der **Relikt-Gate-Highwater wird dagegen
+  ZWINGEND gesät** — auf das tiefste bereits geclerte Gate, gerechnet mit
+  derselben Regel wie `bossFirstKillZones` (`clearedGateFor`, inklusive des
+  Himmelfahrt-festen `gear.zoneEver`). Ohne die Saat bekäme ein Alt-Save auf
+  Bühne 200 beim nächsten Rückweg dreißig Gates geschenkt, die er längst hinter
+  sich hat. Das ist der Gegenfall zu 1b („bewusst leer"): Dort war jede Herleitung
+  eine Erfindung, hier wäre das WEGLASSEN eine Schenkung. Die Sammlung selbst
+  startet trotzdem leer, und ein Alt-Save rechnet nach dem Update bit-gleich
+  weiter (leeres Loadout faltet überall ×1).
+- **Die X7-Matrix hat den Bump sofort rot gemeldet.** Ihr neues Paar prüft den
+  gesunden v17-Save (fünf Relikte in drei Formen, zwei getragen, Gate-Highwater
+  55; Schmiede mit skin-exklusivem Slot, einem Trocken-Zähler von 7 und einem
+  verwaisten Slot, den sein Level nicht mehr deckt) und den kaputten (doppelte
+  Relikt-Id, Müll-Affix, zwei Affixe derselben Sorte, Id ≤ 0, gelogene `nextId`,
+  Slots die dreimal auf dasselbe Relikt zeigen, negative Glut, Phantom-Skin) —
+  übrig bleiben genau die zwei legalen Relikte, ein Slot, `nextId` nach OBEN
+  korrigiert und ein Skin-Fach.
+- **Platz: der 🎁 Truhen-Tab für die Relikte, die Skin-KARTE für die Schmiede.**
+  Ein zehnter Reiter bleibt verboten (headless bei 390 × 844 nachgemessen: neun
+  Reiter à 44 px = **396 px** gegen **387 px** verfügbare Breite — schon heute
+  9 px drüber). Tab-Höhen bei 390 px NACH der Änderung: Ruhm 901 · **Truhen
+  1 322** (davon 666 px die neue Relikt-Sektion, vorher also ~656 px) · Crew
+  1 877 · **Skins 2 147** · Ziele 2 665. Der Truhen-Tab ist damit weiterhin der
+  zweitkürzeste — und der thematisch richtige: Er IST der Loot-Tab, über den
+  Relikten steht das Truhen-Inventar, darunter die Drop-Tabellen. Die
+  Schmiede-Slots sitzen dagegen an der Skin-Karte, weil ein Slot ANTEIL dieses
+  Skins ist: Sein Level schaltet ihn frei, er wirkt nur solange dieser Skin
+  getragen wird, und er verschwindet aus der Rechnung, sobald man wechselt. Eine
+  zweite Liste woanders müsste all das noch einmal erklären. Der Reforge selbst
+  bekommt einen eigenen Dialog (Vorbild `retrain-dialog`).
+- **Eine Qualitäts-Farbskala für beide Systeme.** Grau → Grün → Blau → Gold, in
+  Relikt-Kacheln, Trage-Slots, Schmiede-Chips und Dialog-Karten dieselbe. Ein
+  „makelloser Hüftschwung" sieht überall gleich aus, sonst lernt man die Skala
+  zweimal. In den DREI schmalen Trage-Slots steht eine KOMPAKTE Kachel (Glyph +
+  Wert, Name im `title`): Der erste Headless-Lauf zeigte, dass „Gate-Brecher"
+  bei drei Spalten den Wert aus der Karte schob — die Namen stehen ausgeschrieben
+  in der Sammlung darunter.
+- **Zwei Test-Dateien statt einer — gemessen, nicht aus Ordnungsliebe.** Mit den
+  neuen Ankern lief `sim.test.ts` **65 s CPU am Stück**, und Vitest bricht einen
+  Worker, der so lange nicht auf `onTaskUpdate` antwortet, mit einem RPC-Timeout
+  ab: **jeder Test grün, der Lauf trotzdem rot** (Exit 1). Am Basis-Commit lief
+  dieselbe Datei in 46 s ohne Fehler — die Schranke liegt dazwischen. Die
+  Loot-Anker sind deshalb nach `sim-loot.test.ts` gewandert; zwei Dateien laufen
+  in zwei Workern parallel, keiner reißt die Schranke, und die Gesamtlaufzeit der
+  Suite sank sogar (57,6 s bei 1 085 Tests). Die Bot-PROFILE bleiben die geteilte
+  Quelle aus `sim.ts`. Zweite Lehre derselben Runde: Ketten dürfen nicht im
+  `describe`-Körper laufen — dort fallen sie in die Collect-Phase, in der der
+  Worker erst recht nicht antwortet (Collect 7,1 s → 0,5 s nach der Umstellung
+  auf eine gemerkte, faul gezogene Kette).
+- **Das Balance-Ritual bleibt im Budget.** Abschnitt 11 („Relikte & Schmiede":
+  Drop-Kurve über die geteilten Ketten, die Gegenprobe mit vollem Prestige-Stack,
+  Glut-Quellen und -Senken, die Splitter-Kosten der Slot-Leiter, die vier
+  Budget-Zahlen und das A/B des Schmiede-Profils) nutzt dieselbe `chains`-Map wie
+  die Abschnitte 6/7/10. Laufzeit **32,4 s** (von 60 s Budget, vorher 24,9 s).
+- **Headless-Beweis** (Chromium/SwiftShader, Port 4188, präparierter v17-Save):
+  `1c3a-a-relikte-tab.png` + `1c3a-a2-relikte-zoom.png` (drei gefüllte
+  Trage-Slots, fünf Relikte in der Sammlung, Qualitäts-Rahmen, Einschmelz-Werte
+  12/8/6/4/2 🔥), `1c3a-b-schmiede-slots.png` + `1c3a-b2-schmiede-zoom.png`
+  (Disco Lv 27 ⇒ Slot 1 belegt/Slot 2 leer/Slot 3 „🔒 Lv 40"; Klassiker Lv 12 ⇒
+  genau ein Slot; Robo Lv 4 ⇒ „Schmiede ab Lv 10"),
+  `1c3a-c1-dialog-vorschau(-zoom).png` / `1c3a-c2-dialog-lock.png` (12 🔥 → 36 🔥,
+  Schalter kippt von 🔓 auf 🔒) / `1c3a-c3-pity-vorschau.png` („Mindest-Qualität:
+  Solide · 7 Roll(s) ohne Verbesserung, noch 3 bis zur nächsten Stufe") /
+  `1c3a-c4-dialog-angebot(-zoom).png` (Alt und Neu nebeneinander, „Übernehmen" /
+  „Verwerfen"; Glut 180 → 156 BEVOR gewürfelt wurde, Slot noch leer) /
+  `1c3a-c5-nach-uebernahme.png` + `1c3a-c5b-karte-nachher.png` (Toast
+  „Geschmiedet! · Slot 2: Langer Atem (Fein)", die Kachel trägt es),
+  `1c3a-d1-relikt-drop.png` + `1c3a-d2-drop-toast-zoom.png` (ein ECHTER Drop im
+  laufenden Spiel: Gate 55 fällt nach 9,1 s, Toast „💎 Relikt gefunden! Bühne 55 ·
+  Nachtschwärmer", Highwater 50 → 55, Pity 3 → 0) + `1c3a-d3-sammlung-nach-drop.png`
+  (das neue Relikt füllt den ersten LEEREN Slot) + **`1c3a-d4-kein-zweites-relikt.png`**
+  (die Gegenprobe: per Zonen-Strip zurück auf Bühne 55 gereist, Boss erneut
+  herausgefordert, Gate nach 30,4 s ein ZWEITES Mal gefallen — Toast „Boss
+  besiegt!", aber KEIN zweites Relikt, die Sammlung zeigt weiter genau eines),
+  `1c3a-e1-permanenz-vorher.png` + `1c3a-e2-permanenz-nachher.png` (eine echte
+  TRANSZENDENZ im Spiel: Bühne 62 → 1, Seelen 900 → 0, HPF 900 → 0, TE 0 → 5 —
+  fünf Relikte, dieselben Slots [1,3,2], Gate-Highwater 60, 180 Glut und das
+  geschmiedete „Sequin-Crit" stehen unverändert da), `1c3a-f1-duplikat-glut.png` +
+  `1c3a-f2-duplikat-toast-zoom.png` (Mythos-Duplikat: Glut 180 → 210 UND Splitter
+  740 → 940 — beide Wege zahlen), sowie `1c3a-m-{portrait,schmal,landscape}-{relikte,schmiede,dialog}.png`
+  (390×844, 320×640, 740×380 — `documentElement.scrollWidth` == `innerWidth` in
+  allen neun, und im Querformat scrollt der Dialog IN SICH: sichtbar 350 px bei
+  447 px Inhalt). Bundle nach der Änderung: **884 KB JS** (Budget 1.5 MB).
+
 ## IDEEN-GAMEPLAY Schritt 5 — 1b Gebietsherrschaft
 
 - **Eine Zahl je Theme, eine Gewinn-Regel, eine Wirkung.** `territory:

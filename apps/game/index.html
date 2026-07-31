@@ -325,6 +325,31 @@
       </div>
     </div>
 
+    <!-- Skin-Schmiede (IDEEN-GAMEPLAY 3a): ein Slot, ein bezahlter Roll, eine
+         Wahl. Dieselbe zweiphasige Form wie der Umschul-Dialog (3b) — gewürfelt
+         wird erst NACH der Bezahlung, und das Angebot wird nie blind übernommen. -->
+    <div class="overlay hidden" id="forgeOverlay">
+      <div class="dialog fg">
+        <div class="dt">🔥 Skin-Schmiede</div>
+        <div class="fg-hero">
+          <img class="fg-av" id="fgAvatar" width="48" height="60" alt="" aria-hidden="true" />
+          <div class="fg-who">
+            <div class="fg-name" id="fgName"></div>
+            <div class="fg-slot" id="fgSlot"></div>
+          </div>
+        </div>
+        <div class="fg-now" id="fgNow"></div>
+        <div class="fg-offer hidden" id="fgOffer"></div>
+        <button class="fg-lock" id="fgLock" type="button"></button>
+        <div class="fg-pity dim" id="fgPity"></div>
+        <div class="msg" id="fgMsg"></div>
+        <button class="btn" id="fgRoll" type="button">Schmieden</button>
+        <button class="btn" id="fgTake" type="button">Übernehmen</button>
+        <button class="btn ghost hidden" id="fgKeep" type="button">Behalten</button>
+        <button class="btn ghost" id="fgClose" type="button">Abbrechen</button>
+      </div>
+    </div>
+
     <!-- Leaderboard v2 (§7.4): best-zone submit + top-50 overlays. -->
     <div class="overlay hidden" id="lbSubmit">
       <div class="dialog">

@@ -4377,3 +4377,484 @@ body {
     gap: 2px;
   }
 }
+
+/* ===========================================================================
+   IDEEN-GAMEPLAY 1c + 3a — Relikte & Skin-Schmiede
+   ---------------------------------------------------------------------------
+   EINE Qualitäts-Farbskala für beide Systeme (Grob → Makellos), weil beide aus
+   demselben Affix-Pool ziehen: Ein „makelloser Hüftschwung" muss auf dem
+   Relikt und in der Schmiede-Kachel gleich aussehen, sonst lernt man die Skala
+   zweimal. Die Töne steigen von grau über grün und blau nach gold — dieselbe
+   Ordnung, die Spieler aus jedem Loot-Spiel kennen.
+   ======================================================================== */
+:root {
+  --q0: #9aa0a6;
+  --q1: #63b06a;
+  --q2: #59a2d8;
+  --q3: #e2b13c;
+}
+
+/* --- Die Affix-Kachel (Relikt-Slots, Sammlung) --------------------------- */
+.af {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px 3px 5px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  line-height: 1.25;
+  max-width: 100%;
+}
+.af + .af {
+  margin-top: 4px;
+}
+.af-g {
+  font-style: normal;
+  font-size: 13px;
+  flex: none;
+}
+.af-n {
+  font-weight: 800;
+  white-space: nowrap;
+}
+.af-v {
+  color: rgba(255, 255, 255, 0.72);
+  white-space: nowrap;
+}
+/* Die kompakte Variante der drei Trage-Slots: nur Glyph + Wert, und beides
+   darf notfalls kürzen statt die Nachbarkarte zu überschreiben. */
+.af.mini {
+  padding: 2px 5px;
+  gap: 3px;
+  min-width: 0;
+}
+.af.mini .af-v {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.af.q0 {
+  border-color: var(--q0);
+}
+.af.q1 {
+  border-color: var(--q1);
+}
+.af.q2 {
+  border-color: var(--q2);
+}
+.af.q3 {
+  border-color: var(--q3);
+  background: rgba(226, 177, 60, 0.12);
+}
+
+/* --- Die drei Trage-Slots ------------------------------------------------ */
+.rl-head {
+  font-size: 11px;
+  line-height: 1.45;
+  margin-bottom: 10px;
+}
+.rl-slots {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.rl-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+  padding: 7px 6px 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  min-width: 0;
+}
+.rl-slot.empty {
+  border-style: dashed;
+  opacity: 0.6;
+  align-items: center;
+  justify-content: center;
+  min-height: 62px;
+}
+.rl-slot.q1 {
+  border-color: var(--q1);
+}
+.rl-slot.q2 {
+  border-color: var(--q2);
+}
+.rl-slot.q3 {
+  border-color: var(--q3);
+}
+.rl-sn {
+  font-size: 10px;
+  font-weight: 800;
+  opacity: 0.65;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.rl-none {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.rl-zone {
+  font-size: 10px;
+  opacity: 0.55;
+}
+/* Das × ist optisch 16 px, hat aber über das ::after-Inset eine 30-px-Trefferfläche
+   (dieselbe Lehre wie beim Umschul-Werkzeug in 3b) — und sitzt in der einen Ecke,
+   die die Affix-Kacheln nicht brauchen. */
+.rl-x {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+  line-height: 15px;
+  cursor: pointer;
+}
+.rl-x::after {
+  content: '';
+  position: absolute;
+  inset: -7px;
+}
+.rl-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+.rl-best {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+/* --- Die Sammlung -------------------------------------------------------- */
+.rl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rl-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 7px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+.rl-row.worn {
+  border-color: rgba(120, 220, 140, 0.5);
+  background: rgba(120, 220, 140, 0.07);
+}
+.rl-slot .rl-aff {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+  min-width: 0;
+  padding-right: 14px;
+}
+.rl-row .rl-aff {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.rl-meta {
+  font-size: 10px;
+  flex: none;
+}
+.rl-acts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.rl-sb {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.rl-sb.on {
+  border-color: rgba(120, 220, 140, 0.8);
+  background: rgba(120, 220, 140, 0.22);
+}
+.rl-melt {
+  padding: 4px 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 150, 80, 0.35);
+  background: rgba(255, 150, 80, 0.12);
+  color: #ffc79a;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* --- Die Schmiede-Reihe auf der Skin-Karte ------------------------------- */
+.gb-ember {
+  color: #ffb27a;
+}
+.gb-swap {
+  padding: 2px 7px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 150, 80, 0.4);
+  background: rgba(255, 150, 80, 0.14);
+  color: #ffc79a;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.gb-swap.off {
+  opacity: 0.4;
+  cursor: default;
+}
+.sc-forge {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 6px 0 4px;
+}
+.sc-fh {
+  align-self: center;
+  font-size: 10px;
+  flex: none;
+}
+.fs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.fs.off {
+  border-style: solid;
+  opacity: 0.45;
+  cursor: default;
+  justify-content: center;
+}
+.fs.q0,
+.fs.q1,
+.fs.q2,
+.fs.q3 {
+  border-style: solid;
+}
+.fs.q0 {
+  border-color: var(--q0);
+}
+.fs.q1 {
+  border-color: var(--q1);
+}
+.fs.q2 {
+  border-color: var(--q2);
+}
+.fs.q3 {
+  border-color: var(--q3);
+  background: rgba(226, 177, 60, 0.12);
+}
+.fs-g {
+  font-style: normal;
+  font-size: 12px;
+  flex: none;
+}
+.fs-t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fs-q {
+  margin-left: auto;
+  flex: none;
+  opacity: 0.8;
+}
+
+/* --- Der Schmiede-Dialog ------------------------------------------------- */
+.dialog.fg {
+  max-width: 340px;
+  width: 88vw;
+  /* Wie beim Umschul-Dialog: im kurzen Querformat (740×380) scrollt er IN SICH,
+     statt oben und unten aus dem Bild zu laufen. */
+  max-height: 92vh;
+  overflow-y: auto;
+}
+/* Der Dialog blendet seine Knöpfe je Phase um — `.hidden` ist im Projekt
+   bewusst PRO ELEMENT definiert, nicht global, sonst gewinnt die spätere
+   gleich-spezifische Regel. */
+#fgRoll.hidden,
+#fgTake.hidden,
+#fgKeep.hidden,
+#fgClose.hidden,
+#fgLock.hidden,
+#fgOffer.hidden {
+  display: none;
+}
+.dialog.fg .msg.ok {
+  color: #2e6b1f;
+}
+.dialog.fg .msg.bad {
+  color: #a32b1c;
+}
+.dialog.fg .msg {
+  color: var(--parch-soft);
+}
+.dialog.fg .btn.ghost {
+  background: rgba(90, 66, 30, 0.14);
+  color: #4a3a1c;
+  border-color: rgba(90, 66, 30, 0.38);
+  box-shadow: 0 3px 0 rgba(90, 66, 30, 0.28);
+}
+.fg-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0 12px;
+}
+.fg-av {
+  width: 48px;
+  height: 60px;
+  border-radius: 8px;
+  border: 2px solid var(--parch-line);
+  object-fit: cover;
+  flex: none;
+}
+.fg-who {
+  text-align: left;
+  min-width: 0;
+}
+.fg-name {
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--parch-ink);
+}
+.fg-slot {
+  font-size: 11px;
+  color: var(--parch-soft);
+}
+.fg-k {
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--parch-soft);
+  margin-bottom: 4px;
+  text-align: left;
+}
+.fg-now,
+.fg-offer {
+  margin-bottom: 10px;
+}
+.fg-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 2px solid var(--parch-line);
+  background: rgba(255, 255, 255, 0.4);
+  text-align: left;
+}
+.fg-card.none {
+  border-style: dashed;
+  opacity: 0.72;
+}
+.fg-card.q0 {
+  border-color: #8b8f93;
+}
+.fg-card.q1 {
+  border-color: #3f8a48;
+}
+.fg-card.q2 {
+  border-color: #2f7bb5;
+}
+.fg-card.q3 {
+  border-color: #b8860b;
+  background: rgba(226, 177, 60, 0.22);
+}
+.fg-g {
+  font-size: 22px;
+  flex: none;
+}
+.fg-ct {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  color: var(--parch-ink);
+}
+.fg-ct b {
+  font-size: 14px;
+}
+.fg-eff {
+  font-size: 12px;
+  color: var(--parch-soft);
+}
+.fg-q {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--parch-soft);
+}
+/* Der Lock ist ein SCHALTER, kein Knopf: Er zeigt seinen Zustand (offen/zu),
+   statt eine Aktion zu versprechen. */
+.fg-lock {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 2px dashed rgba(90, 66, 30, 0.4);
+  background: rgba(90, 66, 30, 0.08);
+  color: var(--parch-soft);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.fg-lock.on {
+  border-style: solid;
+  border-color: #b8860b;
+  background: rgba(226, 177, 60, 0.25);
+  color: var(--parch-ink);
+}
+.fg-lock:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.fg-pity {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--parch-soft);
+  margin-bottom: 8px;
+  text-align: left;
+}

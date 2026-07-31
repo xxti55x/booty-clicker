@@ -17,8 +17,25 @@ import {
   sugarCostForStar,
 } from '../game/gear';
 import { SKIN_UNLOCKS } from '../game/gear';
-import type { BackgroundKey, BuffStat, SkinKey, SkinRarity } from '../types';
-import { fmt } from './format';
+import type { BackgroundKey, SkinKey, SkinRarity } from '../types';
+import {
+  FORGE_SLOTS,
+  affixConfig,
+  affixValue,
+  qualityConfig,
+  type RolledAffix,
+} from '../game/affixes';
+import {
+  FORGE_UNLOCK_LEVELS,
+  SHARDS_PER_EMBER,
+  emberForShards,
+  emberHeld,
+  forgeSlotsOf,
+  forgeSlotsUnlocked,
+  nextForgeUnlock,
+} from '../game/forge';
+import { affixText } from './affix-text';
+import { fmt, fmtInt } from './format';
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -27,6 +44,21 @@ function byId(id: string): HTMLElement {
 }
 
 /** German rarity labels (§5.3). */
+/** Die Freischalt-Level als Text — für die gesperrten Kacheln. */
+const FORGE_UNLOCK_LEVELS_TEXT: readonly number[] = FORGE_UNLOCK_LEVELS;
+
+/** Der Inhalt einer Schmiede-Kachel: Glyph + Wert, oder eine Einladung. */
+function forgeChip(a: RolledAffix | null): string {
+  if (!a) return '<i class="fs-g">🔨</i><span class="fs-t">leer</span>';
+  const cfg = affixConfig(a.id);
+  if (!cfg) return '<i class="fs-g">🔨</i><span class="fs-t">leer</span>';
+  return (
+    `<i class="fs-g">${cfg.glyph}</i>` +
+    `<span class="fs-t">${affixText(cfg.stat, affixValue(a))}</span>` +
+    `<span class="fs-q">${qualityConfig(a.q).mark}</span>`
+  );
+}
+
 const RARITY_LABEL: Record<SkinRarity, string> = {
   common: 'Gewöhnlich',
   rare: 'Selten',
@@ -34,59 +66,6 @@ const RARITY_LABEL: Record<SkinRarity, string> = {
   legendary: 'Legendär',
   mythic: 'Mythisch',
 };
-
-/** How each buff stat is worded + its display unit (§5.2/§5.5). */
-interface StatMeta {
-  label: string;
-  unit: 'pct' | 's' | 'ms' | 'h' | 'cps' | 'x';
-  /** A reduction stat (shown with a leading „−"). */
-  neg?: boolean;
-}
-const STAT_META: Record<BuffStat, StatMeta> = {
-  clickPct: { label: 'Klick', unit: 'pct' },
-  dpsPct: { label: 'Crew-DPS', unit: 'pct' },
-  critChance: { label: 'Krit-Chance', unit: 'pct' },
-  critMult: { label: 'Krit-Schaden', unit: 'pct' },
-  comboWindow: { label: 'Combo-Fenster', unit: 's' },
-  comboDecay: { label: 'Combo-Decay', unit: 'pct', neg: true },
-  goldPct: { label: 'Gold', unit: 'pct' },
-  bossDmg: { label: 'Boss-Schaden', unit: 'pct' },
-  bossTimer: { label: 'Boss-Zeit', unit: 's' },
-  beatWindow: { label: 'Beat-Fenster', unit: 'ms' },
-  chestLuck: { label: 'Truhen-Luck', unit: 'pct' },
-  keyDrop: { label: 'Schlüssel-Drop', unit: 'pct' },
-  offlineCap: { label: 'Offline-Cap', unit: 'h' },
-  frenzyDur: { label: 'Ekstase-Dauer', unit: 'pct' },
-  allPct: { label: 'ALLES', unit: 'pct' },
-  coachCps: { label: 'Coach', unit: 'cps' },
-  onBeatMult: { label: 'On-Beat ×', unit: 'x' },
-  frenzyDurSec: { label: 'Ekstase', unit: 's' },
-  frenzyCharge: { label: 'Ladebedarf', unit: 'pct', neg: true },
-  offlineRate: { label: 'Offline-Rate', unit: 'pct' },
-};
-
-/** Trim to ≤ 2 decimals without trailing zeros (0.40 → „0.4", 4 → „4"). */
-const trim = (n: number): string => Number(n.toFixed(2)).toString();
-
-/** Format a raw stat amount into its signed, unit-aware German buff text. */
-function fmtStat(stat: BuffStat, amount: number): string {
-  const m = STAT_META[stat];
-  const sign = m.neg ? '−' : '+';
-  switch (m.unit) {
-    case 'pct':
-      return `${sign}${trim(amount * 100)} % ${m.label}`;
-    case 's':
-      return `${sign}${trim(amount)} s ${m.label}`;
-    case 'ms':
-      return `${sign}${trim(amount)} ms ${m.label}`;
-    case 'h':
-      return `${sign}${trim(amount / 3600)} h ${m.label}`;
-    case 'cps':
-      return `${sign}${trim(amount)} cps ${m.label}`;
-    case 'x':
-      return `${sign}${trim(amount)} ${m.label}`;
-  }
-}
 
 /** Kulisse chooser buttons: id + label + a short mini-buff hint (§5.5). */
 const KULISSE_UI: { key: BackgroundKey; label: string }[] = [
@@ -104,6 +83,10 @@ export interface GearDeps {
   onProgress: () => void;
   /** Kulisse/Auto changed: apply the background (world + audio), recompute, persist. */
   onKulisse: () => void;
+  /** 3a: Den Schmiede-Dialog für einen Slot dieses Skins öffnen. */
+  openForge: (id: SkinKey, slot: number) => void;
+  /** 3a: Überschüssige Splitter in Schmiede-Glut tauschen (`SHARDS_PER_EMBER` : 1). */
+  exchangeShards: (ember: number) => void;
 }
 
 /**
@@ -178,6 +161,20 @@ export class Gear {
     this.render();
   }
 
+  /**
+   * Splitter in Glut tauschen. Bewusst EIN Stück je Druck statt „alles
+   * umtauschen": Der Kurs ist absichtlich ungünstig (20 : 1), und ein
+   * Alles-Knopf würde in einer Sekunde den Splitter-Vorrat leeren, den die
+   * Skin-Level (und damit die Schmiede-SLOTS) brauchen. Wer viel tauschen will,
+   * darf oft drücken — und merkt dabei, was es kostet.
+   */
+  private swap(): void {
+    const { state } = this.deps;
+    if (state.gear.shards < SHARDS_PER_EMBER) return;
+    this.deps.exchangeShards(1);
+    this.render();
+  }
+
   private setKulisse(key: BackgroundKey): void {
     const { state } = this.deps;
     state.gear.bgAuto = false;
@@ -202,9 +199,16 @@ export class Gear {
 
   render(): void {
     const { state } = this.deps;
+    // 3a: Die Glut steht neben den Splittern, aus denen sie zur Not entsteht —
+    // der Umtausch-Knopf gehört an den Ort, an dem beide Zahlen sichtbar sind.
+    const canSwap = emberForShards(state.gear.shards) >= 1;
     byId('gearBal').innerHTML =
       `<span class="gb-shard">🧩 ${fmt(state.gear.shards)} Splitter</span>` +
-      `<span class="gb-sugar">🍬 ${fmt(state.gear.sugarPeaches)} Zuckerpfirsiche</span>`;
+      `<span class="gb-sugar">🍬 ${fmt(state.gear.sugarPeaches)} Zuckerpfirsiche</span>` +
+      `<span class="gb-ember">🔥 ${fmt(emberHeld(state.forge))} Glut</span>` +
+      `<button class="gb-swap ${canSwap ? '' : 'off'}" id="gearSwap" type="button" ${canSwap ? '' : 'disabled'}>` +
+      `${SHARDS_PER_EMBER} 🧩 → 1 🔥</button>`;
+    byId('gearSwap').addEventListener('click', () => this.swap());
 
     this.renderKulisse();
     this.renderSets();
@@ -230,7 +234,7 @@ export class Gear {
     }
 
     const kul = KULISSE_BUFFS[state.gear.bg];
-    const kulTxt = fmtStat(kul.stat, kul.amount);
+    const kulTxt = affixText(kul.stat, kul.amount);
     byId('kulisseHint').textContent = state.gear.bgAuto
       ? `Tour-Modus: die Kulisse rotiert mit der Bühne. Aktiv: ${state.gear.bg} (${kulTxt}).`
       : `Feste Kulisse: ${kulTxt}.`;
@@ -247,7 +251,7 @@ export class Gear {
   }
 
   private setRow(s: SetBonusConfig): string {
-    return `<div class="gear-set"><span class="gs-name">✨ ${s.name}</span><span class="gs-eff">${fmtStat(s.stat, s.amount)}</span></div>`;
+    return `<div class="gear-set"><span class="gs-name">✨ ${s.name}</span><span class="gs-eff">${affixText(s.stat, s.amount)}</span></div>`;
   }
 
   private renderGrid(): void {
@@ -263,6 +267,7 @@ export class Gear {
         else if (act === 'level') this.levelUp(id);
         else if (act === 'star') this.starUp(id);
         else if (act === 'craft') this.craft(id);
+        else if (act === 'forge') this.deps.openForge(id, Number(btn.dataset.slot ?? '0'));
       });
     }
   }
@@ -285,6 +290,45 @@ export class Gear {
     }
   }
 
+  /**
+   * **Die Schmiede-Reihe** (3a) — bis zu drei Kacheln direkt an der Skin-Karte.
+   *
+   * Sie sitzt hier und nicht in einem eigenen Tab, weil ein Slot ANTEIL dieses
+   * Skins ist: Er wird von seinem Level freigeschaltet, er wirkt nur, solange
+   * dieser Skin getragen wird, und er verschwindet aus der Rechnung, sobald man
+   * einen anderen ausrüstet. Eine zweite Liste woanders müsste all das noch
+   * einmal erklären.
+   *
+   * Drei Zustände je Kachel: **gesperrt** (nennt das Level, das sie öffnet),
+   * **leer** (lädt zum ersten Schmieden ein) und **belegt** (Glyph + Wert, in
+   * der Farbe der Qualität). Gesperrte Kacheln sind bewusst sichtbar — sie sind
+   * das Ziel, für das man den Skin weiter levelt.
+   */
+  private forgeRow(id: SkinKey, level: number, unlocked: boolean): string {
+    const { state } = this.deps;
+    const open = forgeSlotsUnlocked(level);
+    const slots = forgeSlotsOf(state.forge, id);
+    const next = nextForgeUnlock(level);
+    const chips: string[] = [];
+    for (let i = 0; i < FORGE_SLOTS; i++) {
+      if (i >= open) {
+        const at = FORGE_UNLOCK_LEVELS_TEXT[i];
+        chips.push(`<span class="fs off" title="Öffnet bei Skin-Level ${at}">🔒 Lv ${at}</span>`);
+        continue;
+      }
+      const a = slots[i].affix;
+      chips.push(
+        `<button class="fs ${a ? `q${a.q}` : 'empty'}" data-act="forge" data-slot="${i}" type="button"` +
+          ` ${unlocked ? '' : 'disabled'} title="Schmiede-Slot ${i + 1}">${forgeChip(a)}</button>`,
+      );
+    }
+    const hint =
+      open === 0 && next !== null
+        ? `<span class="sc-fh dim">Schmiede ab Lv ${next}</span>`
+        : `<span class="sc-fh dim">🔥 ${fmtInt(emberHeld(state.forge))}</span>`;
+    return `<div class="sc-forge">${hint}${chips.join('')}</div>`;
+  }
+
   private card(id: SkinKey): string {
     const { state } = this.deps;
     const cfg = SKINS[id];
@@ -294,12 +338,12 @@ export class Gear {
     const stars = skinStarCount(state.gear, id);
 
     // Buff descriptors (per-level buff + per-star bonus) — AC4: always shown.
-    const buffTxt = `${fmtStat(cfg.buff.stat, cfg.buff.perLevel)}/Lv`;
-    const starTxt = `${fmtStat(cfg.star.stat, cfg.star.perStar)}/⭐`;
+    const buffTxt = `${affixText(cfg.buff.stat, cfg.buff.perLevel)}/Lv`;
+    const starTxt = `${affixText(cfg.star.stat, cfg.star.perStar)}/⭐`;
     const nowTxt =
       lv > 0 || stars > 0
-        ? `<div class="sc-now">jetzt ${fmtStat(cfg.buff.stat, cfg.buff.perLevel * lv)}` +
-          (stars > 0 ? ` · ${fmtStat(cfg.star.stat, cfg.star.perStar * stars)}` : '') +
+        ? `<div class="sc-now">jetzt ${affixText(cfg.buff.stat, cfg.buff.perLevel * lv)}` +
+          (stars > 0 ? ` · ${affixText(cfg.star.stat, cfg.star.perStar * stars)}` : '') +
           `</div>`
         : '';
 
@@ -352,6 +396,7 @@ export class Gear {
       ${nowTxt}
       <div class="sc-row"><span class="sc-level">Lv ${lv}/${MAX_SKIN_LEVEL}</span>${lvBtn}</div>
       <div class="sc-row"><span class="sc-stars">${stars5} ${stars}/${MAX_SKIN_STARS}</span>${stBtn}</div>
+      ${this.forgeRow(id, lv, unlocked)}
       ${footer}
     </div>`;
   }

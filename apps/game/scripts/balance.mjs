@@ -46,6 +46,9 @@ await build({
     join(GAME, 'src/game/retrain.ts'),
     join(GAME, 'src/game/constellation.ts'),
     join(GAME, 'src/game/territory.ts'),
+    join(GAME, 'src/game/affixes.ts'),
+    join(GAME, 'src/game/relics.ts'),
+    join(GAME, 'src/game/forge.ts'),
   ],
   bundle: true,
   format: 'esm',
@@ -60,12 +63,16 @@ const gear = await import(pathToFileURL(join(tmp, 'gear.js')).href);
 const retrain = await import(pathToFileURL(join(tmp, 'retrain.js')).href);
 const cs = await import(pathToFileURL(join(tmp, 'constellation.js')).href);
 const terr = await import(pathToFileURL(join(tmp, 'territory.js')).href);
+const aff = await import(pathToFileURL(join(tmp, 'affixes.js')).href);
+const rel = await import(pathToFileURL(join(tmp, 'relics.js')).href);
+const forge = await import(pathToFileURL(join(tmp, 'forge.js')).href);
 const MASTERY_AT = mastery.MASTERY_RANKS.map((r) => r.at);
 
 const {
   SIM_ACTIVE,
   SIM_ACTIVE_CAL,
   SIM_CONSTELLATION,
+  SIM_FORGE,
   SIM_RUN_S,
   SIM_SEEDS_HEAVY,
   simulateAscensionEra,
@@ -514,6 +521,176 @@ console.log(
     ` (Deckel ×1.15) — auf JEDER anderen Bühne ×1.000, es gibt kein Produkt über die vier Leisten.` +
     `\n   Anker: Stufe 1 im ersten Sitting · Stufe 3 nach ~3 h · Stufe 10 nach ~${(ladder[9] / repRate).toFixed(0)} h aktivem Spiel (= Wochen).` +
     `\n   Trophäe: ab Stufe ${terr.TROPHY_MIN_RANK} Bronze · ab 6 Silber · ab 10 Gold (kosmetisch, G3-Ambient-Slot).`,
+);
+
+// ---------------------------------------------------------------------------
+// 11 · Relikte & Schmiede (IDEEN-GAMEPLAY 1c + 3a) — Drop-Kurve, Glut, Budget
+//      Anker: sim.test.ts „1c Relikte (Drop-Kurve + Pity im Bot)" und
+//             „3a Skin-Schmiede (Best-Case als eigenes Profil)"
+// ---------------------------------------------------------------------------
+// Relikte fallen PASSIV aus Boss-Gates ab Bühne 50 — je Gate genau einmal im
+// Leben (`relics.deepestGate`). Der Bot spielt exakt dieselbe Regel wie das
+// Spiel, diese Tabelle ist also keine Untergrenze, sondern die Kurve selbst.
+console.log('\n── 11 · Relikte & Schmiede · Drop-Kurve + Glut-Ökonomie (1c + 3a)');
+const relicRows = [];
+for (const runs of CHAIN_RUNS) {
+  const per = chains.get(runs).map((c) => c.econ);
+  const h = (runs * SIM_RUN_S) / 3600;
+  const found = mean(per.map((p) => p.relicsFound));
+  const gate = mean(per.map((p) => p.deepestGate));
+  const gates = gate >= rel.RELIC_MIN_ZONE ? (gate - rel.RELIC_MIN_ZONE) / 5 + 1 : 0;
+  relicRows.push([
+    `${runs} × 45 min`,
+    hrs(runs * SIM_RUN_S),
+    Math.round(gate),
+    n1(gates),
+    n1(found),
+    found > 0 ? n1(gates / found) : '—',
+    n1(found / h),
+    Math.round(mean(per.map((p) => p.ember))),
+  ]);
+}
+table(
+  ['Spielzeit', '[h]', 'tiefstes Gate', 'Gates ≥ 50', '💎 Relikte', 'Gates/💎', '💎/h', '🔥 Glut'],
+  relicRows,
+);
+// Der Kettenlauf hängt an der M9-Wand (Bühne ~73) — Relikte hängen aber an der
+// TIEFE. Der E2-Treiber (voller Prestige-Stack, Abschnitt 4) stößt darüber
+// hinaus und ist deshalb die ehrliche Messung des Endgame-Zuflusses.
+console.log(
+  '   … und mit vollem Prestige-Stack (derselbe Treiber wie Abschnitt 4, bis 400 000 s):',
+);
+const relicDeep = SEEDS.map((seed) => {
+  const c = simulateContinuous(
+    { ...SIM_ACTIVE, seed },
+    { stallSeconds: 1500, maxSeconds: 400_000, plateauAscensions: 4, fullPrestige: true },
+  );
+  const gates =
+    c.econ.deepestGate >= rel.RELIC_MIN_ZONE
+      ? (c.econ.deepestGate - rel.RELIC_MIN_ZONE) / 5 + 1
+      : 0;
+  return { seed, zone: c.maxBestZone, gates, found: c.econ.relicsFound, ember: c.econ.ember };
+});
+table(
+  ['Seed', 'Beste Bühne', 'Gates ≥ 50', '💎 Relikte', 'Gates/💎', '🔥 Glut'],
+  relicDeep.map((d) => [
+    d.seed,
+    d.zone,
+    d.gates,
+    d.found,
+    d.found > 0 ? n1(d.gates / d.found) : '—',
+    d.ember,
+  ]),
+);
+console.log(
+  `   Mittel: ${n1(mean(relicDeep.map((d) => d.gates)))} Gates ⇒ ${n1(mean(relicDeep.map((d) => d.found)))} Relikte` +
+    ` (${n1(mean(relicDeep.map((d) => d.gates)) / Math.max(1e-9, mean(relicDeep.map((d) => d.found))))} Gates je Relikt)`,
+);
+
+// Der Erwartungswert der Drop-Regel, analytisch gegen die gemessene Kurve.
+const p = rel.RELIC_DROP_CHANCE;
+let expGates = 0;
+for (let k = 1; k < rel.RELIC_PITY; k++) expGates += k * p * Math.pow(1 - p, k - 1);
+expGates += rel.RELIC_PITY * Math.pow(1 - p, rel.RELIC_PITY - 1);
+console.log(
+  `   Regel: ab Bühne ${rel.RELIC_MIN_ZONE} · ${(p * 100).toFixed(0)} % je NEUEM Gate · Garantie am ${rel.RELIC_PITY}.` +
+    ` ⇒ Erwartung ${expGates.toFixed(2)} Gates je Relikt (= ${(expGates * 5).toFixed(0)} Bühnen Vorstoß)` +
+    `\n   Ein Gate würfelt genau EINMAL im Leben (Highwater überlebt alle drei Resets) — Farmen zahlt keine Relikte.`,
+);
+
+// Die Glut-Ökonomie: woher sie kommt, was sie kostet.
+table(
+  ['Glut-Quelle / Senke', 'Wert'],
+  [
+    [
+      'Duplikat-Jackpot (Holz/Gold/Diamant/Mythos)',
+      `${forge.DUP_EMBER.wood} / ${forge.DUP_EMBER.gold} / ${forge.DUP_EMBER.diamond} / ${forge.DUP_EMBER.mythic} 🔥`,
+    ],
+    ['Splitter-Umtausch', `${forge.SHARDS_PER_EMBER} 🧩 → 1 🔥`],
+    [
+      'Relikt einschmelzen (1 Affix grob … 2 Affixe makellos)',
+      `${rel.EMBER_PER_AFFIX} … ${2 * (rel.EMBER_PER_AFFIX + rel.EMBER_PER_QUALITY * 3)} 🔥`,
+    ],
+    [
+      'Reforge Slot 1 / 2 / 3',
+      `${forge.forgeCost(0)} / ${forge.forgeCost(1)} / ${forge.forgeCost(2)} 🔥`,
+    ],
+    [
+      'mit Affix-Lock (×' + forge.FORGE_LOCK_FACTOR + ')',
+      `${forge.forgeCost(0, true)} / ${forge.forgeCost(1, true)} / ${forge.forgeCost(2, true)} 🔥`,
+    ],
+  ],
+);
+// Die Slot-Leiter in Splittern: was ein Schmiede-Slot WIRKLICH kostet.
+const cumShards = (lv) => {
+  let n = 0;
+  for (let i = 0; i < lv; i++) n += gear.shardCost(i);
+  return n;
+};
+table(
+  ['Schmiede-Slot', 'Skin-Level', 'Σ 🧩 bis dahin', 'bei ~140 🧩/h'],
+  forge.FORGE_UNLOCK_LEVELS.map((lv, i) => [
+    `Slot ${i + 1}`,
+    lv,
+    Math.round(cumShards(lv)).toLocaleString('de-DE'),
+    `${(cumShards(lv) / 140).toFixed(1)} h`,
+  ]),
+);
+
+// Das Budget — dieselbe Disziplin wie Abschnitt 9 (2a) und 10 (1b).
+table(
+  ['Budget-Term', 'Rechnung', 'Wert'],
+  [
+    [
+      'Höchstfall Affixe',
+      `${aff.RELIC_SLOTS} Relikte × ${aff.RELIC_MAX_AFFIXES} + ${aff.FORGE_SLOTS} Schmiede`,
+      `${aff.MAX_WORN_AFFIXES}`,
+    ],
+    [
+      'Qualitäts-Spanne',
+      'Grob … Makellos',
+      `×${aff.QUALITIES[0].factor} … ×${aff.QUALITIES[3].factor}`,
+    ],
+    [
+      'Deckel je Term (strukturell)',
+      `+${(aff.AFFIX_STAT_CAP * 100).toFixed(0)} %`,
+      `×${(1 + aff.AFFIX_STAT_CAP).toFixed(2)}`,
+    ],
+    [
+      'Σ Einzel-Term (alle 9 gestapelt)',
+      'Deckel greift',
+      `×${aff.affixSingleTermBudget().toFixed(4)}  (Richtwert ×2)`,
+    ],
+    [
+      'Σ Leistungs-Budget (Produkt)',
+      'Klick × DPS × BP × Krit-EV × Luck',
+      `×${aff.affixPowerBudget().toFixed(4)}  (Richtwert ×1.5)`,
+    ],
+    [
+      'Boss-Term (A2: getrennt)',
+      'läuft gegen Gates, nicht Farm',
+      `×${aff.affixBossBudget().toFixed(4)}`,
+    ],
+    ['Offline (Rate)', 'auf die 50-%-Basis', `×${aff.affixOfflineBudget().toFixed(4)}`],
+  ],
+);
+console.log('\n   Best-Case-Schmiede im Bot (Profil „Schmiede voll") vs. Basis:');
+const forgeRows = [];
+for (const seed of SEEDS) {
+  const a = simulateSingleRun({ ...SIM_ACTIVE_CAL, seed }, SIM_RUN_S);
+  const b = simulateSingleRun({ ...SIM_ACTIVE_CAL, forge: true, seed }, SIM_RUN_S);
+  forgeRows.push([
+    seed,
+    `${min(a.timeToZone.get(25))} → ${min(b.timeToZone.get(25))}`,
+    `×${(a.timeToZone.get(25) / b.timeToZone.get(25)).toFixed(2)}`,
+    `${a.bestZone} → ${b.bestZone}`,
+  ]);
+}
+table(['Seed', 't25 [min]', 'Beschleunigung', 'Wand-Bühne'], forgeRows);
+console.log(
+  `   Profil: ${JSON.stringify(SIM_FORGE)} (${forge.FORGE_BEST.map((x) => `${x.id}/makellos`).join(' + ')})` +
+    `\n   Der NORMALE Bot schmiedet nie (dokumentierte Untergrenze) — Relikte dagegen faltet JEDES Profil,` +
+    ` sie fallen ohne Kauf-Entscheidung.`,
 );
 
 rmSync(tmp, { recursive: true, force: true });

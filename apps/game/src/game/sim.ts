@@ -141,7 +141,16 @@ import {
   tickBoss,
   travelTo,
 } from './combat';
-import { MAX_SKIN_LEVEL, shardCost } from './gear';
+import { type GearBonus, MAX_SKIN_LEVEL, emptyGearBonus, shardCost } from './gear';
+import { type RolledAffix, foldAffixes } from './affixes';
+import {
+  type RelicsState,
+  createRelics,
+  equipBestRelics,
+  equippedRelicAffixes,
+  gateRelicRoll,
+} from './relics';
+import { FORGE_BEST, emberForDuplicate } from './forge';
 import { GOBLIN_BUFF_MULT, GOBLIN_CHESTS, GOBLIN_SIM_CATCH, rollNextGoblinAt } from './goblin';
 import {
   REMIX_OFF,
@@ -255,6 +264,25 @@ export interface SimConfig {
    * die erste Himmelfahrt? (Antwort steht in `sim.test.ts` und in DECISIONS.md.)
    */
   constellation?: boolean;
+  /**
+   * **IDEEN-GAMEPLAY 3a — die Skin-Schmiede.** Standard `false`: Der normale
+   * Anker-Bot schmiedet NIE. Das ist dieselbe dokumentierte **Untergrenze** wie
+   * bei der Umschulung (3b) und der Konstellation (2a) — Schmieden kostet Glut,
+   * die der Bot ohnehin nicht ausgibt, es setzt Skin-Level 10/25/40 voraus (die
+   * er nicht gezielt kauft) und es kann die Affix-Verteilung im Zweifel nur
+   * VERBESSERN. Ein optimal schmiedender Bot wäre schneller als jeder Spieler,
+   * und die Anker müssen die langsamere Wahrheit messen.
+   *
+   * `true` schaltet die **Best-Case-Schmiede** ein ({@link FORGE_BEST}: drei
+   * makellose Slots) — das eigene Anker-Profil {@link SIM_FORGE}, an dem der
+   * Budget-Deckel gemessen wird.
+   *
+   * **Relikte (1c) sind davon NICHT betroffen** und stecken in JEDEM Profil:
+   * Sie fallen passiv aus Boss-Gates ab Bühne 50, ohne jede Kauf-Entscheidung —
+   * genau wie der Ruf (1b) trägt sie also zwangsläufig jeder echte Spielstand,
+   * und ein Bot ohne sie würde einen Machtterm verschweigen.
+   */
+  forge?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +311,16 @@ export const SIM_ACTIVE_CAL: SimConfig = { clickRate: 3, juice: true, economy: f
  * dem ×1.5-Budget bleiben.
  */
 export const SIM_CONSTELLATION: SimConfig = { clickRate: 3, juice: true, constellation: true };
+
+/**
+ * **„Schmiede voll"** (IDEEN-GAMEPLAY 3a, Pflicht-Guardrail): derselbe aktive
+ * Spieler wie {@link SIM_ACTIVE}, aber mit drei makellos geschmiedeten
+ * Slots ({@link FORGE_BEST}). Der A/B-Partner von `SIM_ACTIVE` — die Differenz
+ * der Anker IST die gemessene Wirkung der Schmiede und muss unter dem Budget
+ * bleiben. Die Relikte laufen in BEIDEN Läufen mit, gemessen wird also die
+ * Schmiede allein.
+ */
+export const SIM_FORGE: SimConfig = { clickRate: 3, juice: true, forge: true };
 
 /** Die feste Lauflänge der Messungen: 45 min = 2700 Ein-Sekunden-Schritte. */
 export const SIM_RUN_S = 2700;
@@ -352,6 +390,29 @@ interface Sim {
    * verschweigen, den ein echter Spielstand zwangsläufig trägt.
    */
   territory: Territory;
+  /**
+   * 1c: Die Relikt-Sammlung. Sie wächst im Bot GENAUSO passiv wie im Spiel —
+   * jedes neue Boss-Gate ab Bühne 50 würfelt einmal — und kein Reset-Pfad fasst
+   * sie an. Der Bot trägt automatisch die drei bestgerollten (`equipBestRelics`).
+   */
+  relics: RelicsState;
+  /**
+   * 3a: Die geschmiedeten Affixe des getragenen Skins. Leer im Normal-Bot
+   * (dokumentierte Untergrenze), voll im Profil {@link SIM_FORGE}.
+   */
+  forgeAffixes: readonly RolledAffix[];
+  /** 3a: Gebankte Schmiede-Glut aus Duplikat-Jackpots + Splitter-Umtausch. */
+  ember: number;
+  /**
+   * Gemerkter Affix-Fold (1c + 3a). Er wird bis zu viermal PRO SEKUNDE gelesen
+   * (Klick-, Idle-, BP- und Truhen-Term) und ändert sich nur, wenn ein Relikt
+   * fällt — ohne diesen Cache lief `sim.test.ts` zehn Sekunden länger. `null`
+   * heißt „neu rechnen"; jeder Schreibzugriff auf `relics`/`forgeAffixes` setzt
+   * ihn zurück.
+   */
+  loadout: GearBonus | null;
+  /** Die Truhen-Skins, die der Bot schon besitzt — ab dem zweiten gibt es Glut. */
+  chestSkins: Set<string>;
   gilds: Gilds;
   souls: number;
   lifetimeMaxZone: number;
@@ -423,6 +484,8 @@ interface Sim {
   peachesCaught: number;
   /** A3: Truhen-Kobolde gefangen (lifetime). */
   goblinsCaught: number;
+  /** 1c: Gefundene Relikte (lifetime) — die Messgröße der Drop-Kurve. */
+  relicsFound: number;
   rng: Rng;
 }
 
@@ -442,6 +505,12 @@ export interface EconSummary {
   shards: number;
   /** Shard-bought skin level driving the idle-gear multiplier. */
   gearLevel: number;
+  /** 1c: Gefundene Relikte — die Drop-Kurve, gegen die Rate + Pity geeicht sind. */
+  relicsFound: number;
+  /** 3a: Gebankte Schmiede-Glut aus Duplikat-Jackpots. */
+  ember: number;
+  /** 1c: Das tiefste Boss-Gate, das schon gewürfelt hat (die Drop-Front). */
+  deepestGate: number;
 }
 
 /** Read the current loot-economy tallies off the sim. */
@@ -456,16 +525,24 @@ function econSummary(sim: Sim): EconSummary {
     tokensBanked,
     shards: sim.shards,
     gearLevel: shardSkinLevel(sim.shards),
+    relicsFound: sim.relicsFound,
+    ember: sim.ember,
+    deepestGate: sim.relics.deepestGate,
   };
 }
 
-function newSim(seed: number, mods = true, constellation = false): Sim {
+function newSim(seed: number, mods = true, constellation = false, forge = false): Sim {
   return {
     gold: 0,
     crew: {},
     crewUp: {},
     crewMastery: createMastery(),
     territory: createTerritory(),
+    relics: createRelics(),
+    forgeAffixes: forge ? FORGE_BEST : [],
+    ember: 0,
+    loadout: null,
+    chestSkins: new Set<string>(),
     gilds: {},
     souls: 0,
     lifetimeMaxZone: 1,
@@ -493,6 +570,7 @@ function newSim(seed: number, mods = true, constellation = false): Sim {
     chestsOpened: 0,
     peachesCaught: 0,
     goblinsCaught: 0,
+    relicsFound: 0,
     rng: new Rng({ seed, cursor: 0 }),
   };
 }
@@ -532,6 +610,7 @@ function critFactor(
   stageCrit = 0,
   heaven: HeavenState = createHeaven(),
   constellation: ConstellationState = createConstellation(),
+  loadout: GearBonus = emptyGearBonus(),
 ): number {
   if (!config.juice) return 1;
   const econ = econOn(config);
@@ -549,12 +628,18 @@ function critFactor(
       // 2a: die drei Krit-Sterne der Konstellation (+0,5 pp je Stern) — durch
       // DENSELBEN 40-%-Deckel wie im Spiel.
       constellationCritChanceBonus(constellation) +
+      // 1c + 3a: „Glückstreffer"/„Sequin-Crit" des Loadouts — durch DENSELBEN
+      // 40-%-Deckel wie im Spiel.
+      loadout.critChance +
       (econ ? permTokenCritChance(permTokens) : 0),
   );
   // P4 „Präzisions-Shake": derselbe multiplikative Griff wie die Krit-Token (×1
   // ohne Knoten), deshalb hängt er auch außerhalb der Loot-Ökonomie im Term.
+  // 1c + 3a: „Wuchtschlag" des Loadouts wird wie jeder `critMultBonus` des
+  // Spiels ADDITIV auf CRIT_MULT gelegt (`click.critMult`), nicht multiplikativ
+  // darauf — dieselbe Semantik wie beim Lava-Skin und den Crew-Specials.
   const mult =
-    (CRIT_MULT + spec.critDmg) *
+    (CRIT_MULT + spec.critDmg + loadout.critMult) *
     (econ ? permTokenCritMult(permTokens) : 1) *
     heavenCritMultFactor(heaven);
   return 1 + chance * (mult - 1);
@@ -589,6 +674,24 @@ function shardIdleMultFor(sim: Sim, config: SimConfig): number {
   return shardGearIdleMult(sim.shards);
 }
 
+/**
+ * **1c + 3a — der Affix-Fold des Bots.** Getragene Relikte (drei Slots, vom Bot
+ * automatisch die bestgerollten) plus die Schmiede-Affixe des Profils. Läuft
+ * durch dieselbe eine Funktion wie im Spiel (`affixes.foldAffixes`), inklusive
+ * des strukturellen Deckels je Term — es gibt keinen zweiten Rechenweg.
+ */
+function simLoadout(sim: Sim): GearBonus {
+  let v = sim.loadout;
+  if (v === null) {
+    v =
+      sim.relics.owned.length === 0 && sim.forgeAffixes.length === 0
+        ? emptyGearBonus()
+        : foldAffixes([...equippedRelicAffixes(sim.relics), ...sim.forgeAffixes]);
+    sim.loadout = v;
+  }
+  return v;
+}
+
 /** Die beiden Schadens-Quellen einer Sekunde, getrennt (A2 braucht den Split). */
 interface DamageSplit {
   /** Aktiver Klick-Schaden dieser Sekunde (Rate × Klick × Combo × Krit-EV). */
@@ -621,6 +724,7 @@ function powerSplit(
   crit: number,
   permTokens: PermTokens,
   shardIdle: number,
+  loadout: GearBonus,
 ): DamageSplit {
   const hpf = heaven.hpf;
   const sm = soulMult(souls, soulBonusEff(hpf));
@@ -635,6 +739,8 @@ function powerSplit(
     heavenClickMult(heaven) *
     // 2a: die vier Klick-Sterne (+2 % je Stern, ×1 ohne Baum).
     constellationClickMult(constellation) *
+    // 1c + 3a: die `clickPct`-Affixe des Loadouts (×1 ohne Relikte/Schmiede).
+    (1 + loadout.clickPct) *
     (config.clickGearMult ?? 1);
   // Idle gear (§5) + the permanent DPS-token pool (§6.2) + the crew's
   // `idle`-special tiers (v11.1 Groove) multiply crew DPS only — never the
@@ -648,6 +754,8 @@ function powerSplit(
     heavenDpsMult(heaven) *
     // 2a: die drei Ausdauer-Sterne (+2 % je Stern, ×1 ohne Baum) — nur Idle.
     constellationDpsMult(constellation) *
+    // 1c + 3a: die `dpsPct`-Affixe des Loadouts (×1 ohne Relikte/Schmiede).
+    (1 + loadout.dpsPct) *
     (config.idleGearMult ?? 1) *
     shardIdle *
     (econOn(config) ? permTokenDpsMult(permTokens) : 1) *
@@ -670,6 +778,7 @@ function powerFor(
   crit: number,
   permTokens: PermTokens,
   shardIdle: number,
+  loadout: GearBonus,
 ): number {
   const p = powerSplit(
     crew,
@@ -685,6 +794,7 @@ function powerFor(
     crit,
     permTokens,
     shardIdle,
+    loadout,
   );
   return p.click + p.idle;
 }
@@ -705,6 +815,7 @@ function damageSplit(sim: Sim, config: SimConfig, combo: number, crit: number): 
     crit,
     sim.permTokens,
     shardIdleMultFor(sim, config),
+    simLoadout(sim),
   );
 }
 
@@ -777,7 +888,12 @@ function tickGoblin(sim: Sim, nowMs: number): void {
  * additive Stack wie `ch-state.chestLuck` im Spiel.
  */
 function chestLuckNow(sim: Sim): number {
-  return ancientChestLuckBonus(sim.ancients) + constellationChestLuckBonus(sim.constellation);
+  return (
+    ancientChestLuckBonus(sim.ancients) +
+    constellationChestLuckBonus(sim.constellation) +
+    // 1c + 3a: die „Spürnase"-Affixe des Loadouts.
+    simLoadout(sim).chestLuck
+  );
 }
 
 /**
@@ -806,8 +922,12 @@ function goldMultiplierNow(sim: Sim, config: SimConfig, nowMs: number): number {
   // 2a „Anfängerglück" + „Tantiemen" (+2 % je Stern) treffen wie die „Goldenen
   // Hände" JEDE BP-Quelle, also auch die Kalibrier-Läufe ohne Loot-Ökonomie.
   const sterne = constellationGoldMult(sim.constellation);
-  if (!econOn(config)) return ancientGoldMult(sim.ancients) * crewGold * hande * sterne;
+  // 1c + 3a: „Trinkgeld" des Loadouts trifft wie die „Goldenen Hände" JEDE
+  // BP-Quelle, also auch die Kalibrier-Läufe ohne Loot-Ökonomie.
+  const affix = 1 + simLoadout(sim).goldPct;
+  if (!econOn(config)) return ancientGoldMult(sim.ancients) * crewGold * hande * sterne * affix;
   return (
+    affix *
     ancientGoldMult(sim.ancients) *
     permTokenGoldMult(sim.permTokens) *
     incomeMultiplier(sim.boostUntilMs, nowMs) *
@@ -839,9 +959,22 @@ function foldReward(sim: Sim, reward: Reward, nowMs: number): void {
       sim.boostUntilMs = clampBoostUntil(base + reward.boost.durMs, nowMs);
       break;
     }
-    // `sugar` (🍬 → gear stars, ~1×/24 h real-time) and `jackpot` (cosmetic
-    // chest-skin) carry no meaningful run-power — caught but not converted (see the
-    // module-header exclusions). No default action needed.
+    case 'jackpot': {
+      // 3a: Ein Jackpot-Skin, den der Bot schon besitzt, ist ein DUPLIKAT — und
+      // Duplikate sind seit 3a der Glut-Faucet (`forge.emberForDuplicate`).
+      // Der Skin selbst bleibt Kosmetik (dokumentierter Ausschluss); gezählt
+      // wird nur, was die Schmiede daraus zieht. Die 🧩 aus `resolveDuplicate`
+      // bucht der Bot bewusst NICHT — sie sind ein reiner Splitter-Zufluss, den
+      // die 3b-Kurve schon misst, und würden die Anker sonst doppelt speisen.
+      if (sim.chestSkins.has(reward.jackpot.skin)) {
+        sim.ember += emberForDuplicate(reward.jackpot.tier);
+      } else {
+        sim.chestSkins.add(reward.jackpot.skin);
+      }
+      break;
+    }
+    // `sugar` (🍬 → gear stars, ~1×/24 h real-time) carries no meaningful
+    // run-power — caught but not converted (see the module-header exclusions).
   }
 }
 
@@ -976,6 +1109,20 @@ function stepSecond(
       // Theme, dem der Ruf gutgeschrieben wird, als auch den Ruf-BP-Faktor
       // (nach `hit` steht `combat.zone` womöglich schon eine Bühne weiter).
       const killZone = combat.zone;
+      // 1c: Ein Boss-Gate ab Bühne 50 würfelt GENAU EINMAL im Leben auf ein
+      // Relikt — der Highwater in `relics` gattert das selbst, deshalb steht
+      // dieser Aufruf (anders als der Truhen-Drop unten) NICHT hinter
+      // `onFrontier`: Der Bot liest hier exakt dieselbe Regel wie das Spiel.
+      if (wasBoss) {
+        const drop = gateRelicRoll(sim.relics, bossZone, sim.rng);
+        if (drop.relics !== sim.relics) {
+          // Der Bot trägt immer die drei bestgerollten (`relicScore`) — die
+          // dokumentierte, build-blinde Auto-Wahl, kein Macht-Optimierer.
+          sim.relics = drop.relic ? equipBestRelics(drop.relics) : drop.relics;
+          sim.loadout = null; // getragene Relikte geändert ⇒ Fold neu rechnen
+          if (drop.relic) sim.relicsFound += 1;
+        }
+      }
       const r = hit(combat, combat.hp);
       sim.gold += Math.floor(
         r.gold * goldMult * (stage?.f.gold ?? 1) * territoryGoldMult(sim.territory, killZone),
@@ -1101,6 +1248,7 @@ function economyStep(
     stageCrit,
     sim.heaven,
     sim.constellation,
+    simLoadout(sim),
   );
   const base = damageSplit(sim, config, combo, crit);
   // 2a ★ „Warm-up-Start": die ersten 60 s jeder Tour zählt der Klick-Anteil ×2
@@ -1221,7 +1369,12 @@ export interface ChainResult {
  * each new best zone for the endless-wall criterion (E2) and the §4.8 Bühne-80 target.
  */
 export function simulateRunChain(config: SimConfig, runs: number, runSeconds: number): ChainResult {
-  const sim = newSim(config.seed ?? 1, modsOn(config), config.constellation === true);
+  const sim = newSim(
+    config.seed ?? 1,
+    modsOn(config),
+    config.constellation === true,
+    config.forge === true,
+  );
   const summaries: RunSummary[] = [];
   const timeToLifetime = new Map<number, number>();
   let globalT = 0;
@@ -1269,7 +1422,12 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
 
 /** Play a single fresh run (0 souls); the E4 active-vs-casual comparison unit. */
 export function simulateSingleRun(config: SimConfig, seconds: number): RunResult {
-  const sim = newSim(config.seed ?? 1, modsOn(config), config.constellation === true);
+  const sim = newSim(
+    config.seed ?? 1,
+    modsOn(config),
+    config.constellation === true,
+    config.forge === true,
+  );
   startTour(sim, 0); // 2a: Startkapital + Warm-up-Fenster der ersten Tour
   return runOnce(sim, seconds, config);
 }
@@ -1314,6 +1472,13 @@ export interface ContinuousResult {
   mastery: CrewMastery;
   /** Gebietsherrschaft (1b) am Ende des Laufs — Ruf je Bühnen-Theme. */
   territory: Territory;
+  /**
+   * Die kumulierte Loot-Ökonomie am Ende des Laufs. Für 1c ist genau DIESER
+   * Treiber die ehrliche Messung: Er fährt den vollen Prestige-Stack und stößt
+   * damit über die M9-Wand hinaus, während der Kettenlauf bei Bühne ~73 hängen
+   * bleibt — und Relikte hängen nun einmal an der TIEFE, nicht an der Spielzeit.
+   */
+  econ: EconSummary;
 }
 
 /**
@@ -1329,7 +1494,12 @@ export interface ContinuousResult {
  * plateau (souls stop growing) — the honest crew+gild+soul-only ceiling.
  */
 export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): ContinuousResult {
-  const sim = newSim(config.seed ?? 1, modsOn(config), config.constellation === true);
+  const sim = newSim(
+    config.seed ?? 1,
+    modsOn(config),
+    config.constellation === true,
+    config.forge === true,
+  );
   startTour(sim, 0); // 2a
   let combat = spawnFor(1, 0, 1, sim.remix);
   const timeToLifetime = new Map<number, number>();
@@ -1369,7 +1539,15 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
       ascensions++;
       if (opts.fullPrestige) {
         const combo = comboFactor(config, sim.heaven);
-        const crit = critFactor(config, sim.permTokens, sim.crewUp, 0, sim.heaven);
+        const crit = critFactor(
+          config,
+          sim.permTokens,
+          sim.crewUp,
+          0,
+          sim.heaven,
+          sim.constellation,
+          simLoadout(sim),
+        );
         buyAncientsGreedy(sim, config, combo, crit); // §4.6 soul sink → deeper re-climbs
       }
       if (gained <= 0) {
@@ -1413,6 +1591,7 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
     maxBestZone: maxBest,
     finalBank: sim.souls,
     plateaued,
+    econ: econSummary(sim),
   };
 }
 
@@ -1435,6 +1614,7 @@ export function farmZone(combat: CombatState, zone: number): CombatState {
 function buyAncientsGreedy(sim: Sim, config: SimConfig, combo: number, crit: number): void {
   const permTokens = sim.permTokens;
   const shardIdle = shardIdleMultFor(sim, config);
+  const loadout = simLoadout(sim);
   let guard = 300;
   for (;;) {
     if (guard-- <= 0) break;
@@ -1452,6 +1632,7 @@ function buyAncientsGreedy(sim: Sim, config: SimConfig, combo: number, crit: num
       crit,
       permTokens,
       shardIdle,
+      loadout,
     );
     let bestId: string | null = null;
     let bestPower = p0;
@@ -1472,6 +1653,7 @@ function buyAncientsGreedy(sim: Sim, config: SimConfig, combo: number, crit: num
         crit,
         permTokens,
         shardIdle,
+        loadout,
       );
       if (p > bestPower) {
         bestPower = p;
@@ -1566,7 +1748,12 @@ export interface EraResult {
  * anti-plateau of §4.6.
  */
 export function simulateAscensionEra(config: SimConfig, opts: EraOptions): EraResult {
-  const sim = newSim(config.seed ?? 1, modsOn(config), config.constellation === true);
+  const sim = newSim(
+    config.seed ?? 1,
+    modsOn(config),
+    config.constellation === true,
+    config.forge === true,
+  );
   startTour(sim, 0); // 2a
   let combat = spawnFor(1, 0, 1, sim.remix);
   let globalT = 0;
@@ -1589,7 +1776,15 @@ export function simulateAscensionEra(config: SimConfig, opts: EraOptions): EraRe
     if (combat.maxZone > maxBestZone) maxBestZone = combat.maxZone;
 
     const combo = comboFactor(config, sim.heaven);
-    const crit = critFactor(config, sim.permTokens, sim.crewUp, 0, sim.heaven);
+    const crit = critFactor(
+      config,
+      sim.permTokens,
+      sim.crewUp,
+      0,
+      sim.heaven,
+      sim.constellation,
+      simLoadout(sim),
+    );
     const power = damagePerSecond(sim, config, combo, crit);
     maxPower = Math.max(maxPower, power);
     if (milestonePower <= 0) {
@@ -1746,6 +1941,7 @@ export function simulateFloatGuard(config: SimConfig, opts: FloatGuardOptions): 
       crit,
       sim.permTokens,
       shardGearIdleMult(sim.shards),
+      simLoadout(sim),
     );
     audit(power);
   }

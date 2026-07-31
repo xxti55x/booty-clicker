@@ -69,13 +69,22 @@ import {
   totalStars,
 } from '../game/stars';
 import { type Territory, ZONE_THEMES, createTerritory } from '../game/territory';
+import { FORGE_SLOTS, RELIC_MAX_AFFIXES, RELIC_SLOTS, clampQuality } from '../game/affixes';
+import {
+  type Relic,
+  type RelicsState,
+  RELIC_MIN_ZONE,
+  createRelics,
+  isRolledAffix,
+} from '../game/relics';
+import { type ForgeSlot, type ForgeState, createForge } from '../game/forge';
 import { type TranscendState, createTranscend } from '../game/transcend';
 import { SKINS } from '../character/skins';
 import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 16;
+export const CH_SCHEMA = 17;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -105,7 +114,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (v16, Gebietsherrschaft): ChState + envelope. */
+/** The current persisted shape (v17, Relikte & Skin-Schmiede): ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -134,7 +143,7 @@ function isFiniteNumber(v: unknown): v is number {
  * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
  * The meta/juice fields (rng/stats/legacyImported/ability/combo/gilds/rsLifetime/
  * ancients/heaven/gear/chests/permTokens/peach/meta/achievements/transcend/
- * stageStars/crewMastery/crewRetrain/constellation/territory) are
+ * stageStars/crewMastery/crewRetrain/constellation/territory/relics/forge) are
  * deliberately NOT gated here: they are runtime bookkeeping and get repaired (fresh
  * seed / zeroed stats / false flag / default ability+combo / pruned gilds / clamped
  * highwater / sanitised ancients+heaven+gear / defaulted loot slices / defaulted
@@ -654,6 +663,128 @@ function repairTerritory(v: unknown): Territory {
   return out;
 }
 
+/**
+ * Repair die **Relikte** (v17, 1c). Fünf Regeln, jede an ihrem eigenen Rand:
+ *
+ *  · **Ein Relikt überlebt nur vollständig.** Positive ganzzahlige Id, echte
+ *    Katalog-Sorten, Qualität auf 0…3 geklemmt, höchstens
+ *    {@link RELIC_MAX_AFFIXES} Affixe und keine Sorte doppelt (zwei gleiche
+ *    Affixe auf einem Stück wären eine verdoppelte Zahl, die kein Wurf je
+ *    erzeugen kann). Bleibt danach kein Affix übrig, fällt das ganze Relikt
+ *    weg — ein leeres Relikt wäre eine Zeile ohne Wirkung.
+ *  · **Ids sind eindeutig.** Ein handgeschriebener Save mit zweimal derselben
+ *    Id hätte zwei Stücke, auf die ein Trage-Slot gleichzeitig zeigt; der
+ *    zweite Treffer fliegt raus.
+ *  · **Die Slots zeigen nur auf Vorhandenes** — und nie zweimal auf dasselbe
+ *    Relikt (sonst zählte ein Stück doppelt, exakt der Fall, den
+ *    `equipRelic` im Spiel ausschließt).
+ *  · **`nextId` wird nach OBEN korrigiert** (über die größte vergebene Id) —
+ *    dieselbe Richtung wie bei `repairTranscend`: Eine zu kleine Zahl würde
+ *    Ids recyceln und einen Slot auf ein FREMDES Relikt zeigen lassen.
+ *  · **`deepestGate` wird NICHT gedeckelt.** Ein zu hoher Wert schadet nur
+ *    seinem Besitzer (er sperrt eigene Drops aus) — genau wie der Roll-Zähler
+ *    in `repairRetrainRolls`. Ein zu niedriger ist nach dem nächsten Vorstoß
+ *    ohnehin wieder die Wahrheit.
+ *
+ * Nie werfend; ein komplett kaputter Slice wird eine frische, leere Sammlung.
+ */
+function repairRelics(v: unknown): RelicsState {
+  const def = createRelics();
+  if (!isRecord(v)) return def;
+  const owned: Relic[] = [];
+  const seen = new Set<number>();
+  if (Array.isArray(v.owned)) {
+    for (const raw of v.owned) {
+      if (!isRecord(raw)) continue;
+      const id = isFiniteNumber(raw.id) && raw.id > 0 ? Math.floor(raw.id) : 0;
+      if (id <= 0 || seen.has(id)) continue;
+      if (!Array.isArray(raw.affixes)) continue;
+      const affixes: { id: string; q: number }[] = [];
+      const kinds = new Set<string>();
+      for (const a of raw.affixes) {
+        if (affixes.length >= RELIC_MAX_AFFIXES) break;
+        if (!isRolledAffix(a) || kinds.has(a.id)) continue;
+        kinds.add(a.id);
+        affixes.push({ id: a.id, q: clampQuality(a.q) });
+      }
+      if (affixes.length === 0) continue;
+      const zone = isFiniteNumber(raw.zone) && raw.zone > 0 ? Math.floor(raw.zone) : RELIC_MIN_ZONE;
+      seen.add(id);
+      owned.push({ id, zone, affixes });
+    }
+  }
+  const ids = new Set(owned.map((r) => r.id));
+  const slots = new Array<number>(RELIC_SLOTS).fill(0);
+  if (Array.isArray(v.slots)) {
+    const used = new Set<number>();
+    for (let i = 0; i < RELIC_SLOTS; i++) {
+      const raw = v.slots[i];
+      const id = isFiniteNumber(raw) && raw > 0 ? Math.floor(raw) : 0;
+      if (id > 0 && ids.has(id) && !used.has(id)) {
+        used.add(id);
+        slots[i] = id;
+      }
+    }
+  }
+  let maxId = 0;
+  for (const r of owned) if (r.id > maxId) maxId = r.id;
+  const nextId = Math.max(
+    isFiniteNumber(v.nextId) && v.nextId > 0 ? Math.floor(v.nextId) : 1,
+    maxId + 1,
+  );
+  return {
+    owned,
+    slots,
+    nextId,
+    pity: isFiniteNumber(v.pity) && v.pity > 0 ? Math.floor(v.pity) : 0,
+    deepestGate: isFiniteNumber(v.deepestGate) && v.deepestGate > 0 ? Math.floor(v.deepestGate) : 0,
+  };
+}
+
+/**
+ * Repair die **Skin-Schmiede** (v17, 3a): gehaltene Glut als nicht-negative
+ * ganze Zahl, und je Skin höchstens {@link FORGE_SLOTS} Slots. Ein Slot behält
+ * sein Affix nur, wenn Sorte UND Qualität den Katalog überstehen; alles andere
+ * wird ein leerer Slot (statt das ganze Skin-Fach zu verwerfen, denn Slot 2
+ * darf nicht an Slot 1 sterben).
+ *
+ * Nur echte Skin-Ids bekommen ein Fach (`Object.hasOwn(SKINS, …)`, dieselbe
+ * Disziplin wie `repairGear.crafted`) — ein erfundener Skin hätte keinen
+ * Level, der seine Slots je freischalten könnte, und wäre stiller Ballast.
+ *
+ * Bewusst NICHT gegen `gear.skinLevels` geklemmt: `forgeAffixes` liest ohnehin
+ * nur die Slots, die der aktuelle Level freigeschaltet hat, also WIRKT ein
+ * verwaister Slot nicht — aber er bleibt erhalten, falls der Level später
+ * wiederkommt. Wegzuwerfen hieße, bezahlte Glut zu nuken.
+ */
+function repairForge(v: unknown): ForgeState {
+  const def = createForge();
+  if (!isRecord(v)) return def;
+  const slots: Record<string, ForgeSlot[]> = {};
+  if (isRecord(v.slots)) {
+    for (const [skin, raw] of Object.entries(v.slots)) {
+      if (!Object.hasOwn(SKINS, skin) || !Array.isArray(raw)) continue;
+      const row: ForgeSlot[] = [];
+      let any = false;
+      for (let i = 0; i < FORGE_SLOTS; i++) {
+        const s = raw[i];
+        if (!isRecord(s)) {
+          row.push({ affix: null, dry: 0 });
+          continue;
+        }
+        const affix = isRolledAffix(s.affix)
+          ? { id: s.affix.id, q: clampQuality(s.affix.q) }
+          : null;
+        const dry = isFiniteNumber(s.dry) && s.dry > 0 ? Math.floor(s.dry) : 0;
+        if (affix || dry > 0) any = true;
+        row.push({ affix, dry });
+      }
+      if (any) slots[skin] = row;
+    }
+  }
+  return { ember: isFiniteNumber(v.ember) && v.ember > 0 ? Math.floor(v.ember) : 0, slots };
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
 function stateFromSave(save: ChSaveLatest): ChState {
   const souls = save.souls;
@@ -698,6 +829,8 @@ function stateFromSave(save: ChSaveLatest): ChState {
     bossFoulZone: isNonNegInt(save.bossFoulZone) ? save.bossFoulZone : 0,
     constellation: repairConstellation(save.constellation),
     territory: repairTerritory(save.territory),
+    relics: repairRelics(save.relics),
+    forge: repairForge(save.forge),
   };
 }
 
@@ -996,6 +1129,63 @@ function migrateChV15toV16(raw: Record<string, unknown>): Record<string, unknown
   return { ...raw, v: 16, territory: createTerritory() };
 }
 
+/**
+ * Das tiefste Boss-Gate, das ein Save nachweislich schon GECLERT hat. Ein Gate
+ * `Z` gilt als gefallen, wenn die tiefste je erreichte Bühne ÜBER `Z` liegt
+ * (man kommt nur an ihm vorbei, indem man es besiegt) — exakt die Regel aus
+ * `ch-state.bossFirstKillZones`. Die Tiefe selbst ist das Maximum aus allen
+ * vier Zahlen, die sie tragen können: `lifetimeMaxZone` und die Run-Werte
+ * fallen bei Himmelfahrt/Transzendenz auf 1 zurück, der Gear-Latch `zoneEver`
+ * nicht.
+ */
+function clearedGateFor(raw: Record<string, unknown>): number {
+  const gear = isRecord(raw.gear) ? raw.gear : {};
+  const deepest = Math.max(
+    isFiniteNumber(raw.lifetimeMaxZone) ? raw.lifetimeMaxZone : 1,
+    isFiniteNumber(raw.runMaxZone) ? raw.runMaxZone : 1,
+    isFiniteNumber(raw.zone) ? raw.zone : 1,
+    isFiniteNumber(gear.zoneEver) ? gear.zoneEver : 1,
+  );
+  const gate = Math.floor((deepest - 1) / 5) * 5;
+  return gate >= RELIC_MIN_ZONE ? gate : 0;
+}
+
+/**
+ * v16 → v17: **Relikte** (1c) + **Skin-Schmiede** (3a) — ein Loot-Paket, zwei
+ * Slices, und zwei GEGENSÄTZLICHE Migrations-Entscheidungen im selben Schritt.
+ *
+ * **Die Schmiede startet komplett leer.** Weder Glut noch geschmiedete Affixe
+ * lassen sich aus irgendetwas herleiten: Glut entsteht aus Duplikat-Jackpots
+ * und getauschten Splittern, und beides hat das Spiel nie gezählt (der Save
+ * kennt nur den AKTUELLEN Splitter-Stand, nicht die Historie). Ein
+ * geschmiedetes Affix wäre vollends erfunden — es hätte eine gerollte Qualität,
+ * die niemand gerollt hat. Dasselbe „bewusst leer" wie bei den Bühnen-Sternen
+ * (v10→v11) und der Umschulung (v13→v14).
+ *
+ * **Der Relikt-Gate-Highwater wird dagegen ZWINGEND gesät** — und das ist der
+ * interessante Fall. Die Sammlung selbst startet leer (aus demselben Grund wie
+ * die Schmiede: gefallene Relikte, die nie gefallen sind, wären erfunden), aber
+ * `deepestGate` MUSS auf das tiefste bereits geclerte Gate gesetzt werden. Ohne
+ * das bekäme ein Alt-Save auf Bühne 200 beim nächsten Rückweg dreißig Gates
+ * geschenkt, die er längst hinter sich hat — ein Regen von zehn Relikten für
+ * Arbeit, die vor dem Update passiert ist. Die Zahl ist dabei nicht geraten,
+ * sondern GERECHNET (`clearedGateFor`, dieselbe Regel wie
+ * `bossFirstKillZones`), und sie ist die einzige Richtung, die niemandem etwas
+ * wegnimmt: Sie verschenkt nichts und sperrt nichts, was noch aussteht.
+ *
+ * Ein Alt-Save rechnet nach dem Update also bit-gleich weiter (ein leeres
+ * Loadout faltet überall ×1) und würfelt sein erstes Relikt an dem Gate, das
+ * ihn ohnehin als Nächstes erwartet. Für jedes bestehende Feld verlustfrei.
+ */
+function migrateChV16toV17(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    v: 17,
+    relics: { ...createRelics(), deepestGate: clearedGateFor(raw) },
+    forge: createForge(),
+  };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
@@ -1012,6 +1202,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
   13: migrateChV13toV14,
   14: migrateChV14toV15,
   15: migrateChV15toV16,
+  16: migrateChV16toV17,
 };
 
 /**

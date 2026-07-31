@@ -26,6 +26,7 @@ import {
   permTokenGoldMult,
 } from './chests';
 import {
+  type GearBonus,
   type GearState,
   type UnlockCtx,
   chestLuckBonus,
@@ -34,7 +35,11 @@ import {
   dpsGearMult,
   goldGearMult,
   keyDropBonus,
+  skinLevel,
 } from './gear';
+import { type RolledAffix, foldAffixes } from './affixes';
+import { type RelicsState, createRelics, equippedRelicAffixes } from './relics';
+import { type ForgeState, createForge, forgeAffixes } from './forge';
 import {
   type ConstellationState,
   constellationChestLuckBonus,
@@ -309,6 +314,19 @@ export interface ChState {
    * auf Bühnen des eigenen Themes greift (`territory.territoryGoldMult`).
    */
   territory: Territory;
+  /**
+   * Relikte (CH-Save v17, IDEEN-GAMEPLAY 1c): die Sammlung, die drei Trage-Slots,
+   * der Drop-Pity und der Gate-Highwater. PERMANENTER Loot wie Truhen-Skins und
+   * Gear — kein Reset fasst ihn an; der Gate-Highwater ist sogar genau deshalb
+   * da, damit ein Reset die Drop-Leiter nicht neu auszahlt.
+   */
+  relics: RelicsState;
+  /**
+   * Die Skin-Schmiede (CH-Save v17, IDEEN-GAMEPLAY 3a): gehaltene Schmiede-Glut
+   * plus je Skin bis zu drei geschmiedete Affix-Slots. Ebenfalls permanent —
+   * die Slots hängen an `gear.skinLevels`, und das Gear überlebt jeden Reset.
+   */
+  forge: ForgeState;
 }
 
 /** A brand-new run/profile. */
@@ -348,6 +366,8 @@ export function createChState(): ChState {
     bossFoulZone: 0,
     constellation: createConstellation(),
     territory: createTerritory(),
+    relics: createRelics(),
+    forge: createForge(),
   };
 }
 
@@ -369,7 +389,46 @@ type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'hea
   crewRetrain?: CrewRetrain;
   /** Legenden-Konstellation (optional so pre-v15 callers/tests fold ×1). */
   constellation?: ConstellationState;
+  /** Relikte (optional so pre-v17 callers/tests fold ×1). */
+  relics?: RelicsState;
+  /** Skin-Schmiede (optional so pre-v17 callers/tests fold ×1). */
+  forge?: ForgeState;
 };
+
+/**
+ * **Der Affix-Fold des Loadouts** (1c + 3a) — die EINE Stelle, an der die
+ * getragenen Relikte und die Schmiede-Slots des AKTIVEN Skins zu einem einzigen
+ * `GearBonus` zusammenlaufen. Von hier liest die abgeleitete Pipeline über
+ * dieselben `1 + x`-Griffe wie beim Gear; einen zweiten Rechenweg gibt es nicht.
+ *
+ * Warum hier und nicht in `affixes.ts`: Der Pool kennt bewusst weder die
+ * Relikt- noch die Schmiede-Slice (er ist reine Arithmetik über Sorte und
+ * Qualität). Das ZUSAMMENFÜHREN ist Aufgabe der Zustands-Schicht — genau wie
+ * `gearUnlockCtx` die Unlock-Regeln mit dem Save verheiratet.
+ *
+ * Fehlt eine der beiden Slices (alte Tests, pre-v17-Aufrufer), faltet sie
+ * schlicht nichts bei. Die Schmiede zählt nur Slots, die der LEVEL des aktiven
+ * Skins freigeschaltet hat.
+ */
+export function loadoutBonus(
+  state: Pick<ChState, 'gear'> & { relics?: RelicsState; forge?: ForgeState },
+): GearBonus {
+  const list: RolledAffix[] = [];
+  if (state.relics) list.push(...equippedRelicAffixes(state.relics));
+  if (state.forge) {
+    list.push(
+      ...forgeAffixes(state.forge, state.gear.skin, skinLevel(state.gear, state.gear.skin)),
+    );
+  }
+  return foldAffixes(list);
+}
+
+/** Derselbe Fold für die optionale `DerivedInput`-Form (fehlendes Gear ⇒ leer). */
+function loadoutOf(state: DerivedInput | { gear?: GearState }): GearBonus {
+  const s = state as { gear?: GearState; relics?: RelicsState; forge?: ForgeState };
+  if (!s.gear) return foldAffixes([]);
+  return loadoutBonus({ gear: s.gear, relics: s.relics, forge: s.forge });
+}
 
 /**
  * Total crew DPS: raw crew (with gilds) × the held-soul multiplier (amplified by
@@ -402,7 +461,10 @@ export function dpsOf(state: DerivedInput): number {
     // 2a: die Ausdauer-Knoten der Legenden-Konstellation (+2 %/Knoten, ×1 ohne
     // Baum). Wie der Meisterschafts-Perk bewusst NUR auf der Idle-Seite — die
     // Konstellation hat für den Klick ihre eigenen Knoten (P1 bleibt unberührt).
-    (state.constellation ? constellationDpsMult(state.constellation) : 1)
+    (state.constellation ? constellationDpsMult(state.constellation) : 1) *
+    // 1c + 3a: die `dpsPct`-Affixe der getragenen Relikte und der Schmiede des
+    // aktiven Skins — EIN summierter, gedeckelter Term, exakt wie ein Skin-Buff.
+    (1 + loadoutOf(state).dpsPct)
   );
 }
 
@@ -427,7 +489,9 @@ export function clickDamageOf(state: DerivedInput): number {
     (state.transcend ? transcendGlobalMult(state.transcend.te) : 1) *
     (state.gear ? clickGearMult(state.gear) : 1) *
     // 2a: die Klick-Knoten der Legenden-Konstellation (+2 %/Knoten, ×1 ohne Baum).
-    (state.constellation ? constellationClickMult(state.constellation) : 1)
+    (state.constellation ? constellationClickMult(state.constellation) : 1) *
+    // 1c + 3a: die `clickPct`-Affixe des Loadouts (×1 ohne Relikte/Schmiede).
+    (1 + loadoutOf(state).clickPct)
   );
 }
 
@@ -448,6 +512,8 @@ export function goldMult(
     crewRetrain?: CrewRetrain;
     heaven?: HeavenState;
     constellation?: ConstellationState;
+    relics?: RelicsState;
+    forge?: ForgeState;
   },
 ): number {
   return (
@@ -457,7 +523,9 @@ export function goldMult(
     (state.crewUp ? crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).goldMult : 1) *
     (state.heaven ? goldeneHandeMult(state.heaven) : 1) *
     // 2a: „Anfängerglück" + „Tantiemen" der Konstellation (+2 %/Knoten, ×1 ohne Baum).
-    (state.constellation ? constellationGoldMult(state.constellation) : 1)
+    (state.constellation ? constellationGoldMult(state.constellation) : 1) *
+    // 1c + 3a: die `goldPct`-Affixe des Loadouts (×1 ohne Relikte/Schmiede).
+    (1 + loadoutOf(state).goldPct)
   );
 }
 
@@ -468,12 +536,18 @@ export function goldMult(
  * `(gear, ancients, constellation)`; `applyLuck` clamps it to `LUCK_MAX_SHIFT`.
  */
 export function chestLuck(
-  state: Pick<ChState, 'gear' | 'ancients'> & { constellation?: ConstellationState },
+  state: Pick<ChState, 'gear' | 'ancients'> & {
+    constellation?: ConstellationState;
+    relics?: RelicsState;
+    forge?: ForgeState;
+  },
 ): number {
   return (
     chestLuckBonus(state.gear) +
     ancientChestLuckBonus(state.ancients) +
-    (state.constellation ? constellationChestLuckBonus(state.constellation) : 0)
+    (state.constellation ? constellationChestLuckBonus(state.constellation) : 0) +
+    // 1c + 3a: die „Spürnase"-Affixe des Loadouts (0 ohne Relikte/Schmiede).
+    loadoutOf(state).chestLuck
   );
 }
 
@@ -629,6 +703,11 @@ export function ascendState(state: ChState): ChState {
     // Gebietsherrschaft (1b): vier Lebenszeit-Zähler wie `totalClicks` — die
     // Bühnen fallen auf 1 zurück, der Ruf für sie bleibt.
     territory: state.territory,
+    // Relikte (1c) + Schmiede (3a): permanenter Loot wie Truhen-Skins und Gear.
+    // Der Gate-Highwater in `relics` MUSS mitwandern — sonst zahlte jede
+    // Aszension die Drop-Leiter ab Bühne 50 ein zweites Mal aus.
+    relics: state.relics,
+    forge: state.forge,
   };
 }
 
@@ -674,6 +753,10 @@ export function himmelfahrtState(state: ChState): ChState {
     constellation: state.constellation,
     // Gebietsherrschaft (1b) — der Ruf überlebt auch L2.
     territory: state.territory,
+    // Relikte (1c) + Schmiede (3a) überleben auch L2 — inklusive des
+    // Gate-Highwaters, der die Drop-Leiter genau einmal im Leben auszahlt.
+    relics: state.relics,
+    forge: state.forge,
   };
 }
 
@@ -727,5 +810,9 @@ export function transcendState(state: ChState): ChState {
     constellation: state.constellation,
     // Gebietsherrschaft (1b) — ebenso: Ruf ist verdient, nicht geliehen.
     territory: state.territory,
+    // Relikte (1c) + Schmiede (3a) — gefundener und geschmiedeter Loot ist
+    // Besitz, kein Ausbau; der tiefste Reset des Spiels lässt ihn stehen.
+    relics: state.relics,
+    forge: state.forge,
   };
 }

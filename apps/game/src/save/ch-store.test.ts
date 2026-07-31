@@ -11,11 +11,14 @@ import {
   createPeach,
   createStats,
   himmelfahrtState,
+  loadoutBonus,
   transcendState,
 } from '../game/ch-state';
 import { CH_ACHIEVEMENT_IDS } from '../game/ch-achievements';
 import { createConstellation, dustEntitlement, dustHeld } from '../game/constellation';
 import { createGear } from '../game/gear';
+import { createForge, forgeAffixes, forgeSlotsUnlocked } from '../game/forge';
+import { createRelics, equippedRelicAffixes, relicGateEligible } from '../game/relics';
 import { TREE_NODES, treeLevel } from '../game/heaven';
 import { createMeta, dailyQuests } from '../game/quests';
 import { createTerritory, rankOf, territoryGoldMult } from '../game/territory';
@@ -1674,5 +1677,178 @@ describe('ch-store — v16 migration & repair (Gebietsherrschaft, 1b)', () => {
     // Und die Wirkung steht danach unverändert da: Space voll, Club auf Stufe 5.
     expect(territoryGoldMult(after.territory, 18)).toBeCloseTo(1.15, 10);
     expect(territoryGoldMult(after.territory, 3)).toBeCloseTo(1.075, 10);
+  });
+});
+
+describe('ch-store — v17 migration & repair (Relikte 1c + Skin-Schmiede 3a)', () => {
+  it('sät den Gate-Highwater aus der geclerten Tiefe — sonst regnet es Relikte', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 16;
+    delete raw.relics;
+    delete raw.forge;
+    // Ein gestandener Spielstand auf Bühne 203: die Gates 50…200 sind längst
+    // gefallen. Ohne die Saat bekäme er sie beim nächsten Rückweg ALLE noch
+    // einmal ausgezahlt — dreißig Würfe für Arbeit von vor dem Update.
+    raw.lifetimeMaxZone = 203;
+    raw.runMaxZone = 203;
+    raw.zone = 203;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    // Die SAMMLUNG startet leer (gefallene Relikte, die nie fielen, wären erfunden) …
+    expect(s!.relics.owned).toEqual([]);
+    expect(s!.relics.slots).toEqual([0, 0, 0]);
+    expect(s!.relics.pity).toBe(0);
+    // … der HIGHWATER dagegen steht auf dem tiefsten geclerten Gate (200).
+    expect(s!.relics.deepestGate).toBe(200);
+    expect(relicGateEligible(s!.relics, 200)).toBe(false);
+    expect(relicGateEligible(s!.relics, 205)).toBe(true);
+  });
+
+  it('liest die Tiefe auch aus dem Himmelfahrt-festen `zoneEver`-Latch', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 16;
+    delete raw.relics;
+    delete raw.forge;
+    // Frisch transzendiert: die Run-Zahlen stehen auf 1, nur der Gear-Latch
+    // erinnert sich an Bühne 140 — genau die Regel aus `bossFirstKillZones`.
+    raw.lifetimeMaxZone = 1;
+    raw.runMaxZone = 1;
+    raw.zone = 1;
+    raw.gear = { ...createGear(), zoneEver: 140 };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.relics.deepestGate).toBe(135); // Gate 140 ist noch NICHT geclert
+  });
+
+  it('ein flacher Alt-Save wird gar nicht erst gesperrt', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 16;
+    delete raw.relics;
+    delete raw.forge;
+    raw.lifetimeMaxZone = 50; // steht AUF Bühne 50, hat sie aber nicht geclert
+    raw.runMaxZone = 50;
+    raw.zone = 50;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.relics.deepestGate).toBe(0);
+    expect(relicGateEligible(s!.relics, 50)).toBe(true);
+  });
+
+  it('die Schmiede startet komplett leer — Glut und Rolls sind nicht herleitbar', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 16;
+    delete raw.relics;
+    delete raw.forge;
+    raw.gear = { ...createGear(), skinLevels: { disco: 42 }, shards: 99_999 };
+    const s = deserializeCh(JSON.stringify(raw));
+    // Level 42 hätte drei Slots offen — aber keiner trägt etwas, und die
+    // 99 999 Splitter werden NICHT stillschweigend in Glut umgerechnet.
+    expect(forgeSlotsUnlocked(42)).toBe(3);
+    expect(s!.forge).toEqual(createForge());
+    expect(forgeAffixes(s!.forge, 'disco', 42)).toEqual([]);
+  });
+
+  it('ein Alt-Save rechnet nach dem Update bit-gleich weiter (leeres Loadout ⇒ ×1)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 16;
+    delete raw.relics;
+    delete raw.forge;
+    raw.lifetimeMaxZone = 90;
+    const s = deserializeCh(JSON.stringify(raw))!;
+    const bonus = loadoutBonus(s);
+    expect(bonus.clickPct).toBe(0);
+    expect(bonus.dpsPct).toBe(0);
+    expect(bonus.goldPct).toBe(0);
+    expect(bonus.chestLuck).toBe(0);
+  });
+
+  it('round-trippt Sammlung, Slots und Schmiede', () => {
+    const relics = {
+      owned: [
+        { id: 1, zone: 50, affixes: [{ id: 'click', q: 3 }] },
+        {
+          id: 2,
+          zone: 65,
+          affixes: [
+            { id: 'boss', q: 1 },
+            { id: 'gold', q: 2 },
+          ],
+        },
+      ],
+      slots: [2, 1, 0],
+      nextId: 3,
+      pity: 1,
+      deepestGate: 65,
+    };
+    const forge = {
+      ember: 88,
+      slots: {
+        lava: [
+          { affix: { id: 'glut', q: 3 }, dry: 6 },
+          { affix: null, dry: 0 },
+          { affix: null, dry: 0 },
+        ],
+      },
+    };
+    const s: ChState = { ...createChState(), relics, forge };
+    const round = deserializeCh(serializeCh(s, 1000))!;
+    expect(round.relics).toEqual(relics);
+    expect(round.forge).toEqual(forge);
+    // Und die Wirkung kommt an: getragen sind Relikt 2 (zwei Affixe) + Relikt 1.
+    expect(equippedRelicAffixes(round.relics).length).toBe(3);
+  });
+
+  it('ein Relikt kann nie zweimal wirken, auch nicht aus einem gebastelten Save', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.relics = {
+      owned: [{ id: 1, zone: 50, affixes: [{ id: 'click', q: 3 }] }],
+      slots: [1, 1, 1],
+      nextId: 2,
+      pity: 0,
+      deepestGate: 50,
+    };
+    const s = deserializeCh(JSON.stringify(raw))!;
+    expect(s.relics.slots).toEqual([1, 0, 0]);
+    expect(equippedRelicAffixes(s.relics).length).toBe(1);
+  });
+
+  it('repariert kaputte Slices isoliert, ohne anderen Fortschritt zu nuken', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.relics = 'garbage';
+    raw.forge = 42;
+    raw.souls = 77;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.relics).toEqual(createRelics());
+    expect(s!.forge).toEqual(createForge());
+    expect(s!.souls).toBe(77);
+  });
+
+  it('überlebt alle drei Resets — Loot ist Besitz, kein Ausbau', () => {
+    const relics = {
+      owned: [{ id: 1, zone: 80, affixes: [{ id: 'click', q: 3 }] }],
+      slots: [1, 0, 0],
+      nextId: 2,
+      pity: 2,
+      deepestGate: 80,
+    };
+    const forge = {
+      ember: 55,
+      slots: { classic: [{ affix: { id: 'gold', q: 2 }, dry: 3 }] },
+    };
+    const base: ChState = {
+      ...createChState(),
+      relics,
+      forge,
+      runMaxZone: 80,
+      lifetimeMaxZone: 80,
+      rsLifetime: 5_000,
+      heaven: { ...createChState().heaven, hpfLifetime: 1e12 },
+    };
+    for (const next of [ascendState(base), himmelfahrtState(base), transcendState(base)]) {
+      expect(next.relics).toEqual(relics);
+      expect(next.forge).toEqual(forge);
+      // Der Gate-Highwater MUSS mitwandern, sonst zahlte jeder Reset die
+      // Drop-Leiter ab Bühne 50 ein zweites Mal aus.
+      expect(next.relics.deepestGate).toBe(80);
+    }
   });
 });
