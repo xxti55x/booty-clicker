@@ -25,6 +25,7 @@ import {
   createCrew,
   crewSpecialBonuses,
   grantFreeMasteryTiers,
+  heirWeightFor,
   heroClick,
   heroDps,
   HERO_COST_GROWTH,
@@ -37,7 +38,7 @@ import {
   totalRawDps,
 } from './heroes';
 
-import { MASTERY_RANKS, masteryOwnMult } from './mastery';
+import { HEIR_WEIGHT, MASTERY_MAX_DPS_BONUS, MASTERY_RANKS, masteryOwnMult } from './mastery';
 
 const boss = CREW[0]; // Booty-Boss: click hero, baseCost 5, baseDps 2 (click/level)
 const hype = CREW[1]; // Hype-Girl: first pure-DPS member, baseDps 5
@@ -419,5 +420,76 @@ describe('heroes — Crew-Umschulung: die EINE Lesekette (IDEEN-GAMEPLAY 3b)', (
     );
     expect(deep.beatWindowMs).toBe(SPECIAL_BEAT_CAP_MS);
     expect(deep.goldMult).toBe(1);
+  });
+});
+
+describe('Erbe (3c) — die doppelte Meisterschaft in der Crew-Faltung', () => {
+  const gold = MASTERY_RANKS[2].at; // Gold-Rang: der Perk steht bei +6 %
+
+  it('gewichtet genau EIN Mitglied doppelt', () => {
+    expect(heirWeightFor('dj', 'dj')).toBe(HEIR_WEIGHT);
+    expect(heirWeightFor('hype', 'dj')).toBe(1);
+    // Ohne Erben zählt niemand doppelt — der Normalfall vor der 1. Transzendenz.
+    expect(heirWeightFor('dj', '')).toBe(1);
+  });
+
+  it('hebt die Gesamt-DPS um exakt den Eigen-Anteil des Erben', () => {
+    const levels = Object.fromEntries(CREW.map((c) => [c.id, 40]));
+    const mastery = Object.fromEntries(CREW.map((c) => [c.id, gold]));
+    const plain = totalRawDps(levels, {}, {}, mastery);
+    const withHeir = totalRawDps(levels, {}, {}, mastery, 'dj');
+    expect(withHeir).toBeGreaterThan(plain);
+    // Der Zuwachs ist der EIGEN-Anteil dieses einen Mitglieds × 6 pp / 1.06.
+    const own = heroDps(
+      CREW.find((c) => c.id === 'dj')!,
+      40,
+      0,
+      0,
+      gold,
+    );
+    expect((withHeir - plain) / (own * (0.06 / 1.06))).toBeCloseTo(1, 5);
+  });
+
+  /**
+   * **Die Leitplanke des Erben-Moments, strukturell.** Die Verdopplung wirkt nur
+   * auf den EIGEN-Anteil eines Mitglieds. Selbst wenn ein einziges Mitglied die
+   * KOMPLETTE Crew-DPS trüge, wäre der Zuwachs `0.06 / 1.06 = +5,66 %` — der
+   * absolute Deckel, und er hängt allein an `MASTERY_MAX_DPS_BONUS`, nicht an
+   * der Crew-Kurve. Gemessen an gleichmäßig gekauften Leveln bleibt er darunter,
+   * weil das stärkste Mitglied zwar dominiert, aber nie allein ist.
+   */
+  it('bleibt strukturell unter +5,66 % Gesamt-DPS (der Eigen-Anteil-Deckel)', () => {
+    const cap = MASTERY_MAX_DPS_BONUS / (1 + MASTERY_MAX_DPS_BONUS); // 0.0566…
+    const levels = Object.fromEntries(CREW.map((c) => [c.id, 40]));
+    const mastery = Object.fromEntries(CREW.map((c) => [c.id, gold]));
+    const plain = totalRawDps(levels, {}, {}, mastery);
+    let worst = 1;
+    for (const cfg of CREW) {
+      const r = totalRawDps(levels, {}, {}, mastery, cfg.id) / plain;
+      if (r > worst) worst = r;
+    }
+    expect(worst - 1).toBeLessThan(cap);
+    expect(worst).toBeLessThan(1.05); // gemessen: ×1.0490 im Extremfall „alle Lv 40"
+  });
+
+  it('wirkt beim Klick-Mitglied auf den KLICK (dort sitzt sein Eigen-Output)', () => {
+    const levels = { boss: 50 };
+    const mastery = { boss: gold };
+    const plain = clickDamageRaw(levels, {}, {}, mastery);
+    const withHeir = clickDamageRaw(levels, {}, {}, mastery, 'boss');
+    expect(withHeir).toBeGreaterThan(plain);
+  });
+
+  it('tut ohne Rang nichts (doppelt null ist null)', () => {
+    const levels = Object.fromEntries(CREW.map((c) => [c.id, 20]));
+    expect(totalRawDps(levels, {}, {}, {}, 'dj')).toBe(totalRawDps(levels, {}, {}, {}));
+  });
+
+  it('lässt eine unbekannte Erben-Id die Rechnung unverändert', () => {
+    const levels = Object.fromEntries(CREW.map((c) => [c.id, 30]));
+    const mastery = Object.fromEntries(CREW.map((c) => [c.id, gold]));
+    expect(totalRawDps(levels, {}, {}, mastery, 'niemand')).toBe(
+      totalRawDps(levels, {}, {}, mastery),
+    );
   });
 });

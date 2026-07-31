@@ -4858,3 +4858,196 @@ body {
   margin-bottom: 8px;
   text-align: left;
 }
+
+/* ---------------------------------------------------------------------------
+   IDEEN-GAMEPLAY 2b — Skin-Meisterschafts-Pfad an der Skin-Karte
+   Fünf Knoten-Punkte, ein Balken, eine Klartext-Zeile. Die Reihe ist bewusst so
+   flach wie die Schmiede-Reihe darüber (dieselbe 4-px-Rhythmik), damit die
+   Karte durch den Zusatz nicht in eine zweite Bildschirmhöhe rutscht.
+   --------------------------------------------------------------------------- */
+.sc-path {
+  margin: 4px 0 6px;
+}
+.sp-dots {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+.sp-dot {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 15px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 9px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.42);
+  line-height: 1;
+}
+.sp-dot.on {
+  border-color: rgba(168, 232, 49, 0.6);
+  background: rgba(168, 232, 49, 0.2);
+  color: #dcffa6;
+}
+.sp-dot.sig.on {
+  border-color: rgba(255, 210, 77, 0.75);
+  background: rgba(255, 210, 77, 0.24);
+  color: #fff3cc;
+}
+.sp-bar {
+  display: block;
+  height: 3px;
+  margin-top: 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.sp-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #a8e831, #58c9f3);
+}
+.sp-bar.full > i {
+  background: linear-gradient(90deg, #ffd24d, #ff9f1a);
+}
+.sp-t {
+  margin-top: 3px;
+  font-size: 9.5px;
+  line-height: 1.25;
+}
+
+/* ---------------------------------------------------------------------------
+   IDEEN-GAMEPLAY 3c — Erben-Dialog (Portraits aus dem 4a-Baukasten)
+   --------------------------------------------------------------------------- */
+.dialog.heir {
+  max-width: 400px;
+  width: 92vw;
+  /* Wie beim Umschul-Dialog: im kurzen Querformat (740×380) scrollt der Dialog
+     IN SICH, statt oben und unten aus dem Bild zu laufen. */
+  max-height: 92vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.heir-sub {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--parch-soft);
+  margin: 8px 0 10px;
+  text-align: left;
+}
+.heir-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.heir-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px;
+  border-radius: 10px;
+  border: 2px solid rgba(90, 66, 30, 0.28);
+  background: rgba(255, 255, 255, 0.4);
+  color: var(--parch-ink);
+  font: inherit;
+  cursor: pointer;
+  text-align: center;
+}
+.heir-card:hover {
+  border-color: rgba(90, 66, 30, 0.5);
+}
+.heir-card.on {
+  border-color: #a8e831;
+  background: rgba(168, 232, 49, 0.3);
+  box-shadow: 0 0 0 2px rgba(168, 232, 49, 0.35);
+}
+.heir-card .heir-x {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  border: 2px dashed rgba(90, 66, 30, 0.4);
+  font-size: 20px;
+  color: var(--parch-soft);
+}
+.heir-nm {
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+.heir-xp {
+  font-size: 9px;
+  color: var(--parch-soft);
+}
+.heir-gain {
+  font-size: 9px;
+  font-weight: 800;
+  color: #2e6b1f;
+}
+.heir-gain.dim {
+  color: var(--parch-soft);
+  font-weight: 600;
+}
+.dialog.heir .msg {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--parch-soft);
+  text-align: left;
+  margin-bottom: 10px;
+}
+.dialog.heir .btn.ghost {
+  background: rgba(90, 66, 30, 0.14);
+  color: #4a3a1c;
+}
+
+/* ---------------------------------------------------------------------------
+   IDEEN-GAMEPLAY 1d — Legenden-Level-Zähler + 3c-Erben-Zeile im 🔮 Tab
+   --------------------------------------------------------------------------- */
+.tc-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.tl-n {
+  flex: none;
+  min-width: 54px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 210, 77, 0.55);
+  background: rgba(255, 210, 77, 0.16);
+  color: #ffe9a8;
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 800;
+  text-align: center;
+  line-height: 1.1;
+}
+.tl-t {
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.tc-heir {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.tc-heir.none .th-t {
+  color: rgba(255, 255, 255, 0.62);
+}
+.th-t {
+  font-size: 11.5px;
+  line-height: 1.35;
+}

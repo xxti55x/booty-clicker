@@ -34,6 +34,7 @@ import {
   createGear,
   dpsGearMult,
   goldGearMult,
+  emptyGearBonus,
   keyDropBonus,
   skinLevel,
 } from './gear';
@@ -70,6 +71,8 @@ import {
   totalRawDps,
 } from './heroes';
 import { type CrewMastery, createMastery } from './mastery';
+import { gainLegend, legendGlobalMult } from './legend';
+import { type SkinPath, createSkinPath, skinPathBonus } from './skin-path';
 import { type CrewRetrain, type RetrainRolls, createRetrain, createRetrainRolls } from './retrain';
 import { type Territory, createTerritory } from './territory';
 import { incomeMultiplier } from './peach';
@@ -327,6 +330,28 @@ export interface ChState {
    * die Slots hängen an `gear.skinLevels`, und das Gear überlebt jeden Reset.
    */
   forge: ForgeState;
+  /**
+   * Skin-Meisterschafts-Pfade (CH-Save v18, IDEEN-GAMEPLAY 2b): je Skin die
+   * Tragezeit in Sekunden und die Boss-Kills in ihm. PERMANENT wie das Gear
+   * selbst — kein Reset fasst die Tafel an; sie misst Treue über die gesamte
+   * Lebenszeit eines Spielstands, nicht über eine Tour.
+   */
+  skinPath: SkinPath;
+  /**
+   * Der **Erbe** dieser Ära (CH-Save v18, IDEEN-GAMEPLAY 3c): die Crew-Id, deren
+   * Meisterschafts-Perks doppelt zählen (`heroes.heirWeightFor`), oder `''`
+   * (kein Erbe). Gesetzt wird sie ausschließlich in der Transzendenz-Zeremonie;
+   * sie überlebt Aszension und Himmelfahrt und wird bei der NÄCHSTEN Transzendenz
+   * neu gewählt — ein Erbe je Ära.
+   */
+  heir: string;
+  /**
+   * Legenden-Level (CH-Save v18, IDEEN-GAMEPLAY 1d): ein unendlicher
+   * Lebenszeit-Zähler. Jede Himmelfahrt NACH der ersten Transzendenz gibt genau
+   * eins, jedes zahlt +0,5 % global — **additiv** (`legend.legendGlobalMult`).
+   * Von keinem der drei Resets angefasst, auch nicht vom tiefsten.
+   */
+  legend: number;
 }
 
 /** A brand-new run/profile. */
@@ -368,6 +393,9 @@ export function createChState(): ChState {
     territory: createTerritory(),
     relics: createRelics(),
     forge: createForge(),
+    skinPath: createSkinPath(),
+    heir: '',
+    legend: 0,
   };
 }
 
@@ -393,6 +421,12 @@ type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'hea
   relics?: RelicsState;
   /** Skin-Schmiede (optional so pre-v17 callers/tests fold ×1). */
   forge?: ForgeState;
+  /** Skin-Meisterschafts-Pfade (optional so pre-v18 callers/tests fold ×1). */
+  skinPath?: SkinPath;
+  /** Der Erbe dieser Ära (optional/leer ⇒ jedes Mitglied zählt einfach). */
+  heir?: string;
+  /** Legenden-Level (optional so pre-v18 callers/tests fold ×1). */
+  legend?: number;
 };
 
 /**
@@ -431,6 +465,17 @@ function loadoutOf(state: DerivedInput | { gear?: GearState }): GearBonus {
 }
 
 /**
+ * **Der Pfad-Bonus des AKTIVEN Skins** (2b) — dieselbe Bauform wie `loadoutOf`:
+ * eine Stelle, die aus dem Save einen `GearBonus` macht, damit die abgeleiteten
+ * Pipelines ihn über dieselben `1 + x`-Griffe lesen. Ohne Gear oder ohne Tafel
+ * (Alt-Tests, pre-v18-Aufrufer) faltet er überall ×1.
+ */
+export function skinPathOf(state: { gear?: GearState; skinPath?: SkinPath }): GearBonus {
+  if (!state.gear || !state.skinPath) return emptyGearBonus();
+  return skinPathBonus(state.skinPath, state.gear.skin);
+}
+
+/**
  * Total crew DPS: raw crew (with gilds) × the held-soul multiplier (amplified by
  * held HPF) × Poposeidon's Ancient DPS mult × the +2 %/HPF global mult × the
  * Transzendenz ×3^TE global mult (§4.5.3, the same scalar applied to click — P1-
@@ -444,7 +489,13 @@ function loadoutOf(state: DerivedInput | { gear?: GearState }): GearBonus {
 export function dpsOf(state: DerivedInput): number {
   const hpf = state.heaven.hpf;
   return (
-    totalRawDps(state.crew, state.gilds, state.crewUp ?? {}, state.crewMastery ?? {}) *
+    totalRawDps(
+      state.crew,
+      state.gilds,
+      state.crewUp ?? {},
+      state.crewMastery ?? {},
+      state.heir ?? '',
+    ) *
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientDpsMult(state.ancients) *
     heavenGlobalMult(hpf) *
@@ -464,7 +515,13 @@ export function dpsOf(state: DerivedInput): number {
     (state.constellation ? constellationDpsMult(state.constellation) : 1) *
     // 1c + 3a: die `dpsPct`-Affixe der getragenen Relikte und der Schmiede des
     // aktiven Skins — EIN summierter, gedeckelter Term, exakt wie ein Skin-Buff.
-    (1 + loadoutOf(state).dpsPct)
+    (1 + loadoutOf(state).dpsPct) *
+    // 2b: der Skin-Pfad des AKTIVEN Skins (nur Diamant-Booty zahlt hier über
+    // seinen `allPct`-Stern; jeder andere Pfad faltet auf der Idle-Seite ×1).
+    (1 + skinPathOf(state).dpsPct) *
+    // 1d: die Legenden-Level — `1 + 0.005·L`, ADDITIV, und derselbe Skalar wie
+    // im Klick-Term (P1-neutral, exakt wie die Transzendenz-Schicht darüber).
+    legendGlobalMult(state.legend ?? 0)
   );
 }
 
@@ -478,7 +535,13 @@ export function dpsOf(state: DerivedInput): number {
 export function clickDamageOf(state: DerivedInput): number {
   const hpf = state.heaven.hpf;
   return (
-    clickDamageRaw(state.crew, state.gilds, state.crewUp ?? {}, state.crewMastery ?? {}) *
+    clickDamageRaw(
+      state.crew,
+      state.gilds,
+      state.crewUp ?? {},
+      state.crewMastery ?? {},
+      state.heir ?? '',
+    ) *
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientClickMult(state.ancients) *
     heavenGlobalMult(hpf) *
@@ -491,7 +554,12 @@ export function clickDamageOf(state: DerivedInput): number {
     // 2a: die Klick-Knoten der Legenden-Konstellation (+2 %/Knoten, ×1 ohne Baum).
     (state.constellation ? constellationClickMult(state.constellation) : 1) *
     // 1c + 3a: die `clickPct`-Affixe des Loadouts (×1 ohne Relikte/Schmiede).
-    (1 + loadoutOf(state).clickPct)
+    (1 + loadoutOf(state).clickPct) *
+    // 2b: der Skin-Pfad (Klassiker zahlt hier bis zu +8 % — der stärkste Fall
+    // des ganzen Systems, und damit exakt der Richtwert des Ideen-Dokuments).
+    (1 + skinPathOf(state).clickPct) *
+    // 1d: derselbe additive Legenden-Faktor wie in `dpsOf` (P1-neutral).
+    legendGlobalMult(state.legend ?? 0)
   );
 }
 
@@ -514,6 +582,7 @@ export function goldMult(
     constellation?: ConstellationState;
     relics?: RelicsState;
     forge?: ForgeState;
+    skinPath?: SkinPath;
   },
 ): number {
   return (
@@ -525,7 +594,9 @@ export function goldMult(
     // 2a: „Anfängerglück" + „Tantiemen" der Konstellation (+2 %/Knoten, ×1 ohne Baum).
     (state.constellation ? constellationGoldMult(state.constellation) : 1) *
     // 1c + 3a: die `goldPct`-Affixe des Loadouts (×1 ohne Relikte/Schmiede).
-    (1 + loadoutOf(state).goldPct)
+    (1 + loadoutOf(state).goldPct) *
+    // 2b: der Skin-Pfad (Pfirsich-Pirat zahlt hier, Diamant über `allPct`).
+    (1 + skinPathOf(state).goldPct)
   );
 }
 
@@ -540,6 +611,7 @@ export function chestLuck(
     constellation?: ConstellationState;
     relics?: RelicsState;
     forge?: ForgeState;
+    skinPath?: SkinPath;
   },
 ): number {
   return (
@@ -547,7 +619,9 @@ export function chestLuck(
     ancientChestLuckBonus(state.ancients) +
     (state.constellation ? constellationChestLuckBonus(state.constellation) : 0) +
     // 1c + 3a: die „Spürnase"-Affixe des Loadouts (0 ohne Relikte/Schmiede).
-    loadoutOf(state).chestLuck
+    loadoutOf(state).chestLuck +
+    // 2b: der Skin-Pfad (Goldener Twerk-Tyrann zahlt hier, Diamant über `allPct`).
+    skinPathOf(state).chestLuck
   );
 }
 
@@ -555,8 +629,10 @@ export function chestLuck(
  * Multiplier applied to key-drop chances (§6.1): `1 + gear keyDrop + Truhen-Magnet`
  * (the Himmelsbaum node, +25 %). Pure over `(gear, heaven)`.
  */
-export function keyDropMult(state: Pick<ChState, 'gear' | 'heaven'>): number {
-  return 1 + keyDropBonus(state.gear) + truhenMagnetBonus(state.heaven);
+export function keyDropMult(
+  state: Pick<ChState, 'gear' | 'heaven'> & { skinPath?: SkinPath },
+): number {
+  return 1 + keyDropBonus(state.gear) + truhenMagnetBonus(state.heaven) + skinPathOf(state).keyDrop;
 }
 
 /**
@@ -708,6 +784,11 @@ export function ascendState(state: ChState): ChState {
     // Aszension die Drop-Leiter ab Bühne 50 ein zweites Mal aus.
     relics: state.relics,
     forge: state.forge,
+    // Skin-Pfade (2b), Erbe (3c) und Legenden-Level (1d): drei permanente
+    // Zahlen, die eine Tour-Zurücksetzung nichts angeht.
+    skinPath: state.skinPath,
+    heir: state.heir,
+    legend: state.legend,
   };
 }
 
@@ -757,6 +838,11 @@ export function himmelfahrtState(state: ChState): ChState {
     // Gate-Highwaters, der die Drop-Leiter genau einmal im Leben auszahlt.
     relics: state.relics,
     forge: state.forge,
+    // Skin-Pfade (2b) und Erbe (3c) überleben die Himmelfahrt unverändert; das
+    // Legenden-Level (1d) wächst hier — sofern schon einmal transzendiert wurde.
+    skinPath: state.skinPath,
+    heir: state.heir,
+    legend: gainLegend(state.legend, state.transcend.transcendences),
   };
 }
 
@@ -775,7 +861,7 @@ export function himmelfahrtState(state: ChState): ChState {
  * MUST gate the button on `canTranscend(state.transcend, state.heaven.hpfLifetime)`
  * so the reset is never triggered without a real gain.
  */
-export function transcendState(state: ChState): ChState {
+export function transcendState(state: ChState, heir = ''): ChState {
   const transcend = bankTranscendence(state.transcend, state.heaven.hpfLifetime);
   return {
     ...createChState(), // fresh L1 tour + fresh L2 heaven (createHeaven())
@@ -814,5 +900,15 @@ export function transcendState(state: ChState): ChState {
     // Besitz, kein Ausbau; der tiefste Reset des Spiels lässt ihn stehen.
     relics: state.relics,
     forge: state.forge,
+    // 2b: Tragezeit und Boss-Kills sind erspielte Lebenszeit — wie die
+    // Crew-Meisterschaft überstehen sie auch den tiefsten Reset.
+    skinPath: state.skinPath,
+    // 3c: DER ERBEN-MOMENT. Die Wahl gilt für die NEUE Ära; der Aufrufer
+    // übergibt sie hier (leer = kein Erbe). Der alte Erbe der abgelaufenen Ära
+    // wird bewusst NICHT weitergetragen — ein Erbe je Ära, neu gewählt.
+    heir,
+    // 1d: unendlich und nie gewipet — der tiefste Reset des Spiels lässt ihn
+    // stehen. Die Transzendenz selbst zahlt KEIN Level (nur Himmelfahrten tun das).
+    legend: state.legend,
   };
 }

@@ -41,7 +41,7 @@
  * utility kinds below (same hooks the Twerk-Ahnen use; `idle` folds into
  * `dpsOf` like the idle gear does).
  */
-import { type CrewMastery, masteryFreeFirstTier, masteryOwnMult } from './mastery';
+import { HEIR_WEIGHT, type CrewMastery, masteryFreeFirstTier, masteryOwnMult } from './mastery';
 import { type CrewRetrain, retrainedKind } from './retrain';
 
 export type AbilityKind =
@@ -514,6 +514,16 @@ export function nextAbility(
   return { tier, level: lv, cost: abilityCost(cfg, tier), unlocked: level >= lv };
 }
 
+/**
+ * **Die Erben-Gewichtung** (3c): {@link HEIR_WEIGHT} für das beim Transzendieren
+ * gewählte Mitglied, sonst 1. Eine leere Erben-Id (der Normalfall — es gibt
+ * genau EINEN Erben je Ära, und vor der ersten Transzendenz gar keinen) faltet
+ * damit für JEDES Mitglied ×1, also rechnen alle Alt-Aufrufer zahlengleich.
+ */
+export function heirWeightFor(id: string, heir: string): number {
+  return heir !== '' && id === heir ? HEIR_WEIGHT : 1;
+}
+
 /** Permanent DPS multiplier from `gildCount` gilds on a member (×1.25 each, §4.3.4). */
 export function gildMult(gildCount: number): number {
   return Math.pow(GILD_DPS_MULT, Math.max(0, gildCount));
@@ -532,6 +542,7 @@ export function heroDps(
   gildCount = 0,
   ups = 0,
   masteryXp = 0,
+  heirWeight = 1,
 ): number {
   if (level <= 0 || cfg.click) return 0;
   return (
@@ -540,7 +551,7 @@ export function heroDps(
     level *
     abilityMult(cfg, ups) *
     gildMult(gildCount) *
-    masteryOwnMult(masteryXp)
+    masteryOwnMult(masteryXp, heirWeight)
   );
 }
 
@@ -556,10 +567,15 @@ export function heroClick(
   gildCount = 0,
   ups = 0,
   masteryXp = 0,
+  heirWeight = 1,
 ): number {
   if (level <= 0 || !cfg.click) return 0;
   return (
-    cfg.baseDps * level * abilityMult(cfg, ups) * gildMult(gildCount) * masteryOwnMult(masteryXp)
+    cfg.baseDps *
+    level *
+    abilityMult(cfg, ups) *
+    gildMult(gildCount) *
+    masteryOwnMult(masteryXp, heirWeight)
   );
 }
 
@@ -611,6 +627,7 @@ export function totalRawDps(
   gilds: CrewGilds = {},
   ups: CrewUps = {},
   mastery: CrewMastery = {},
+  heir = '',
 ): number {
   let dps = 0;
   for (const cfg of CREW)
@@ -620,6 +637,7 @@ export function totalRawDps(
       gilds[cfg.id] ?? 0,
       ups[cfg.id] ?? 0,
       mastery[cfg.id] ?? 0,
+      heirWeightFor(cfg.id, heir),
     );
   return dps;
 }
@@ -765,6 +783,7 @@ export function clickDamageRaw(
   gilds: CrewGilds = {},
   ups: CrewUps = {},
   mastery: CrewMastery = {},
+  heir = '',
 ): number {
   let click = CLICK_BASE;
   for (const cfg of CREW)
@@ -774,6 +793,7 @@ export function clickDamageRaw(
       gilds[cfg.id] ?? 0,
       ups[cfg.id] ?? 0,
       mastery[cfg.id] ?? 0,
+      heirWeightFor(cfg.id, heir),
     );
-  return click + CLICK_DPS_SHARE * totalRawDps(levels, gilds, ups, mastery);
+  return click + CLICK_DPS_SHARE * totalRawDps(levels, gilds, ups, mastery, heir);
 }

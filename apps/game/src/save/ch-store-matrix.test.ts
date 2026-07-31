@@ -1,7 +1,7 @@
 /**
  * X7 — Save-Migrations-Matrix (ROADMAP-V2, „Save-Hygiene vor neuen Feldern").
  *
- * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v17). Pro Version
+ * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v18). Pro Version
  * zwei Inline-Fixtures (kein Datei-IO):
  *
  *   1. ein REALISTISCHER Save der jeweiligen Ära, der die volle Ladekette
@@ -49,7 +49,7 @@ function memStorage(): ChStorage & { map: Map<string, string> } {
 }
 
 /** Every historical CH schema version, oldest first — the spine of the matrix. */
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18] as const;
 type SchemaVersion = (typeof VERSIONS)[number];
 
 const LAST_SEEN = 1_752_800_000_000;
@@ -270,6 +270,26 @@ const FORGE = {
 };
 
 /**
+ * v18 (2b): Skin-Meisterschafts-Pfade. Drei Skins in ganz verschiedenen
+ * Ständen — der getragene Disco-King mit VOLLEM Pfad (720 000 Pfad-Sekunden
+ * ⇒ alle fünf Knoten inklusive Signature-Move), der Klassiker mitten in der
+ * Leiter (Knoten 2: 30 000 Trage-Sekunden + 40 Bosse = 37 200) und Robo mit
+ * reiner Tragezeit unter Knoten 1. Genau diese Streuung ist der Punkt: Der Pfad
+ * misst TREUE, und Treue verteilt sich nicht gleichmäßig.
+ */
+const SKIN_PATH = {
+  disco: { s: 600_000, b: 700 },
+  classic: { s: 30_000, b: 40 },
+  robo: { s: 1_500, b: 0 },
+};
+
+/** v18 (3c): Der Erbe dieser Ära — DJ Wumms trägt seine Ränge doppelt. */
+const HEIR = 'dj';
+
+/** v18 (1d): Legenden-Level — 12 Himmelfahrten nach der ersten Transzendenz. */
+const LEGEND = 12;
+
+/**
  * Was ein Save VOR v17 nach der Migration in den Relikten stehen haben muss:
  * eine LEERE Sammlung, aber einen GESETZTEN Gate-Highwater. Die Sammlung ist
  * leer, weil gefallene Relikte, die nie gefallen sind, erfunden wären; der
@@ -381,6 +401,11 @@ function saveAt(v: SchemaVersion): Record<string, unknown> {
       ),
     };
   }
+  if (v >= 18) {
+    raw.skinPath = Object.fromEntries(Object.entries(SKIN_PATH).map(([k, e]) => [k, { ...e }]));
+    raw.heir = HEIR;
+    raw.legend = LEGEND;
+  }
   return raw;
 }
 
@@ -478,6 +503,19 @@ function expectSlices(s: ChState, v: SchemaVersion): void {
   // ausgezahlt; die Zahl ist gerechnet (`clearedGateFor`), nicht geraten.
   expect(s.relics).toEqual(v >= 17 ? RELICS : RELICS_PRE_V17);
   expect(s.forge).toEqual(v >= 17 ? FORGE : createForge());
+  // v18 — Skin-Pfade (2b) + Erbe (3c) + Legenden-Level (1d). ALLE DREI starten
+  // in älteren Ären leer, und jedes aus seinem eigenen Grund:
+  //  · Tragezeit hat das Spiel nie gemessen — `stats.playTimeS` kennt die
+  //    Spielzeit, aber nicht, WELCHER Skin dabei anlag.
+  //  · Ein Erbe entsteht nur durch eine WAHL in der Zeremonie; ihn zu raten
+  //    hieße, dem Spieler genau die Entscheidung abzunehmen, um die es geht.
+  //  · Für das Legenden-Level bräuchte es einen Lebenszeit-Zähler der
+  //    Himmelfahrten. Der einzige Kandidat (`heaven.ascensions2`) wird von
+  //    `transcendState` auf 0 zurückgesetzt, zählt also nur die laufende Ära —
+  //    aus ihm zu säen wäre eine untere Schranke mit dem Anschein einer Zahl.
+  expect(s.skinPath).toEqual(v >= 18 ? SKIN_PATH : {});
+  expect(s.heir).toBe(v >= 18 ? HEIR : '');
+  expect(s.legend).toBe(v >= 18 ? LEGEND : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -864,6 +902,35 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
         { affix: null, dry: 2 },
         { affix: null, dry: 0 },
       ]);
+    },
+  },
+  18: {
+    what: 'Pfad mit Phantom-Skin/NaN, Erbe ohne Crew-Mitglied, krummes Legenden-Level',
+    damage: (raw) => {
+      raw.skinPath = {
+        disco: { s: 600_000, b: 700 }, // heil — muss unangetastet durchkommen
+        classic: { s: Number.NaN, b: 40.7 }, // NaN-Sekunden ⇒ 0, krumme Bosse ⇒ abgerundet
+        robo: { s: -900, b: -3 }, // beides negativ ⇒ das Fach fällt ganz weg
+        vegasking: { s: 99_999, b: 99 }, // KEIN echter Skin ⇒ raus
+        toString: { s: 10, b: 1 }, // Prototyp-Schlüssel ⇒ raus
+        host: 'kaputt', // gar kein Objekt ⇒ raus
+      };
+      raw.heir = 'niemand'; // keine Crew-Id ⇒ ''
+      raw.legend = 12.9; // krumm ⇒ abgerundet
+    },
+    check: (s) => {
+      // Nur echte Skin-Ids mit echtem Fortschritt überleben. Die Sekunden
+      // bleiben BEWUSST ungefloort (die Glue bucht Bruchteile je 0,25-s-Tick),
+      // die Boss-Stückzahlen werden gefloort.
+      expect(s.skinPath).toEqual({
+        disco: { s: 600_000, b: 700 },
+        classic: { s: 0, b: 40 },
+      });
+      // Eine Müll-Id hinge sonst als Geist in `heirWeightFor` und käme nie zu
+      // einer Wirkung — sie wird zu „kein Erbe".
+      expect(s.heir).toBe('');
+      // Der Zähler ist unendlich und wird deshalb NICHT gedeckelt, nur gefloort.
+      expect(s.legend).toBe(12);
     },
   },
 };

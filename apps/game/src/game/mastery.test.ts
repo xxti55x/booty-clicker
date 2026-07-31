@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  HEIR_WEIGHT,
   MASTERY_DPS_PER_RANK,
   MASTERY_DPS_RANKS,
   MASTERY_MAX_DPS_BONUS,
@@ -165,5 +166,39 @@ describe('mastery — Fortschritt für Card und Tooltip', () => {
 
   it('rundet krumme Stände ab, statt sie anzuzeigen', () => {
     expect(masteryProgress(1_240.9).xp).toBe(1_240);
+  });
+});
+
+describe('Erben-Gewichtung (3c)', () => {
+  it('verdoppelt die Perk-Wirkung — und nur die des Erben', () => {
+    const gold = MASTERY_RANKS[2].at; // Gold ⇒ der Prozent-Perk steht am Deckel
+    expect(masteryOwnMult(gold)).toBeCloseTo(1 + MASTERY_MAX_DPS_BONUS, 12);
+    expect(masteryOwnMult(gold, HEIR_WEIGHT)).toBeCloseTo(1 + 2 * MASTERY_MAX_DPS_BONUS, 12);
+    expect(masteryOwnMult(gold, 1)).toBeCloseTo(1 + MASTERY_MAX_DPS_BONUS, 12);
+  });
+
+  it('hebt den Deckel MIT — der Erbe darf +12 % statt +6 %', () => {
+    expect(masteryOwnMult(MASTERY_RANKS[3].at, HEIR_WEIGHT)).toBeCloseTo(1.12, 12);
+  });
+
+  it('verdoppelt auf jeder Stufe der Leiter, nicht nur oben', () => {
+    for (const [i, cfg] of MASTERY_RANKS.entries()) {
+      const base = MASTERY_DPS_PER_RANK * Math.min(MASTERY_DPS_RANKS, i + 1);
+      expect(masteryOwnMult(cfg.at, HEIR_WEIGHT) - 1).toBeCloseTo(2 * base, 12);
+    }
+  });
+
+  it('macht aus einem Mitglied OHNE Rang keinen Bonus (doppelt null ist null)', () => {
+    expect(masteryOwnMult(0, HEIR_WEIGHT)).toBe(1);
+    expect(masteryOwnMult(MASTERY_RANKS[0].at - 1, HEIR_WEIGHT)).toBe(1);
+  });
+
+  it('klemmt ein unsinniges Gewicht auf den Erlaubten-Bereich statt zu werfen', () => {
+    const gold = MASTERY_RANKS[2].at;
+    expect(masteryOwnMult(gold, 0)).toBeCloseTo(masteryOwnMult(gold), 12);
+    expect(masteryOwnMult(gold, -4)).toBeCloseTo(masteryOwnMult(gold), 12);
+    expect(masteryOwnMult(gold, Number.NaN)).toBeCloseTo(masteryOwnMult(gold), 12);
+    // Ein gebasteltes Riesen-Gewicht kann den Perk nicht über die Verdopplung heben.
+    expect(masteryOwnMult(gold, 99)).toBeCloseTo(masteryOwnMult(gold, HEIR_WEIGHT), 12);
   });
 });

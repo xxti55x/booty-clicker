@@ -10,6 +10,15 @@ import {
   transcendGain,
   transcendGlobalMult,
 } from '../game/transcend';
+import { CREW } from '../game/heroes';
+import {
+  HEIR_WEIGHT,
+  MASTERY_DPS_PER_RANK,
+  MASTERY_DPS_RANKS,
+  masteryProgress,
+} from '../game/mastery';
+import { legendGlobalMult } from '../game/legend';
+import { portraitTile } from './avatars';
 import { emptyState } from './empty';
 import { fmt } from './format';
 
@@ -53,6 +62,10 @@ export class Transcend {
         <h3>Transzendenz 🔮</h3>
         <div class="rebirth-info transcend-info" id="tcInfo"></div>
         <button class="btn danger" id="transcendBtn" type="button">Transzendieren</button>
+      </div>
+      <div class="settings-section">
+        <h3>Legenden-Level 🏅</h3>
+        <div class="rebirth-info transcend-info" id="tcLegend"></div>
       </div>
       <div class="settings-section">
         <h3>Mythos-Shop 🔮</h3>
@@ -125,6 +138,8 @@ export class Transcend {
         : 'Noch keine Transzendenz (100 HPF)';
     }
 
+    this.renderLegend();
+
     byId('tcMythosInfo').innerHTML =
       `<span class="tc-bank">Verfügbar <b>${fmt(t.te)}</b> 🔮</span> · ausgegeben <b>${fmt(mythosSpent(t))}</b> 🔮 · Boost <b>×${fmt(mult)}</b>.<br>` +
       `Knoten sind <b>permanent</b> (überleben jede weitere Transzendenz) und es gibt <b>keinen Respec</b>. ` +
@@ -148,6 +163,44 @@ export class Transcend {
         el.addEventListener('click', () => this.deps.onBuyMythos(id));
       }
     }
+  }
+
+  /**
+   * **1d + 3c in einem Abschnitt** — und das ist Absicht: Beides sind Dinge,
+   * die eine Himmelfahrt bzw. eine Transzendenz PERMANENT hinterlässt, und
+   * beide gehören damit unter den Knopf, der sie auslöst. Der Legenden-Zähler
+   * steht oben (er tickt bei jeder Himmelfahrt), der Erbe darunter (er wird
+   * beim Transzendieren gewählt).
+   */
+  private renderLegend(): void {
+    const { state } = this.deps;
+    const L = state.legend;
+    const pct = Math.round((legendGlobalMult(L) - 1) * 1000) / 10;
+    const first = state.transcend.transcendences >= 1;
+    const heir = CREW.find((c) => c.id === state.heir);
+
+    const counter =
+      `<div class="tc-legend"><span class="tl-n">${fmt(L)}</span>` +
+      `<span class="tl-t">Legenden-Level 🏅<br><b>+${String(pct).replace('.', ',')} %</b> global, additiv</span></div>` +
+      (first
+        ? `<span class="dim">Jede weitere Himmelfahrt gibt +1 — unendlich, und kein Reset nimmt sie je zurück.</span>`
+        : `<span class="tc-locked">🔒 Erst nach der ersten Transzendenz.</span> ` +
+          `<span class="dim">Danach zahlt jede Himmelfahrt ein Level (+0,5 % global, additiv statt multiplikativ).</span>`);
+
+    const p = heir ? masteryProgress(state.crewMastery[heir.id] ?? 0) : null;
+    const gain = p
+      ? Math.round(
+          MASTERY_DPS_PER_RANK * Math.min(MASTERY_DPS_RANKS, p.rank) * (HEIR_WEIGHT - 1) * 100,
+        )
+      : 0;
+    const heirRow = heir
+      ? `<div class="tc-heir">${portraitTile(heir.id, 'base', `av-lg mr${p?.rank ?? 0}`)}` +
+        `<span class="th-t"><b>Erbe dieser Ära: ${heir.name}</b><br>` +
+        `${p && p.rank > 0 ? `${p.name}-Rang doppelt gewichtet — +${gain} Prozentpunkte Eigen-Output` : 'noch ohne Rang — die Verdopplung greift ab Bronze'}</span></div>`
+      : `<div class="tc-heir none"><span class="th-t"><b>Kein Erbe</b><br>` +
+        `${first ? 'Beim nächsten Transzendieren darfst du einen wählen.' : 'Beim Transzendieren darf ein Crew-Mitglied seine Meisterschaft doppelt gewichtet mitnehmen.'}</span></div>`;
+
+    byId('tcLegend').innerHTML = counter + heirRow;
   }
 
   /** Eine Mythos-Knoten-Card: Name, Effekt, Kosten bzw. gekauft-Haken. */

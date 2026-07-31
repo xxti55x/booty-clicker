@@ -34,6 +34,13 @@ import {
   forgeSlotsUnlocked,
   nextForgeUnlock,
 } from '../game/forge';
+import {
+  PATH_NODES,
+  PATH_THRESHOLDS,
+  SIGNATURE_MOVES,
+  pathAmount,
+  pathProgress,
+} from '../game/skin-path';
 import { affixText } from './affix-text';
 import { fmt, fmtInt } from './format';
 
@@ -329,6 +336,52 @@ export class Gear {
     return `<div class="sc-forge">${hint}${chips.join('')}</div>`;
   }
 
+  /**
+   * **Der Meisterschafts-Pfad** (2b) — fünf Knoten direkt an der Skin-Karte.
+   *
+   * Er sitzt hier aus demselben Grund wie die Schmiede-Reihe darüber: Ein Pfad
+   * ist ANTEIL dieses Skins. Er füllt sich nur, während dieser Skin getragen
+   * wird, er zahlt auf dessen eigenen Stern-Stat, und er verschwindet aus der
+   * Rechnung, sobald man wechselt. Ein zehnter Reiter wäre räumlich ohnehin
+   * ausgeschlossen (neun Reiter à 44 px = 396 px gegen 387 px verfügbare Breite
+   * bei 390 px Gerätebreite, headless nachgemessen).
+   *
+   * Drei Zeilen, mehr nicht: die fünf Knoten-Punkte (der letzte trägt das
+   * Tanz-Zeichen statt einer Zahl), ein Fortschritts-Balken zum nächsten
+   * Knoten, und eine Zeile Klartext — was er JETZT zahlt und woraus er wächst.
+   */
+  private pathRow(id: SkinKey): string {
+    const cfg = SKINS[id];
+    const p = pathProgress(this.deps.state.skinPath, id);
+    const dots: string[] = [];
+    for (let i = 1; i <= PATH_NODES; i++) {
+      const on = p.nodes >= i;
+      const last = i === PATH_NODES;
+      dots.push(
+        `<span class="sp-dot${on ? ' on' : ''}${last ? ' sig' : ''}" title="${
+          last
+            ? `Knoten 5: Signature-Move „${SIGNATURE_MOVES[id]}"`
+            : `Knoten ${i}: ${affixText(cfg.star.stat, pathAmount(id, i))}`
+        }">${last ? '💃' : i}</span>`,
+      );
+    }
+    const bar =
+      p.next > 0
+        ? `<span class="sp-bar"><i style="width:${(p.frac * 100).toFixed(1)}%"></i></span>`
+        : `<span class="sp-bar full"><i style="width:100%"></i></span>`;
+    const now =
+      p.nodes > 0
+        ? `jetzt ${affixText(cfg.star.stat, p.amount)}`
+        : `Knoten 1 bei ${fmtInt(PATH_THRESHOLDS[0])} Pfad-Sek.`;
+    const src = `${Math.floor(p.wear / 60)} min getragen · ${fmtInt(p.bosses)} Boss${p.bosses === 1 ? '' : 'e'}`;
+    const done = p.nodes >= PATH_NODES ? ` · Move „${SIGNATURE_MOVES[id]}"` : '';
+    return (
+      `<div class="sc-path" title="Meisterschafts-Pfad: Tragezeit + Boss-Kills in diesem Skin">` +
+      `<div class="sp-dots">${dots.join('')}</div>${bar}` +
+      `<div class="sp-t dim">${now} · ${src}${done}</div></div>`
+    );
+  }
+
   private card(id: SkinKey): string {
     const { state } = this.deps;
     const cfg = SKINS[id];
@@ -397,6 +450,7 @@ export class Gear {
       <div class="sc-row"><span class="sc-level">Lv ${lv}/${MAX_SKIN_LEVEL}</span>${lvBtn}</div>
       <div class="sc-row"><span class="sc-stars">${stars5} ${stars}/${MAX_SKIN_STARS}</span>${stBtn}</div>
       ${this.forgeRow(id, lv, unlocked)}
+      ${this.pathRow(id)}
       ${footer}
     </div>`;
   }

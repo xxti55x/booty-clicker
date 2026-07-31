@@ -5,11 +5,13 @@ import { pendingSouls, soulsForMaxZone } from '../game/ascension';
 import {
   type ChState,
   ascendState,
+  clickDamageOf,
   createChState,
   createChests,
   createComboSave,
   createPeach,
   createStats,
+  dpsOf,
   himmelfahrtState,
   loadoutBonus,
   transcendState,
@@ -1850,5 +1852,97 @@ describe('ch-store — v17 migration & repair (Relikte 1c + Skin-Schmiede 3a)', 
       // Drop-Leiter ab Bühne 50 ein zweites Mal aus.
       expect(next.relics.deepestGate).toBe(80);
     }
+  });
+});
+
+describe('ch-store — v18 migration & repair (Skin-Pfade 2b + Erbe 3c + Legenden-Level 1d)', () => {
+  it('migriert v17 → v18: alle drei Felder starten LEER', () => {
+    const v17 = {
+      ...JSON.parse(serializeCh(createChState(), 1_752_800_000_000)),
+      v: 17,
+      // Ein Save, der reichlich Anhaltspunkte BÖTE — und aus keinem davon wird
+      // gesät: `playTimeS` kennt den Skin nicht, `ascensions2` wird von jeder
+      // Transzendenz genullt, und ein Erbe entsteht nur durch eine Wahl.
+      stats: { ...createStats(), playTimeS: 500_000, bossKills: 900 },
+      heaven: { hpf: 40, hpfLifetime: 12_000, ascensions2: 6, tree: {} },
+      transcend: { te: 2, teLifetime: 4, transcendences: 3, mythos: {} },
+      crewMastery: { dj: 90_000 },
+      gear: { ...createGear(), skin: 'lava' },
+    };
+    delete (v17 as Record<string, unknown>).skinPath;
+    delete (v17 as Record<string, unknown>).heir;
+    delete (v17 as Record<string, unknown>).legend;
+    const s = deserializeCh(JSON.stringify(v17));
+    expect(s).not.toBeNull();
+    expect(s!.skinPath).toEqual({});
+    expect(s!.heir).toBe('');
+    expect(s!.legend).toBe(0);
+    // Verlustfrei für alles Bestehende.
+    expect(s!.transcend.transcendences).toBe(3);
+    expect(s!.heaven.ascensions2).toBe(6);
+    expect(s!.crewMastery).toEqual({ dj: 90_000 });
+  });
+
+  it('rechnet nach der Migration bit-gleich weiter (leere Felder falten ×1)', () => {
+    const base = createChState();
+    const withPath: ChState = {
+      ...base,
+      crew: { boss: 40, dj: 40 },
+      crewMastery: { dj: 8_000 },
+    };
+    expect(dpsOf(withPath)).toBe(dpsOf({ ...withPath, skinPath: {}, heir: '', legend: 0 }));
+    expect(clickDamageOf(withPath)).toBe(
+      clickDamageOf({ ...withPath, skinPath: {}, heir: '', legend: 0 }),
+    );
+  });
+
+  it('repariert Müll in allen drei Feldern, ohne echten Fortschritt zu nuken', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1_752_800_000_000));
+    raw.skinPath = {
+      disco: { s: 12_345.5, b: 7 }, // heil (die Sekunden bleiben GEBROCHEN)
+      lava: { s: -1, b: -1 }, // nichts Gültiges ⇒ Fach fällt weg
+      vegasking: { s: 900, b: 9 }, // kein Katalog-Skin ⇒ raus
+    };
+    raw.heir = 'niemand';
+    raw.legend = -4;
+    const s = deserializeCh(JSON.stringify(raw))!;
+    expect(s.skinPath).toEqual({ disco: { s: 12_345.5, b: 7 } });
+    expect(s.heir).toBe('');
+    expect(s.legend).toBe(0);
+  });
+
+  it('trägt Pfade und Legenden-Level durch JEDEN Reset — der Erbe nur bis zur nächsten Ära', () => {
+    const skinPath = { disco: { s: 60_000, b: 120 }, pirate: { s: 720_000, b: 0 } };
+    const base: ChState = {
+      ...createChState(),
+      skinPath,
+      heir: 'dj',
+      legend: 9,
+      runMaxZone: 80,
+      lifetimeMaxZone: 80,
+      rsLifetime: 5_000,
+      transcend: { te: 2, teLifetime: 2, transcendences: 1, mythos: {} },
+      heaven: { ...createChState().heaven, hpfLifetime: 1e12 },
+    };
+    // Aszension: alles bleibt stehen.
+    const asc = ascendState(base);
+    expect(asc.skinPath).toEqual(skinPath);
+    expect(asc.heir).toBe('dj');
+    expect(asc.legend).toBe(9);
+    // Himmelfahrt: der Zähler WÄCHST (die Transzendenz ist gebucht).
+    const hf = himmelfahrtState(base);
+    expect(hf.skinPath).toEqual(skinPath);
+    expect(hf.heir).toBe('dj');
+    expect(hf.legend).toBe(10);
+    // …aber nicht ohne Transzendenz.
+    expect(
+      himmelfahrtState({ ...base, transcend: { ...base.transcend, transcendences: 0 } }).legend,
+    ).toBe(9);
+    // Transzendenz: Pfade und Zähler bleiben, der Erbe wird NEU gewählt.
+    const tc = transcendState(base, 'hype');
+    expect(tc.skinPath).toEqual(skinPath);
+    expect(tc.legend).toBe(9); // die Transzendenz selbst zahlt kein Level
+    expect(tc.heir).toBe('hype');
+    expect(transcendState(base).heir).toBe(''); // ohne Wahl: kein Erbe
   });
 });

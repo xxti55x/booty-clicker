@@ -90,6 +90,34 @@ export const MASTERY_DPS_RANKS = 3;
 export const MASTERY_MAX_DPS_BONUS = MASTERY_DPS_PER_RANK * MASTERY_DPS_RANKS;
 
 /**
+ * **Der Erben-Moment** (IDEEN-GAMEPLAY 3c): Gewichtung der Meisterschafts-Perks
+ * des beim Transzendieren gewählten Erben. `2` heißt: Seine Ränge zählen
+ * doppelt, also **+4 % je Rang statt +2 %**, in der Spitze +12 % statt +6 %.
+ *
+ * **Warum der +6-%-Deckel für den Erben fällt — und warum das trotzdem klein
+ * ist.** Der Deckel aus 1a ist ein PRO-MITGLIED-Deckel gegen schleichende
+ * Permanenz über die ganze Crew: 15 Mitglieder à +6 % wären in der Summe ein
+ * echter Term. Der Erbe ist genau EINER, genau EINE Ära lang, und muss beim
+ * nächsten Transzendieren neu gewählt werden.
+ *
+ * Der Deckel ist damit STRUKTURELL, nicht geschätzt: Die Verdopplung wirkt nur
+ * auf den EIGEN-Anteil eines Mitglieds, also ist der absolute Höchstfall
+ * `MASTERY_MAX_DPS_BONUS / (1 + MASTERY_MAX_DPS_BONUS)` = **+5,66 %
+ * Gesamt-DPS** — und der gilt nur, wenn dieses eine Mitglied die KOMPLETTE
+ * Crew-DPS trüge. Gemessen an einer gleichmäßig gekauften Crew (alle Lv 40,
+ * alle Gold) sind es ×1.0490; im Bot-Lauf (`npm run balance`, Abschnitt 12)
+ * noch weniger, weil dort auch Klick, Seelen und Ahnen am Produkt hängen. Ein
+ * Test friert beide Zahlen ein.
+ *
+ * Die Gegenprobe war die Alternative „Deckel steht" (Ränge zählen doppelt, aber
+ * die Wirkung klemmt weiter bei +6 %): Dann wäre der Erbe für JEDEN Spielstand
+ * mit Gold-Rang wirkungslos — und Gold fällt nach ~13 h. Ein Zeremonien-Moment,
+ * der für alle Fortgeschrittenen nichts tut, ist kein Moment. Deshalb:
+ * die Wirkung verdoppelt sich, der Deckel wandert mit.
+ */
+export const HEIR_WEIGHT = 2;
+
+/**
  * Der Rang zu `xp` als Index 0…4 (0 = noch keiner). Nicht-endliche oder
  * negative Werte lesen als 0 — die Funktion ist überall im Renderpfad und darf
  * nie werfen.
@@ -109,11 +137,18 @@ export function masteryRankConfig(xp: number): MasteryRankConfig | null {
 
 /**
  * Der Eigen-Output-Faktor eines Mitglieds aus seinen Einsatz-XP:
- * `1 + 2 % · min(Rang, 3)` — Bronze ×1.02, Silber ×1.04, Gold/Legende ×1.06.
- * Trifft DPS bzw. (beim Klick-Mitglied) den Klick-Schaden, nie etwas Globales.
+ * `1 + 2 % · min(Rang, 3) · Gewicht` — Bronze ×1.02, Silber ×1.04,
+ * Gold/Legende ×1.06. Trifft DPS bzw. (beim Klick-Mitglied) den Klick-Schaden,
+ * nie etwas Globales.
+ *
+ * `weight` ist die Erben-Gewichtung (3c): 1 für jedes gewöhnliche Mitglied,
+ * {@link HEIR_WEIGHT} für den beim Transzendieren gewählten Erben. Ein
+ * unsinniges Gewicht (negativ, NaN) liest als 1 — der Getter hängt im
+ * Renderpfad und darf nie werfen.
  */
-export function masteryOwnMult(xp: number): number {
-  return 1 + MASTERY_DPS_PER_RANK * Math.min(MASTERY_DPS_RANKS, masteryRank(xp));
+export function masteryOwnMult(xp: number, weight = 1): number {
+  const w = Number.isFinite(weight) && weight > 0 ? Math.min(HEIR_WEIGHT, weight) : 1;
+  return 1 + MASTERY_DPS_PER_RANK * Math.min(MASTERY_DPS_RANKS, masteryRank(xp)) * w;
 }
 
 /** `true`, sobald der Legenden-Rang die erste Fähigkeits-Stufe gratis macht. */

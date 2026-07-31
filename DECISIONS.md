@@ -3,6 +3,213 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## IDEEN-GAMEPLAY Schritt 7 — 2b Skin-Pfade + 3c Erben-Moment + 1d Legenden-Level
+
+- **Ein Knoten ist ein FÜNFTEL Stern — die Leitplanke steht damit strukturell,
+  nicht als Handrechnung.** Die vier Bonus-Knoten eines Skin-Pfades zahlen auf
+  den **`star.stat` desselben Skins** (Klassiker Klick · Robo Coach-cps · Pirat
+  Gold — das Muster aus dem Ideen-Dokument), und zwar je `star.perStar · 0.2`.
+  Der VOLLE Pfad ist damit **0,8 ⭐ wert, also weniger als EIN zusätzlicher
+  Stern**, den derselbe Skin für einen einzigen Zuckerpfirsich bekäme. Der
+  Richtwert „≤ +8 % auf den skin-typischen Term" fällt daraus ab statt
+  hineingerechnet zu werden: Der stärkste Fall ist der Klassiker (0,1
+  clickPct/⭐ ⇒ **exakt +8 % Klick**), und ein Test prüft das für JEDEN Skin
+  gegen den lebenden `SKINS`-Katalog — ein künftiger Skin mit fetterem Stern
+  reißt den Test, nicht erst die Balance. Leistungs-Produkt eines vollen Pfades:
+  **×1.1259** (zum Vergleich 2a ×1.30, 1c/3a ×1.43 — dieselbe Rechnung, dieselbe
+  Einheit).
+- **Zwei Fortschritts-Quellen, aber nur EINE Leiste.** Tragezeit und Boss-Kills
+  laufen über `BOSS_SECONDS = 180` in eine Zahl zusammen (ein Boss-Kill = 3 min
+  Tragezeit). Damit braucht der Pfad keine zweite Schwellen-Reihe, keine
+  „oder"-Logik und keine Anzeige mit zwei Balken — dieselbe Disziplin wie bei
+  der Gebietsherrschaft (1b: eine Zahl je Theme, eine Gewinn-Regel, eine
+  Wirkung). Die 180 sind gemessen: Der Bot fällt im ersten Sitting **6,3 Gates
+  (0,14 Boss/min)** und im Beharrungszustand **0,31 Boss/min** — ein Boss-Kill
+  ist damit rund ein Drittel des Fortschritts einer aktiven Sitzung wert, und
+  wer nur idlet, kommt trotzdem an, nur langsamer.
+- **Die Schwellen 3 000 / 18 000 / 72 000 / 216 000 / 720 000, gemessen statt
+  geraten** (`npm run balance`, Abschnitt 12, Seeds 1/7/12345, MIT Loot):
+  · **45 min: 3 840 Pfad-Sek. ⇒ Knoten 1** — die Vorgabe „im ersten Sitting"
+  ist erfüllt, und zwar mit 28 % Luft: Die erste Fassung hatte 3 600 und lag
+  damit bei einem boss-schwachen Seed (4 Gates ⇒ 3 420) auf der Kippe.
+  · **3 h: 19 200 ⇒ Knoten 2** · **12 h: 81 840 ⇒ Knoten 3** ·
+  **24 h: 166 260 — immer noch Knoten 3** (Knoten 4 bei 31 h).
+  · **Knoten 5 nach ~103 h** bei gemessener Kadenz, 200 h bei reiner Tragezeit —
+  „darf Tage dauern" heißt hier gut vier Tage aktiven Spiels. Ein Test friert
+  beide Enden ein (Knoten 1 im ersten Sitting, Knoten 4+5 nach 24 h noch offen).
+- **Knoten 5 zahlt bewusst KEINEN Prozentpunkt, sondern einen Move.** Dieselbe
+  Entscheidung wie beim Legenden-Rang der Crew-Meisterschaft (1a: Rang 4 zahlt
+  die Gratis-Erststufe statt weiterer Prozente) — der letzte, teuerste Knoten
+  einer permanenten Leiter soll etwas sein, das man SIEHT. Die zehn Signature-
+  Moves kommen aus dem BESTEHENDEN A4-Satz und sind als NAMEN katalogisiert
+  (`SIGNATURE_MOVES`), nicht als Indizes: Der Index ist eine Eigenschaft von
+  `MOVES`, der Name ist der Vertrag — genau wie `VICTORY_MOVE` selbst über den
+  Namen aufgelöst wird. Keiner der zehn ist der **Diva-Turn** (ein „Signature-
+  Move", der aussieht wie der Move aller anderen, wäre keiner); sieben Moves auf
+  zehn Skins heißt drei Doppelungen, und die sind nach Rig-Silhouette gepaart
+  (die beiden `boss`-Rigs teilen den Booty-Slam, die beiden `robot`-Rigs die
+  Welle). **Der Physik-Kontrakt bleibt unberührt**: `skin-path.ts` liefert einen
+  Namen, `main.ts` schlägt ihn in `MOVES` nach und übergibt einen INDEX an
+  `Choreographer.setMove` — keine neue Pose, kein neuer Bone, kein neuer
+  Blend-Pfad.
+- **Ein toter Haken wurde endlich verdrahtet.** `Choreographer.onMove` stand
+  seit A4 als „HUD hook" im Code und war nie benutzt; jetzt schreibt er den
+  laufenden Move-Namen als `data-move` ans Canvas. Ohne das wäre der
+  Signature-Move nur ein Bild, das man mit dem Standard-Move verwechseln kann —
+  mit ihm ist er im DOM nachweisbar (siehe `2b3c1d-b*`). Kosten: ein
+  Attribut-Schreiben je Move-Wechsel (alle 18 Klicks).
+- **Der Erbe darf +12 % — der Deckel wandert MIT, und das war eine gerechnete
+  Entscheidung.** Die Alternative („Ränge zählen doppelt, aber die Wirkung
+  klemmt weiter bei +6 %") wurde verworfen, weil sie den Erben für JEDEN
+  Spielstand mit Gold-Rang wirkungslos machte — und Gold fällt nach ~13 h. Ein
+  Zeremonien-Moment, der für alle Fortgeschrittenen nichts tut, ist kein Moment.
+  Der Deckel aus 1a ist ein PRO-MITGLIED-Deckel gegen schleichende Permanenz
+  über die ganze Crew (15 × +6 % wären ein echter Term); der Erbe ist genau
+  EINER, genau EINE Ära lang. Der neue Deckel ist trotzdem strukturell und nicht
+  geschätzt: Die Verdopplung wirkt nur auf den EIGEN-Anteil, also ist der
+  absolute Höchstfall `0.06 / 1.06 = +5,66 % Gesamt-DPS`, und der gälte nur,
+  wenn dieses eine Mitglied die KOMPLETTE Crew-DPS trüge. Gemessen an einer
+  Crew auf Lv 40 mit durchweg Gold-Rang: **×1.0490** (bester Erbe: Kosmische
+  Twerk-Entität). Zwei Tests frieren beide Zahlen ein.
+- **Der Erbe liegt UNTER der Auflösung jedes Ankers — und das ist das Ergebnis,
+  kein kaputtes Messgerät.** Das A/B-Profil `SIM_HEIR` (beste-ROI-Heuristik: das
+  XP-stärkste Mitglied, nach jedem Kauf-Durchgang nachgeführt) bewegt t25 um
+  **×1.00** und die 3-h-Kette um **×1.00** (alle drei Seeds enden bei Bühne 75 /
+  1 295 Seelen). Gründe, beide dokumentiert: Im ersten Sitting existiert noch
+  kein Rang, den man verdoppeln könnte (Bronze fällt erst gegen Ende, Abschnitt
+  6), und die Kette rennt gegen die M9-Wand, die ein paar Prozent Eigen-DPS
+  nicht verschieben. Damit ist die Zusage des Ideen-Dokuments („kostet nichts an
+  Balance") nicht behauptet, sondern gemessen.
+- **Die Wahl liegt VOR der Gutschrift, nicht in der Blende.** Die G4-Zeremonie
+  ist per Vertrag rein optisch — wenn sie läuft, ist alles gebucht, und jeder
+  Tap darf sie abbrechen. Eine Wahl darin wäre eine Entscheidung, die man
+  wegklicken kann. Der Erben-Dialog ist deshalb der letzte Schritt VOR dem
+  Reset (`arm → bestätigen → Erbe wählen → transzendieren`), die Blende feiert
+  danach; headless nachgewiesen ist, dass bei offenem Dialog noch **0 TE**
+  gebucht sind. „Kein Erbe" steht als eigene KACHEL neben den 15 Portraits, nicht
+  nur als Abbrechen-Knopf: Wer noch keinen Rang hat, soll nicht das Gefühl
+  bekommen, etwas falsch zu machen. Der Rand-Klick schließt bewusst NICHT (er
+  stünde zwischen „abbrechen" und „ohne Erben transzendieren" — beides echte
+  Entscheidungen, beide brauchen ihren Knopf).
+- **1d ist additiv, und der Unterschied ist nicht kosmetisch.** `1 + 0.005·L`
+  statt `1.005^L`: bei L = 20 belanglos (×1,10 gegen ×1,105), bei L = 2 000 der
+  Unterschied zwischen ×11 und **×1 953 mal so viel** — und genau dort
+  entschiede er über den Float-Guard (§9.3, z300) und jeden Anker. Ein Test
+  prüft `legendGlobalMult(1e15)` auf endlich und < 1e300; eine exponentielle
+  Formel hätte hier einen Deckel gebraucht, die additive braucht keinen. Genau
+  deshalb wird der Zähler in `repairLegend` auch NICHT gedeckelt.
+- **Die Kadenz ist die eigentliche Leitplanke von 1d — gemessen: ein Level je
+  24 h.** Der 24-h-Kettenlauf mit vollem Prestige-Stack schafft **genau EINE
+  Himmelfahrt** (alle drei Seeds), also genau ein Legenden-Level, +0,5 % global.
+  Für die Wirkung eines EINZIGEN TE (×3) braucht es 400 Level ≈ **9 600 h**.
+  Das Profil `SIM_LEGEND` misst deshalb bewusst den Extremfall L = 100 (×1.5
+  global, ~2 400 h Spielzeit): t25 **35.8 → 16.8 min, ×1.97**. Die Beschleunigung
+  liegt über dem Faktor selbst, weil die Crew-Kurve exponentiell ist — ein Test
+  klemmt sie bei `Faktor × 1.6`.
+- **Sim: Fortschritt IMMER, Wirkung nur im Profil — und der Grund ist neu.** Der
+  Pfad-FORTSCHRITT (Tragezeit + Boss-Kills) läuft in jedem Bot-Profil mit, die
+  WIRKUNG nur in `SIM_PATH`. Das ist NICHT dieselbe Bequemlichkeits-Untergrenze
+  wie bei 2a/3a/3b: Der normale Anker-Bot modelliert überhaupt **kein
+  Skin-Gear** (`clickGearMult` steht auf 1, obwohl der Klassiker auf Lv 50 ×5
+  Klick zahlt). Einen Bot, der den +8-%-Pfad faltet und den +400-%-Level-Buff
+  desselben Skins verschweigt, gibt es im Spiel nicht — er fiele die Krume auf
+  und ließe den Laib liegen. Die erste Fassung faltete den Pfad trotzdem und
+  brach sofort einen Anker (**t75 3.15 h → 2.34 h**, unter die 3-h-Untergrenze):
+  nicht wegen der 2–4 % Macht, sondern weil t75 an einer Lauf-GRENZE liegt und
+  der Übergang von Lauf 5 auf Lauf 4 quantisiert. Mit der Trennung sind die
+  Abschnitte 1–11 des Balance-Rituals **byte-gleich** zum Basis-Commit.
+- **Der Bot trägt EINEN Skin und wechselt nie** (`SIM_SKIN = 'classic'`, der
+  Spiel-Standard). Das ist die konservative Wahrheit in beide Richtungen: Wer
+  wechselt, füllt jeden Pfad langsamer; wer bleibt, füllt genau diesen einen so
+  schnell wie überhaupt möglich. Gemessen wird also die SCHNELLSTE Pfad-Kurve —
+  die richtige Seite für eine Schwellen-Eichung — und zugleich der STÄRKSTE
+  Bonus des Katalogs (+8 % Klick), also die richtige Seite für ein Budget.
+- **Save v18 mit drei Feldern und dreimal „bewusst leer" — jedes aus einem
+  anderen Grund.** `skinPath`: Tragezeit hat das Spiel nie gemessen —
+  `stats.playTimeS` kennt die Spielzeit, aber nicht, WELCHER Skin dabei anlag
+  (`gear.skin` ist eine Momentaufnahme, keine Historie), und `stats.bossKills`
+  kennt kein Gear; die Gesamt-Spielzeit auf den aktuell getragenen Skin zu
+  buchen hieße „du hast diesen Skin schon immer getragen". `heir`: Ein Erbe
+  entsteht ausschließlich durch eine WAHL in der Zeremonie; ihn zu raten (etwa
+  „das XP-stärkste Mitglied") nähme dem Spieler genau die Entscheidung ab, um
+  die es bei 3c geht. `legend`: Hier wurde ausdrücklich nach einem
+  Lebenszeit-Zähler der Himmelfahrten gesucht — es gibt ihn nicht.
+  `heaven.ascensions2` ist der einzige Kandidat und wird ausgerechnet von
+  `transcendState` mit `createHeaven()` auf 0 zurückgesetzt; er zählt also nur
+  die laufende Ära und verschweigt alle früheren. Aus ihm zu säen wäre keine
+  Herleitung, sondern eine untere Schranke mit dem Anschein einer Zahl. Ein
+  Alt-Save rechnet nach dem Update bit-gleich weiter (leerer Pfad, leerer Erbe,
+  L = 0 falten überall ×1).
+- **Eine Reparatur-Regel, die gegen den Strich geht: die Trage-Sekunden bleiben
+  GEBROCHEN.** `repairSkinPath` floort sie bewusst nicht (nur ≥ 0 und endlich),
+  weil die Glue Bruchteile pro Frame bucht — ein Floor beim Speichern verlöre
+  bei jedem Reload bis zu einer Sekunde. Die Boss-Kills daneben sind Stückzahlen
+  und werden gefloort. Sonst dieselbe Disziplin wie bei `repairForge`: nur echte
+  Katalog-Skins bekommen ein Fach (`Object.hasOwn`), ein Fach ohne jeden
+  Fortschritt fällt weg, und geklemmt wird in KEINE Richtung (ein Pfad ist ein
+  Lebenszeit-Highwater, `gear.skin` sagt nur, was gerade getragen wird).
+- **Die X7-Matrix hat den Bump wie immer sofort rot gemeldet.** Ihr neues Paar
+  prüft den gesunden v18-Save (drei Skins in ganz verschiedenen Pfad-Ständen,
+  ein Erbe, 12 Legenden-Level) und den kaputten (Phantom-Skin `vegasking`,
+  Prototyp-Schlüssel `toString`, NaN-Sekunden, negative Bosse, ein Fach das gar
+  kein Objekt ist, eine Erben-Id ohne Crew-Mitglied, ein krummes Legenden-Level)
+  — übrig bleiben genau zwei legale Fächer, `heir: ''` und ein gefloortes L.
+- **Platz: KEIN zehnter Reiter, drei Orte, jeder aus einem Sachgrund.** Headless
+  bei 390 × 844 nachgemessen: neun Reiter à 44 px = **396 px** gegen **387 px**
+  verfügbare Breite (schon heute 9 px drüber). Der **Pfad sitzt an der
+  Skin-KARTE**, weil er ANTEIL dieses Skins ist (er füllt sich nur, während der
+  Skin getragen wird, er zahlt auf dessen eigenen Stern-Stat, er verschwindet
+  aus der Rechnung beim Wechsel) — genau die Begründung, mit der in Schritt 6
+  schon die Schmiede-Slots dorthin kamen. Der **Legenden-Zähler und die
+  Erben-Zeile stehen im 🔮 Transzendenz-Tab**, weil beides Dinge sind, die eine
+  Himmelfahrt bzw. eine Transzendenz PERMANENT hinterlässt: unter dem Knopf, der
+  sie auslöst. Die **Erben-Wahl ist ein Dialog** (Vorbild `retrain-dialog`).
+  Tab-Höhen bei 390 px NACH der Änderung: **Trans. 934** (vorher ~700) ·
+  **Skins 2 430** (vorher 2 147). Der Skins-Tab wächst um 283 px = 28 px je
+  Karte — eine Reihe Punkte, ein 3-px-Balken, eine Klartext-Zeile.
+- **Headless-Beweis** (Chromium/SwiftShader, Port 4188, präparierter v18-Save):
+  `2b3c1d-a-skin-pfade.png` + `-a2-pfad-zoom-disco.png` + `-a3-pfad-zoom-pirat-voll.png`
+  (Disco-King ●●●○○ „jetzt +0.03 Krit-Multiplikator · 1000 min getragen · 120
+  Bosse", Klassiker ●○○○○, Robo ○○○○○ mit „Knoten 1 bei 3.000 Pfad-Sek.",
+  Pfirsich-Pirat ●●●●● mit goldenem 💃 und „Move ‚Welle'"),
+  `2b3c1d-b1-siegesmove-standard(-zoom).png` / `-b2-siegesmove-signature(-zoom).png`
+  (zwei ECHTE Boss-Siege, GLEICHER Skin, gleiche Bühne, gleiche Kamera — nur der
+  Pfad-Stand unterscheidet sich: 4/5 ⇒ `data-move="Diva-Turn"`, 5/5 ⇒
+  `data-move="Welle"`; beide Bilder exakt 250 ms nach dem Move-Wechsel und mit
+  stillgelegtem rAF aufgenommen, die Posen sind sichtbar verschieden),
+  `2b3c1d-c1-erben-wahl.png` + `-c2-erben-wahl-zoom.png` (16 Kacheln: „Kein
+  Erbe" plus 15 Portraits mit Meisterschafts-Rahmen, DJ Wumms vorgeschlagen
+  „9.20K XP · Gold → +6 pp", Knopf „Mit DJ Wumms transzendieren 🔮" — und
+  nachgewiesen, dass in diesem Moment noch **0 TE** gebucht sind),
+  `2b3c1d-d1-erbe-nach-transzendenz.png` + `-d2-erbe-zoom.png` („Erbe dieser
+  Ära: DJ Wumms · Gold-Rang doppelt gewichtet — +6 Prozentpunkte Eigen-Output"),
+  `2b3c1d-e1-legende-vorher.png` (gesperrt vor der ersten Transzendenz),
+  `2b3c1d-e2-legende-nach-t1-{vorher,nachher,nachher-voll}.png` (eine ECHTE
+  Himmelfahrt nach T1: **3 → 4 Level, +1,5 % → +2 % global**, HPF 0 → 34),
+  `2b3c1d-e3-legende-ohne-t1-{vorher,nachher}.png` (die Gegenprobe: dieselbe
+  Himmelfahrt OHNE Transzendenz — HPF 0 → 34, Legenden-Level bleibt bei **3**,
+  und die Zeile sagt „🔒 Erst nach der ersten Transzendenz"),
+  `2b3c1d-f-permanenz-nach-transzendenz.png` (nach der echten Transzendenz:
+  Bühne 62 → 1, Seelen 900 → 0, HPF 900 → 0, TE ×9 — die Skin-Pfade [Klassiker
+  ●○○○○, Disco ●●●○○], die 180 Glut und der Erbe stehen unverändert da), sowie
+  `2b3c1d-m-{portrait,schmal,landscape}-{pfade,legende,erbe}.png` (390×844,
+  320×640, 740×380 — `documentElement.scrollWidth == innerWidth` in allen neun,
+  und im Querformat scrollt der Erben-Dialog IN SICH: sichtbar 344 px bei
+  1 028 px Inhalt). Bundle nach der Änderung: **892 KB JS** (Budget 1.5 MB).
+- **Gemessener Anker-Shift** (`npm run balance`, Seeds 1/7/12345): **Abschnitte
+  1–11 byte-gleich** zum Basis-Commit — kein einziger Anker bewegt sich, weil
+  keine der drei Wirkungen im Normal-Bot hängt. Laufzeit **34,1 s** (von 60 s
+  Budget, vorher 28,2 s). Die Suite läuft mit **1 161 Tests** (vorher 1 085) in
+  46,9 s; die neuen Sim-Anker liegen in einer DRITTEN Datei (`sim-meta.test.ts`)
+  aus demselben gemessenen Grund wie `sim-loot.test.ts` in Schritt 6 — ein
+  Vitest-Worker über 60 s CPU am Stück reißt den `onTaskUpdate`-RPC-Timeout, und
+  `sim.test.ts` lag mit 48 s bereits nah dran.
+
+**Bilanz.** Damit sind alle elf Felder aus IDEEN-GAMEPLAY.md umgesetzt: 4a + 4b
+(Avatare) · 1a (Crew-Meisterschaft) · 3b (Umschulung) · 2a (Konstellation) ·
+1b (Gebietsherrschaft) · 1c + 3a (Relikte & Schmiede) · 2b (Skin-Pfade) ·
+3c (Erben-Moment) · 1d (Legenden-Level).
+
 ## IDEEN-GAMEPLAY Schritt 6 — 1c Relikte + 3a Skin-Schmiede
 
 - **EIN Pool, zwei Systeme — und das ist die ganze Architektur.** `affixes.ts`

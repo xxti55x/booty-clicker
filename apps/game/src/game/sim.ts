@@ -182,6 +182,7 @@ import {
   truhenMagnetBonus,
 } from './heaven';
 import {
+  CREW,
   bestCrewBuy,
   clickDamageRaw,
   crewSpecialBonuses,
@@ -189,6 +190,8 @@ import {
   totalRawDps,
 } from './heroes';
 import { type CrewMastery, addMastery, createMastery } from './mastery';
+import { legendGlobalMult } from './legend';
+import { BOSS_SECONDS, PATH_NODES, SIM_SKIN, nodesForScore, pathAmount } from './skin-path';
 import {
   type Territory,
   addRep,
@@ -283,6 +286,47 @@ export interface SimConfig {
    * und ein Bot ohne sie würde einen Machtterm verschweigen.
    */
   forge?: boolean;
+  /**
+   * **IDEEN-GAMEPLAY 2b — der Skin-Meisterschafts-Pfad.** Standard `false`, und
+   * der Grund ist ein anderer als bei 2a/3a: Der normale Anker-Bot modelliert
+   * **gar kein Skin-Gear** (`clickGearMult`/`idleGearMult` stehen per Default
+   * auf 1, obwohl der Klassiker auf Lv 50 allein ×5 Klick zahlt). Einen Bot,
+   * der den +400-%-Level-Buff verschweigt, aber den +8-%-Pfad desselben Skins
+   * mitrechnete, gäbe es im Spiel nicht — er fiele die Krume auf und ließe den
+   * Laib liegen.
+   *
+   * Der Pfad-FORTSCHRITT wird trotzdem in JEDEM Profil mitgezählt (Tragezeit +
+   * Boss-Kills, siehe {@link SIM_SKIN}) — das ist die Messgröße, an der die
+   * Schwellen geeicht sind. Nur die WIRKUNG hängt an diesem Schalter, und der
+   * schaltet sie in voller Höhe ein (alle vier Bonus-Knoten): das Profil
+   * {@link SIM_PATH}, an dem der Budget-Deckel gemessen wird.
+   */
+  skinPath?: boolean;
+  /**
+   * **IDEEN-GAMEPLAY 3c — der Erbe.** Standard `false`: Der Bot transzendiert
+   * nie (siehe Modul-Kopf), also hat er auch keinen Erben — dieselbe
+   * dokumentierte **Untergrenze** wie bei 2a/3a/3b.
+   *
+   * `true` markiert das Mitglied mit den MEISTEN Einsatz-XP als Erben und
+   * erneuert die Wahl nach jedem Kauf-Durchgang — die beste-ROI-Heuristik, die
+   * ein Spieler in der Zeremonie träfe (wer am meisten investiert hat, holt aus
+   * der Verdopplung am meisten heraus). Das Profil {@link SIM_HEIR} misst damit
+   * die OBERGRENZE der Wirkung.
+   */
+  heir?: boolean;
+  /**
+   * **IDEEN-GAMEPLAY 1d — Legenden-Level.** Standard `undefined`: Der Bot hat
+   * nie transzendiert, also verdient er auch kein Legenden-Level, und der
+   * Faktor faltet überall exakt ×1 — jeder bestehende Anker bleibt
+   * zahlengleich.
+   *
+   * Eine Zahl schaltet den Bot in den **Nach-Transzendenz-Modus**: Er startet
+   * mit so vielen Leveln UND zählt jede weitere Himmelfahrt mit (der Treiber
+   * `simulateContinuous` mit `fullPrestige` ist der einzige, der überhaupt
+   * Himmelfahrten fährt). `0` ist damit ausdrücklich etwas anderes als
+   * `undefined`: „frisch transzendiert, sammelt ab jetzt".
+   */
+  legend?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -321,6 +365,35 @@ export const SIM_CONSTELLATION: SimConfig = { clickRate: 3, juice: true, constel
  * Schmiede allein.
  */
 export const SIM_FORGE: SimConfig = { clickRate: 3, juice: true, forge: true };
+
+/**
+ * **„Erbe gesetzt"** (IDEEN-GAMEPLAY 3c): derselbe aktive Spieler wie
+ * {@link SIM_ACTIVE}, aber mit dem stärksten Mitglied als Erben (Perk-Wirkung
+ * ×2). Der A/B-Partner von `SIM_ACTIVE` — die Differenz IST die gemessene
+ * Wirkung des Erben-Moments.
+ */
+export const SIM_HEIR: SimConfig = { clickRate: 3, juice: true, heir: true };
+
+/**
+ * **„Pfad komplett"** (IDEEN-GAMEPLAY 2b): derselbe aktive Spieler wie
+ * {@link SIM_ACTIVE}, aber mit den vier Bonus-Knoten des getragenen Skins
+ * ({@link SIM_SKIN} = Klassiker, +8 % Klick — der stärkste Pfad des Katalogs).
+ * Der A/B-Partner von `SIM_ACTIVE`.
+ */
+export const SIM_PATH: SimConfig = { clickRate: 3, juice: true, skinPath: true };
+
+/**
+ * **„Ultra-Langzeit"** (IDEEN-GAMEPLAY 1d): derselbe aktive Spieler, aber mit
+ * {@link SIM_LEGEND_LEVELS} Legenden-Leveln im Rücken. Die Zahl ist absichtlich
+ * groß gewählt (siehe dort) — bei den paar Leveln, die ein realistischer
+ * Spielstand hält, wäre die Differenz im Rauschen, und dann misst man nichts.
+ */
+export const SIM_LEGEND_LEVELS = 100;
+export const SIM_LEGEND: SimConfig = {
+  clickRate: 3,
+  juice: true,
+  legend: SIM_LEGEND_LEVELS,
+};
 
 /** Die feste Lauflänge der Messungen: 45 min = 2700 Ein-Sekunden-Schritte. */
 export const SIM_RUN_S = 2700;
@@ -486,6 +559,27 @@ interface Sim {
   goblinsCaught: number;
   /** 1c: Gefundene Relikte (lifetime) — die Messgröße der Drop-Kurve. */
   relicsFound: number;
+  /**
+   * 2b: Sekunden, die der Bot seinen EINEN Skin getragen hat. Er wechselt nie
+   * (siehe {@link SIM_SKIN}), das ist also zugleich seine Spielzeit — und exakt
+   * die konservative Modellierung eines treuen Spielers.
+   */
+  wearS: number;
+  /** 2b: Boss-Kills in diesem Skin (jeder Kill zählt, auch ein wiederholtes Gate). */
+  pathBosses: number;
+  /** 2b: Ob die WIRKUNG des Pfades gefaltet wird (nur im Profil {@link SIM_PATH}). */
+  pathOn: boolean;
+  /** 3c: Ob der Bot einen Erben führt (nur im Profil {@link SIM_HEIR}). */
+  heirOn: boolean;
+  /**
+   * 3c: Die Erben-Id ('' = kein Erbe). Nur im Profil {@link SIM_HEIR} gesetzt;
+   * sie wird nach jedem Kauf-Durchgang auf das XP-stärkste Mitglied nachgeführt.
+   */
+  heir: string;
+  /** 1d: Legenden-Level. Bleibt 0, solange `config.legend` fehlt. */
+  legend: number;
+  /** 1d: Ob dieser Bot als NACH-Transzendenz-Spieler läuft (zählt Himmelfahrten). */
+  postTranscend: boolean;
   rng: Rng;
 }
 
@@ -513,6 +607,27 @@ export interface EconSummary {
   deepestGate: number;
 }
 
+/**
+ * 2b: Der Pfad-Stand des EINEN Skins, den der Bot trägt — die Messgröße, gegen
+ * die {@link PATH_THRESHOLDS} geeicht sind (`npm run balance`, Abschnitt 12).
+ */
+export interface PathSummary {
+  /** Getragene Sekunden (= Spielzeit, der Bot wechselt nie). */
+  wearS: number;
+  /** Boss-Kills im Skin. */
+  bosses: number;
+  /** Die Fortschritts-Zahl: `wearS + 180 · bosses`. */
+  score: number;
+  /** Freigeschaltete Knoten (0 … 5). */
+  nodes: number;
+}
+
+/** Read the current skin-path tallies off the sim (2b). */
+function pathSummary(sim: Sim): PathSummary {
+  const score = sim.wearS + sim.pathBosses * BOSS_SECONDS;
+  return { wearS: sim.wearS, bosses: sim.pathBosses, score, nodes: nodesForScore(score) };
+}
+
 /** Read the current loot-economy tallies off the sim. */
 function econSummary(sim: Sim): EconSummary {
   let tokensBanked = 0;
@@ -531,7 +646,15 @@ function econSummary(sim: Sim): EconSummary {
   };
 }
 
-function newSim(seed: number, mods = true, constellation = false, forge = false): Sim {
+function newSim(
+  seed: number,
+  mods = true,
+  constellation = false,
+  forge = false,
+  legend?: number,
+  skinPath = false,
+  heir = false,
+): Sim {
   return {
     gold: 0,
     crew: {},
@@ -571,6 +694,13 @@ function newSim(seed: number, mods = true, constellation = false, forge = false)
     peachesCaught: 0,
     goblinsCaught: 0,
     relicsFound: 0,
+    wearS: 0,
+    pathBosses: 0,
+    pathOn: skinPath,
+    heir: '',
+    heirOn: heir,
+    legend: legend !== undefined && legend > 0 ? Math.floor(legend) : 0,
+    postTranscend: legend !== undefined,
     rng: new Rng({ seed, cursor: 0 }),
   };
 }
@@ -692,6 +822,60 @@ function simLoadout(sim: Sim): GearBonus {
   return v;
 }
 
+/**
+ * **Die drei Meta-Terme der Schritte 2b/3c/1d**, in EINEM Bündel durch die
+ * Power-Rechnung gereicht — drei weitere Positions-Parameter hätten
+ * `powerSplit` endgültig unlesbar gemacht.
+ */
+interface SimMeta {
+  /** 3c: Erben-Id ('' ⇒ jedes Mitglied zählt einfach). */
+  readonly heir: string;
+  /** 2b: Klick-Faktor des Skin-Pfades (1 ohne Pfad). */
+  readonly pathClick: number;
+  /** 1d: Legenden-Level (0 ⇒ Faktor exakt 1). */
+  readonly legend: number;
+}
+
+/** Das neutrale Bündel — jeder Term faltet ×1. */
+const NO_META: SimMeta = { heir: '', pathClick: 1, legend: 0 };
+
+/**
+ * **2b im Bot.** Der Bot trägt {@link SIM_SKIN} von Sekunde 0 bis zum Ende und
+ * WECHSELT NIE — er ist damit der loyalste denkbare Spieler auf genau einem
+ * Pfad und hat auf den neun anderen null Fortschritt. Das ist keine
+ * Vereinfachung, sondern die konservative Wahrheit in beide Richtungen: Wer
+ * wechselt, füllt jeden Pfad langsamer; wer wie der Bot bleibt, füllt genau
+ * diesen einen so schnell wie überhaupt möglich. Gemessen wird also die
+ * SCHNELLSTE Pfad-Kurve — die richtige Seite für die Schwellen-Eichung.
+ */
+function simMeta(sim: Sim): SimMeta {
+  return {
+    heir: sim.heir,
+    // Der FORTSCHRITT läuft in jedem Profil mit (`sim.wearS`/`sim.pathBosses`),
+    // die WIRKUNG nur im Profil `SIM_PATH` — Begründung an `SimConfig.skinPath`.
+    pathClick: sim.pathOn ? 1 + pathAmount(SIM_SKIN, PATH_NODES - 1) : 1,
+    legend: sim.legend,
+  };
+}
+
+/**
+ * 3c: Das Mitglied mit den meisten Einsatz-XP — die Erben-Wahl, die ein Spieler
+ * in der Zeremonie treffen würde. Bei Gleichstand gewinnt die Katalog-Reihenfolge
+ * (deterministisch; ein `Math.max` über eine Map wäre es nicht).
+ */
+function bestHeir(mastery: CrewMastery): string {
+  let id = '';
+  let best = 0;
+  for (const cfg of CREW) {
+    const xp = mastery[cfg.id] ?? 0;
+    if (xp > best) {
+      best = xp;
+      id = cfg.id;
+    }
+  }
+  return id;
+}
+
 /** Die beiden Schadens-Quellen einer Sekunde, getrennt (A2 braucht den Split). */
 interface DamageSplit {
   /** Aktiver Klick-Schaden dieser Sekunde (Rate × Klick × Combo × Krit-EV). */
@@ -725,13 +909,16 @@ function powerSplit(
   permTokens: PermTokens,
   shardIdle: number,
   loadout: GearBonus,
+  meta: SimMeta = NO_META,
 ): DamageSplit {
   const hpf = heaven.hpf;
+  // 1d: `1 + 0.005·L`, ADDITIV, und auf BEIDE Seiten derselbe Skalar (P1-neutral).
+  const legend = legendGlobalMult(meta.legend);
   const sm = soulMult(souls, soulBonusEff(hpf));
   const global = heavenGlobalMult(hpf);
   // Click gear (§5) multiplies the click term only (P1: the strongest gear is click).
   const baseClick =
-    clickDamageRaw(crew, gilds, crewUp, mastery) *
+    clickDamageRaw(crew, gilds, crewUp, mastery, meta.heir) *
     sm *
     ancientClickMult(ancients) *
     global *
@@ -741,12 +928,15 @@ function powerSplit(
     constellationClickMult(constellation) *
     // 1c + 3a: die `clickPct`-Affixe des Loadouts (×1 ohne Relikte/Schmiede).
     (1 + loadout.clickPct) *
+    // 2b: der Skin-Pfad des getragenen Skins (Klassiker ⇒ bis zu +8 % Klick).
+    meta.pathClick *
+    legend *
     (config.clickGearMult ?? 1);
   // Idle gear (§5) + the permanent DPS-token pool (§6.2) + the crew's
   // `idle`-special tiers (v11.1 Groove) multiply crew DPS only — never the
   // click term (P1, M11-AC5).
   const idle =
-    totalRawDps(crew, gilds, crewUp, mastery) *
+    totalRawDps(crew, gilds, crewUp, mastery, meta.heir) *
     sm *
     ancientDpsMult(ancients) *
     global *
@@ -759,6 +949,7 @@ function powerSplit(
     (config.idleGearMult ?? 1) *
     shardIdle *
     (econOn(config) ? permTokenDpsMult(permTokens) : 1) *
+    legend *
     crewSpecialBonuses(crewUp).idleMult;
   return { click: config.clickRate * baseClick * combo * crit, idle };
 }
@@ -779,6 +970,7 @@ function powerFor(
   permTokens: PermTokens,
   shardIdle: number,
   loadout: GearBonus,
+  meta: SimMeta = NO_META,
 ): number {
   const p = powerSplit(
     crew,
@@ -795,6 +987,7 @@ function powerFor(
     permTokens,
     shardIdle,
     loadout,
+    meta,
   );
   return p.click + p.idle;
 }
@@ -816,6 +1009,7 @@ function damageSplit(sim: Sim, config: SimConfig, combo: number, crit: number): 
     sim.permTokens,
     shardIdleMultFor(sim, config),
     simLoadout(sim),
+    simMeta(sim),
   );
 }
 
@@ -1113,6 +1307,10 @@ function stepSecond(
       // Relikt — der Highwater in `relics` gattert das selbst, deshalb steht
       // dieser Aufruf (anders als der Truhen-Drop unten) NICHT hinter
       // `onFrontier`: Der Bot liest hier exakt dieselbe Regel wie das Spiel.
+      // 2b: Jeder Boss-Kill zählt auf den Pfad des getragenen Skins — auch ein
+      // wiederholtes Gate, exakt wie im Spiel (der Pfad misst Einsatz, nicht
+      // Vorstoß; der Vorstoß hat mit dem Relikt-Highwater seinen eigenen Zähler).
+      if (wasBoss) sim.pathBosses += 1;
       if (wasBoss) {
         const drop = gateRelicRoll(sim.relics, bossZone, sim.rng);
         if (drop.relics !== sim.relics) {
@@ -1230,6 +1428,10 @@ function economyStep(
 ): CombatState {
   const econ = econOn(config);
   const nowMs = globalSec * 1000;
+  // 2b: Eine Sekunde Tragezeit auf den EINEN Skin des Bots. Sie wird auch dann
+  // gebucht, wenn gerade nichts stirbt — genau wie im Spiel, wo die Tragezeit am
+  // Tick hängt und nicht am Kill.
+  sim.wearS += 1;
   // P4: Der Combo-Faktor wird je Sekunde aus dem AKTUELLEN Himmelsbaum gelesen —
   // die „Combo-Doktrin" kann mitten in einem Lauf gekauft werden (nach einer
   // Himmelfahrt), und ein einmal vor der Schleife berechneter Wert wäre dann stale.
@@ -1273,6 +1475,11 @@ function economyStep(
     sim.incomePerSec = INCOME_EMA_ALPHA * earned + (1 - INCOME_EMA_ALPHA) * sim.incomePerSec;
   }
   buyCrewGreedy(sim);
+  // 3c: Die beste-ROI-Heuristik der Zeremonie — Erbe ist, wer die meisten
+  // Einsatz-XP trägt. Sie wird nach dem Kauf-Durchgang nachgeführt, weil sich
+  // die Rangfolge mit jedem gekauften Level verschieben kann; im Spiel wählt
+  // man einmal je Ära, hier bekommt der Bot bewusst die OBERGRENZE.
+  if (sim.heirOn) sim.heir = bestHeir(sim.crewMastery);
   if (econ) openChestsGreedy(sim, sim.incomePerSec, nowMs);
   return next;
 }
@@ -1298,6 +1505,8 @@ export interface RunResult {
    * an der die Ruf-Kurve geeicht ist (`npm run balance`, Abschnitt 10).
    */
   territory: Territory;
+  /** 2b: Der Pfad-Stand des getragenen Skins nach diesem Lauf (kumulativ). */
+  skinPath: PathSummary;
 }
 
 /**
@@ -1331,6 +1540,7 @@ function runOnce(
     econ: econSummary(sim),
     mastery: { ...sim.crewMastery },
     territory: { ...sim.territory },
+    skinPath: pathSummary(sim),
   };
 }
 
@@ -1360,6 +1570,8 @@ export interface ChainResult {
    * werden (3b: die Umschul-Kosten) — `npm run balance` druckt sie aus.
    */
   econ: EconSummary;
+  /** 2b: Der Pfad-Stand am Ende der Kette (kein Reset fasst ihn an). */
+  skinPath: PathSummary;
 }
 
 /**
@@ -1374,6 +1586,9 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
     modsOn(config),
     config.constellation === true,
     config.forge === true,
+    config.legend,
+    config.skinPath === true,
+    config.heir === true,
   );
   const summaries: RunSummary[] = [];
   const timeToLifetime = new Map<number, number>();
@@ -1417,6 +1632,7 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
     mastery: { ...sim.crewMastery },
     territory: { ...sim.territory },
     econ: econSummary(sim),
+    skinPath: pathSummary(sim),
   };
 }
 
@@ -1427,6 +1643,9 @@ export function simulateSingleRun(config: SimConfig, seconds: number): RunResult
     modsOn(config),
     config.constellation === true,
     config.forge === true,
+    config.legend,
+    config.skinPath === true,
+    config.heir === true,
   );
   startTour(sim, 0); // 2a: Startkapital + Warm-up-Fenster der ersten Tour
   return runOnce(sim, seconds, config);
@@ -1479,6 +1698,14 @@ export interface ContinuousResult {
    * bleibt — und Relikte hängen nun einmal an der TIEFE, nicht an der Spielzeit.
    */
   econ: EconSummary;
+  /** 2b: Der Pfad-Stand am Ende des Laufs. */
+  skinPath: PathSummary;
+  /**
+   * 1d: Erreichte Legenden-Level. Nur im Nach-Transzendenz-Modus (`config.legend`
+   * gesetzt) ungleich 0 — sonst hat der Bot nie transzendiert und verdient keins.
+   * Die Zahl ist per Konstruktion identisch mit `himmelfahrten`.
+   */
+  legend: number;
 }
 
 /**
@@ -1499,6 +1726,9 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
     modsOn(config),
     config.constellation === true,
     config.forge === true,
+    config.legend,
+    config.skinPath === true,
+    config.heir === true,
   );
   startTour(sim, 0); // 2a
   let combat = spawnFor(1, 0, 1, sim.remix);
@@ -1565,6 +1795,11 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
           sim.rsLifetime = 0;
           sim.ancients = {};
           sim.lifetimeMaxZone = 1;
+          // 1d: Jede Himmelfahrt NACH der ersten Transzendenz zahlt genau ein
+          // Legenden-Level. Der Bot transzendiert nie, also gilt das nur im
+          // Nach-Transzendenz-Modus (`config.legend` gesetzt) — dieselbe eine
+          // Regel wie in `ch-state.himmelfahrtState`.
+          if (sim.postTranscend) sim.legend += 1;
           himmelfahrten++;
           plateauStreak = 0;
         } else {
@@ -1592,6 +1827,8 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
     finalBank: sim.souls,
     plateaued,
     econ: econSummary(sim),
+    skinPath: pathSummary(sim),
+    legend: sim.legend,
   };
 }
 
@@ -1615,6 +1852,7 @@ function buyAncientsGreedy(sim: Sim, config: SimConfig, combo: number, crit: num
   const permTokens = sim.permTokens;
   const shardIdle = shardIdleMultFor(sim, config);
   const loadout = simLoadout(sim);
+  const meta = simMeta(sim);
   let guard = 300;
   for (;;) {
     if (guard-- <= 0) break;
@@ -1633,6 +1871,7 @@ function buyAncientsGreedy(sim: Sim, config: SimConfig, combo: number, crit: num
       permTokens,
       shardIdle,
       loadout,
+      meta,
     );
     let bestId: string | null = null;
     let bestPower = p0;
@@ -1654,6 +1893,7 @@ function buyAncientsGreedy(sim: Sim, config: SimConfig, combo: number, crit: num
         permTokens,
         shardIdle,
         loadout,
+        meta,
       );
       if (p > bestPower) {
         bestPower = p;
@@ -1753,6 +1993,9 @@ export function simulateAscensionEra(config: SimConfig, opts: EraOptions): EraRe
     modsOn(config),
     config.constellation === true,
     config.forge === true,
+    config.legend,
+    config.skinPath === true,
+    config.heir === true,
   );
   startTour(sim, 0); // 2a
   let combat = spawnFor(1, 0, 1, sim.remix);

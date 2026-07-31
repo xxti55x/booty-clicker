@@ -78,13 +78,14 @@ import {
   isRolledAffix,
 } from '../game/relics';
 import { type ForgeSlot, type ForgeState, createForge } from '../game/forge';
+import { type SkinPath, createSkinPath } from '../game/skin-path';
 import { type TranscendState, createTranscend } from '../game/transcend';
 import { SKINS } from '../character/skins';
 import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 17;
+export const CH_SCHEMA = 18;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -114,7 +115,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (v17, Relikte & Skin-Schmiede): ChState + envelope. */
+/** The current persisted shape (v18, Skin-Pfade · Erbe · Legenden-Level): ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -143,7 +144,7 @@ function isFiniteNumber(v: unknown): v is number {
  * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
  * The meta/juice fields (rng/stats/legacyImported/ability/combo/gilds/rsLifetime/
  * ancients/heaven/gear/chests/permTokens/peach/meta/achievements/transcend/
- * stageStars/crewMastery/crewRetrain/constellation/territory/relics/forge) are
+ * stageStars/crewMastery/crewRetrain/constellation/territory/relics/forge/skinPath/heir/legend) are
  * deliberately NOT gated here: they are runtime bookkeeping and get repaired (fresh
  * seed / zeroed stats / false flag / default ability+combo / pruned gilds / clamped
  * highwater / sanitised ancients+heaven+gear / defaulted loot slices / defaulted
@@ -785,6 +786,69 @@ function repairForge(v: unknown): ForgeState {
   return { ember: isFiniteNumber(v.ember) && v.ember > 0 ? Math.floor(v.ember) : 0, slots };
 }
 
+/**
+ * Repair die **Skin-Meisterschafts-Pfade** (v18, 2b): je ECHTER Skin-Id ein Paar
+ * aus getragenen Sekunden und Boss-Kills, beide nicht-negativ und endlich.
+ *
+ *  · **Nur Katalog-Skins bekommen ein Fach** (`Object.hasOwn(SKINS, …)`, dieselbe
+ *    Disziplin wie `repairGear.crafted` und `repairForge`) — ein erfundener Skin
+ *    hätte keinen `star.stat`, auf den sein Pfad je zahlen könnte, und wäre
+ *    stiller Ballast.
+ *  · **Die Sekunden bleiben GEBROCHEN** (nur auf ≥ 0 und endlich geprüft, nicht
+ *    gefloort): Die Glue bucht Bruchteile pro 0,25-s-Tick, ein Floor beim
+ *    Speichern verlöre also bei jedem Reload bis zu einer Sekunde. Die
+ *    Boss-Kills dagegen sind Stückzahlen und werden gefloort.
+ *  · **In KEINE Richtung an den Spielstand geklemmt** (wie `repairCrewMastery`
+ *    und `repairTerritory`): Ein Pfad ist ein Lebenszeit-Highwater, während
+ *    `gear.skin` nur sagt, was GERADE getragen wird — es gibt keine Zahl im
+ *    Save, gegen die ein Vergleich stimmen würde. Ein zu hoher Wert ist zudem
+ *    gedeckelt: Die Wirkung endet bei Knoten 5.
+ *
+ * Ein Fach ohne jeden Fortschritt fällt weg (statt eine Null zu persistieren).
+ * Nie werfend; eine komplett kaputte Tafel wird leer.
+ */
+function repairSkinPath(v: unknown): SkinPath {
+  if (!isRecord(v)) return createSkinPath();
+  const out: SkinPath = {};
+  for (const [id, raw] of Object.entries(v)) {
+    if (!Object.hasOwn(SKINS, id) || !isRecord(raw)) continue;
+    const sec = isFiniteNumber(raw.s) && raw.s > 0 ? raw.s : 0;
+    const bosses = isFiniteNumber(raw.b) && raw.b > 0 ? Math.floor(raw.b) : 0;
+    if (sec > 0 || bosses > 0) out[id] = { s: sec, b: bosses };
+  }
+  return out;
+}
+
+/**
+ * Repair den **Erben** (v18, 3c): eine echte Crew-Id oder `''`.
+ *
+ * Bewusst NICHT gegen `crewMastery` geprüft — ein Erbe ohne Rang ist eine
+ * legale (wenn auch wirkungslose) Wahl, und die Ränge fallen ohnehin nie. Auch
+ * NICHT gegen `transcend.transcendences`: Ein Save, der einen Erben trägt, hat
+ * ihn per Konstruktion in einer Zeremonie gewählt; ihn wegen einer anderen Zahl
+ * zu löschen, hieße eine bezahlte Entscheidung zu nuken. Eine Müll-Id (kein
+ * Crew-Mitglied, `"toString"`, eine Zahl) wird dagegen `''`, weil sie sonst als
+ * Geist in `heirWeightFor` hinge und nie zu einer Wirkung käme.
+ */
+function repairHeir(v: unknown): string {
+  if (typeof v !== 'string' || v === '') return '';
+  return CREW.some((cfg) => cfg.id === v) ? v : '';
+}
+
+/**
+ * Repair das **Legenden-Level** (v18, 1d): eine nicht-negative ganze Zahl.
+ *
+ * Bewusst NICHT nach oben gedeckelt — der Zähler IST unendlich, das ist sein
+ * ganzer Sinn, und weil er rein additiv wirkt (`1 + 0.005·L`) kann selbst ein
+ * absurder Wert weder den Float-Guard (§9.3) noch einen Anker sprengen: Bei
+ * `L = 1e15` steht der Faktor bei ×5e12, nicht bei Unendlich. Eine
+ * exponentielle Formel hätte hier einen Deckel gebraucht — genau deshalb ist
+ * sie additiv.
+ */
+function repairLegend(v: unknown): number {
+  return isFiniteNumber(v) && v > 0 ? Math.floor(v) : 0;
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
 function stateFromSave(save: ChSaveLatest): ChState {
   const souls = save.souls;
@@ -831,6 +895,9 @@ function stateFromSave(save: ChSaveLatest): ChState {
     territory: repairTerritory(save.territory),
     relics: repairRelics(save.relics),
     forge: repairForge(save.forge),
+    skinPath: repairSkinPath(save.skinPath),
+    heir: repairHeir(save.heir),
+    legend: repairLegend(save.legend),
   };
 }
 
@@ -1186,6 +1253,39 @@ function migrateChV16toV17(raw: Record<string, unknown>): Record<string, unknown
   };
 }
 
+/**
+ * v17 → v18: **Skin-Pfade** (2b) + **Erbe** (3c) + **Legenden-Level** (1d) —
+ * drei neue Felder, und alle drei starten bewusst LEER.
+ *
+ * **Skin-Pfade**: Tragezeit hat das Spiel nie gemessen. `stats.playTimeS` kennt
+ * die Gesamt-Spielzeit, aber nicht, WELCHER Skin dabei anlag (`gear.skin` ist
+ * eine Momentaufnahme, keine Historie), und `stats.bossKills` kennt kein Gear.
+ * Die Gesamt-Spielzeit auf den aktuell getragenen Skin zu buchen, wäre die
+ * Erfindung „du hast diesen Skin schon immer getragen" — bei einem Spieler, der
+ * gerade erst gewechselt hat, würde sie einen fremden Pfad verschenken.
+ *
+ * **Erbe**: `''`. Ein Erbe entsteht ausschließlich durch eine Wahl in der
+ * Transzendenz-Zeremonie; ihn zu raten (etwa „das Mitglied mit den meisten
+ * Einsatz-XP") hieße, dem Spieler die eine Entscheidung abzunehmen, um die es
+ * bei 3c geht. Wer schon transzendiert hat, wählt beim nächsten Mal.
+ *
+ * **Legenden-Level**: 0 — und das ist die interessante Prüfung. Die Regel lautet
+ * „jede Himmelfahrt NACH der ersten Transzendenz", ein Save müsste dafür also
+ * einen LEBENSZEIT-Zähler der Himmelfahrten tragen. Es gibt ihn nicht:
+ * `heaven.ascensions2` ist der einzige Kandidat, und ausgerechnet er wird von
+ * `transcendState` mit `createHeaven()` auf 0 zurückgesetzt — er zählt also nur
+ * die Himmelfahrten der LAUFENDEN Ära und verschweigt alle früheren. Aus ihm zu
+ * säen wäre keine Herleitung, sondern eine untere Schranke mit dem Anschein
+ * einer Zahl. Dasselbe „bewusst leer" wie bei der Gebietsherrschaft (v15→v16):
+ * Der Zähler beginnt mit der nächsten Himmelfahrt zu ticken.
+ *
+ * Für jedes bestehende Feld verlustfrei; ein Alt-Save rechnet nach dem Update
+ * bit-gleich weiter (leerer Pfad, leerer Erbe und L = 0 falten überall ×1).
+ */
+function migrateChV17toV18(raw: Record<string, unknown>): Record<string, unknown> {
+  return { ...raw, v: 18, skinPath: createSkinPath(), heir: '', legend: 0 };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
@@ -1203,6 +1303,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
   14: migrateChV14toV15,
   15: migrateChV15toV16,
   16: migrateChV16toV17,
+  17: migrateChV17toV18,
 };
 
 /**

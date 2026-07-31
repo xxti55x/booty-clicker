@@ -49,6 +49,10 @@ await build({
     join(GAME, 'src/game/affixes.ts'),
     join(GAME, 'src/game/relics.ts'),
     join(GAME, 'src/game/forge.ts'),
+    join(GAME, 'src/game/skin-path.ts'),
+    join(GAME, 'src/game/legend.ts'),
+    join(GAME, 'src/game/mastery.ts'),
+    join(GAME, 'src/game/heroes.ts'),
   ],
   bundle: true,
   format: 'esm',
@@ -66,6 +70,9 @@ const terr = await import(pathToFileURL(join(tmp, 'territory.js')).href);
 const aff = await import(pathToFileURL(join(tmp, 'affixes.js')).href);
 const rel = await import(pathToFileURL(join(tmp, 'relics.js')).href);
 const forge = await import(pathToFileURL(join(tmp, 'forge.js')).href);
+const path = await import(pathToFileURL(join(tmp, 'skin-path.js')).href);
+const legend = await import(pathToFileURL(join(tmp, 'legend.js')).href);
+const heroes = await import(pathToFileURL(join(tmp, 'heroes.js')).href);
 const MASTERY_AT = mastery.MASTERY_RANKS.map((r) => r.at);
 
 const {
@@ -73,6 +80,10 @@ const {
   SIM_ACTIVE_CAL,
   SIM_CONSTELLATION,
   SIM_FORGE,
+  SIM_HEIR,
+  SIM_LEGEND,
+  SIM_LEGEND_LEVELS,
+  SIM_PATH,
   SIM_RUN_S,
   SIM_SEEDS_HEAVY,
   simulateAscensionEra,
@@ -692,6 +703,199 @@ console.log(
     `\n   Der NORMALE Bot schmiedet nie (dokumentierte Untergrenze) — Relikte dagegen faltet JEDES Profil,` +
     ` sie fallen ohne Kauf-Entscheidung.`,
 );
+
+// ---------------------------------------------------------------------------
+// 12 · Skin-Pfade · Erbe · Legenden-Level (IDEEN-GAMEPLAY 2b + 3c + 1d)
+//     Anker: sim-meta.test.ts
+// ---------------------------------------------------------------------------
+// Drei permanente Feinschliff-Schichten, drei ganz verschiedene Messgrößen: der
+// Pfad wächst PASSIV mit (Tragezeit + Boss-Kills, in jedem Profil gezählt), der
+// Erbe und die Pfad-WIRKUNG hängen an eigenen Profilen (dokumentierte
+// Untergrenze im Normal-Bot), und das Legenden-Level misst eine KADENZ statt
+// einer Zahl: wie oft überhaupt eine Himmelfahrt fällt.
+console.log('\n── 12 · Skin-Pfade · Erbe · Legenden-Level (2b + 3c + 1d)');
+console.log(
+  `   Der Bot trägt „${path.SIM_SKIN}" von Sekunde 0 und wechselt NIE — die schnellstmögliche Pfad-Kurve.`,
+);
+const pathRows = [];
+for (const runs of CHAIN_RUNS) {
+  const per = chains.get(runs).map((c) => c.skinPath);
+  const wear = mean(per.map((p) => p.wearS));
+  const bosses = mean(per.map((p) => p.bosses));
+  const score = mean(per.map((p) => p.score));
+  const nodes = path.nodesForScore(score);
+  const next = nodes < path.PATH_NODES ? path.PATH_THRESHOLDS[nodes] : 0;
+  pathRows.push([
+    `${runs} × 45 min`,
+    hrs(runs * SIM_RUN_S),
+    Math.round(wear),
+    n1(bosses),
+    n2(bosses / ((runs * SIM_RUN_S) / 60)),
+    Math.round(score),
+    `${nodes}/${path.PATH_NODES}`,
+    next > 0 ? next.toLocaleString('de-DE') : '—',
+  ]);
+}
+table(
+  [
+    'Spielzeit',
+    '[h]',
+    'Trage-Sek.',
+    'Bosse',
+    'Boss/min',
+    'Pfad-Sek.',
+    'Knoten',
+    'nächste Schwelle',
+  ],
+  pathRows,
+);
+{
+  // Die Leiter in Klartext — und was sie bei der GEMESSENEN Kadenz bedeutet.
+  const steady = 3600 + 0.31 * 60 * path.BOSS_SECONDS; // Pfad-Sek./h im Beharrungszustand
+  table(
+    ['Knoten', 'Schwelle', 'bei gemessener Kadenz', 'nur Tragezeit', 'zahlt'],
+    path.PATH_THRESHOLDS.map((at, i) => [
+      `${i + 1}${i === path.PATH_NODES - 1 ? ' 💃' : ''}`,
+      at.toLocaleString('de-DE'),
+      `${(at / steady).toFixed(1)} h`,
+      `${(at / 3600).toFixed(1)} h`,
+      i === path.PATH_NODES - 1
+        ? `Signature-Move „${path.SIGNATURE_MOVES[path.SIM_SKIN]}"`
+        : `${(path.NODE_STARS * 100).toFixed(0)} % eines ⭐ (kumuliert ${((i + 1) * path.NODE_STARS).toFixed(1)} ⭐)`,
+    ]),
+  );
+  console.log(
+    `   Regel: 1 Boss-Kill = ${path.BOSS_SECONDS} s Tragezeit · voller Pfad = ${path.PATH_MAX_STARS.toFixed(1)} ⭐` +
+      ` (weniger als EIN Stern) · stärkster Prozent-Term ${(path.skinPathMaxPercent() * 100).toFixed(1)} % (Richtwert ≤ 8 %)` +
+      `\n   Leistungs-Produkt eines vollen Pfades: ×${path.skinPathPowerBudget().toFixed(4)} (2a: ×${cs.constellationPowerBudget().toFixed(2)} · 1c/3a: ×${aff.affixPowerBudget().toFixed(2)})`,
+  );
+}
+
+// A/B der drei neuen Profile gegen dieselbe Basis — Kalibrier-Bedingungen.
+console.log('\n   A/B gegen den Anker-Bot (t25, §4.8-Kalibrierung):');
+const abRows = [];
+for (const [label, cfg] of [
+  ['Pfad komplett (2b)', SIM_PATH],
+  ['Erbe gesetzt (3c)', SIM_HEIR],
+  [`Legenden-Level ${SIM_LEGEND_LEVELS} (1d)`, SIM_LEGEND],
+]) {
+  const ratios = [];
+  const cells = [];
+  for (const seed of SEEDS) {
+    const a = simulateSingleRun({ ...SIM_ACTIVE_CAL, seed }, SIM_RUN_S).timeToZone.get(25);
+    const b = simulateSingleRun(
+      { ...SIM_ACTIVE_CAL, ...cfg, economy: false, seed },
+      SIM_RUN_S,
+    ).timeToZone.get(25);
+    ratios.push(a / b);
+    cells.push(`${min(a)} → ${min(b)}`);
+  }
+  abRows.push([label, ...cells, `×${n2(mean(ratios))}`]);
+}
+table(['Profil', ...SEEDS.map((s) => `t25 Seed ${s}`), '⌀ Beschl.'], abRows);
+console.log(
+  `   Der NORMAL-Bot faltet keine der drei Wirkungen (er trägt kein Skin-Gear, transzendiert nie` +
+    `\n   und hat damit weder Erben noch Legenden-Level) — alle Alt-Anker bleiben bit-gleich.`,
+);
+
+// 3c braucht einen LANGEN Horizont: Im ersten Sitting hat noch niemand einen
+// Rang, den man verdoppeln könnte (Bronze fällt erst gegen Ende, Abschnitt 6) —
+// die t25-Zeile oben zeigt deshalb exakt ×1.00, und das ist die ehrliche
+// Aussage über die erste Stunde. Gemessen wird der Erbe darum an der 3-h-Kette.
+console.log('\n   3c · Erbe über die 3-h-Kette (dort trägt das beste Mitglied Silber):');
+const heirRows = [];
+for (const seed of SEEDS) {
+  const a = simulateRunChain({ ...SIM_ACTIVE, seed }, 4, SIM_RUN_S);
+  const b = simulateRunChain({ ...SIM_ACTIVE, ...SIM_HEIR, seed }, 4, SIM_RUN_S);
+  heirRows.push([
+    seed,
+    `${a.maxBestZone} → ${b.maxBestZone}`,
+    `${Math.round(a.finalBank)} → ${Math.round(b.finalBank)}`,
+    `×${n2(b.finalBank / Math.max(1, a.finalBank))}`,
+  ]);
+}
+table(['Seed', 'Beste Bühne', 'Seelen-Bank', 'Bank-Verhältnis'], heirRows);
+{
+  // Beide A/B stehen auf ×1.00 — und das ist KEIN kaputtes Messgerät, sondern
+  // das Ergebnis: Der Erbe liegt UNTER der Auflösung jedes Ankers. Im ersten
+  // Sitting existiert noch kein Rang, den man verdoppeln könnte; die Kette
+  // rennt gegen die M9-Wand (alle Seeds enden bei Bühne 75 / 1 295 Seelen), und
+  // ein paar Prozent Eigen-DPS eines Mitglieds verschieben eine WAND nicht.
+  // Direkt messbar ist der Term deshalb nur arithmetisch — an einer Crew, die
+  // ihn maximal ausreizt:
+  const gold = mastery.MASTERY_RANKS[2].at;
+  const levels = Object.fromEntries(heroes.CREW.map((c) => [c.id, 40]));
+  const m = Object.fromEntries(heroes.CREW.map((c) => [c.id, gold]));
+  const base = heroes.totalRawDps(levels, {}, {}, m);
+  let worst = 1;
+  let who = '';
+  for (const cfg of heroes.CREW) {
+    const r = heroes.totalRawDps(levels, {}, {}, m, cfg.id) / base;
+    if (r > worst) {
+      worst = r;
+      who = cfg.name;
+    }
+  }
+  console.log(
+    `   Beide Verhältnisse stehen auf ×1.00 — der Erbe liegt UNTER der Auflösung der Anker:` +
+      `\n   im ersten Sitting gibt es noch keinen Rang zu verdoppeln, und die Kette endet bei allen` +
+      `\n   Seeds an derselben M9-Wand (Bühne 75 / 1 295 Seelen). Arithmetisch, an einer Crew auf` +
+      `\n   Lv 40 mit durchweg Gold-Rang: der beste Erbe („${who}") hebt die Roh-Crew-DPS auf ×${worst.toFixed(4)}.`,
+  );
+}
+
+// 1d: die Kadenz. Die Zahl, die den unendlichen Zähler harmlos macht.
+console.log('\n   1d · Legenden-Kadenz: wie oft fällt überhaupt eine Himmelfahrt?');
+const legendRows = SEEDS.map((seed) => {
+  const c = simulateContinuous(
+    { ...SIM_ACTIVE, seed, legend: 0 },
+    { stallSeconds: 1500, maxSeconds: 86_400, plateauAscensions: 4, fullPrestige: true },
+  );
+  return [
+    seed,
+    c.ascensions,
+    c.himmelfahrten,
+    c.legend,
+    `+${n1(legend.legendPercent(c.legend))} %`,
+  ];
+});
+table(['Seed', 'Aszensionen', 'Himmelfahrten', '🏅 Level', 'global'], legendRows);
+{
+  const lv = mean(legendRows.map((r) => r[3]));
+  const perLv = 24 / Math.max(1e-9, lv);
+  console.log(
+    `   ⌀ ${n1(lv)} Level je 24 h ⇒ ein Level alle ${n1(perLv)} h (die erste Himmelfahrt fällt nach ⌀ 16,7 h, Abschnitt 3).` +
+      `\n   Additiv: 1 + 0,5 % · L. Für die Wirkung EINES TE (×3) braucht es ${Math.round(2 / legend.LEGEND_PER_LEVEL)} Level ≈ ${Math.round((2 / legend.LEGEND_PER_LEVEL) * perLv).toLocaleString('de-DE')} h.` +
+      `\n   Multiplikativ (1,005^L) wäre dieselbe Zahl bei L = 2000 um Faktor ${Math.round(Math.pow(1 + legend.LEGEND_PER_LEVEL, 2000) / legend.legendGlobalMult(2000)).toLocaleString('de-DE')} größer — genau deshalb additiv.`,
+  );
+}
+
+// 3c: der Erben-Deckel, arithmetisch statt behauptet.
+{
+  const cap = mastery.MASTERY_MAX_DPS_BONUS / (1 + mastery.MASTERY_MAX_DPS_BONUS);
+  table(
+    ['Erben-Term', 'Rechnung', 'Wert'],
+    [
+      [
+        'Perk je Rang (normal)',
+        '1a-Leitplanke',
+        `+${(mastery.MASTERY_DPS_PER_RANK * 100).toFixed(0)} %`,
+      ],
+      [
+        'Perk je Rang (Erbe)',
+        `×${mastery.HEIR_WEIGHT}`,
+        `+${(mastery.MASTERY_DPS_PER_RANK * mastery.HEIR_WEIGHT * 100).toFixed(0)} %`,
+      ],
+      [
+        'Eigen-Output max (normal / Erbe)',
+        `${mastery.MASTERY_DPS_RANKS} Ränge`,
+        `+${(mastery.MASTERY_MAX_DPS_BONUS * 100).toFixed(0)} % / +${(mastery.MASTERY_MAX_DPS_BONUS * mastery.HEIR_WEIGHT * 100).toFixed(0)} %`,
+      ],
+      ['Gesamt-DPS-Deckel (strukturell)', 'Erbe = ganze Crew-DPS', `+${(cap * 100).toFixed(2)} %`],
+      ['Erben je Ära', 'neu wählbar je Transzendenz', '1'],
+    ],
+  );
+}
 
 rmSync(tmp, { recursive: true, force: true });
 const secs = (Date.now() - t0) / 1000;
