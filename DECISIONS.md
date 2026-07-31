@@ -3,6 +3,36 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Easter Egg — der Cheat-Code der Ahnen (Save v19)
+
+- **↑ ↑ ↓ ↓ ← → ← → B A** zündet den Pfirsich-Regen: Gold-Flash,
+  36 glühende 🍑 über dem ganzen Bild, Feder-Banner, Boss-Fanfare — und beim
+  ERSTEN Mal den Einmal-Jackpot plus den Erfolg „Cheat-Code der Ahnen" (🕹️,
+  Beschreibung bewusst als Rätsel formuliert statt als Tasten-Spoiler).
+- **Der Jackpot skaliert statt zu brechen:** `konamiJackpot(zone)` =
+  20 Boss-Drops der AKTUELLEN Bühne (≈ 40–60 min Farm-Ertrag — „sehr viele
+  BP", aber nie ein Sprung über die eigene Kurve; auf Bühne 1 sind es ehrliche
+  240 BP, auf Bühne 22 2,3 M — beides headless belegt). Einmal-Latch ist der
+  Lebenszeit-Zähler `stats.konami`: nur der Übergang 0 → 1 zahlt; jeder
+  weitere Tanz ist Spielzeug (Regen ja, Beute nein — „Die Ahnen nicken
+  anerkennend"). Kein Sim-Term: der Bot tippt keine Pfeiltasten, kein Anker
+  bewegt sich; der neue Erfolg speist wie jeder andere +3 💫 in die
+  Konstellation (endliche Quelle, Bot-Zahlen unverändert — er tanzt nie).
+- **Detektor-Detail:** Fehltritt wirft auf 0 zurück, AUSSER die falsche Taste
+  ist selbst der Sequenz-Anfang — ↑↑↑↓↓←→←→BA muss zünden (gehaltener
+  Anlauf, als Test gepinnt). Kein Feed bei `e.repeat` und nie beim Tippen in
+  Eingabefeldern (Import-Textarea: Pfeile sind dort Text, kein Tanz).
+- **Save-Disziplin wie immer:** v18 → v19 (nur Versions-Hub — niemand kann vor
+  v19 getanzt haben, `repairStats` defaultet 0), X7-Matrix-Fixture-Paar. Die
+  Kaputt-Zeile prüft die EINE gefährliche Ecke: `konami: 1.9` muss auf 1
+  runden, nicht auf 0 — sonst würde ein krummer Wert den Einmal-Jackpot
+  wieder scharf machen.
+- **Headless-Lehre (Instrument, nicht Produkt):** `getBoundingClientRect`
+  meldete alle 36 Pfirsiche als unbewegt, während der Screenshot den vollen
+  Regen zeigt — Compositor-getriebene Transform-Animationen spiegeln sich im
+  gedrosselten Headless-Tab nicht zuverlässig in Main-Thread-Rects. Verwandt
+  mit der dokumentierten `tb-in`-Falle: PIXEL prüfen, nicht Layout-Werte.
+
 ## V2-3 — PWA: installierbar + offline ab dem ersten Besuch (Version 2.0.0)
 
 - **Precache LIEST die Build-Hashes statt sie zu kennen.** Ein statisches

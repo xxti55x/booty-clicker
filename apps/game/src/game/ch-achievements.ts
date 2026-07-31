@@ -42,6 +42,8 @@ export interface AchievementCtx {
   souls: number;
   /** Himmelspfirsiche earned (lifetime highwater). */
   hpf: number;
+  /** Wie oft der Cheat-Code der Ahnen getanzt wurde (Easter Egg, v19). */
+  konami: number;
 }
 
 /** A single achievement (data). */
@@ -266,6 +268,17 @@ export const CH_ACHIEVEMENTS: readonly Achievement[] = [
     icon: '🔮',
     check: (c) => c.transcendences >= 1,
   },
+  // --- Easter Egg (v19) ---
+  // Die Beschreibung verrät die Tasten BEWUSST nicht — sie ist der Hinweis,
+  // dass es etwas zu finden gibt („der älteste Code der Spielegeschichte" +
+  // Tanz-Metapher). Wer ihn kennt, erkennt ihn; wer nicht, hat ein Rätsel.
+  {
+    id: 'konami',
+    name: 'Cheat-Code der Ahnen',
+    desc: 'Den ältesten Tanz der Spielegeschichte auf der Tastatur getanzt',
+    icon: '🕹️',
+    check: (c) => c.konami >= 1,
+  },
 ];
 
 const CH_ACHIEVEMENT_IDS_SET: ReadonlySet<string> = new Set(CH_ACHIEVEMENTS.map((a) => a.id));
@@ -301,6 +314,7 @@ export function buildAchievementCtx(state: ChState): AchievementCtx {
     keys: s.keysEarned,
     souls: state.rsLifetime,
     hpf: state.heaven.hpfLifetime,
+    konami: state.stats.konami,
   };
 }
 

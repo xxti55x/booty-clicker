@@ -288,8 +288,10 @@ import { isTranscendEnabled } from './game/flags';
 import { shouldShakeOnKey } from './game/input';
 import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
 import { applyLegacyInheritance } from './game/legacy-import';
+import { createKonami, konamiJackpot } from './game/konami';
 import { loadSettings, type Quality, type QualityChoice, saveSettings } from './game/settings';
 import { type WelcomeBackData, welcomeBackData } from './game/welcome-back';
+import { playKonamiCeremony } from './ui/easter-egg';
 import { loadCh, offlineGold, resetCh, saveCh } from './save/ch-store';
 import { loadGame } from './save/store';
 import { Rng } from './util/rng';
@@ -2411,12 +2413,43 @@ canvas.addEventListener('pointerup', (e) => {
   const dist = Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY);
   if (dist <= 10 && performance.now() - downT <= 500) doShake(e.clientX, e.clientY);
 });
+// ---------- Easter Egg: Cheat-Code der Ahnen (v19) ----------
+const konami = createKonami();
+/**
+ * Die Zeremonie: Zähler hoch, beim ERSTEN Mal den Einmal-Jackpot gutschreiben
+ * (20 Boss-Drops der aktuellen Bühne — skaliert mit dem Spielstand statt die
+ * v12-Kurve zu brechen), Pfirsich-Regen + Fanfare, und `checkAchievements`
+ * schaltet „Cheat-Code der Ahnen" frei (Toast + 💫-Sync inklusive). Jede
+ * weitere Zündung ist reines Spielzeug: Regen ja, Beute nein — der
+ * Lebenszeit-Zähler `stats.konami` ist der Latch.
+ */
+function danceKonami(): void {
+  state.stats.konami += 1;
+  let label: string | null = null;
+  if (state.stats.konami === 1) {
+    const jackpot = konamiJackpot(combat.zone);
+    state.gold += jackpot;
+    state.stats.goldLifetime += jackpot;
+    label = `+${fmt(jackpot)} BP`;
+  }
+  playKonamiCeremony(label);
+  audio.bossWin();
+  persist(); // der Zähler selbst — checkAchievements persistiert nur bei Neuem
+  checkAchievements();
+  hud.update(state, combat, dps, clickDmg);
+}
+
 window.addEventListener('keydown', (e) => {
   audio.unlock();
   if (e.code === 'Space') e.preventDefault();
   // shouldShakeOnKey guards B4: a held (auto-repeating) space is not an autoclicker.
   if (shouldShakeOnKey(e.code, e.repeat)) doShake();
   if (e.code === 'KeyF' && !e.repeat) activateEkstase();
+  // Easter Egg: nie beim Tippen in Eingabefeldern (Import-Dialog, Name) —
+  // dort sind Pfeile und Buchstaben Text, kein Tanz.
+  const t = e.target as HTMLElement | null;
+  const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+  if (!typing && !e.repeat && konami.feed(e.code)) danceKonami();
 });
 
 // ---------- runtime signals ----------
