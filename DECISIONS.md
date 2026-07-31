@@ -11,7 +11,7 @@ here (spec §7).
   ihre `assets/`-Referenzen, das CSS auf seine `url()`-Assets (Font) und das
   JS auf `avatars/`-Pfade. Möglich, weil das Spiel WINZIG ausliefert: die
   Charaktere sind vollständig prozedural — der komplette Satz ist 1 JS + 1 CSS
-  + 1 Font + Icons (~950 KB). Kein Workbox, keine neue Dependency.
+  - 1 Font + Icons (~950 KB). Kein Workbox, keine neue Dependency.
 - **Zwei headless gefundene Fallen, beide im Kommentar des Workers verewigt:**
   (1) Die Shell-Fetches des ERSTEN Besuchs laufen, bevor der Worker die Seite
   übernimmt — ohne Install-Precache hing der Offline-Reload im Loader
