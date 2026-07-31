@@ -3,6 +3,37 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## V2-2 — Auto-Qualität: Signal-Wahl + FPS-Governor (X6-Restschuld geschlossen)
+
+- **`quality: 'auto'` ist der neue Default, und Provenienz schlägt Wert.** Der
+  alte Default `'high'` galt für JEDES Gerät — ein Telefon zahlte den vollen
+  PixelRatio-2-Preis, ein Software-Rasterizer alles. Der Loader erzwingt
+  `'auto'`, solange `qualityChosen` fehlt: Alt-Saves, die nur den alten Default
+  gespeichert hatten (keine Entscheidung), wandern in die Automatik; jede echte
+  Berührung des Qualitäts-Zyklus setzt das Flag und wird für immer respektiert.
+  Ein „gespeichert = gewollt"-Schluss wäre hier falsch gewesen — der Wert war
+  zu 100 % Default-Schreibung.
+- **Zwei Stufen, beide konservativ:** (1) Signal-Wahl beim Boot
+  (`pickQuality`): Software-GPU (SwiftShader/llvmpipe/…) ⇒ `low` — der String
+  kommt aus dem ECHTEN Renderer-Kontext, kein zweiter Probe-Kontext; Mobil
+  (Coarse-Pointer/UA) oder ≤ 4 Kerne ⇒ `medium`; sonst `high`. (2) FPS-Governor
+  zur Laufzeit: Median über 180 Frames (robust gegen GC-Spikes — ein
+  400-ms-Ausreißer trippt NICHT), Schwelle 24 ms (≈ 42 FPS), 6 s Warm-up
+  (Lade-Jank zählt nie), 8 s Abklingzeit, stuft NUR herab (Aufwärts-Flattern
+  wäre sichtbares Pumpen), `low` ist der Boden. Frames > 1 s verwerfen das
+  Fenster (Tab-Throttling ist kein Jank). Ein Spieler-FPS-Limit macht lange
+  Frames zur Absicht: gemessen wird dann gegen `capMs × 1.35`.
+- **Der Governor überstimmt nie eine Wahl** — er läuft nur bei `'auto'`, und
+  sein Ergebnis ist SESSION-LOKAL (nichts wird zurückgeschrieben): ein
+  gedrosseltes Notebook am Netzteil startet nächste Session wieder mit der
+  Signal-Wahl statt mit einer eingebrannten Strafe. Herabstufung meldet sich
+  als Toast mit Verweis auf die Einstellungen.
+- **Headless bewiesen** (`v2-autoq.cjs`): frischer Kontext auf SwiftShader ⇒
+  `low`; Alt-Default `high` ohne Flag ⇒ `low` (Automatik greift); echte Wahl
+  `high` + Flag ⇒ `high` trotz Software-GPU. Governor-Verhalten als 7
+  Unit-Tests (Fenster, Median, Warm-up, Throttle-Verwurf, Kaskade+Boden,
+  Cap-Toleranz). Settings-UI zeigt ehrlich „Auto (Hoch)" — den WIRKSAMEN Wert.
+
 ## V2-1 — Bloom an: Display-Space-Overlay statt Linear-HDR-Kette (Known Issue geschlossen)
 
 - **Der alte Befund reproduziert, dann erst erklärt.** Die kanonische Kette

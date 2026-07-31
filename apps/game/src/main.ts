@@ -42,6 +42,7 @@ import {
 import { createControls, frameCamera } from './engine/camera';
 import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
+import { type DeviceSignals, createFpsGovernor, pickQuality } from './engine/auto-quality';
 import { effectivePixelRatio, qualityPreset } from './engine/quality';
 import { setTextureAnisotropy } from './engine/textures';
 import { createPost } from './engine/post';
@@ -287,7 +288,7 @@ import { isTranscendEnabled } from './game/flags';
 import { shouldShakeOnKey } from './game/input';
 import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
 import { applyLegacyInheritance } from './game/legacy-import';
-import { loadSettings, type Quality, saveSettings } from './game/settings';
+import { loadSettings, type Quality, type QualityChoice, saveSettings } from './game/settings';
 import { type WelcomeBackData, welcomeBackData } from './game/welcome-back';
 import { loadCh, offlineGold, resetCh, saveCh } from './save/ch-store';
 import { loadGame } from './save/store';
@@ -360,11 +361,41 @@ const controls = createControls(camera, renderer.domElement);
 
 const effects = loadSettings();
 /**
+ * V2-2: Gerätesignale für die Auto-Qualität. Der GPU-String kommt aus dem
+ * ECHTEN Kontext des Renderers (kein zweiter Probe-Kontext) — auf ihm hängen
+ * Software-Rasterizer wie SwiftShader, die sofort auf `low` gehören.
+ */
+function deviceSignals(): DeviceSignals {
+  let gpu = '';
+  try {
+    const gl = renderer.getContext();
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    gpu = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+  } catch {
+    gpu = '';
+  }
+  const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  return {
+    mobile: coarse || /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent),
+    cores: navigator.hardwareConcurrency ?? 0,
+    gpu,
+  };
+}
+/** `'auto'` zur Boot-Zeit auflösen; explizite Wahl geht unverändert durch. */
+function resolveQuality(choice: QualityChoice): Quality {
+  return choice === 'auto' ? pickQuality(deviceSignals()) : choice;
+}
+/** Das gerade WIRKSAME Preset (nach Auto-Auflösung + Governor). */
+let effectiveQuality: Quality = resolveQuality(effects.quality);
+/**
  * Das aktive Grafik-Preset (ROADMAP-V2 Preset-Pflicht): G1-Bühnenwechsel,
  * G2-Regie und Konfetti-Dichte lesen es live, `applyQuality` schreibt es.
  */
-let preset = qualityPreset(effects.quality);
+let preset = qualityPreset(effectiveQuality);
 function applyQuality(q: Quality): void {
+  effectiveQuality = q;
+  // Sichtbar für Verifikation + künftige CSS-Hooks (kein Spiel-Verhalten).
+  document.documentElement.dataset.quality = q;
   preset = qualityPreset(q);
   renderer.setPixelRatio(effectivePixelRatio(q, window.devicePixelRatio));
   // Roadmap L / V2-1: Bloom folgt dem Preset. Die Kette ist ein DISPLAY-SPACE-
@@ -385,7 +416,15 @@ function applyQuality(q: Quality): void {
     });
   }
 }
-applyQuality(effects.quality);
+applyQuality(effectiveQuality);
+/**
+ * V2-2: Der FPS-Governor misst NUR im Auto-Modus (eine explizite Wahl wird nie
+ * überstimmt) und stuft bei anhaltendem Jank eine Stufe herab. Neu aufgebaut
+ * bei jedem Grafik-/FPS-Limit-Wechsel, damit Startstufe + Limit stimmen.
+ */
+let governor = createFpsGovernor(effectiveQuality, {
+  capMs: effects.fpsCap > 0 ? 1000 / effects.fpsCap : 0,
+});
 
 // ---------- state ----------
 let state = createChState();
@@ -1396,10 +1435,15 @@ const chSettings = new ChSettings({
   },
   effects,
   onGraphicsChange: () => {
-    applyQuality(effects.quality);
+    applyQuality(resolveQuality(effects.quality));
     // G3: Dichte-Wechsel baut die laufende Bühne einmal neu (No-op bei gleichem Wert).
     world.setAmbientLife(preset.ambientLife);
+    // V2-2: neuer Governor mit frischer Startstufe + aktuellem FPS-Limit.
+    governor = createFpsGovernor(effectiveQuality, {
+      capMs: effects.fpsCap > 0 ? 1000 / effects.fpsCap : 0,
+    });
   },
+  effectiveQuality: () => effectiveQuality,
 });
 
 // ---------- welcome back (ROADMAP-V2 X3) ----------
@@ -3244,7 +3288,22 @@ let firstFrame = true;
 function loop(nowMs: number): void {
   requestAnimationFrame(loop);
   if (!frameDue(nowMs, lastRenderMs, effects.fpsCap)) return;
+  // V2-2: ROHE Frame-Dauer (ungeklemmt) für den Governor — nur im Auto-Modus,
+  // eine explizite Spieler-Wahl wird nie überstimmt.
+  const rawFrameMs = lastRenderMs > 0 ? nowMs - lastRenderMs : 0;
   lastRenderMs = nowMs;
+  if (effects.quality === 'auto' && rawFrameMs > 0) {
+    const dropped = governor.sample(rawFrameMs, nowMs);
+    if (dropped !== null) {
+      applyQuality(dropped);
+      world.setAmbientLife(preset.ambientLife);
+      toasts.show(
+        '⚙️',
+        `Grafik auf „${dropped === 'medium' ? 'Mittel' : 'Niedrig'}" gestellt`,
+        'Das Gerät hielt das Preset nicht — Einstellungen ▸ Grafik überstimmt das.',
+      );
+    }
+  }
   const dt = Math.min(clock.getDelta(), 0.05);
   t0 += dt;
   state.stats.playTimeS += dt;
