@@ -3526,3 +3526,17 @@ function loop(nowMs: number): void {
   }
 }
 requestAnimationFrame(loop);
+
+// V2-3: PWA — der Service Worker cached AUSLIEFERUNG (gehashte Assets
+// cache-first, Navigation network-first, public/ stale-while-revalidate),
+// niemals Spielstand. Nur im Build: der Dev-Server transformiert Module on
+// the fly, ein SW würde dort Stale-Chaos stiften.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  const registerSw = (): void => {
+    navigator.serviceWorker.register('sw.js').catch(() => {
+      // Offline-Cache ist Komfort, kein Feature-Gate — still weiterspielen.
+    });
+  };
+  if (document.readyState === 'complete') registerSw();
+  else window.addEventListener('load', registerSw, { once: true });
+}

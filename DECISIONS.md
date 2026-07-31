@@ -3,6 +3,38 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## V2-3 — PWA: installierbar + offline ab dem ersten Besuch (Version 2.0.0)
+
+- **Precache LIEST die Build-Hashes statt sie zu kennen.** Ein statisches
+  `sw.js` kann Vites gehashte Dateinamen nicht wissen; statt eines
+  Build-Plugins parst der Install-Schritt die frisch geholte index.html auf
+  ihre `assets/`-Referenzen, das CSS auf seine `url()`-Assets (Font) und das
+  JS auf `avatars/`-Pfade. Möglich, weil das Spiel WINZIG ausliefert: die
+  Charaktere sind vollständig prozedural — der komplette Satz ist 1 JS + 1 CSS
+  + 1 Font + Icons (~950 KB). Kein Workbox, keine neue Dependency.
+- **Zwei headless gefundene Fallen, beide im Kommentar des Workers verewigt:**
+  (1) Die Shell-Fetches des ERSTEN Besuchs laufen, bevor der Worker die Seite
+  übernimmt — ohne Install-Precache hing der Offline-Reload im Loader
+  (beobachtet, Screenshot). (2) Der Server hängt `Vary: Origin` an die Assets,
+  und die `crossorigin`-Module-Requests tragen einen Origin-Header, den die
+  addAll-Einträge nicht haben — ohne `ignoreVary: true` verfehlte jeder
+  Offline-Match die eigenen Einträge (`ERR_FAILED` auf das gecachte Modul,
+  beobachtet). Same-origin + URL-adressiert ⇒ Vary ignorieren ist korrekt.
+- **Strategie je Ressourcen-Klasse** (Vite-Kontrakt): gehashte `assets/`
+  cache-first für immer; Navigationen network-first mit Cache-Fallback (online
+  gewinnt IMMER der frische Build — kein Stale-App-Problem); `public/`-Rest
+  stale-while-revalidate. Cross-Origin (Leaderboard-API) fasst der Worker nie
+  an, localStorage-Saves erst recht nicht. Registrierung nur im PROD-Build
+  (der Dev-Server transformiert on the fly — ein SW würde dort Chaos cachen).
+- **Abnahme headless**: SW `activated`, Manifest valide (3 Icons, standalone),
+  Offline-Reload bootet das VOLLE Spiel (dynamischer Titel, Auto-Quality
+  gesetzt, Bühne + HUD im Screenshot). Bekannte, bewusste Lücke: die
+  Skin-Thumbnails (`avatars/skin-*.jpg`) baut das JS zur Laufzeit aus
+  Segmenten — der Install-Parser sieht sie nicht; sie landen beim ersten
+  Online-Blick in den Skins-Tab im Laufzeit-Cache (SWR) und fehlen offline
+  nur, wenn man sie nie gesehen hat. App-Icons: gezeichneter Ink-Outline-
+  Pfirsich (PIL, 192/512/maskable/apple-touch, zusammen 42 KB).
+
 ## V2-4 — Zwei dokumentierte Gameplay-Schulden beglichen (Schmiede-Slot 3, Advisor-Spiegel)
 
 - **Schmiede-Slot 3: Level 40 → 32, aus der Kostenkurve gerechnet.** Die
