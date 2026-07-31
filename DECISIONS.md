@@ -3,6 +3,36 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## V2-1 — Bloom an: Display-Space-Overlay statt Linear-HDR-Kette (Known Issue geschlossen)
+
+- **Der alte Befund reproduziert, dann erst erklärt.** Die kanonische Kette
+  (RenderPass → UnrealBloom → OutputPass, three r180) wurde headless per
+  A/B-Screenshot gemessen: **Median +42/255 über das GANZE Bild, Schatten +38,
+  Lichter +8** — die Signatur einer zusätzlichen konkaven Transferkurve, kein
+  Bloom. Wurzel: Die Kette ist nur für Szenen korrekt, deren SÄMTLICHE
+  Materialien die konditionalen Farb-Chunks tragen. Diese Welt tut das bewusst
+  nicht — die Kulissen-Himmel sind `ShaderMaterial`s und die Ink-Kanten
+  `toneMapped: false`, beide DISPLAY-REFERRED geautored. Der OutputPass legt
+  ACES+sRGB über den GESAMTEN Puffer und hebt genau diese Flächen milchig an.
+  (Der r180-Kontrakt selbst ist sauber: `WebGLPrograms` schaltet Tone-Mapping
+  bei Target ≠ null ab — im Quelltext verifiziert. Er hilft nur nichts, wenn
+  Teile der Szene die Pipeline absichtlich verlassen.)
+- **Die Lösung dreht die Reihenfolge um:** Szene rendert UNVERÄNDERT direkt auf
+  die Leinwand (abgenommene Optik bleibt byte-identisch — sie IST die Basis),
+  `copyFramebufferToTexture` blittet den Frame in eine `FramebufferTexture`,
+  und NUR der Glow wird darauf gerechnet: TexturePass → UnrealBloom
+  (Threshold 0.78 im Display-Raum, Strength 0.4, Radius 0.25) → roher
+  CopyShader. Keine Farbraum-Konvertierung in der ganzen Kette ⇒ eine
+  Doppel-Anwendung ist strukturell unmöglich, nicht nur getuned.
+- **Abnahme in Zahlen** (Zone 7/Synth, 640×780-Canvas-Ausschnitt):
+  Dunkel-Region-Delta Bloom vs. aus **+3,24** — UNTER dem gemessenen
+  Rausch-Boden zweier identischer Läufe (**+3,51**; Animations-/Kampf-Drift).
+  Overall +3,1 (Rauschen +1,0), Rest ist lokalisierter Glow (Grid, Deck-Ring,
+  Spotlight, Sternschnuppe — Beweisbilder `v2-bloom-{off,on}.png`).
+- **Preset-Pflicht:** `bloom` ist ein Preset-Feld (nur `high`), Test pinnt es;
+  `applyQuality` synct `post.setSize` nach jedem PixelRatio-Wechsel, der
+  Resize-Pfad tat es schon.
+
 ## Review-Fix nach Schritt 7 — sechs Affix-Terme erreichen jetzt das Live-Spiel (1c/3a)
 
 - **Der Befund (aus dem Schritt-7-Abschlussbericht, im Review bestätigt):** Der

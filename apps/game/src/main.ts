@@ -367,13 +367,12 @@ let preset = qualityPreset(effects.quality);
 function applyQuality(q: Quality): void {
   preset = qualityPreset(q);
   renderer.setPixelRatio(effectivePixelRatio(q, window.devicePixelRatio));
-  // Roadmap L, KNOWN ISSUE (Review Schritt 4): `post.enabled` war nie true —
-  // die Zuweisung ging bei einem Refactor verloren, der Composer lief also nie
-  // und wurde nie visuell validiert. Beim Aktivieren zeigt die Kette eine
-  // uniforme Aufhellung (mutmaßlich doppelte sRGB-Konvertierung), Threshold-
-  // Tuning ändert daran nichts. Bewusst AUS gelassen, bis ein eigenes Paket
-  // die Farb-Pipeline fixt — das Spiel ist ohne Bloom abgenommen.
-  post.enabled = false;
+  // Roadmap L / V2-1: Bloom folgt dem Preset. Die Kette ist ein DISPLAY-SPACE-
+  // Overlay (Begründung + Messung im Kopf von `engine/post.ts`): die Basis ist
+  // der unveränderte Direkt-Render, nur der Glow kommt additiv obendrauf — per
+  // A/B-Screenshot bewiesen (DECISIONS „V2-1").
+  post.enabled = preset.bloom;
+  post.setSize(window.innerWidth, window.innerHeight);
   // Roadmap T1: Textur-Anisotropie folgt dem Preset (GPU-Maximum deckelt real).
   setTextureAnisotropy(Math.min(preset.anisotropy, renderer.capabilities.getMaxAnisotropy() || 1));
   if (renderer.shadowMap.enabled !== preset.shadows) {

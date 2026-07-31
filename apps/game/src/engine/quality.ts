@@ -36,6 +36,15 @@ export interface QualityPreset {
    * weniger kostet keinen zusätzlichen Draw-Call.
    */
   ambientLife: number;
+  /**
+   * V2: Bloom-Composer (Roadmap L) — nur `high` zahlt den Fullscreen-Pass samt
+   * Blur-Kette. Der r180-Kontrakt ist im A/B-Beweis validiert (siehe
+   * DECISIONS „V2-1"): RenderPass rendert LINEAR ins HalfFloat-Target
+   * (`WebGLPrograms` schaltet Tone-Mapping bei Target ≠ null ab), `OutputPass`
+   * wendet ACES + sRGB genau EINMAL an — die historisch beobachtete
+   * Doppel-Konvertierung ist mit dieser Kette strukturell unmöglich.
+   */
+  bloom: boolean;
 }
 
 const PRESETS: Record<Quality, QualityPreset> = {
@@ -48,6 +57,7 @@ const PRESETS: Record<Quality, QualityPreset> = {
     confetti: 0,
     ekstaseDeck: false,
     ambientLife: 0.5,
+    bloom: false,
   },
   medium: {
     pixelRatioCap: 1.5,
@@ -58,6 +68,7 @@ const PRESETS: Record<Quality, QualityPreset> = {
     confetti: 70,
     ekstaseDeck: true,
     ambientLife: 1,
+    bloom: false,
   },
   high: {
     pixelRatioCap: 2,
@@ -68,6 +79,7 @@ const PRESETS: Record<Quality, QualityPreset> = {
     confetti: 130,
     ekstaseDeck: true,
     ambientLife: 1,
+    bloom: true,
   },
 };
 
