@@ -3,7 +3,6 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { TexturePass } from 'three/examples/jsm/postprocessing/TexturePass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { CopyShader } from 'three/examples/jsm/shaders/CopyShader.js';
 
 /**
  * Post-Processing (Roadmap L, V2-1): selektives Bloom für die ECHTEN Emissives —
@@ -48,6 +47,50 @@ const BLOOM_THRESHOLD = 0.78;
 const BLOOM_STRENGTH = 0.4;
 const BLOOM_RADIUS = 0.25;
 
+/**
+ * **Grade-Abschluss** (AAA-Pass): ersetzt den nackten CopyShader am Ende der
+ * Kette durch Kopie + Feinschliff — sanfte Vignette (lenkt den Blick zur
+ * Bühnenmitte), +5 % Sättigung um den Luma-Anker und ein Hauch warmes Licht
+ * NUR in den Lichtern. Alles bewusst DISPLAY-SPACE und bewusst dezent: der
+ * Grade ist ein künstlerischer Fingerabdruck, keine Farbraum-Konvertierung —
+ * die V2-1-Regel „keine Transferkurve über den ganzen Puffer" bleibt
+ * unangetastet (Vignette/Grade sind orts- bzw. luma-selektiv, gemessen in
+ * DECISIONS „AAA-Grafik-Pass").
+ */
+const GradeShader = {
+  name: 'BootyGradeShader',
+  uniforms: {
+    tDiffuse: { value: null },
+    /** Kanten-Abdunklung (0 = aus). */
+    uVignette: { value: 0.2 },
+    /** 1 = neutral. */
+    uSaturation: { value: 1.05 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+    }`,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float uVignette;
+    uniform float uSaturation;
+    varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D( tDiffuse, vUv );
+      float luma = dot( c.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+      c.rgb = mix( vec3( luma ), c.rgb, uSaturation );
+      // Warme Lichter: nur oberhalb ~55 % Luma, Blau minimal raus — der
+      // "goldene Bühnenglanz", ohne die Schatten zu kippen.
+      c.rgb += vec3( 0.020, 0.008, -0.012 ) * smoothstep( 0.55, 1.0, luma );
+      vec2 q = vUv - 0.5;
+      float edge = smoothstep( 0.32, 0.85, length( q ) * 1.35 );
+      c.rgb *= 1.0 - uVignette * edge;
+      gl_FragColor = c;
+    }`,
+};
+
 export function createPost(
   renderer: THREE.WebGLRenderer,
   scene: THREE.Scene,
@@ -66,9 +109,9 @@ export function createPost(
     BLOOM_THRESHOLD,
   );
   composer.addPass(bloom);
-  // Roher Kopierer auf die Leinwand — bewusst KEIN OutputPass: der Puffer ist
-  // schon display-referred, jede weitere Transferkurve wäre die Doppelung.
-  composer.addPass(new ShaderPass(CopyShader));
+  // Grade-Abschluss statt nacktem Kopierer — bewusst KEIN OutputPass: der
+  // Puffer ist schon display-referred, jede Transferkurve wäre die Doppelung.
+  composer.addPass(new ShaderPass(GradeShader));
 
   return {
     enabled: false,

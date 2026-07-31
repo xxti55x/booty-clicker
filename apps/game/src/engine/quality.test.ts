@@ -14,7 +14,15 @@ describe('quality presets', () => {
       ekstaseDeck: false,
       ambientLife: 0.5,
       bloom: false,
+      toonFx: false,
     });
+  });
+
+  // AAA-Toon-Pass: low spart die Per-Pixel-ALU (Software-Rasterizer), sonst an.
+  it('low skips the toon rim/glint pass, medium/high run it', () => {
+    expect(qualityPreset('low').toonFx).toBe(false);
+    expect(qualityPreset('medium').toonFx).toBe(true);
+    expect(qualityPreset('high').toonFx).toBe(true);
   });
 
   // Roadmap L / V2-1: NUR high zahlt den Bloom-Overlay-Pass (Blit + Blur-Kette).

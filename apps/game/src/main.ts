@@ -43,6 +43,7 @@ import { createControls, frameCamera } from './engine/camera';
 import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
 import { type DeviceSignals, createFpsGovernor, pickQuality } from './engine/auto-quality';
+import { TOON_FX } from './engine/materials';
 import { effectivePixelRatio, qualityPreset } from './engine/quality';
 import { setTextureAnisotropy } from './engine/textures';
 import { createPost } from './engine/post';
@@ -406,6 +407,8 @@ function applyQuality(q: Quality): void {
   // A/B-Screenshot bewiesen (DECISIONS „V2-1").
   post.enabled = preset.bloom;
   post.setSize(window.innerWidth, window.innerHeight);
+  // AAA-Toon-Pass: EIN geteilter Uniform-Wert, alle Materialien folgen sofort.
+  TOON_FX.value = preset.toonFx ? 1 : 0;
   // Roadmap T1: Textur-Anisotropie folgt dem Preset (GPU-Maximum deckelt real).
   setTextureAnisotropy(Math.min(preset.anisotropy, renderer.capabilities.getMaxAnisotropy() || 1));
   if (renderer.shadowMap.enabled !== preset.shadows) {

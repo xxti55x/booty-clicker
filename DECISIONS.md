@@ -3,6 +3,38 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## AAA-Grafik-Pass — Rim-Licht, Spekular-Glint, Grade/Vignette (Shader)
+
+- **„AAA" heißt hier: die Beleuchtungs-Sprache stilisierter AAA-Titel, nicht
+  PBR-Fotorealismus.** Drei Shader-Bausteine, alle im bestehenden System:
+  (1) **Toon-Rim** — View-Space-Fresnel, hart per `smoothstep(0.62, 0.8)`
+  gestuft, kühl getönt (0xbcd2ff, Gegenfarbe zum warmen Key): die
+  Silhouetten-Lichtkante, die runde Formen vom Hintergrund löst.
+  (2) **Spekular-Glint** — Blinn-Halbvektor gegen einen FESTEN Bühnen-Key
+  (die Welt-Richtung des scene.ts-Key-Lichts), hoch potenziert und gestuft:
+  der kleine Lack-Tupfer auf Schultern und Booty. Kunstlicht wie im
+  Cartoon-Kino — es folgt der Bühne, nicht der Physik.
+  (3) **Grade-Abschluss** der V2-1-Post-Kette — der nackte CopyShader wurde
+  zu Kopie + sanfter Vignette (0.2, lenkt zur Bühnenmitte) + 5 % Sättigung +
+  warmem Lichter-Push (luma-selektiv ab 55 %). Bewusst display-space und
+  bewusst KEINE Transferkurve über den ganzen Puffer — die V2-1-Regel steht.
+- **Ein Programm, ein Schalter:** Rim+Glint injizieren über `onBeforeCompile`
+  in die EINE `toonMat`-Fabrik (alle Charaktere, Gegner, Kulissen teilen sie),
+  uniform-getrieben mit konstantem `customProgramCacheKey` — ein einziges
+  Shader-Programm für die ganze Welt, Stärken pro Material dosierbar. Das
+  Preset schaltet über EIN geteiltes Uniform-Objekt (`TOON_FX`), ohne
+  Recompile: `low` (Software-Rasterizer) zahlt die Per-Pixel-ALU nicht.
+- **Beweis als Build-A/B** (gleicher Save, gleiches Preset, alter vs. neuer
+  Build): medium p95 **+17/255** lokalisiert auf Silhouetten (Rauschboden
+  ~+1), high Ecken **−4,6** (Vignette) bei Zentrum ±0 — und mit eigenen Augen:
+  Charakter und Rivale tragen eine klare, nicht überkochte Lichtkante, das
+  alte Bild fällt flach von der Cel-Fläche in die Ink-Linie.
+- **Zwei Prozess-Fallen dokumentiert:** (a) Der A/B-Probe fehlte nach V2-2
+  `qualityChosen` — der Loader erzwang „auto" ⇒ SwiftShader ⇒ low ⇒ beide
+  Seiten OHNE Effekte, Delta ≈ 0. Erst die Null-Messung hinterfragen, dann
+  den Shader. (b) `git stash pop` aus dem Scratchpad-cwd schlägt fehl
+  („not a git repository") — Stash-Operationen immer vom Repo-Root.
+
 ## Easter Egg — der Cheat-Code der Ahnen (Save v19)
 
 - **↑ ↑ ↓ ↓ ← → ← → B A** zündet den Pfirsich-Regen: Gold-Flash,

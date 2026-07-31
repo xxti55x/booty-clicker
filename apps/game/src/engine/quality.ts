@@ -37,14 +37,17 @@ export interface QualityPreset {
    */
   ambientLife: number;
   /**
-   * V2: Bloom-Composer (Roadmap L) — nur `high` zahlt den Fullscreen-Pass samt
-   * Blur-Kette. Der r180-Kontrakt ist im A/B-Beweis validiert (siehe
-   * DECISIONS „V2-1"): RenderPass rendert LINEAR ins HalfFloat-Target
-   * (`WebGLPrograms` schaltet Tone-Mapping bei Target ≠ null ab), `OutputPass`
-   * wendet ACES + sRGB genau EINMAL an — die historisch beobachtete
-   * Doppel-Konvertierung ist mit dieser Kette strukturell unmöglich.
+   * V2-1: Bloom als DISPLAY-SPACE-Overlay (Begründung + Messung im Kopf von
+   * `engine/post.ts`) — nur `high` zahlt den Blit + die Blur-Kette samt
+   * Grade/Vignette-Abschluss.
    */
   bloom: boolean;
+  /**
+   * AAA-Toon-Pass (Rim-Licht + Spekular-Glint in `materials.toonMat`): reine
+   * Per-Pixel-ALU, aber auf einem Software-Rasterizer (low) ist genau die
+   * teuer — low schaltet den globalen Uniform auf 0.
+   */
+  toonFx: boolean;
 }
 
 const PRESETS: Record<Quality, QualityPreset> = {
@@ -58,6 +61,7 @@ const PRESETS: Record<Quality, QualityPreset> = {
     ekstaseDeck: false,
     ambientLife: 0.5,
     bloom: false,
+    toonFx: false,
   },
   medium: {
     pixelRatioCap: 1.5,
@@ -69,6 +73,7 @@ const PRESETS: Record<Quality, QualityPreset> = {
     ekstaseDeck: true,
     ambientLife: 1,
     bloom: false,
+    toonFx: true,
   },
   high: {
     pixelRatioCap: 2,
@@ -80,6 +85,7 @@ const PRESETS: Record<Quality, QualityPreset> = {
     ekstaseDeck: true,
     ambientLife: 1,
     bloom: true,
+    toonFx: true,
   },
 };
 

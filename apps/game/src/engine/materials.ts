@@ -55,6 +55,33 @@ export function toonRamp(bands: number = TOON_BANDS): THREE.CanvasTexture {
   return t;
 }
 
+// ---------------------------------------------------------------------------
+// AAA-Toon-Pass (Goal „Grafik nach AAA-Standard"): Rim-Licht + Spekular-Glint
+// als Shader-Injektion in JEDES `toonMat` — eine Fabrik, ein Look, ein
+// Shader-Programm. Beides ist reine Per-Pixel-ALU (keine Texturen, keine
+// zusätzlichen Passes) und hängt an EINEM globalen Uniform, das das Preset
+// schaltet (low ⇒ 0, kein Recompile beim Wechsel).
+// ---------------------------------------------------------------------------
+
+/**
+ * Globaler Preset-Schalter des Toon-FX-Passes (0 = aus, 1 = an). Als GETEILTES
+ * Uniform-Objekt exportiert: `applyQuality` schreibt EINEN Wert, alle
+ * Materialien sehen ihn im selben Frame — kein Traversieren, kein Recompile.
+ */
+export const TOON_FX = { value: 1 };
+
+/**
+ * Welt-Richtung ZUM Key-Licht (scene.ts: Position (4.5, 8.5, 7) → Ziel
+ * (1.4, −2.4, 1.7)) — der Glint ist ein KUNSTLICHT-Vektor wie in jedem
+ * stilisierten AAA-Titel: er folgt der Bühnenbeleuchtung, nicht der Physik,
+ * damit die Lichtkante immer da sitzt, wo die Kamera sie sehen kann.
+ */
+const KEY_LIGHT_DIR = new THREE.Vector3(3.1, 10.9, 5.3).normalize();
+
+/** Kühles Mondlicht-Weiß — die klassische Rim-Farbe des Cartoon-Kinos. */
+const RIM_COLOR = new THREE.Color(0xbcd2ff);
+const GLINT_COLOR = new THREE.Color(0xfff6e2);
+
 export interface ToonMatParams {
   color: THREE.ColorRepresentation;
   /** Cel band count (2 = graphic poster look, 4 = default rounded cel). */
@@ -75,11 +102,27 @@ export interface ToonMatParams {
   bumpScale?: number;
   /** Optional glow pattern (sequins, scanner spots) — multiplies `emissive`. */
   emissiveMap?: THREE.Texture;
+  /** Rim-Licht-Stärke (0 = aus; Default dezent — Krümmung macht den Rest). */
+  rim?: number;
+  /** Spekular-Glint-Stärke (0 = aus). */
+  glint?: number;
 }
 
-/** Cel-shaded material factory — the cartoon counterpart of `mk()`. */
+/**
+ * Cel-shaded material factory — the cartoon counterpart of `mk()`.
+ *
+ * Der AAA-Pass injiziert zwei gestufte Terme vor `opaque_fragment`:
+ *  · **Rim**: View-Space-Fresnel, hart per `smoothstep` gestuft — die
+ *    Silhouetten-Lichtkante, die runde Formen vom Hintergrund löst. Kühl
+ *    getönt (Gegenfarbe zum warmen Key), Stärke pro Material dosierbar.
+ *  · **Glint**: Blinn-Halbvektor gegen den festen Bühnen-Key, hoch potenziert
+ *    und gestuft — der kleine Lack-Tupfer auf Schultern/Wangen/Booty.
+ * Beide multiplizieren mit dem globalen {@link TOON_FX}-Uniform (Preset) und
+ * teilen sich EIN Shader-Programm über alle Materialien (uniform-getrieben,
+ * `customProgramCacheKey` konstant).
+ */
 export function toonMat(p: ToonMatParams): THREE.MeshToonMaterial {
-  return new THREE.MeshToonMaterial({
+  const m = new THREE.MeshToonMaterial({
     color: p.color,
     gradientMap: toonRamp(p.bands ?? TOON_BANDS),
     emissive: p.emissive ?? 0x000000,
@@ -92,6 +135,46 @@ export function toonMat(p: ToonMatParams): THREE.MeshToonMaterial {
     bumpScale: p.bumpScale ?? 1,
     emissiveMap: p.emissiveMap ?? null,
   });
+  const rim = p.rim ?? 0.34;
+  const glint = p.glint ?? 0.2;
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.uToonFx = TOON_FX; // geteiltes Objekt — Preset schreibt live
+    shader.uniforms.uRim = { value: rim };
+    shader.uniforms.uGlint = { value: glint };
+    shader.uniforms.uRimColor = { value: RIM_COLOR };
+    shader.uniforms.uGlintColor = { value: GLINT_COLOR };
+    shader.uniforms.uKeyDir = { value: KEY_LIGHT_DIR };
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        'void main() {',
+        [
+          'uniform float uToonFx;',
+          'uniform float uRim;',
+          'uniform float uGlint;',
+          'uniform vec3 uRimColor;',
+          'uniform vec3 uGlintColor;',
+          'uniform vec3 uKeyDir;',
+          'void main() {',
+        ].join('\n'),
+      )
+      .replace(
+        '#include <opaque_fragment>',
+        [
+          '\t// AAA-Toon-Pass: Rim (View-Fresnel, gestuft) + Glint (Blinn gegen den Bühnen-Key).',
+          '\tvec3 fxN = normalize( normal );',
+          '\tvec3 fxV = normalize( vViewPosition );',
+          '\tfloat fxFres = 1.0 - saturate( dot( fxN, fxV ) );',
+          '\tfloat fxRim = smoothstep( 0.62, 0.8, fxFres );',
+          '\tvec3 fxL = normalize( ( viewMatrix * vec4( uKeyDir, 0.0 ) ).xyz );',
+          '\tfloat fxSpec = pow( saturate( dot( fxN, normalize( fxL + fxV ) ) ), 42.0 );',
+          '\tfloat fxGlint = smoothstep( 0.42, 0.58, fxSpec );',
+          '\toutgoingLight += uToonFx * ( uRimColor * ( fxRim * uRim ) + uGlintColor * ( fxGlint * uGlint ) );',
+          '\t#include <opaque_fragment>',
+        ].join('\n'),
+      );
+  };
+  m.customProgramCacheKey = () => 'toon-aaa-fx';
+  return m;
 }
 
 const outlineCache = new Map<string, THREE.MeshBasicMaterial>();
