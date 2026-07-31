@@ -3,6 +3,1153 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Review-Fix nach Schritt 7 — sechs Affix-Terme erreichen jetzt das Live-Spiel (1c/3a)
+
+- **Der Befund (aus dem Schritt-7-Abschlussbericht, im Review bestätigt):** Der
+  Loadout-Fold aus Schritt 6 (`ch-state.loadoutBonus`) floss nur über die vier
+  zentralen Ableitungen (`dpsOf`/`clickDamageOf`/`goldMult`/Truhen-Luck) ins
+  Spiel. Die Sorten **Sequin-Crit (Krit-Chance), Wuchtschlag (Krit-
+  Multiplikator), Langer Atem (Combo-Fenster), Servo (Coach-cps), Nachtschwärmer
+  (Offline-Rate) und Gate-Brecher/Glut (Boss-Schaden)** standen auf den Kacheln
+  und falteten in der SIM — aber ihre Summen-Stellen in `main.ts` lasen nur
+  `…Bonus(state.gear) + pathB()`. Anzeige und Bot versprachen also Wirkung, die
+  der Klick nie sah.
+- **Der Fix folgt exakt dem 2b-Muster:** ein `loadout()`-Getter neben `pathB()`
+  (beide liefern einen `GearBonus`), und je Call-Site EINE Addition im
+  bestehenden Term — Krit-Chance durch denselben 40-%-Deckel, Krit-Multiplikator
+  als Punkte, Combo-Sekunden ins selbe Fenster, Coach-cps an beiden Stellen
+  (Tick + Offline), Offline-Rate in den gedeckelten `rateBonus`, Boss-Schaden in
+  den bestehenden `1 + x`-Griff neben dem Pfad (additiv untereinander,
+  multiplikativ zum Rest — die Reihenfolge, die `foldAffixes` mit dem
+  strukturellen +75-%-Deckel je Term erzwingt).
+- **Warum das keine Anker bewegt:** Die Sim faltete diese Terme schon vorher
+  (`simLoadout` → `foldAffixes`, dieselbe eine Funktion) — der Fix zieht das
+  Live-Spiel zur Sim nach, nicht umgekehrt. `npm run balance` vor/nach:
+  byte-gleich. Tests 1 161, Lint/Prettier/Build grün.
+- **Bewusst NICHT angefasst:** `advisor.bossDamageMult` spiegelt den Loadout-
+  Boss-Term (wie schon den 2b-Pfad-Term) nicht — die P3-Wand-Telemetrie ist
+  damit um die Affix-Größe konservativ. Falsche Richtung tut hier nicht weh
+  (der Advisor unterschätzt den Spieler minimal); ein Spiegel-Nachzieher wäre
+  Kosmetik und keine Korrektur.
+
+## IDEEN-GAMEPLAY Schritt 7 — 2b Skin-Pfade + 3c Erben-Moment + 1d Legenden-Level
+
+- **Ein Knoten ist ein FÜNFTEL Stern — die Leitplanke steht damit strukturell,
+  nicht als Handrechnung.** Die vier Bonus-Knoten eines Skin-Pfades zahlen auf
+  den **`star.stat` desselben Skins** (Klassiker Klick · Robo Coach-cps · Pirat
+  Gold — das Muster aus dem Ideen-Dokument), und zwar je `star.perStar · 0.2`.
+  Der VOLLE Pfad ist damit **0,8 ⭐ wert, also weniger als EIN zusätzlicher
+  Stern**, den derselbe Skin für einen einzigen Zuckerpfirsich bekäme. Der
+  Richtwert „≤ +8 % auf den skin-typischen Term" fällt daraus ab statt
+  hineingerechnet zu werden: Der stärkste Fall ist der Klassiker (0,1
+  clickPct/⭐ ⇒ **exakt +8 % Klick**), und ein Test prüft das für JEDEN Skin
+  gegen den lebenden `SKINS`-Katalog — ein künftiger Skin mit fetterem Stern
+  reißt den Test, nicht erst die Balance. Leistungs-Produkt eines vollen Pfades:
+  **×1.1259** (zum Vergleich 2a ×1.30, 1c/3a ×1.43 — dieselbe Rechnung, dieselbe
+  Einheit).
+- **Zwei Fortschritts-Quellen, aber nur EINE Leiste.** Tragezeit und Boss-Kills
+  laufen über `BOSS_SECONDS = 180` in eine Zahl zusammen (ein Boss-Kill = 3 min
+  Tragezeit). Damit braucht der Pfad keine zweite Schwellen-Reihe, keine
+  „oder"-Logik und keine Anzeige mit zwei Balken — dieselbe Disziplin wie bei
+  der Gebietsherrschaft (1b: eine Zahl je Theme, eine Gewinn-Regel, eine
+  Wirkung). Die 180 sind gemessen: Der Bot fällt im ersten Sitting **6,3 Gates
+  (0,14 Boss/min)** und im Beharrungszustand **0,31 Boss/min** — ein Boss-Kill
+  ist damit rund ein Drittel des Fortschritts einer aktiven Sitzung wert, und
+  wer nur idlet, kommt trotzdem an, nur langsamer.
+- **Die Schwellen 3 000 / 18 000 / 72 000 / 216 000 / 720 000, gemessen statt
+  geraten** (`npm run balance`, Abschnitt 12, Seeds 1/7/12345, MIT Loot):
+  · **45 min: 3 840 Pfad-Sek. ⇒ Knoten 1** — die Vorgabe „im ersten Sitting"
+  ist erfüllt, und zwar mit 28 % Luft: Die erste Fassung hatte 3 600 und lag
+  damit bei einem boss-schwachen Seed (4 Gates ⇒ 3 420) auf der Kippe.
+  · **3 h: 19 200 ⇒ Knoten 2** · **12 h: 81 840 ⇒ Knoten 3** ·
+  **24 h: 166 260 — immer noch Knoten 3** (Knoten 4 bei 31 h).
+  · **Knoten 5 nach ~103 h** bei gemessener Kadenz, 200 h bei reiner Tragezeit —
+  „darf Tage dauern" heißt hier gut vier Tage aktiven Spiels. Ein Test friert
+  beide Enden ein (Knoten 1 im ersten Sitting, Knoten 4+5 nach 24 h noch offen).
+- **Knoten 5 zahlt bewusst KEINEN Prozentpunkt, sondern einen Move.** Dieselbe
+  Entscheidung wie beim Legenden-Rang der Crew-Meisterschaft (1a: Rang 4 zahlt
+  die Gratis-Erststufe statt weiterer Prozente) — der letzte, teuerste Knoten
+  einer permanenten Leiter soll etwas sein, das man SIEHT. Die zehn Signature-
+  Moves kommen aus dem BESTEHENDEN A4-Satz und sind als NAMEN katalogisiert
+  (`SIGNATURE_MOVES`), nicht als Indizes: Der Index ist eine Eigenschaft von
+  `MOVES`, der Name ist der Vertrag — genau wie `VICTORY_MOVE` selbst über den
+  Namen aufgelöst wird. Keiner der zehn ist der **Diva-Turn** (ein „Signature-
+  Move", der aussieht wie der Move aller anderen, wäre keiner); sieben Moves auf
+  zehn Skins heißt drei Doppelungen, und die sind nach Rig-Silhouette gepaart
+  (die beiden `boss`-Rigs teilen den Booty-Slam, die beiden `robot`-Rigs die
+  Welle). **Der Physik-Kontrakt bleibt unberührt**: `skin-path.ts` liefert einen
+  Namen, `main.ts` schlägt ihn in `MOVES` nach und übergibt einen INDEX an
+  `Choreographer.setMove` — keine neue Pose, kein neuer Bone, kein neuer
+  Blend-Pfad.
+- **Ein toter Haken wurde endlich verdrahtet.** `Choreographer.onMove` stand
+  seit A4 als „HUD hook" im Code und war nie benutzt; jetzt schreibt er den
+  laufenden Move-Namen als `data-move` ans Canvas. Ohne das wäre der
+  Signature-Move nur ein Bild, das man mit dem Standard-Move verwechseln kann —
+  mit ihm ist er im DOM nachweisbar (siehe `2b3c1d-b*`). Kosten: ein
+  Attribut-Schreiben je Move-Wechsel (alle 18 Klicks).
+- **Der Erbe darf +12 % — der Deckel wandert MIT, und das war eine gerechnete
+  Entscheidung.** Die Alternative („Ränge zählen doppelt, aber die Wirkung
+  klemmt weiter bei +6 %") wurde verworfen, weil sie den Erben für JEDEN
+  Spielstand mit Gold-Rang wirkungslos machte — und Gold fällt nach ~13 h. Ein
+  Zeremonien-Moment, der für alle Fortgeschrittenen nichts tut, ist kein Moment.
+  Der Deckel aus 1a ist ein PRO-MITGLIED-Deckel gegen schleichende Permanenz
+  über die ganze Crew (15 × +6 % wären ein echter Term); der Erbe ist genau
+  EINER, genau EINE Ära lang. Der neue Deckel ist trotzdem strukturell und nicht
+  geschätzt: Die Verdopplung wirkt nur auf den EIGEN-Anteil, also ist der
+  absolute Höchstfall `0.06 / 1.06 = +5,66 % Gesamt-DPS`, und der gälte nur,
+  wenn dieses eine Mitglied die KOMPLETTE Crew-DPS trüge. Gemessen an einer
+  Crew auf Lv 40 mit durchweg Gold-Rang: **×1.0490** (bester Erbe: Kosmische
+  Twerk-Entität). Zwei Tests frieren beide Zahlen ein.
+- **Der Erbe liegt UNTER der Auflösung jedes Ankers — und das ist das Ergebnis,
+  kein kaputtes Messgerät.** Das A/B-Profil `SIM_HEIR` (beste-ROI-Heuristik: das
+  XP-stärkste Mitglied, nach jedem Kauf-Durchgang nachgeführt) bewegt t25 um
+  **×1.00** und die 3-h-Kette um **×1.00** (alle drei Seeds enden bei Bühne 75 /
+  1 295 Seelen). Gründe, beide dokumentiert: Im ersten Sitting existiert noch
+  kein Rang, den man verdoppeln könnte (Bronze fällt erst gegen Ende, Abschnitt
+  6), und die Kette rennt gegen die M9-Wand, die ein paar Prozent Eigen-DPS
+  nicht verschieben. Damit ist die Zusage des Ideen-Dokuments („kostet nichts an
+  Balance") nicht behauptet, sondern gemessen.
+- **Die Wahl liegt VOR der Gutschrift, nicht in der Blende.** Die G4-Zeremonie
+  ist per Vertrag rein optisch — wenn sie läuft, ist alles gebucht, und jeder
+  Tap darf sie abbrechen. Eine Wahl darin wäre eine Entscheidung, die man
+  wegklicken kann. Der Erben-Dialog ist deshalb der letzte Schritt VOR dem
+  Reset (`arm → bestätigen → Erbe wählen → transzendieren`), die Blende feiert
+  danach; headless nachgewiesen ist, dass bei offenem Dialog noch **0 TE**
+  gebucht sind. „Kein Erbe" steht als eigene KACHEL neben den 15 Portraits, nicht
+  nur als Abbrechen-Knopf: Wer noch keinen Rang hat, soll nicht das Gefühl
+  bekommen, etwas falsch zu machen. Der Rand-Klick schließt bewusst NICHT (er
+  stünde zwischen „abbrechen" und „ohne Erben transzendieren" — beides echte
+  Entscheidungen, beide brauchen ihren Knopf).
+- **1d ist additiv, und der Unterschied ist nicht kosmetisch.** `1 + 0.005·L`
+  statt `1.005^L`: bei L = 20 belanglos (×1,10 gegen ×1,105), bei L = 2 000 der
+  Unterschied zwischen ×11 und **×1 953 mal so viel** — und genau dort
+  entschiede er über den Float-Guard (§9.3, z300) und jeden Anker. Ein Test
+  prüft `legendGlobalMult(1e15)` auf endlich und < 1e300; eine exponentielle
+  Formel hätte hier einen Deckel gebraucht, die additive braucht keinen. Genau
+  deshalb wird der Zähler in `repairLegend` auch NICHT gedeckelt.
+- **Die Kadenz ist die eigentliche Leitplanke von 1d — gemessen: ein Level je
+  24 h.** Der 24-h-Kettenlauf mit vollem Prestige-Stack schafft **genau EINE
+  Himmelfahrt** (alle drei Seeds), also genau ein Legenden-Level, +0,5 % global.
+  Für die Wirkung eines EINZIGEN TE (×3) braucht es 400 Level ≈ **9 600 h**.
+  Das Profil `SIM_LEGEND` misst deshalb bewusst den Extremfall L = 100 (×1.5
+  global, ~2 400 h Spielzeit): t25 **35.8 → 16.8 min, ×1.97**. Die Beschleunigung
+  liegt über dem Faktor selbst, weil die Crew-Kurve exponentiell ist — ein Test
+  klemmt sie bei `Faktor × 1.6`.
+- **Sim: Fortschritt IMMER, Wirkung nur im Profil — und der Grund ist neu.** Der
+  Pfad-FORTSCHRITT (Tragezeit + Boss-Kills) läuft in jedem Bot-Profil mit, die
+  WIRKUNG nur in `SIM_PATH`. Das ist NICHT dieselbe Bequemlichkeits-Untergrenze
+  wie bei 2a/3a/3b: Der normale Anker-Bot modelliert überhaupt **kein
+  Skin-Gear** (`clickGearMult` steht auf 1, obwohl der Klassiker auf Lv 50 ×5
+  Klick zahlt). Einen Bot, der den +8-%-Pfad faltet und den +400-%-Level-Buff
+  desselben Skins verschweigt, gibt es im Spiel nicht — er fiele die Krume auf
+  und ließe den Laib liegen. Die erste Fassung faltete den Pfad trotzdem und
+  brach sofort einen Anker (**t75 3.15 h → 2.34 h**, unter die 3-h-Untergrenze):
+  nicht wegen der 2–4 % Macht, sondern weil t75 an einer Lauf-GRENZE liegt und
+  der Übergang von Lauf 5 auf Lauf 4 quantisiert. Mit der Trennung sind die
+  Abschnitte 1–11 des Balance-Rituals **byte-gleich** zum Basis-Commit.
+- **Der Bot trägt EINEN Skin und wechselt nie** (`SIM_SKIN = 'classic'`, der
+  Spiel-Standard). Das ist die konservative Wahrheit in beide Richtungen: Wer
+  wechselt, füllt jeden Pfad langsamer; wer bleibt, füllt genau diesen einen so
+  schnell wie überhaupt möglich. Gemessen wird also die SCHNELLSTE Pfad-Kurve —
+  die richtige Seite für eine Schwellen-Eichung — und zugleich der STÄRKSTE
+  Bonus des Katalogs (+8 % Klick), also die richtige Seite für ein Budget.
+- **Save v18 mit drei Feldern und dreimal „bewusst leer" — jedes aus einem
+  anderen Grund.** `skinPath`: Tragezeit hat das Spiel nie gemessen —
+  `stats.playTimeS` kennt die Spielzeit, aber nicht, WELCHER Skin dabei anlag
+  (`gear.skin` ist eine Momentaufnahme, keine Historie), und `stats.bossKills`
+  kennt kein Gear; die Gesamt-Spielzeit auf den aktuell getragenen Skin zu
+  buchen hieße „du hast diesen Skin schon immer getragen". `heir`: Ein Erbe
+  entsteht ausschließlich durch eine WAHL in der Zeremonie; ihn zu raten (etwa
+  „das XP-stärkste Mitglied") nähme dem Spieler genau die Entscheidung ab, um
+  die es bei 3c geht. `legend`: Hier wurde ausdrücklich nach einem
+  Lebenszeit-Zähler der Himmelfahrten gesucht — es gibt ihn nicht.
+  `heaven.ascensions2` ist der einzige Kandidat und wird ausgerechnet von
+  `transcendState` mit `createHeaven()` auf 0 zurückgesetzt; er zählt also nur
+  die laufende Ära und verschweigt alle früheren. Aus ihm zu säen wäre keine
+  Herleitung, sondern eine untere Schranke mit dem Anschein einer Zahl. Ein
+  Alt-Save rechnet nach dem Update bit-gleich weiter (leerer Pfad, leerer Erbe,
+  L = 0 falten überall ×1).
+- **Eine Reparatur-Regel, die gegen den Strich geht: die Trage-Sekunden bleiben
+  GEBROCHEN.** `repairSkinPath` floort sie bewusst nicht (nur ≥ 0 und endlich),
+  weil die Glue Bruchteile pro Frame bucht — ein Floor beim Speichern verlöre
+  bei jedem Reload bis zu einer Sekunde. Die Boss-Kills daneben sind Stückzahlen
+  und werden gefloort. Sonst dieselbe Disziplin wie bei `repairForge`: nur echte
+  Katalog-Skins bekommen ein Fach (`Object.hasOwn`), ein Fach ohne jeden
+  Fortschritt fällt weg, und geklemmt wird in KEINE Richtung (ein Pfad ist ein
+  Lebenszeit-Highwater, `gear.skin` sagt nur, was gerade getragen wird).
+- **Die X7-Matrix hat den Bump wie immer sofort rot gemeldet.** Ihr neues Paar
+  prüft den gesunden v18-Save (drei Skins in ganz verschiedenen Pfad-Ständen,
+  ein Erbe, 12 Legenden-Level) und den kaputten (Phantom-Skin `vegasking`,
+  Prototyp-Schlüssel `toString`, NaN-Sekunden, negative Bosse, ein Fach das gar
+  kein Objekt ist, eine Erben-Id ohne Crew-Mitglied, ein krummes Legenden-Level)
+  — übrig bleiben genau zwei legale Fächer, `heir: ''` und ein gefloortes L.
+- **Platz: KEIN zehnter Reiter, drei Orte, jeder aus einem Sachgrund.** Headless
+  bei 390 × 844 nachgemessen: neun Reiter à 44 px = **396 px** gegen **387 px**
+  verfügbare Breite (schon heute 9 px drüber). Der **Pfad sitzt an der
+  Skin-KARTE**, weil er ANTEIL dieses Skins ist (er füllt sich nur, während der
+  Skin getragen wird, er zahlt auf dessen eigenen Stern-Stat, er verschwindet
+  aus der Rechnung beim Wechsel) — genau die Begründung, mit der in Schritt 6
+  schon die Schmiede-Slots dorthin kamen. Der **Legenden-Zähler und die
+  Erben-Zeile stehen im 🔮 Transzendenz-Tab**, weil beides Dinge sind, die eine
+  Himmelfahrt bzw. eine Transzendenz PERMANENT hinterlässt: unter dem Knopf, der
+  sie auslöst. Die **Erben-Wahl ist ein Dialog** (Vorbild `retrain-dialog`).
+  Tab-Höhen bei 390 px NACH der Änderung: **Trans. 934** (vorher ~700) ·
+  **Skins 2 430** (vorher 2 147). Der Skins-Tab wächst um 283 px = 28 px je
+  Karte — eine Reihe Punkte, ein 3-px-Balken, eine Klartext-Zeile.
+- **Headless-Beweis** (Chromium/SwiftShader, Port 4188, präparierter v18-Save):
+  `2b3c1d-a-skin-pfade.png` + `-a2-pfad-zoom-disco.png` + `-a3-pfad-zoom-pirat-voll.png`
+  (Disco-King ●●●○○ „jetzt +0.03 Krit-Multiplikator · 1000 min getragen · 120
+  Bosse", Klassiker ●○○○○, Robo ○○○○○ mit „Knoten 1 bei 3.000 Pfad-Sek.",
+  Pfirsich-Pirat ●●●●● mit goldenem 💃 und „Move ‚Welle'"),
+  `2b3c1d-b1-siegesmove-standard(-zoom).png` / `-b2-siegesmove-signature(-zoom).png`
+  (zwei ECHTE Boss-Siege, GLEICHER Skin, gleiche Bühne, gleiche Kamera — nur der
+  Pfad-Stand unterscheidet sich: 4/5 ⇒ `data-move="Diva-Turn"`, 5/5 ⇒
+  `data-move="Welle"`; beide Bilder exakt 250 ms nach dem Move-Wechsel und mit
+  stillgelegtem rAF aufgenommen, die Posen sind sichtbar verschieden),
+  `2b3c1d-c1-erben-wahl.png` + `-c2-erben-wahl-zoom.png` (16 Kacheln: „Kein
+  Erbe" plus 15 Portraits mit Meisterschafts-Rahmen, DJ Wumms vorgeschlagen
+  „9.20K XP · Gold → +6 pp", Knopf „Mit DJ Wumms transzendieren 🔮" — und
+  nachgewiesen, dass in diesem Moment noch **0 TE** gebucht sind),
+  `2b3c1d-d1-erbe-nach-transzendenz.png` + `-d2-erbe-zoom.png` („Erbe dieser
+  Ära: DJ Wumms · Gold-Rang doppelt gewichtet — +6 Prozentpunkte Eigen-Output"),
+  `2b3c1d-e1-legende-vorher.png` (gesperrt vor der ersten Transzendenz),
+  `2b3c1d-e2-legende-nach-t1-{vorher,nachher,nachher-voll}.png` (eine ECHTE
+  Himmelfahrt nach T1: **3 → 4 Level, +1,5 % → +2 % global**, HPF 0 → 34),
+  `2b3c1d-e3-legende-ohne-t1-{vorher,nachher}.png` (die Gegenprobe: dieselbe
+  Himmelfahrt OHNE Transzendenz — HPF 0 → 34, Legenden-Level bleibt bei **3**,
+  und die Zeile sagt „🔒 Erst nach der ersten Transzendenz"),
+  `2b3c1d-f-permanenz-nach-transzendenz.png` (nach der echten Transzendenz:
+  Bühne 62 → 1, Seelen 900 → 0, HPF 900 → 0, TE ×9 — die Skin-Pfade [Klassiker
+  ●○○○○, Disco ●●●○○], die 180 Glut und der Erbe stehen unverändert da), sowie
+  `2b3c1d-m-{portrait,schmal,landscape}-{pfade,legende,erbe}.png` (390×844,
+  320×640, 740×380 — `documentElement.scrollWidth == innerWidth` in allen neun,
+  und im Querformat scrollt der Erben-Dialog IN SICH: sichtbar 344 px bei
+  1 028 px Inhalt). Bundle nach der Änderung: **892 KB JS** (Budget 1.5 MB).
+- **Gemessener Anker-Shift** (`npm run balance`, Seeds 1/7/12345): **Abschnitte
+  1–11 byte-gleich** zum Basis-Commit — kein einziger Anker bewegt sich, weil
+  keine der drei Wirkungen im Normal-Bot hängt. Laufzeit **34,1 s** (von 60 s
+  Budget, vorher 28,2 s). Die Suite läuft mit **1 161 Tests** (vorher 1 085) in
+  46,9 s; die neuen Sim-Anker liegen in einer DRITTEN Datei (`sim-meta.test.ts`)
+  aus demselben gemessenen Grund wie `sim-loot.test.ts` in Schritt 6 — ein
+  Vitest-Worker über 60 s CPU am Stück reißt den `onTaskUpdate`-RPC-Timeout, und
+  `sim.test.ts` lag mit 48 s bereits nah dran.
+
+**Bilanz.** Damit sind alle elf Felder aus IDEEN-GAMEPLAY.md umgesetzt: 4a + 4b
+(Avatare) · 1a (Crew-Meisterschaft) · 3b (Umschulung) · 2a (Konstellation) ·
+1b (Gebietsherrschaft) · 1c + 3a (Relikte & Schmiede) · 2b (Skin-Pfade) ·
+3c (Erben-Moment) · 1d (Legenden-Level).
+
+## IDEEN-GAMEPLAY Schritt 6 — 1c Relikte + 3a Skin-Schmiede
+
+- **EIN Pool, zwei Systeme — und das ist die ganze Architektur.** `affixes.ts`
+  kennt weder Relikte noch Schmiede: Es ist reine Arithmetik über ein PAAR aus
+  Sorte und Qualität (9 geteilte Sorten + 3 skin-exklusive, 4 Qualitätsstufen).
+  `relics.ts` und `forge.ts` ziehen beide daraus, und beide laufen am Ende durch
+  dieselbe eine Funktion `foldAffixes` in `ch-state.loadoutBonus`. Im Save steht
+  nur `{ id, q }` — der WERT wird immer gerechnet (`affixValue`), nie
+  gespeichert: Ein Katalog, der sich ändert, ändert damit rückwirkend jedes
+  getragene Affix, statt Saves mit eingefrorenen Zahlen zu hinterlassen. Dasselbe
+  Prinzip wie bei den Skin-Buffs (`perLevel · Level`).
+- **Die Qualitäts-Spanne: ×0.4 / ×0.6 / ×0.8 / ×1.0 bei Gewichten 45/30/18/7.**
+  Der Katalog-Wert IST damit der Höchstwert („Makellos" = volle Basis), ein
+  Makellos-Roll ist 7 % wahrscheinlich und exakt 2,5-mal so stark wie ein
+  Grob-Roll. Die Basen sind so gewählt, dass jede Stufe eine runde Zahl ergibt
+  (0.04 ⇒ 1,6 / 2,4 / 3,2 / 4,0 %) — die UI muss nie „3,75 %" zeigen.
+- **Der Deckel ist STRUKTURELL, nicht arithmetisch.** `AFFIX_STAT_CAP = +0.75`
+  klemmt jeden Prozent-Term IM FOLD. Das ist kein Zierrat: Der Höchstfall aus
+  neun Affixen liegt beim Boss-Term rechnerisch bei +105 % (6 × 10 % Relikt +
+  3 × 15 % Glut-DoT) — die Zahlen allein hielten die Leitplanke also NICHT. Mit
+  dem Deckel ist sie unabhängig vom Katalog wahr, und ein Test prüft das für
+  JEDEN Prozent-Stat über 50 gestapelte Affixe.
+- **Das Budget, erschöpfend gerechnet statt geschätzt.** Höchstfall sind neun
+  Affixe (3 Relikt-Slots × bis zu 2 + 3 Schmiede-Slots). `affixPowerBudget()`
+  probiert ALLE Aufteilungen der sechs Relikt-Plätze (nur geteilte Sorten) und
+  der drei Schmiede-Plätze (auch exklusive) auf die sechs Produkt-Terme durch —
+  462 × 56 = 25 872 Fälle in Millisekunden. Ein Greedy hätte hier nicht gereicht:
+  Die Plätze sind ungleich (nur die Schmiede darf „Sequin-Crit" ziehen), und für
+  ungleiche Einheiten ist Greedy nicht beweisbar optimal. Ergebnis, als Test
+  eingefroren und in Abschnitt 11 gedruckt:
+  · **Einzel-Term ×1.7500** (Richtwert ×2) — der Deckel greift.
+  · **Leistungs-Produkt ×1.4298** (Richtwert ×1.5), Terme wie bei 2a:
+  Klick × Crew-DPS × BP × Krit-EV × Truhen-Luck.
+  · **Boss-Term ×1.7500, GETRENNT** (A2): Boss-Schaden läuft gegen die
+  30-s-Gates, nicht gegen die Farm-Geschwindigkeit — ihn ins Produkt zu rechnen
+  hieße, zwei Dinge zu multiplizieren, die nie zusammen wirken. Einordnung: Der
+  Tyrann-Skin zahlt auf Lv 50 allein +600 % Boss-Schaden, und der Bot modelliert
+  Boss-Mults per dokumentiertem Ausschluss gar nicht — die Anker messen also
+  weiterhin die langsamere Wahrheit.
+  · **Offline ×1.3600**, eigener Pfad wie bei 2a (dort ×1.35).
+- **Die skin-exklusiven Affixe liegen BEWUSST außerhalb des Produkts — und das
+  war eine Messung, keine Meinung.** Die erste Fassung gab Robo ein „Servo-Takt"
+  auf Crew-DPS (doppelte Basis). Weil alle drei Schmiede-Slots demselben Skin
+  gehören, stapelte der Budget-Rechner dort +24 % DPS und landete bei **×1.58** —
+  über dem Richtwert. Jetzt zahlt Servo-Takt auf `coachCps` (Robos eigener
+  Stern-Stat), Glut-DoT auf Boss-Schaden und Sequin-Crit auf Krit-Chance: alle
+  drei auf Termen, die das Standard-Produkt nicht oder nur mit kleinem Hebel
+  enthält. Ein Test friert die Regel ein.
+- **Krit-Schaden war falsch angeschrieben — und das fiel erst durch die Affixe
+  auf.** Das Spiel ADDIERT `critMultBonus` auf `CRIT_MULT` (5), es sind
+  MULTIPLIKATOR-PUNKTE. Das Gear-Panel schrieb 0.06 aber als „+6 % Krit-Schaden"
+  an (in Wahrheit ×5 → ×5.06, also +1,2 %). Mit einem Affix daneben hätten zwei
+  Kacheln („+4 % Klick" vs. „+20 % Krit-Schaden") die Größenordnung glatt
+  verdreht. Die Term-Tabelle ist deshalb aus dem Gear-Panel nach `ui/affix-text.ts`
+  gewandert (eine Sprache für alle Buff-Zahlen), und `critMult` heißt jetzt
+  überall **„Krit-Multiplikator"** und wird als Punkt-Zahl gezeigt. Der Sim-Term
+  wurde in derselben Runde korrigiert (er multiplizierte, statt zu addieren).
+- **Die Drop-Regel: FRONTIER-Gates statt Farm-Gates — aus drei Gründen.** Ein
+  Relikt fällt nur an einem Boss-Gate, das tiefer liegt als jedes je gewürfelte
+  (`relics.deepestGate`). (1) **Gegen den Farm-Exploit**: Das Spiel erlaubt
+  `travelTo` auf jede geclerte Bühne und `challengeBoss` direkt am Gate — ohne
+  Highwater könnte man Bühne 50 endlos wiederholen und alle 30 Sekunden würfeln.
+  (2) **Gegen die Prestige-Wäsche**: Der Zähler fällt bei KEINEM der drei Resets,
+  sonst zahlte jede Transzendenz die Leiter 50…∞ neu aus. (3) **Weil der Bot dann
+  dieselbe Zahl misst wie das Spiel** — die Sim gattert ihren Loot ohnehin auf den
+  Frontier, mit derselben Regel im Spiel ist die gemessene Kurve keine
+  Untergrenze mehr, sondern die Wahrheit. Beides ist headless nachgewiesen (siehe
+  `1c3a-d4`).
+- **Rate + Pity, gemessen.** 25 % je neuem Gate, Garantie spätestens am 4. (die
+  Zahl von `PITY_DIAMOND` — wer die Truhen-Garantie kennt, muss die Relikt-
+  Garantie nicht neu lernen). Erwartung: **ein Relikt je 2,73 Gates = je ~14
+  Bühnen Vorstoß**. Gemessen (`SIM_ACTIVE`, Seeds 1/7/12345):
+  · **45 min: 0 Relikte** — die Wand steht bei Bühne 25, Gate 50 ist außer Reichweite.
+  · **3 h: 1,3** (tiefstes Gate 70, also 5,0 berechtigte Gates).
+  · **12 h: 1,3** · **24 h: 1,7** (Gate 72).
+  Zwischen Stunde 3 und Stunde 24 bewegt sich fast nichts — und das ist KEIN
+  Fehler der Drop-Rate, sondern die M9-Wand des Kettenlaufs (er hängt bei Bühne
+  ~73). Die Gegenprobe mit vollem Prestige-Stack (E2-Treiber) endet bei Bühne 80,
+  6 Gates, 1–2 Relikten. Relikte hängen an der TIEFE, nicht an der Spielzeit —
+  hochgerechnet: Bühne 100 ⇒ 10 Gates ⇒ ~4 Relikte, Bühne 150 ⇒ ~7, Bühne 300 ⇒
+  ~18. Die drei Trage-Slots sind damit um Bühne ~90 gefüllt, alles danach ist
+  Verbesserung statt Erstausstattung. Genau das meint „Endgame-Loot oberhalb der
+  Mythos-Truhen": Das System startet, wo die Truhen-Leiter aufhört.
+- **Die Glut-Ökonomie: Duplikate zahlen ZUSÄTZLICH, nicht stattdessen.** Das
+  Ideen-Dokument nennt Duplikate „heute wertlos" — sie waren es nicht (§6.3.2
+  zahlt 5/20/60/200 🧩), aber sie waren auch nie mehr als ein Splitter-Häppchen.
+  `resolveDuplicate` bleibt deshalb **unangetastet** (die 🧩 sind zugesagt und
+  tragen die in 3b geeichte Umschul-Leiter), und die Glut kommt obendrauf:
+  **2 / 5 / 12 / 30 🔥** je Truhen-Stufe. Das Einschmelzen passiert automatisch —
+  ein Duplikat-Fach wäre eine Schachtel um eine Zahl. Dazu zwei kleinere
+  Quellen: der **Splitter-Umtausch 20 🧩 → 1 🔥** (bewusst ungünstig: bei den in
+  3b gemessenen ~140 🧩/h ergibt ein VOLLSTÄNDIGER Umtausch 7 🔥/h, nicht einmal
+  ein Slot-2-Reforge je Stunde — ein Überlauf-Ventil, kein Haupt-Faucet) und das
+  **Einschmelzen überzähliger Relikte** (2 … 16 🔥), das den Kreis zwischen 1c
+  und 3a schließt.
+- **Reforge-Kosten 12 / 24 / 48 🔥 je Slot, Lock ×3 — und warum genau 3.** Der
+  Pool eines Schmiede-Slots hat 10 Sorten. Wer eine BESTIMMTE Sorte in besserer
+  Qualität will, trifft ohne Lock mit 1/10 · P(bessere Qualität), mit Lock mit
+  P(bessere Qualität) — der Lock ist also exakt eine **Verzehnfachung** der
+  Trefferquote. ×10 zu verlangen wäre erwartungswert-neutral und damit sinnlos
+  (niemand würde je locken); ×3 macht daraus ein klares Geschäft, für das man
+  trotzdem echte Währung liegen lässt. Bezahlt wird der Verzicht auf das
+  Gegenteil: Ein freier Roll kann eine ANDERE, für den Build bessere Sorte
+  bringen. **Keine Roll-Eskalation wie bei 3b** — dort war sie nötig, weil
+  Splitter im Überfluss fließen; Glut ist die knappe Währung dieses Systems, die
+  Knappheit IST die Bremse, und ein zweiter Zähler darüber bestrafte nur die
+  Spieler, die sie ohnehin spüren.
+- **Das Qualitäts-Pity, exakt.** Jeder Schmiede-Slot führt einen Trocken-Zähler:
+  Ein bezahlter Roll, dessen ANGEBOT eine echt höhere Qualität hat als das
+  getragene Affix, setzt ihn auf 0 — unabhängig davon, ob der Spieler annimmt
+  (bezahlt wurde der Roll, und der Wurf WAR eine Verbesserung). Jeder andere
+  zählt +1. Die Mindest-Qualität des nächsten Rolls ist `min(3, ⌊dry / 5⌋)`. Also:
+  nach 5 trockenen Rolls nichts unter „Solide", nach 10 nichts unter „Fein", nach
+  15 ist „Makellos" **garantiert** — spätestens der 16. Roll trifft. Ein leerer
+  Slot zählt als Qualität −1, der erste Roll darauf ist also immer eine
+  Verbesserung. Die Trockenstrecke steht im Dialog als Klartext („noch 3 bis zur
+  nächsten Stufe"), damit niemand raten muss.
+- **Die Schmiede-Slots sind teuer — und DAS ist die eigentliche Balance.** Sie
+  hängen an `gear.skinLevels` (10/25/40, wie das Ideen-Dokument vorgibt), und
+  `shardCost` wächst mit ×1.25/Level. Kumuliert gemessen: **Slot 1 = 370 🧩**
+  (~2,6 h), **Slot 2 = 10 660 🧩** (~76 h), **Slot 3 = 301 060 🧩** (~2 150 h).
+  Der rechnerische Höchstfall des Budgets beschreibt also einen Spielstand, den
+  fast niemand je hält — die Leitplanke misst absichtlich diesen Extremfall.
+  Zweite Bremse: Die Slots eines NICHT ausgerüsteten Skins falten ×1 (exakt wie
+  `gearBonus` nur den aktiven Skin liest). Man schmiedet an EINEM Lieblings-
+  Charakter, nicht an zehn parallel — genau deshalb dürfen die exklusiven Affixe
+  überhaupt die doppelte Basis tragen.
+- **Sim: Relikte in JEDEM Profil, Schmiede als eigenes.** Relikte fallen passiv
+  aus Boss-Gates, ohne jede Kauf-Entscheidung — wie der Ruf (1b) trägt sie also
+  zwangsläufig jeder echte Spielstand, ein Bot ohne sie verschwiege einen
+  Machtterm. Sie sind deshalb bewusst NICHT an `econOn` gehängt (sie sind kein
+  Loot-Beschleuniger im Sinne der §4.8-Kalibrierung, sondern eine Progressions-
+  Schicht), und der Bot trägt automatisch die drei bestgerollten
+  (`equipBestRelics` — eine build-blinde Zahl, kein Macht-Optimierer). Die
+  Schmiede dagegen bekommt das Profil **`SIM_FORGE`** („Schmiede voll", drei
+  makellose Slots); der Normal-Bot schmiedet NIE — dieselbe dokumentierte
+  Untergrenze wie bei 3b und 2a.
+- **Gemessener Anker-Shift** (`npm run balance`, Seeds 1/7/12345, gegen die in
+  Schritt 5 protokollierten Zahlen):
+  · **Pacing im ersten Sitting UNVERÄNDERT** — t10 1.7 min, t25 32.4 min, Wand
+  ⌀ Bühne 25.0, byte-gleich. Kein Lauf dieser Länge erreicht Bühne 50, es gibt
+  dort schlicht kein Relikt.
+  · **Erste Himmelfahrt** (0.7 cps, ohne Loot — der empfindlichste Anker):
+  16.63 → **16.74 h** (+0,7 %, Rauschen). Der Lauf endet bei Bühne 75, sieht also
+  nur die Gates 50…75.
+  · **Kumuliert t75**: 3.17 → **3.13 h**.
+  · **E2** unverändert 15 Stufen je Seed, schlimmstes Verhältnis 1.85.
+  · **E3** +50 %-Stufen 47/51/58 → **53/55/59**, größte Lücke 30.7 → **16.1 min**
+  — die Relikte machen die Kurve LEBENDIGER, nicht schneller: mehr kleine
+  Sprünge, kürzere Durststrecken.
+  · **E4-Vorsprung** unverändert ⌀ +13.3 Bühnen, kleinster 5.
+  · **Ruf (1b) nach 24 h Kette**: stärkstes Theme 16 218 → **18 196** (+12 %,
+  Stufe unverändert 8) — Relikte heben die Kills/h ein wenig, also auch den Ruf.
+  · **Schmiede-Profil A/B** (t25, Kalibrier-Bedingungen): ×1.18 / ×1.15 / ×1.18 —
+  deutlich unter dem Produkt-Budget ×1.4298, weil drei Slots nur ein Drittel des
+  Höchstfalls sind.
+  Kein Anker musste aufgerissen werden.
+- **Save v17 mit ZWEI gegensätzlichen Migrations-Entscheidungen im selben
+  Schritt.** Die **Schmiede startet komplett leer**: Glut entsteht aus
+  Duplikat-Jackpots und getauschten Splittern, und beides hat das Spiel nie
+  gezählt; ein geschmiedetes Affix wäre vollends erfunden (es hätte eine gerollte
+  Qualität, die niemand gerollt hat). Der **Relikt-Gate-Highwater wird dagegen
+  ZWINGEND gesät** — auf das tiefste bereits geclerte Gate, gerechnet mit
+  derselben Regel wie `bossFirstKillZones` (`clearedGateFor`, inklusive des
+  Himmelfahrt-festen `gear.zoneEver`). Ohne die Saat bekäme ein Alt-Save auf
+  Bühne 200 beim nächsten Rückweg dreißig Gates geschenkt, die er längst hinter
+  sich hat. Das ist der Gegenfall zu 1b („bewusst leer"): Dort war jede Herleitung
+  eine Erfindung, hier wäre das WEGLASSEN eine Schenkung. Die Sammlung selbst
+  startet trotzdem leer, und ein Alt-Save rechnet nach dem Update bit-gleich
+  weiter (leeres Loadout faltet überall ×1).
+- **Die X7-Matrix hat den Bump sofort rot gemeldet.** Ihr neues Paar prüft den
+  gesunden v17-Save (fünf Relikte in drei Formen, zwei getragen, Gate-Highwater
+  55; Schmiede mit skin-exklusivem Slot, einem Trocken-Zähler von 7 und einem
+  verwaisten Slot, den sein Level nicht mehr deckt) und den kaputten (doppelte
+  Relikt-Id, Müll-Affix, zwei Affixe derselben Sorte, Id ≤ 0, gelogene `nextId`,
+  Slots die dreimal auf dasselbe Relikt zeigen, negative Glut, Phantom-Skin) —
+  übrig bleiben genau die zwei legalen Relikte, ein Slot, `nextId` nach OBEN
+  korrigiert und ein Skin-Fach.
+- **Platz: der 🎁 Truhen-Tab für die Relikte, die Skin-KARTE für die Schmiede.**
+  Ein zehnter Reiter bleibt verboten (headless bei 390 × 844 nachgemessen: neun
+  Reiter à 44 px = **396 px** gegen **387 px** verfügbare Breite — schon heute
+  9 px drüber). Tab-Höhen bei 390 px NACH der Änderung: Ruhm 901 · **Truhen
+  1 322** (davon 666 px die neue Relikt-Sektion, vorher also ~656 px) · Crew
+  1 877 · **Skins 2 147** · Ziele 2 665. Der Truhen-Tab ist damit weiterhin der
+  zweitkürzeste — und der thematisch richtige: Er IST der Loot-Tab, über den
+  Relikten steht das Truhen-Inventar, darunter die Drop-Tabellen. Die
+  Schmiede-Slots sitzen dagegen an der Skin-Karte, weil ein Slot ANTEIL dieses
+  Skins ist: Sein Level schaltet ihn frei, er wirkt nur solange dieser Skin
+  getragen wird, und er verschwindet aus der Rechnung, sobald man wechselt. Eine
+  zweite Liste woanders müsste all das noch einmal erklären. Der Reforge selbst
+  bekommt einen eigenen Dialog (Vorbild `retrain-dialog`).
+- **Eine Qualitäts-Farbskala für beide Systeme.** Grau → Grün → Blau → Gold, in
+  Relikt-Kacheln, Trage-Slots, Schmiede-Chips und Dialog-Karten dieselbe. Ein
+  „makelloser Hüftschwung" sieht überall gleich aus, sonst lernt man die Skala
+  zweimal. In den DREI schmalen Trage-Slots steht eine KOMPAKTE Kachel (Glyph +
+  Wert, Name im `title`): Der erste Headless-Lauf zeigte, dass „Gate-Brecher"
+  bei drei Spalten den Wert aus der Karte schob — die Namen stehen ausgeschrieben
+  in der Sammlung darunter.
+- **Zwei Test-Dateien statt einer — gemessen, nicht aus Ordnungsliebe.** Mit den
+  neuen Ankern lief `sim.test.ts` **65 s CPU am Stück**, und Vitest bricht einen
+  Worker, der so lange nicht auf `onTaskUpdate` antwortet, mit einem RPC-Timeout
+  ab: **jeder Test grün, der Lauf trotzdem rot** (Exit 1). Am Basis-Commit lief
+  dieselbe Datei in 46 s ohne Fehler — die Schranke liegt dazwischen. Die
+  Loot-Anker sind deshalb nach `sim-loot.test.ts` gewandert; zwei Dateien laufen
+  in zwei Workern parallel, keiner reißt die Schranke, und die Gesamtlaufzeit der
+  Suite sank sogar (57,6 s bei 1 085 Tests). Die Bot-PROFILE bleiben die geteilte
+  Quelle aus `sim.ts`. Zweite Lehre derselben Runde: Ketten dürfen nicht im
+  `describe`-Körper laufen — dort fallen sie in die Collect-Phase, in der der
+  Worker erst recht nicht antwortet (Collect 7,1 s → 0,5 s nach der Umstellung
+  auf eine gemerkte, faul gezogene Kette).
+- **Das Balance-Ritual bleibt im Budget.** Abschnitt 11 („Relikte & Schmiede":
+  Drop-Kurve über die geteilten Ketten, die Gegenprobe mit vollem Prestige-Stack,
+  Glut-Quellen und -Senken, die Splitter-Kosten der Slot-Leiter, die vier
+  Budget-Zahlen und das A/B des Schmiede-Profils) nutzt dieselbe `chains`-Map wie
+  die Abschnitte 6/7/10. Laufzeit **32,4 s** (von 60 s Budget, vorher 24,9 s).
+- **Headless-Beweis** (Chromium/SwiftShader, Port 4188, präparierter v17-Save):
+  `1c3a-a-relikte-tab.png` + `1c3a-a2-relikte-zoom.png` (drei gefüllte
+  Trage-Slots, fünf Relikte in der Sammlung, Qualitäts-Rahmen, Einschmelz-Werte
+  12/8/6/4/2 🔥), `1c3a-b-schmiede-slots.png` + `1c3a-b2-schmiede-zoom.png`
+  (Disco Lv 27 ⇒ Slot 1 belegt/Slot 2 leer/Slot 3 „🔒 Lv 40"; Klassiker Lv 12 ⇒
+  genau ein Slot; Robo Lv 4 ⇒ „Schmiede ab Lv 10"),
+  `1c3a-c1-dialog-vorschau(-zoom).png` / `1c3a-c2-dialog-lock.png` (12 🔥 → 36 🔥,
+  Schalter kippt von 🔓 auf 🔒) / `1c3a-c3-pity-vorschau.png` („Mindest-Qualität:
+  Solide · 7 Roll(s) ohne Verbesserung, noch 3 bis zur nächsten Stufe") /
+  `1c3a-c4-dialog-angebot(-zoom).png` (Alt und Neu nebeneinander, „Übernehmen" /
+  „Verwerfen"; Glut 180 → 156 BEVOR gewürfelt wurde, Slot noch leer) /
+  `1c3a-c5-nach-uebernahme.png` + `1c3a-c5b-karte-nachher.png` (Toast
+  „Geschmiedet! · Slot 2: Langer Atem (Fein)", die Kachel trägt es),
+  `1c3a-d1-relikt-drop.png` + `1c3a-d2-drop-toast-zoom.png` (ein ECHTER Drop im
+  laufenden Spiel: Gate 55 fällt nach 9,1 s, Toast „💎 Relikt gefunden! Bühne 55 ·
+  Nachtschwärmer", Highwater 50 → 55, Pity 3 → 0) + `1c3a-d3-sammlung-nach-drop.png`
+  (das neue Relikt füllt den ersten LEEREN Slot) + **`1c3a-d4-kein-zweites-relikt.png`**
+  (die Gegenprobe: per Zonen-Strip zurück auf Bühne 55 gereist, Boss erneut
+  herausgefordert, Gate nach 30,4 s ein ZWEITES Mal gefallen — Toast „Boss
+  besiegt!", aber KEIN zweites Relikt, die Sammlung zeigt weiter genau eines),
+  `1c3a-e1-permanenz-vorher.png` + `1c3a-e2-permanenz-nachher.png` (eine echte
+  TRANSZENDENZ im Spiel: Bühne 62 → 1, Seelen 900 → 0, HPF 900 → 0, TE 0 → 5 —
+  fünf Relikte, dieselben Slots [1,3,2], Gate-Highwater 60, 180 Glut und das
+  geschmiedete „Sequin-Crit" stehen unverändert da), `1c3a-f1-duplikat-glut.png` +
+  `1c3a-f2-duplikat-toast-zoom.png` (Mythos-Duplikat: Glut 180 → 210 UND Splitter
+  740 → 940 — beide Wege zahlen), sowie `1c3a-m-{portrait,schmal,landscape}-{relikte,schmiede,dialog}.png`
+  (390×844, 320×640, 740×380 — `documentElement.scrollWidth` == `innerWidth` in
+  allen neun, und im Querformat scrollt der Dialog IN SICH: sichtbar 350 px bei
+  447 px Inhalt). Bundle nach der Änderung: **884 KB JS** (Budget 1.5 MB).
+
+## IDEEN-GAMEPLAY Schritt 5 — 1b Gebietsherrschaft
+
+- **Eine Zahl je Theme, eine Gewinn-Regel, eine Wirkung.** `territory:
+Record<theme, number>` ist die ganze Slice: vier monotone Lebenszeit-Zähler,
+  gefüllt AUSSCHLIESSLICH über `addRep` im Kill-Pfad (Rivalin +1, Boss +10 — ein
+  Gate ist zehn Rivalen wert, ein Theme-Zyklus zahlt also 50 + 10 = 60 Ruf).
+  Gelesen wird die Tafel an genau zwei Stellen: `territoryGoldMult(t, zone)` für
+  die Wirkung und `trophyTier(rank)` für die Optik. Die Theme-Zuordnung wird
+  nirgends nachgebaut — `territory.ts` RE-EXPORTIERT `themeForZone` aus
+  `boss-gimmicks.ts`, damit Kulisse, Zonen-Strip, Gimmick, Ruf, Bonus und Pokal
+  garantiert dieselbe Grenze sehen.
+- **Der Bonus ist BP — bewusst kein Schaden.** Das Ideen-Dokument nennt selbst
+  „+5 % BP auf Club-Bühnen", und die Messung gibt ihm recht: Boss-Gates sind
+  30-Sekunden-Schranken, und die A2-Kalibrierung hat gezeigt, wie empfindlich sie
+  auf Wirkungs-Prozente reagieren (das ungedämpfte Gimmick-Paket verschob damals
+  die Wand um ganze Bühnen). Ein BP-Term läuft dagegen in die ×1.075-Kostenleiter
+  der Crew, die jeden Einkommens-Zuwachs logarithmisch einebnet: mehr BP heißt
+  „ein paar Level früher", nie „ein Gate, das sonst zu wäre". Genau so liest sich
+  auch der gemessene Anker-Shift (unten): Das erste Sitting bewegt sich um NULL,
+  nur die Langhorizont-Läufe werden ein paar Prozent schneller.
+- **Das Budget: ×1.15 — und warum das auch bei VOLL-Ausbau aller vier Leisten
+  gilt.** +1,5 pp BP je Stufe × 10 Stufen = +15 %. Der Deckel bleibt ×1.15, ganz
+  gleich wie viele Leisten voll sind, weil ein Kill immer genau EINER Bühne
+  gehört und nur deren Theme zählt — es gibt hier kein Produkt über vier Leisten
+  (Club-Ruf ist auf einer Space-Bühne exakt ×1.00). Das ist die operative Lesart
+  von „kein Global-Creep", `territoryPowerBudget()` rechnet sie aus, und ein Test
+  friert sie ein — inklusive der Gegenprobe „alle vier auf Stufe 10, über 40
+  Bühnen geprüft: immer ×1.150" (Vorbild `constellationPowerBudget`).
+- **Die Kurve ist GEMESSEN, in zwei Durchgängen.** Der Bot rotiert wie jeder
+  Spieler durch alle vier Themen (`themeForZone` wechselt alle fünf Bühnen), also
+  liefert er die Ruf-Rate direkt. Erster Durchgang, Wirkung noch neutral
+  (`SIM_ACTIVE`, 3 cps + Juice, volle Loot-Ökonomie, Seeds 1/7/12345, jeweils das
+  STÄRKSTE Theme): 45 min → 273 Ruf (364/h) · 3 h → 1 457 (486/h) · 12 h → 6 504
+  (542/h) · 24 h → 12 701 (529/h). Die Rate ist nach der ersten Stunde KONSTANT
+  (~530 Ruf/h), denn Ruf hängt am Kill, nicht an der Bühnen-Tiefe — jede Tour
+  klettert dieselbe Strecke neu. Daraus die geometrische Leiter **250 × 1.8^(n−1)**
+  = 250 · 450 · 810 · 1 458 · 2 624 · 4 724 · 8 503 · 15 306 · 27 550 · **49 590**;
+  Stufe 10 also ~94 h aktives Spiel AUF DIESEM Theme. Die Alternativen wurden
+  mitgerechnet: 1.75 ⇒ 73 h („Wochen" schrumpfte zu einem langen Monat), 1.85 ⇒
+  120 h. 1.8 trifft die Größenordnung, die das Spiel schon kennt (Meisterschafts-
+  Legende ~100 h). Zweiter Durchgang MIT gefalteter Wirkung (die Rückkopplung
+  hebt die Rate, weil mehr BP etwas tiefer tragen): 273 (364/h) · 1 454 (485/h) ·
+  7 716 (643/h) · 16 218 (676/h) ⇒ Stufe 10 nach ~73 h. Die Leiter steht gegen die
+  KONSERVATIVE Zahl und liest sich mit Rückkopplung nur schneller.
+- **Der Ruf verteilt sich NICHT gleichmäßig — und das ist der Inhalt von 1b.**
+  Nach 24 h Kette: Club 7 676 · Synth 7 847 · **Beach 16 218** · Space 7 872. Der
+  Bot hängt an seiner Wand und farmt, was darunter liegt; in der langen Kette ist
+  das meist das Beach-Fünftel (11–15 / 31–35). Ein Anker friert das ein
+  (stärkstes/schwächstes Theme > 1.3). Genau diese Schieflage ist die zweite
+  Entscheidungs-Ebene, die das Ideen-Dokument wollte: WO man farmt, zählt.
+- **Start bei NULL — und warum das hier zwingend ist (Gegenstück zu 2a).** Die
+  Migration v15 → v16 sät leer. Beim Sternenstaub (v14→v15) war die Rückwirkung
+  möglich UND richtig, weil sich der Anspruch aus lauter Highwatern RECHNEN ließ,
+  die im Save stehen. Ruf entsteht dagegen aus Kills PRO THEME, und diese Zählung
+  hat das Spiel nie geführt: `stats.bossKills` kennt kein Theme, `lifetimeMaxZone`
+  keine Wiederholungen, `stageStars` kein WIE OFT. Jede Herleitung wäre eine
+  Erfindung — und eine erfundene Ruf-Zahl verschenkt echte Macht (BP-Prozente) für
+  einen Nachweis, den niemand erbracht hat. Dasselbe Muster wie die Bühnen-Sterne
+  in v10→v11 („bewusst leer"), hier zusätzlich mit dem Balance-Argument: Die
+  Leiste ist eine Wochen-Kurve; ein Startguthaben wären nicht ein paar Prozent,
+  sondern die ersten Stufen geschenkt. Ein Alt-Save rechnet nach dem Update
+  deshalb bit-gleich weiter (`territoryGoldMult` faltet auf jeder Bühne ×1), bis
+  er den ersten Kill macht.
+- **Der Bot MUSSTE falten — anders als bei 3b/2a gibt es hier keine
+  Untergrenzen-Ausrede.** Umschulung und Konstellation kann man liegen lassen;
+  Ruf entsteht ohne jede Entscheidung. Ein Bot ohne die Faltung hätte eine
+  Einkommens-Kurve gemessen, die kein echter Spielstand je hat. Gemessener
+  Anker-Shift (`npm run balance`, Seeds 1/7/12345, vorher → nachher):
+  · **Pacing im ersten Sitting UNVERÄNDERT** — t10 1.7 min, t25 32.4 min, Wand
+  ⌀ Bühne 25.0, alle drei Seeds byte-gleich. In 45 min steht die stärkste Leiste
+  gerade auf Stufe 1 (+1,5 % BP auf einem Fünftel der Bühnen), und das erst zum
+  Schluss.
+  · **Erste Himmelfahrt** (0.7 cps, ohne Loot — der empfindlichste Anker):
+  17.27/18.79/17.10 → 15.87/18.05/15.98 h, Mittel 17.72 → 16.63 h (−6,2 %).
+  Fenster [11.6 h, 19.4 h] hält mit Abstand.
+  · **Kumuliert t75** (1 cps, mit Loot): Mittel 3.16 → 3.17 h (Rauschen).
+  · **E2** unverändert 15 Stufen je Seed, schlimmstes Verhältnis 1.86 → 1.85.
+  · **E3** +50 %-Stufen 47/50/58 → 47/51/58, größte Lücke 48.7 → 30.7 min.
+  · **E4-Vorsprung** ⌀ +12.3 → +13.3 Bühnen, kleinster unverändert 5.
+  Kein Anker musste aufgerissen werden; die Verschiebung steht im Kopf von
+  `sim.test.ts`, damit sie beim nächsten Schritt nicht als Rauschen gilt.
+- **Das Balance-Ritual wurde dabei SCHNELLER, nicht langsamer.** Abschnitt 10
+  („Gebietsherrschaft": Ruf/h je Theme, Stufen-Leiter mit Zeitangaben, Budget)
+  braucht dieselben 1/4/16/32-Ketten wie Abschnitt 6 (Meisterschaft) und 7
+  (Splitter). Naiv dazugebaut lief das Ritual 49.0 s (von 60 s Budget); die drei
+  Abschnitte teilen sich die Ketten jetzt (`chains`-Map, einmal fahren, dreimal
+  lesen) und das GANZE Ritual läuft in **24.8 s** — schneller als die 36.3 s
+  vorher, bei bit-gleichen Zahlen.
+- **Platz: der ✨ Ruhm-Tab, gemessen statt geraten.** Ein zehnter Reiter bleibt
+  verboten (headless bei 390 × 844 nachgemessen: 9 Reiter à 44 px = 396 px gegen
+  387 px verfügbare Breite — schon heute 9 px drüber). Von den bestehenden
+  Reitern kam nur einer in Frage; `scrollHeight` der Tab-Bodys bei 390 px: Ziele
+  **2 665 px** · Crew **1 877 px** · Ruhm **901 px** (inklusive der 513 px, die die
+  neue Sektion selbst misst, vorher also ~390 px). Im Ziele-Tab — dem Ort der
+  Konstellation — wären die vier Leisten auf ~3 180 px und damit in die vierte
+  Bildschirmhöhe gerutscht. Der Ruhm-Tab ist zudem der thematisch richtige: Direkt
+  ÜBER den Leisten steht der Knopf, der die ganze Tour einkassiert („was du hier
+  einheimst, kostet dich alles; was darunter steht, kann dir niemand nehmen").
+- **Die Leiste ist in zehn Segmente geteilt, nicht ein glatter Balken.** Die
+  Ruf-STUFE ist die Zahl, die zahlt; zehn Kästchen kann man zählen, ohne die
+  Beschriftung zu lesen. Das laufende Segment füllt sich anteilig, damit auch
+  zwischen zwei Stufen sichtbar etwas passiert, und ab Trophäen-Stufe 2/3 wechselt
+  die Füllfarbe auf Silber/Gold — dieselbe Sprache wie der Pokal auf der Insel.
+  Die Leiste des Themes, auf dem man GERADE steht, trägt einen grünen Rahmen plus
+  „du stehst hier".
+- **Die Insel-Trophäe sitzt im G3-Ambient-Slot und hält dessen Regeln.** EIN
+  gebackenes Mesh (Sockel + Schaft + Kelch + Rand + zwei Henkel über
+  `island.bake`) plus dessen Ink-Hülle, kein Licht, keine Per-Frame-Allokation,
+  an der `islandGroup` (fährt beim G1-Wechsel mit). Drei Stufen statt zehn
+  (Bronze ab Ruf-Stufe 3, Silber ab 6, Gold bei 10), weil ein Pokal am Inselrand
+  nur wenige Dutzend Pixel misst. `World.setTrophy(tier, rebuild)` spiegelt
+  `setAmbientLife`: Ändert sich die Stufe, wird die laufende Bühne EINMAL neu
+  gebaut — mit `rebuild: false`, wenn die Glue ohnehin gleich die Kulisse
+  wechselt, sonst baute man erst die alte Bühne mit dem neuen Pokal und eine
+  Zeile später die neue. Zwei Fallen sind dabei aufgeschlagen: (1) `mergeGeometries`
+  scheitert STILL, wenn indizierte (Cylinder/Torus) und nicht-indizierte
+  (RoundedBox) Geometrien gemischt werden — der erste Headless-Lauf zeigte einen
+  leeren Pokal und eine Konsolen-Warnung; jetzt wird alles vorher entindiziert.
+  (2) Der erste Standort (hinterer rechter Rand) lag im Bild hinter der HUD-Karte;
+  er sitzt jetzt am VORDEREN LINKEN Rand, dem einzigen größeren freien Sand-Bogen
+  (Tanzfläche Mitte, Rivale hinten links, Publikum im +z-Bogen).
+- **Der Pokal folgt der BÜHNE, nicht der angezeigten Kulisse.** Wer die Kulisse
+  manuell festgepinnt hat (§5.5), sieht auf Bühne 12 trotzdem den Beach-Pokal —
+  weil er dort Beach-Ruf verdient und den Beach-Bonus bekommt. Ruf, Bonus und
+  Pokal lesen alle drei `themeForZone(combat.zone)`; alles andere wäre eine
+  zweite Wahrheit.
+- **Headless-Beweis** (Chromium/SwiftShader, Port 4188, präparierter v16-Save
+  mit gestaffelten Ständen: Club 3 200 = Stufe 5 · Synth 1 000 = Stufe 3 · Beach
+  130 = ohne Rang · Space 52 000 = Stufe 10): `1b-a-ruf-leisten.png` +
+  `1b-a2-leisten-zoom.png` (alle vier Zustände gleichzeitig, „du stehst hier" auf
+  Club, Gold-Segmente bei Space), `1b-b-insel-ohne-trophaee(-zoom).png` /
+  `1b-c2-insel-bronze-trophaee(-zoom).png` / `1b-c-insel-gold-trophaee(-zoom).png`
+  (dieselbe Beach-Bühne 12, dieselbe Kamera — kein Pokal / Bronze-Pokal /
+  Gold-Pokal) plus `1b-c3-insel-club-gold(-zoom).png` als Gegenprobe auf der
+  DUNKELSTEN Insel (Club, Bühne 2: der Pokal steht auch dort gegen den Boden),
+  `1b-d1-permanenz-vorher.png` + `1b-d2-permanenz-nachher.png` (eine
+  echte TRANSZENDENZ im Spiel: Bühne 62 → 1, Seelen 900 → 0, HPF 30 → 0,
+  RS-Lebenszeit 5.00M → 0, TE 0 → 3 — die vier Leisten stehen unverändert da,
+  Save-Vergleich im Log), `1b-e-rangaufstieg-toast.png` (Ruf 245 → 250 im
+  laufenden Spiel ⇒ Toast „🏆 Beach-Gast — Ruf-Stufe 1 · Sunset Beach: +1,5 % BP
+  auf diesen Bühnen") + `1b-e3-leisten-nach-aufstieg.png` (Beach danach auf Stufe
+  1 mit 295 Ruf, und weil der Lauf inzwischen auf Bühne 16 steht, ist der
+  „du stehst hier"-Rahmen zu Deep Space gewandert),
+  sowie `1b-m-portrait.png` / `1b-m-schmal.png`
+  / `1b-m-landscape.png` (390×844, 320×640, 740×380 — `documentElement.scrollWidth`
+  == `innerWidth` in allen dreien, kein horizontaler Überlauf). Bundle nach der
+  Änderung: **865 KB JS** (Budget 1.5 MB).
+
+## IDEEN-GAMEPLAY Schritt 4 — 2a Legenden-Konstellation
+
+- **Eine Währung, EINE Formel — und deshalb keine „schon ausgezahlt"-Zähler.**
+  Sternenstaub entsteht ausschließlich aus drei Quellen, die im Spiel allesamt
+  Lebenszeit-Highwater sind: Bühnen-Sterne-Meilensteine (`totalStars`, +5 je 15),
+  Erfolge (+3 je Stück) und Erst-Kills der Boss-Gates ab Bühne 25
+  (lifetimeMaxZone-getrieben, +2 je Gate). Weil jede der drei Zahlen nur wachsen
+  kann, ist auch der daraus gerechnete ANSPRUCH (`dustEntitlement`) monoton — und
+  damit ist `syncDust` kein Gutschreiben, sondern ein Angleichen:
+  `earned = max(earned, Anspruch)`. Ein Reload, ein Import, ein Reset, hundert
+  Aufrufe im selben Tick: immer dieselbe Zahl. Der Kontrast zu `starsAwarded`
+  (dem Meilenstein-Highwater der Truhen) ist Absicht — DORT wird eine Truhe
+  gebucht, ein echtes Ereignis, das ohne Zähler doppelt fiele. Hier wird nichts
+  gebucht, hier wird gerechnet. `spent` ist die zweite Zahl des Paares
+  („verbaut"), `dustHeld = earned − spent` das, was man ausgeben kann.
+- **Saison-Abschlüsse: bewusst WEGGELASSEN.** Das Ideen-Dokument nennt sie als
+  vierte Quelle. Die X4-„Saisons" sind clientseitig aber nur ein
+  Bestenlisten-KALENDER (`weekly.boardSeasonFor`): Der Client weiß, welche Saison
+  läuft, aber nie, ob jemand sie „abgeschlossen" hat — Platzierung und Teilnahme
+  leben serverseitig, und das Leaderboard-API ist optional (Default aus). Eine
+  Quelle, die ohne Server nicht existiert, darf keine permanente Währung drucken;
+  sie hinge sonst an einem Feature-Flag.
+- **Streng lineare Ketten statt eines Graphen — und was das für den Save spart.**
+  Jede der drei Konstellationen ist eine Linie (Knoten n braucht n−1). Damit ist
+  der GANZE Baum drei Zahlen: `nodes: { aufbruch: 4, tempo: 2, ausdauer: 0 }`. Es
+  gibt keine Lücke, die man darstellen müsste, und ein hand-editierter Save kann
+  keine unmögliche Form behaupten (`repairConstellation` klemmt nur auf 0…8).
+  `spent` wird beim Laden aus den Ketten NEU gerechnet (`constellationSpend`)
+  statt gelesen — zwei Quellen für dieselbe Zahl driften irgendwann —, und
+  `earned` wird bei Bedarf nach OBEN auf `spent` korrigiert (dieselbe Richtung wie
+  `repairTranscend`: was gekauft ist, war offenbar bezahlt; Knoten wegzunehmen
+  wäre das Nuken echten Fortschritts).
+- **Kein Respec — und deshalb ein Arm-Knopf.** Der Himmelsbaum hat einen Respec,
+  weil er Exklusiv-PAARE trägt (eine Wahl, die man bereuen kann). Hier gibt es
+  keine Wahl innerhalb einer Linie, nur die Reihenfolge zwischen den Linien — und
+  am Ende kauft man ohnehin alles. Ein Respec wäre also nur ein Umsortier-Knopf.
+  Dafür bestätigt das Panel JEDEN Kauf (arm → „Sicher? Sternenstaub gibt es nicht
+  zurück"), weil die Währung endlich ist.
+- **Das Budget: ×1.304, gerechnet statt behauptet.** Voll ausgebaut zahlt der Baum
+  Klick ×1.08 (4 × +2 %) · Crew-DPS ×1.06 (3 × +2 %) · BP ×1.04 (2 × +2 %) ·
+  Krit-EV ×1.033 (3 × +0,5 pp, gegen `CRIT_CHANCE`/`CRIT_MULT` gerechnet) ·
+  Truhen-Chance ×1.06 (2 × +3 %). Das PRODUKT — die konservative Lesart, denn
+  Klick und Crew-DPS multiplizieren sich nie miteinander — ist **×1.3041**, unter
+  dem ×1.5-Deckel des Ideen-Dokuments. `constellationPowerBudget()` rechnet genau
+  das aus dem Katalog, ein Test friert es ein, und `npm run balance` druckt die
+  Tabelle (Abschnitt 9). Das Combo-Fenster (2 × +0,2 s) zählt bewusst ×1.00: Es
+  hebt weder `COMBO_CAP` noch `comboMult`, nur die Gnadenfrist — bei durchgehendem
+  Klicken ist sein Beitrag exakt 0. Der Offline-Pfad hat ein EIGENES Budget
+  (Rate ×1.08 × Cap ×1.25 = **×1.35**), weil Offline-Ertrag nichts an der
+  Live-Rechnung multipliziert — und weil der Himmelsbaum dort mit 8 h → 24 h
+  längst ein Vielfaches vergibt.
+- **Der Lebens-Vorrat: 210 💫 = Abschluss um Bühne 130–150.** Kostenleiter je
+  Linie 2 · 3 · 5 · 7 · 9 · 12 · 14 · 18 = 70 💫, dreimal = 210. Dagegen der
+  Vorrat (Sterne konservativ mit 2 je Bühne plus Timeout-Stern je Gate geschätzt,
+  28 Erfolge im Katalog): Bühne 50 → 105 💫 · Bühne 100 → 181 · Bühne 150 → 244 ·
+  Bühne 200 → 299. Der erste Stern jeder Linie kostet bewusst nur 2 💫, sodass die
+  ersten zwei Erfolge sofort ALLE DREI Linien anreißen („probier alles an"), und
+  der Identitäts-Stern mit 18 💫 ist die eigentliche Sparstrecke. Ergebnis: ein
+  Lebenswerk MIT Ende — danach ist die Währung wertlos, genau der „Boden", den das
+  Ideen-Dokument für permanente Schichten verlangt.
+- **Startkapital: 700 BP waren falsch, 100 BP sind richtig — der Bot hat es
+  gezeigt.** Die erste Fassung der drei „Aufbruch"-Knoten gab 50/150/500 BP. Der
+  Anker-Bot fiel damit von t10 = 104 s auf 18 s (×5.8): Ein FLACHER BP-Betrag ist
+  auf Bühne 1 alles und auf Bühne 60 nichts. Jetzt 10/30/60 = 100 BP ≈ 15 s
+  Ertrag auf Bühne 1 — ein spürbarer Anschub (der erste Crew-Kauf ist geschenkt),
+  keine übersprungene Bühne.
+- **Sim-Profil „Konstellation komplett" (`SIM_CONSTELLATION`) — und warum der
+  NORMALE Bot den Baum links liegen lässt.** Ohne `config.constellation` faltet
+  jeder Getter ×1; alle Alt-Anker dieser Datei stehen deshalb byte-gleich da wie
+  vor 2a. Das ist die dokumentierte Untergrenze: Ein Spieler, der den Baum baut,
+  kann nur schneller sein. Das neue Profil misst den Deckel — voll ausgebauter
+  Baum gegen Basis:
+  · **t25** (45 min, Kalibrier-Bedingungen ohne Loot): ⌀ 1942 s → 1407 s =
+  **×1.38 schneller**. Über dem reinen Leistungs-Produkt (×1.304), weil dieser
+  Lauf bei NULL Meta startet — der „Warm-up-Start" verdoppelt dort die erste von
+  45 Minuten. Ein echter Besitzer des vollen Baums steht bei Bühne 130+; für ihn
+  ist das Rauschen. Der Anker misst also den GÜNSTIGSTEN denkbaren Fall.
+  · **Erste Himmelfahrt** (0.7 cps, ohne Loot, 7 Seeds): ⌀ 18.24 h → 14.82 h =
+  **×1.23**, Einzelwerte 1.15 … 1.36.
+  · **Kettenlauf** (6 × 45 min, volle Loot-Ökonomie): t75 ⌀ 6198 s → 5714 s =
+  **×1.09** — mit Truhen/Token ist der Baum fast unsichtbar.
+  Alles unter ×1.5, wie das Ideen-Dokument erwartet („gemessen deutlich kleiner …
+  weil additiv-klein").
+- **„Zweiter Wind" ist im Bot BEWUSST nicht gefaltet — mit Messung statt
+  Behauptung.** Der Knoten erstattet nach einem Boss-Timeout 3 von 10 Rivalen der
+  Rückfall-Bühne (`combat.tickBoss(state, dt, refundKills)` — pur und
+  unit-getestet, im Spiel voll verdrahtet). Faltet man ihn in den Bot, wird der
+  0.7-cps-Anker um das **2,5-fache LANGSAMER** (Seed 12345: 17,1 h → 42,9 h),
+  während JEDER andere Knoten ihn beschleunigt (isoliert gemessen: startGold 0.98 ·
+  warmup 0.99 · click 0.98 · dps 0.92 · gold 0.94 · luck 1.00). Der Grund ist eine
+  Eigenschaft der BOT-STRATEGIE, nicht des Knotens: Der Bot fordert den Boss nach
+  einem Fail sofort wieder heraus (`challengeBoss`) und überspringt dabei die
+  Rivalen-Welle der Boss-Bühne — drei erstattete Kills auf der Rückfall-Bühne
+  werden für ihn deshalb zu 30 % weniger Farm je Anlauf bei gleichbleibenden 30 s
+  Boss-Uhr pro Fehlversuch. Ein Mensch kehrt drei Kills früher ans Gate zurück und
+  farmt dann die REICHERE Boss-Bühne. Der Ausschluss steht damit in derselben
+  Tradition wie Twerk-Ekstase und die Boss-Schadens-Mults (Modul-Kopf `sim.ts`),
+  nur mit umgekehrtem Vorzeichen — und die Messung dazu ist im Anker-Test
+  festgeschrieben, damit niemand ihn „aus Versehen" wieder einschaltet.
+- **Platz: eigener Abschnitt im 📋 Ziele-Tab, KEIN zehnter Reiter.** Zwei Gründe.
+  (1) X6-Rechnung, headless nachgemessen: Neun Reiter × 44 px Mindestbreite =
+  396 px, verfügbar sind auf einem 390-px-Telefon 387 px (Bottom-Sheet minus
+  Safe-Area) — die Leiste steht also schon HEUTE 9 px über der Kante. Ein zehnter
+  Reiter machte 440 px und schöbe „Mehr" 53 px weit hinter ein Seitwärts-Scroll
+  OHNE Balken (`scrollbar-width: none`), also genau in den Fehler zurück, den X6
+  behoben hat.
+  (2) Thematisch: Die Währung entsteht ausschließlich aus dem, was DIESER Tab
+  ohnehin zeigt — Bühnen-Sterne-Meilensteine und Erfolge. Die Sektion steht direkt
+  über der Erfolgs-Wand: Quelle und Senke untereinander, und der Panel-Kopf kann
+  die Herkunft jedes Staubkorns mit Live-Zahlen erklären statt auf einen anderen
+  Reiter zu verweisen.
+- **Optik: der eine Ort im Spiel, der nicht nach Pergament aussieht.** Drei
+  dunkle Himmelsausschnitte, Verbindungslinien als `<line>`, Sterne als
+  vierzackige `<path>`-Blenden — alles Inline-SVG in der bestehenden
+  Stroke-Sprache, keine neue Dependency, keine Bild-Assets. Ein Linien-SEGMENT
+  leuchtet nur, wenn BEIDE seiner Sterne stehen, sodass das Sternbild Strich für
+  Strich wächst; der nächste kaufbare Stern pulsiert (das einzige, was man
+  anklicken kann). Vier Zacken statt fünf, weil eine 5-Zack-Silhouette bei 3 px
+  Radius zu Matsch wird.
+- **Der Warm-up-Buff leiht sich den Kobold, statt einen vierten Buff zu
+  erfinden.** „Warm-up-Start" setzt `goblin.buffUntil` auf `now + 60 s` — dieselbe
+  ×2-Klick-Zahl, derselbe Rechenpfad im Klick-Term, keine zweite Anzeige und kein
+  neues Feld. Größenordnung zur Einordnung: Der reguläre Kobold zahlt über einen
+  45-min-Lauf ~7 × 10 s ×2; der Warm-up legt einmalig 60 s dazu und schiebt sie
+  dorthin, wo eine frische Tour sie braucht.
+
+## IDEEN-GAMEPLAY Schritt 3 — 3b Crew-Umschulung
+
+- **Eine Override-Map, EINE Lesekette.** `crewRetrain: Record<crewId,
+Record<tierIndex, AbilityKind>>` (leer = Stock-Sorte) wird ausschließlich in
+  `abilityKind(cfg, tier, retrain)` gelesen — und alles, was je nach der Sorte
+  eines Slots fragt, geht durch genau diese Funktion: die Crew-Card (Kachel,
+  Badge, Tooltip), der Kauf-Tipp (`advisor.bestPurchaseHint`), die
+  Wand-Telemetrie (`bossDamageMult`) und vor allem die Faltung
+  `crewSpecialBonuses`. Die faltete vorher `cfg.special` direkt; jetzt zählt sie
+  für ein Mitglied MIT Einträgen Stufe für Stufe über `abilityKind` und behält
+  für jedes Mitglied OHNE Einträge den alten O(1)-Pfad (`specialTiers`). Damit
+  rechnet ein Save ohne Umschulung — also jeder Sim-Lauf — bitgleich und
+  gleich schnell wie vor 3b, und ein umgeschulter Slot wirkt überall exakt wie
+  ein von Haus aus so geborener. Zweitpfade gibt es keine.
+- **Der Rhythmus ist unantastbar, nur die SORTE rollt.** `abilityKind` prüft
+  ZUERST das Muster (`TIER_PATTERNS`): Auf einer Power-Stufe wird jeder Override
+  ignoriert, `retrainSlotOrdinal` liefert dort 0 und die UI zeigt gar keinen
+  Knopf. `repairCrewRetrain` wirft beim Laden zusätzlich jeden Eintrag weg, der
+  auf einer Power-Stufe sitzt — ein handgeschriebener Save kann das 2P+2S-
+  Verhältnis also nicht kippen (die eine Leitplanke des Ideen-Dokuments).
+- **Kosten gemessen, nicht geraten: 40 · 2^(Slot−1).** `npm run balance` druckt
+  die Splitter-Kurve jetzt als eigenen Abschnitt 7 — Truhen-🧩 aus der
+  Sim-Ökonomie plus der Boss-Faucet `bossShardReward`, den das Spiel pro
+  Boss-Kill zahlt und den der Bot nicht modelliert (er wird aus der gemessenen
+  Bühnen-Kurve rekonstruiert: jeder Lauf clert die Boss-Bühnen 5, 10, … bis zu
+  seiner Wand). Gemessen (`SIM_ACTIVE`, 3 cps + Juice, Seeds 1/7/12345):
+  45 min → 12 + 36 = **48 🧩** (64/h) · 3 h → 52 + 323 = **375** (125/h) ·
+  12 h → 78 + 1 579 = **1 656** (138/h) · 24 h → 121 + 3 253 = **3 375**
+  (141/h). Der Beharrungszustand liegt also bei ~140 🧩/h — und der Boss-Faucet
+  trägt 96 % davon, die Truhen sind nur die Würze. Daraus die Leiter: **Slot 1
+  40 🧩** (die erste Umschulung fällt am ersten Abend, ≈ 20 min Spielzeit),
+  Slot 2 80, Slot 3 160, Slot 4 320 (≈ 2.3 h), Slot 5 640. Die Verdopplung je
+  Slot spiegelt bewusst den bestehenden Splitter-Sink (Skin-Level `shardCost`,
+  ×1.25/Level ⇒ Lv 10 = 100 🧩, Lv 20 = 870, Lv 25 = 2 650): Beide Leitern
+  wachsen geometrisch und konkurrieren über die ganze Spielzeit um dieselben
+  Splitter, statt dass eine die andere ab Stunde 3 trivialisiert. Zwei Anker in
+  `sim.test.ts` frieren die Messung ein (erste Umschulung im ersten Sitting
+  bezahlbar, Slot 3 dort noch nicht; 100–200 🧩/h im Beharrungszustand).
+- **Währungs-Eskalation statt Echtzeit-Abklingzeit — bewusst gegen die Skizze.**
+  Das Ideen-Dokument schrieb „Splitter + Abklingzeit". Ein 24-h-Cooldown
+  bestraft aber genau die Spielweise, für die dieses Spiel gebaut ist: Wer
+  abends 20 Minuten spielt, sieht seinen zweiten Roll frühestens am nächsten
+  Abend und muss sich dafür einen Timer merken. Stattdessen kostet **jeder
+  weitere Roll am SELBEN Mitglied in derselben Aszension ×2** (`retrainRolls`,
+  Run-Zustand: Alle drei Resets setzen ihn auf 0 zurück). Dieselbe Bremse gegen
+  Roll-Spam, aber sie löst sich durch WEITERSPIELEN statt durch Warten — und sie
+  ist selbstbegrenzend, weil nach einem Reset ohnehin erst wieder Level und
+  Slots gekauft werden müssen, bevor überhaupt etwas zu rollen ist.
+- **Zwei Lebensdauern, zwei Felder.** `crewRetrain` ist PERMANENT (überlebt
+  Aszension, Himmelfahrt, Transzendenz — wie Vergoldungen und Meisterschaft);
+  sonst wäre der Splitter-Einsatz nach der nächsten Aszension verpufft, denn die
+  Slots selbst fallen mit `crewUp`. `retrainRolls` ist RUN-Zustand und fällt
+  überall mit. Genau deshalb sind es zwei Felder und nicht ein verschachteltes:
+  Wer verschiedene Lebensdauern in eine Slice packt, muss sie in jedem
+  Reset-Pfad wieder auseinanderklauben.
+- **Angebot statt Blind-Roll — und die Ziehung sitzt HINTER der Bezahlung.**
+  `retrainOffers(current, r1, r2)` zieht aus dem Pool ohne die aktuelle Sorte,
+  entfernt die erste Ziehung vor der zweiten: zwei Angebote, garantiert
+  voneinander und von der aktuellen verschieden. Beide Floats kommen aus dem
+  persistierten Spiel-Strom (`rng.next()`) — derselben Quelle wie Krits, Truhen
+  und Vergoldungen. Gewürfelt wird ERST beim Druck auf „Für X 🧩 umschulen",
+  nicht beim Öffnen des Dialogs: Sonst könnte man das Angebot gratis ansehen,
+  den Dialog schließen und mit verschobenem Cursor neu würfeln — Save-Scumming
+  ohne Save. Bezahlt wird der ROLL, nicht das Ergebnis; „behalten" ist deshalb
+  immer erlaubt und macht den Kauf nie schlechter als vorher.
+- **UI: der Knopf sitzt an der Kachel, der Dialog gehört dem Charakter.** Jeder
+  GEKAUFTE Spezial-Slot trägt unten links ein 16-px-Werkzeug (Schraubenschlüssel
+  in der Stroke-Sprache, kein Emoji) — die anderen drei Ecken sind vergeben
+  (Haken oben rechts, Sorten-Badge unten rechts). Optisch 16 px, TREFFERFLÄCHE
+  28 px über ein `::after`-Inset; nach links wächst die nur in die 9-px-Lücke
+  der Slot-Reihe und höchstens auf eine bereits gekaufte (nicht klickbare)
+  Nachbarkachel — der Kauf-Knopf steht in der Reihe immer rechts von allen
+  gekauften Kacheln. Im delegierten Klick-Handler wird `.ab-rt` ZUERST geprüft
+  und beendet den Handler (sonst kaufte derselbe Klick zusätzlich die
+  Level-Zeile darunter — die Lektion aus dem Ability-Kauf-Bugfix). Der Dialog
+  zeigt das Portrait GROSS (72 px, `av-xl`, auf flachen Geräten 52 px), darunter
+  „Aktuell" und — nach der Bezahlung — „Angebot — wähle eine" mit beiden Karten
+  UNTEREINANDER: nebeneinander brachen Namen wie „Ekstase-Ladung" mitten im
+  Wort. `.btn.ghost` ist für die dunkle HUD gebaut und wäre auf Pergament fast
+  unlesbar, also bekommt der Dialog dieselbe Form in Pergament-Tinte; bei
+  92 vh scrollt er in sich, statt im Querformat aus dem Bild zu laufen.
+- **Der Bot schult NIE um — dokumentierte Untergrenze.** Der Sim hält keine
+  Override-Map, seine Läufe sind damit zahlengleich zu einem Save ohne jede
+  Umschulung; die Anker bleiben unverändert (nachgemessen: t10 1.7 min, t25
+  32.4 min, Wand Bühne 25, erste Himmelfahrt 17.72 h, E2 15 Stufen bei
+  Verhältnis ≤ 1.86, E4-Vorsprung ⌀ +12.3, Meisterschafts-Kennlinie identisch).
+  Das ist Absicht: Umschulen kostet nur Splitter, die der Bot ohnehin bankt, und
+  kann die Sorten-Verteilung im Zweifel nur VERBESSERN — ein optimal
+  umschulender Bot wäre schneller als jeder Spieler, und die Anker müssen die
+  langsamere Wahrheit messen. Die FALTUNG kann es trotzdem: Ein präparierter
+  Zustand mit Override ändert `crewSpecialBonuses`, `dpsOf` und `goldMult` genau
+  um den erwarteten Faktor (Tests in `heroes.test.ts`/`ch-state.test.ts`).
+- **Save-Schema v14 + X7-Fixture-Paar.** Die Migration v13 → v14 sät bewusst
+  LEER: Wer nie Splitter bezahlt hat, trägt überall die Stock-Sorte — genau das
+  sagt die leere Map, die Migration ist also verlustfrei UND rückwirkungsfrei
+  (anders als bei 1a gibt es hier nichts zu rekonstruieren). Die Matrix hat den
+  Bump wie vorgesehen sofort rot gemeldet; ihr neues Paar prüft den gesunden
+  v14-Save (zwei umgeschulte Slots + Eskalator-Stand) und den kaputten
+  (Override auf einer Power-Stufe, `power` als Sorte, Nicht-Normalform-Schlüssel
+  „04", Müll-Id) — übrig bleibt genau der eine legale Eintrag.
+- **Headless-Beweis** (Chromium/SwiftShader, Port 4188, präparierter v14-Save
+  mit 500 🧩 und gekauften Spezial-Slots): `3b-a-knopf-am-slot.png` +
+  `3b-zoom-slots.png` (Werkzeug NUR an den Spezial-Slots — gemessen
+  `boss#2, boss#4, hype#3, hype#4, dj#2, dj#3`, also exakt die Rhythmus-Slots),
+  `3b-b1-dialog-vorschau.png` (Portrait groß, aktuelle Sorte, „Für 40 🧩
+  umschulen"), `3b-b2-dialog-angebote.png` (zwei Angebote: beat + ekstase,
+  Splitter 500 → 460), `3b-c1-nach-roll-toast.png` (Toast „Umgeschult! ·
+  Stufe 2: Beat-Fenster") + `3b-zoom-slots-nachher.png` (das Badge der Kachel
+  ist von Krit-Schaden auf die Beat-Note gewechselt), `3b-d-eskalation.png`
+  (zweiter Roll am selben Mitglied: „Für 80 🧩 umschulen · 1. Umschulung dieser
+  Aszension"; ein anderes Mitglied kostet weiter 40), `3b-e-klick-regression.png`
+  (ein Klick auf den Umschul-Knopf lässt Level UND Kontostand unberührt; EIN
+  Klick auf den Kauf-Slot kauft die Stufe (dj 3 → 4), EIN Klick auf die Zeile
+  ein Level (Türsteher 150 → 151)) sowie `3b-m-portrait/-schmal/-landscape.png`
+  (390×844, 320×640, 740×380 — kein horizontaler Überlauf, im Querformat
+  scrollt der Dialog in sich). Bundle nach der Änderung: **846 KB JS**
+  (Budget 1.5 MB).
+
+## IDEEN-GAMEPLAY Schritt 2 — 1a Crew-Meisterschaft
+
+- **Einsatz-XP sind gekaufte LEVEL, nicht gehaltene.** `crewMastery` ist ein
+  reiner Highwater je Mitglied: `Crew.buy` bucht jeden gekauften Level (auch
+  ×10/Max, auch das „Anheuern"), und KEIN Reset fasst ihn an — `ascendState`,
+  `himmelfahrtState` und `transcendState` tragen ihn alle drei weiter, während
+  Level und Fähigkeits-Ledger fallen. Geschenkte Level (Himmelsbaum-
+  „Frühstarter", Mythos-„Frühstart") zahlen bewusst NICHTS ein: Meisterschaft
+  soll Einsatz messen, nicht Ausstattung. Deshalb klemmt `repairCrewMastery` die
+  Zahl auch in KEINE Richtung an `crew` — nach jedem Reset steht das Level auf 0
+  und die Lebenszeit-Zahl hoch (das ist der ganze Sinn), und ein Level aus einer
+  Geschenk-Quelle hat nie XP gezahlt. Ein Highwater darf ohnehin nur wachsen.
+- **Die Schwellen sind gemessen, nicht geraten — und deutlich höher als die
+  Skizze.** Der Bot zählt die Einsatz-XP jetzt mit (`sim.ts` → `RunResult.mastery`),
+  `npm run balance` druckt die Kennlinie als eigenen Abschnitt 6. Gemessen
+  (Profil `SIM_ACTIVE`, 3 cps + Juice, volle Loot-Ökonomie, Seeds 1/7/12345, das
+  jeweils STÄRKSTE Mitglied): 45 min → 167/234/167 · 3 h → 1 448 · 12 h → 6 951 ·
+  24 h → 14 345 · 72 h → 43 487. Nach den ersten Stunden wächst der Zähler fast
+  linear mit ~450 Level je 45-min-Lauf (die ×1.075-Kostenleiter frisst jeden
+  Meta-Zuwachs logarithmisch wieder auf). Daraus: **Bronze 150** (fällt in der
+  ersten Sitzung, aber nur für das Mitglied, an dem man hängt — Platz 2 lag bei
+  138, Platz 3 bei 116), **Silber 1 200** (~3 h), **Gold 8 000** (~13 h),
+  **Legende 60 000** (~100 h aktives Spiel ⇒ bei einer Stunde am Abend die
+  „vielen Wochen" aus dem Ideen-Dokument). Die skizzierten 100/500/2 500/10 000
+  hätten Legende an EINEM Wochenende ausgeliefert; die Leiter ist deshalb bewusst
+  über-linear gespreizt. Zwei Anker in `sim.test.ts` frieren die Messung ein
+  (Bronze nach einem Sitting, Silber nach vier Läufen — Gold noch nicht).
+- **Drei Ränge zahlen Prozente, der vierte zahlt einen SLOT.** +2 % Eigen-Output
+  je Rang, gedeckelt bei drei Rängen ⇒ exakt die +6 % der Leitplanke (das
+  Ideen-Dokument erlaubte ≤ +8 %). Legende zahlt bewusst keinen vierten
+  Prozentpunkt, sondern die Gratis-Erststufe: Permanenz, die man SIEHT (der Slot
+  steht nach jedem Reset sofort da), statt einer weiteren stillen Zahl im
+  DPS-Produkt. Der Faktor hängt in genau EINER Multiplikation
+  (`heroDps`/`heroClick`), also lesen Spiel, Sim-Bot, Kauf-Tipp und Crew-Card
+  dieselbe Zahl; beim Klick-Mitglied trifft er folgerichtig den Klick.
+- **Der Gratis-Slot ist eine pure Funktion, kein Sonderfall im Kauf-Code.**
+  `grantFreeMasteryTiers(levels, ups, mastery)` liefert einen neuen Ledger plus
+  die frisch beschenkten Ids (und bei „nichts zu tun" den IDENTISCHEN Ledger
+  zurück, damit der Aufrufer gratis prüfen kann). Die Glue ruft sie an vier
+  Stellen: Boot, nach jedem Crew-Level-Kauf, nach jedem der drei Resets und nach
+  einem Save-Import; der Bot an einer (nach `buyCrewGreedy`). Damit fällt der
+  Slot in der Sekunde, in der Lv 25 steht — nicht erst beim nächsten Reset — und
+  ist trotzdem idempotent (zweimal aufgerufen schenkt er kein zweites Mal).
+  Headless verifiziert: frisch aszendiert, 3× ×10 auf den Booty-Boss ⇒ Lv 30,
+  `crewUp.boss = 1`, Kontostand 5 000 000 → 4 999 485 BP (= exakt die 515 BP
+  Level-Kosten, die 274 BP der Fähigkeits-Stufe wurden NICHT abgebucht).
+- **`--av-frame` war schon der Haken — es ändert sich kein Selektor.** Schritt 4b
+  hatte die Rahmenfarbe als PER-ZEILE-Variable angelegt; `portraitTile` bekommt
+  nur einen optionalen `frame`-Parameter, und die Crew-Card schickt Kupfer/
+  Silber/Gold hinein. Der Legenden-Regenbogen läuft NICHT über die Variable,
+  sondern über die Klasse `mr4` mit einer `border-color`-Keyframe-Animation: Eine
+  CSS-Animation schlägt in der Kaskade auch die Inline-Deklaration, die Variable
+  bleibt also der Fallback. Die Fortschritts-Zeile („Meisterschaft: Silber ·
+  1.450/8.000") steht unter der Beschreibung — mit `fmtInt` (deutsche
+  Tausenderpunkte, kein `toLocaleString`: in jsdom/Node ist auf ICU kein Verlass),
+  weil `fmt` daraus „1.45K/8.00K" gemacht hätte, was als Fortschrittsanzeige
+  unbrauchbar ist.
+- **Schema v13 statt v12 — die Wochen-Bestzone hatte v12 schon verbraucht.** Die
+  Migration v12→v13 sät die Meisterschaft aus dem AKTUELLEN `crew`-Stand: Die
+  Level, die ein Spieler gerade hält, hat er nachweislich einmal gekauft. Bei 0
+  zu starten wäre die genauso falsche Behauptung „du hast nie ein Level gekauft"
+  und träfe ausgerechnet die treuesten Spielstände; alles davor ist aus einem
+  Alt-Save nicht rekonstruierbar. Ein frisch aszendierter Alt-Save startet
+  folgerichtig leer. Die X7-Matrix hat den Bump wie vorgesehen sofort rot
+  gemeldet und ihr Fixture-Paar erzwungen (v13-Tafel bewusst ÜBER dem Crew-Stand,
+  weil der Save schon aszendiert hat).
+- **Balance-Snapshot vorher/nachher (`npm run balance`, Seeds 1/7/12345).**
+  Pacing im ersten Sitting UNVERÄNDERT (t10 1.7 min, t25 32.4 min, Wand ⌀ Bühne
+  25.0) — in 45 min erreicht nur EIN Mitglied Bronze, das sind +2 % auf eine
+  Linie ≈ +0.5 % Gesamtleistung. Erste Himmelfahrt 17.86 h → 17.72 h (−0.8 %).
+  E2: unverändert 15 Stufen je Seed, schlimmstes Verhältnis 0.93/0.84/1.86 →
+  0.93/0.83/1.86 (Anker ≤ 2.00), Aszensionen 15/15/13 → 14/13/13. E4-Vorsprung
+  über fünf Seeds IDENTISCH (+7/+25/+5/+10/+14). t75 (1 cps, mit Loot) im Mittel
+  3.41 h → 3.16 h; der BINDENDE Wert ändert sich dabei nicht (schnellster Seed
+  3.13 h vorher wie nachher — Seed 1 rutscht von 3.90 h ins Feld), Anker-Fenster
+  [3 h, 7.5 h] hält.
+- **Die einzige auffällige Zahl — E3 „größte Lücke" — ist ein Wand-Effekt, kein
+  Einbruch.** Über acht Seeds gemessen: +50-%-Stufen 52.8 → 55.1 im Mittel (also
+  MEHR Machtsprünge), größte Lücke aber 17.5 min → 48.7 min im schlimmsten Seed.
+  Nachgemessen, wo die Lücke sitzt: bei Seed 7 zwischen Stufe 49 und 50, bei 11
+  zwischen 46 und 47, bei 12345 zwischen 57 und 58 — IMMER die allerletzte, also
+  im Plateau NACH dem Erreichen der z75-Wand, nie im Aufstieg. Der Bot kommt mit
+  der Meisterschaft früher an die Wand und sitzt den Rest seiner 20 Aszensionen
+  dort; während des Kletterns bleiben die Lücken bei ≤ 6.5 min. Anker (≤ 90 min)
+  behält damit 1.8× Luft, E3 bleibt grün, keine Nachjustierung nötig.
+- **Der ROI-Greedy sieht den Perk — bewusst.** `bestCrewBuy` bekommt die Tafel
+  als optionalen Parameter (fehlt ⇒ ×1, jeder Alt-Aufrufer bleibt zahlengleich).
+  Der Meisterschafts-Faktor kürzt sich im Grenznutzen NICHT heraus, er hebt die
+  Rangfolge eines gemeisterten Mitglieds um genau seine 2–6 %. Bot und
+  in-game-Kauf-Tipp (`advisor.ts`) lesen weiter dieselbe eine Funktion; die
+  Tipp-Cache-Signatur braucht die Tafel nicht, weil sie sich nur ZUSAMMEN mit
+  einem Level-Kauf ändern kann, der schon drinsteht.
+- **Headless-Beweis** (Chromium/SwiftShader, Port 4188, präparierter v13-Save mit
+  gestaffelten Rängen): `1a-a-crew-raenge.png` (alle vier Rahmen gleichzeitig —
+  Legende/Gold/Silber/Bronze plus ein rangloses Mitglied mit „96/150 → Bronze"),
+  `1a-b-card-fortschritt.png` + `1a-b2-card-legende.png` (Card-Nahaufnahmen),
+  `1a-c-rangaufstieg-toast.png` (ein Kauf über die Silber-Schwelle ⇒ Toast
+  „Meisterschaft: Silber — DJ Wumms — +4 % Eigen-Leistung"),
+  `1a-d-legende-gratisslot.png` (frisch aszendiert, Slot geschenkt + Toast
+  „Legenden-Bonus"). Bundle nach der Änderung: **839 KB JS** (Budget 1.5 MB).
+
+## IDEEN-GAMEPLAY Schritt 1 — 4a+4b Avatar-System
+
+- **Ein `<symbol>`-Sprite, zwei Knoten pro Zeile — die 0.25-s-Regel diktiert die
+  Architektur.** Die Crew-Liste wird im Idle-Tick komplett neu aus einem
+  HTML-String gebaut. Ein Portrait als eigenes SVG-Geflecht wäre pro Zeile ~15
+  Knoten gewesen, also bei 15 Mitgliedern × (1 Karte + n Fähigkeits-Kacheln)
+  mehrere hundert Knoten, die viermal pro Sekunde entstehen und sterben.
+  `mountAvatarSprite()` hängt die GEOMETRIE deshalb genau einmal beim Start in
+  den Body (50 Symbole = 25 Charaktere × 2 Posen); jede Zeile trägt nur noch
+  `<svg><use href="#av-dj"/></svg>`. Ein Test zählt die `<`-Zeichen im
+  Zeilen-Markup (genau 3) und verbietet dort jedes `<path`/`<circle` — dieser
+  Guardrail kann nicht still verrutschen.
+- **Die Tinte erbt sich, die Palette wird gebacken.** Innerhalb eines Symbols
+  sind alle Striche `currentColor` — dasselbe Prinzip wie die Tab-Ikonen. Das
+  Portrait ist damit auf der Pergament-Karte braun, auf einer gekauften
+  Fähigkeits-Kachel grün und auf der pulsenden Kauf-Kachel gold-tinten, ohne dass
+  irgendwer eine Farbe setzt. Die MITGLIEDS-Palette (Haar, Accessoire) steht
+  dagegen als Literal im Symbol, weil sie pro Charakter fix ist; nur die
+  Rahmenfarbe reist als `--av-frame` mit der Zeile mit. Ein `color`-Fallback auf
+  `--parch-ink` steht auf `.av` selbst — ohne ihn erbte die Crew-Card die HELLE
+  Body-Textfarbe (im ersten Beweis-Screenshot waren die 48-px-Portraits blass;
+  die Ahnen-Zeilen sahen richtig aus, weil sie in `.nm` liegen, das die
+  Pergament-Tinte schon setzte).
+- **Die Power-Pose ist reine Silhouette — Fäuste wurden zu „oIo".** Der erste
+  Entwurf gab der Power-Variante zwei geballte Fäuste links und rechts eines
+  Brustbeins. Im Portrait-Sheet las sich das als Buchstabenfolge, nicht als
+  Muskel. Der zweite Entwurf mit Funken in den Ecken schied ebenso aus: genau
+  dort sitzen bei der Hälfte des Kaders die Signaturen (Klemmbrett, Dreizack,
+  Solarpanel, Mischpult). Was trägt: kurzer Hals, breitere kantige Schultern,
+  Trapez-Falten, Brustbogen — plus Strichdicke 1.75 statt 1.4 und ein
+  Power-Gesicht (gesenkte Brauen, Schrei-Mund). Der Unterschied ist auf 32 px
+  sofort lesbar, ohne einen einzigen Pixel in den Accessoire-Zonen.
+- **Kopfform + Frisur variieren, damit das Accessoire nicht allein trägt.** 8
+  Kopfformen × 10 Frisuren, handgesetzt in `AVATAR_TABLE` — zwei Portraits
+  unterscheiden sich nie NUR über ihr Signatur-Objekt. Unbekannte Ids fallen auf
+  einen FNV-1a-Hash der Id zurück (ein künftig erfundenes Mitglied hat sofort ein
+  stabiles Gesicht statt gar keins); ein Test hält mit `hasHandSetPortrait` fest,
+  dass kein BESTEHENDES Mitglied still in diesen Fallback rutscht.
+- **Die 10 Skins bekommen echte Renders, keinen Baukasten — und dafür eigene
+  Thumbnails.** `models/renders/character-*.jpg` sind 576×576-Ganzkörper-Posen
+  und liegen NICHT im Vite-`public/`. Statt sie zu kopieren (10 × ~19 KB, und für
+  eine 42-px-Karte 13× zu groß) erzeugt ein einmaliger PIL-Lauf 96×120-Büsten:
+  Motiv-Bounding-Box gegen die einheitliche Hintergrundfarbe, Kopfmitte aus dem
+  obersten Fünftel, obere 52 % der Figur als 4:5-Ausschnitt, JPEG q80.
+  Ergebnis: `apps/game/public/avatars/skin-*.jpg`, **21.6 KB für alle zehn**
+  (1.7–2.5 KB je Bild). Erzeugt mit
+  `python3 <scratchpad>/make-skin-thumbs.py` (Skript im DECISIONS-Text
+  dokumentiert, nicht im Repo — es läuft einmal pro Render-Neuexport). Keine
+  neue Dependency, kein Build-Schritt: die Thumbnails sind eingecheckte Assets.
+  Bundle nach der Änderung: **836 KB JS** (Budget 1.5 MB), `dist` gesamt 945 KB.
+- **Der Tier-Rahmen sagt WIE TIEF, die Sorten-Tönung WAS, das Portrait WER.** Die
+  Fähigkeits-Kachel hatte bisher nur die Sorten-Farbe. Jetzt kommen drei
+  unabhängige Kanäle zusammen, ohne sich zu überlagern: Rahmenfarbe je zwei
+  Stufen eine Klasse höher (Kupfer→Silber→Gold→Platin→Prisma, gedeckelt), die
+  bestehende `k-*`-Füllung, und Portrait + Pose. Die gekaufte Kachel trägt
+  zusätzlich den Haken oben rechts — der Sorten-Badge unten rechts bleibt, damit
+  auch bezahlte Stufen noch verraten, was sie waren (vorher: nur ein Haken).
+- **Die Kauf-Fläche wurde GRÖSSER, nicht kleiner.** Die Kachel wächst von 28 auf
+  32 px, der Zeilen-Abstand von 5 auf 9 px (Badge und Haken ragen über den Rand)
+  und `.ab-slots` darf jetzt umbrechen. Jeder Portrait-Knoten steht auf
+  `pointer-events: none`, damit `closest('.ab.ready')` bzw. `closest('.item')`
+  weiter die Kauf-Fläche selbst sieht — die Delegations-Klicklogik in `crew.ts`
+  und der `pointerHeld`-Aufschub blieben unangetastet. Nachgewiesen headless:
+  ein 320-ms-Press EXAKT auf die Portrait-Grafik im Kauf-Button kauft beim
+  ERSTEN Mal, ein Klick exakt auf das 48-px-Karten-Portrait kauft ein Level, und
+  der alte `verify-abilityclick`-Lauf (10 Schnellklicks) zählt weiter alle zehn.
+- **Himmelsbaum und Mythos bleiben gesichtslos — bewusst.** Ihre Knoten sind
+  Konzepte, keine Personen (Grenze aus IDEEN-GAMEPLAY 4b). Ahnen dagegen sind
+  benannte Charaktere und bekommen denselben Baukasten mit eigener
+  Signatur-Zeile: Twerkules Lorbeer + Bart, Poposeidon Dreizack + Wellenbart,
+  Cheeksana Sturmauge, Glutaeus Gladiatorenhelm, Chronilla Sanduhr, Peachiel
+  Heiligenschein + Flügel, Wackelias Anker, Beatrix Taktstock + Note, Truhilda
+  Schlüssel, Ekstasius Flammenkrone.
+
+## ROADMAP-V2 Nachzügler — G5 Gesichter leben
+
+- **Verstecken heißt `scale ≈ 0`, nicht `visible = false` — sonst frisst der
+  Export die neuen Meshes.** Lider und O-Mund ruhen 99 % der Zeit unsichtbar;
+  der naheliegende Weg wäre `visible = false` gewesen. Der `models/`-Export
+  (`dev/export-models.ts`) fährt aber `GLTFExporter` mit dessen Vorgabewert
+  `onlyVisible: true` — unsichtbare Knoten wären STILL aus den 22 .glb-Dateien
+  gefallen, und niemand hätte es gemerkt, weil der Export weiter „✓" meldet.
+  Also bleiben die Meshes sichtbar und ruhen auf `REST_SCALE = 0.001`
+  (sub-pixel im Bild, vollwertiger Knoten in der Datei). Nachgewiesen im
+  exportierten `character-classic.glb`: die Knoten `lidL`/`lidR`/`mouth-o`
+  stehen mit Matrix (Skalierung 0.001) und Material-Index in der glTF-JSON.
+- **Das Lid fällt von OBEN, weil die Geometrie versetzt ist — nicht der Pivot.**
+  Ein Lid, das aus der Augenmitte heraus wächst, sieht aus wie ein Zwinkern,
+  nicht wie ein Blinzeln. Statt dafür eine Zwischen-Group (und damit einen
+  Quasi-Bone) einzuziehen, wird die Kugel-Geometrie einmalig um ihre halbe Höhe
+  nach unten verschoben (`geometry.translate`): der Objekt-Ursprung sitzt damit
+  am oberen Lidrand, `scale.y` fährt das Lid herunter wie ein echtes Lid. Kein
+  neuer Bone, kein neuer Knoten im Skelett — der Physik-Kontrakt bleibt
+  wortgleich (`stepPhysics`/`applyPose`/`renderCheeks` schreiben nur Bones,
+  G5 nur deren Kind-Meshes, und zwar NACH dem Physik-Schritt).
+- **Bei geschlossenem Lid verschwindet die Pupille — Tiefen-Sortierung ist hier
+  kein Verlass.** Das Lid steht bei z = 0.30 vor der Pupillen-Kuppe (0.349),
+  aber Kopf-Neigung, Kamera-Winkel und die Cel-Outline machen aus zwei
+  Millimetern schnell einen sichtbaren Durchstich. Ab `lidClose ≥ 0.6` fährt
+  die Pupille deshalb auf `REST_SCALE` — der billigste mögliche Anti-Glitch,
+  und weil das Lid dann ohnehin fast zu ist, sieht es niemand verschwinden.
+- **Die Pupillen tracken eine RICHTUNG, keinen Punkt.** `aimPupils` rechnet die
+  Weltposition des Rivalen per `worldToLocal` in den Kopf und normiert sie; erst
+  daraus wird der Versatz (`× 0.06`, geklemmt auf ±0.02). Damit ist der Blick
+  unabhängig von der Entfernung (Boss steht weiter hinten, Rivale näher) und
+  kann bei einer 360°-Drehung nicht überschießen. Gezielt wird auf
+  `entity.root` + 2.2 (`RIVAL_AIM_UP`) — der Wurzelpunkt des Rivalen steht auf
+  dem BODEN, ohne den Aufschlag starrte die Tänzerin ihm auf die Füße.
+  Nachgezogen wird exponentiell (6/s), das ist der ganze Laufzeit-Aufwand.
+- **Grimasse schlägt Ekstase.** Beide wollen den Mund. Ein Boss-Timeout wirft
+  einen aus dem Kampf zurück — dass das ×10-Fenster technisch noch offen ist,
+  interessiert im Gesicht niemanden. `faceView` entscheidet in dieser
+  Reihenfolge, ein Test hält sie fest.
+- **Die gedrehte Mundkurve muss auch FALLEN — das hat erst der Beweis-Lauf
+  gezeigt.** „Torus um 180° drehen" allein ergibt eine Grimasse, die aussieht
+  wie ein Schnurrbart: der Halb-Torus wölbt sich um seinen eigenen Radius nach
+  OBEN und legt sich um die Nase. Die Grimasse senkt den Bogen deshalb
+  zusätzlich um genau diesen Radius (`frownY = smileY − grin`) — dann liegen die
+  herabgezogenen Mundwinkel dort, wo vorher die Lächel-Enden saßen. Ohne den
+  Screenshot wäre das nie aufgefallen; die Zahlen (Rotation gedreht, Timer
+  läuft) waren die ganze Zeit korrekt.
+- **Alles wird ABSOLUT aus der Ruhelage geschrieben, nie inkrementell.**
+  Brauen-Rotation = `baseZ + side · GRIMACE_BROW · brow`, Mund-Drehung/-Höhe =
+  `smileZ`/`smileY` bzw. `frownZ`/`frownY`, Pupille = `base + Versatz`. Nach der Grimasse steht die Braue damit BYTE-gleich
+  wieder auf ihrem Bau-Wert (im Test mit `toBe`, nicht `toBeCloseTo`, geprüft) —
+  ein additiver Effekt hätte über Stunden gedriftet, weil hier — anders als bei
+  den Klick-Akzenten — kein Physik-Schritt hinterherräumt.
+- **Robo und Ninja haben kein Gesicht — und bekommen auch keins.** Beide bauen
+  `face()` gar nicht auf (Visor bzw. Maskenschlitz). Die `FaceRig`-Listen
+  bleiben dort leer, `applyFace` ist ein No-op. EINE Ausnahme, weil sie zwei
+  Zeilen kostet: der Robo registriert seine zwei Visor-Pixel und fährt sie im
+  Blinzel-Takt auf 15 % Höhe zusammen — ein Maschinen-Blinken. Der Ninja bleibt
+  bewusst starr; glühende Maskenaugen, die blinzeln, sähen aus wie ein Wackel-
+  kontakt.
+- **Kein Quality-Schalter, bewusst.** Die Guardrail „jeder neue Effekt hängt an
+  `engine/quality.ts`" zielt auf Kosten; G5 hat keine: die Meshes entstehen mit
+  dem Kopf (zwei Lider + ein Ring, dieselben Materialien wie das übrige Gesicht,
+  also KEIN zusätzlicher Draw-Call-Batch), und pro Frame laufen ein Timer, ein
+  Lerp und ~8 Schreibvorgänge auf `scale`/`position`/`rotation`. Das Abfragen
+  eines Presets wäre teurer als der Effekt. Auch `low` blinzelt und trackt.
+- **Der wichtigste BEFUND des Pakets steht nicht im Code: die Tänzerin zeigt der
+  Kamera fast immer den Rücken.** Das Rig schaut in +z, die Diorama-Kamera steht
+  bei −z — das ist Absicht (die Kernanimation ist das Twerken). Ihr GESICHT
+  sieht man nur im Show-Spin: alle 12 s dreht sich die Figur 0.9 s lang einmal
+  um sich selbst. G5 ist damit ein Effekt für diesen Moment (und für die
+  models/-Exporte, die die Gesichter frontal zeigen) — die Beweis-Serie musste
+  entsprechend AUF den Spin getimt werden. Wer mehr Gesicht will, braucht einen
+  eigenen Anlass (z. B. Zuwenden bei Boss-Auftritt/Kill), nicht mehr
+  Gesichts-Zustände.
+- **Beweis-Handwerk: Screencast statt Einzelbild, und `chFace` misst statt
+  rät.** Unter SwiftShader läuft das Spiel ~0.5 fps, die Spielzeit ist über den
+  `dt`-Deckel (0.05 s) an die FRAMES gekoppelt: ein 0.9-s-Spin besteht aus genau
+  ~18 Frames, und `Page.captureScreenshot` kostet je ~5 davon — jedes Einzelbild
+  rutschte am frontalen Moment vorbei. Also: `Page.startScreencast` schneidet
+  das ganze Fenster mit, eine Zustands-Spur (`window.chFace.state()`) läuft
+  parallel, und jeder Frame trägt seine gemessenen Zahlen (Lid-Schluss,
+  Pupillen-Versatz, Mund) im Dateinamen. Gewartet wird im 260-px-Viewport
+  (schnelle Frames ⇒ die Spielzeit rast), aufgenommen im großen — das ändert
+  nichts am Spiel, nur an der Füllrate. `Emulation.setVirtualTimePolicy` taugt
+  dabei NUR als Standbild-Taste: `pause` friert das Spiel sauber ein (der
+  Screenshot zeigt dann garantiert den Zustand, den `chFace` gemeldet hat — so
+  entstand das Bild mit geschlossenen Lidern), aber ein Budget-Vorlauf erzeugt
+  KEINE neuen rAF-Frames (die hängen am Compositor). Frame für Frame durch den
+  Spin steppen geht damit nicht.
+- **Gemessen, nicht behauptet.** Boss-Timeout auf dem ECHTEN Weg (kein
+  Debug-Hook): bei Spielzeit 30.1 s meldet `tickBoss` den Fehlschlag, das Spiel
+  wirft auf Bühne 4 zurück, der Toast „⏱ Zeit um!" steht, `chFace` liest
+  `mouth: frown`, Rest-Grimasse 1.35 s — und 1.5 s Spielzeit später wieder
+  `smile`. Pupillen über einen ganzen Spin: +0.020 → −0.014 → +0.019, die
+  Klemme ±0.02 wird nie verletzt. Handle-Abdeckung über alle zehn Skins:
+  7 × zwei Lider, Pirat 1 (Augenklappe!), Robo + Gyrator 0 Lider und je zwei
+  Visor-Pixel, Neon (Ninja) 0/0.
+
 ## ROADMAP-V2 Schritt 11 — X6 Mobile-QA + P5 Balance-Ritual
 
 - **Der schlimmste Mobil-Befund war kein Telefon im Hochformat, sondern das

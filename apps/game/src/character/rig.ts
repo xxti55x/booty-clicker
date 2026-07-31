@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 import { INK, sh, toonMat, withOutline } from '../engine/materials';
+import { REST_SCALE, createFaceRig, type FaceRig } from './face-life';
 import {
   brushedTex,
   carbonTex,
@@ -20,6 +21,12 @@ export const BASE_ROOT_Y = -1.12;
 export interface CharacterInstance {
   rig: Rig;
   cheeks: Cheek[];
+  /**
+   * ROADMAP-V2 G5: die Gesichts-Handles unter dem `head`-Bone (Lider, Pupillen,
+   * Brauen, Mund-Varianten). Leer bei Visor-/Masken-Stilen — `applyFace` ist
+   * dort ein No-op.
+   */
+  face: FaceRig;
 }
 
 /**
@@ -224,6 +231,10 @@ export function buildCharacter(
   // Physics only writes head.rotation, so scaling the bone is silhouette-safe.
   head.scale.setScalar(robot ? 1.02 : 1.06);
   spine.add(head);
+  // ROADMAP-V2 G5: Sammelstelle der Gesichts-Handles. Gefüllt wird sie NUR von
+  // den Stilen, die ein Standard-Gesicht bauen (`face()`) — plus die zwei
+  // Visor-Pixel des Robos als sein Blink-Ersatz. Der Ninja (Maske) bleibt leer.
+  const faceLife = createFaceRig();
 
   /**
    * Simple cartoon face: googly white eyes + pupils, brows, button nose,
@@ -254,6 +265,20 @@ export function buildCharacter(
       );
       pupil.position.set(s * 0.115, 0.035, 0.315);
       head.add(pupil);
+      faceLife.pupils.push({ m: pupil, base: pupil.position.clone() });
+      // G5 Blinzeln: eine Haut-Kuppel vor dem Augapfel, deren GEOMETRIE nach
+      // unten versetzt ist — der Pivot sitzt damit am oberen Lidrand und
+      // `scale.y` fährt das Lid herunter wie ein echtes. z liegt vor der
+      // Pupillen-Kuppe (0.349), damit im Schluss nichts durchsticht.
+      const lidGeo = new THREE.SphereGeometry(0.092, 16, 12);
+      lidGeo.scale(1, 1.34, 0.62);
+      lidGeo.translate(0, -0.1233, 0);
+      const lid = new THREE.Mesh(lidGeo, skinT);
+      lid.name = s > 0 ? 'lidL' : 'lidR';
+      lid.position.set(s * 0.12, 0.04 + 0.1233, 0.3);
+      lid.scale.y = REST_SCALE; // Ruhelage: sub-pixel am oberen Lidrand
+      head.add(lid);
+      faceLife.lids.push(lid);
     };
     eye(1);
     if (opts.patch) {
@@ -275,6 +300,7 @@ export function buildCharacter(
       brow.position.set(s * 0.12, opts.angry ? 0.14 : 0.17, 0.27);
       brow.rotation.z = s * (opts.angry ? 0.42 : -0.12);
       head.add(brow);
+      faceLife.brows.push({ m: brow, baseZ: brow.rotation.z, side: s });
     });
     const nose = withOutline(new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 12), skinT), {
       color: line,
@@ -286,6 +312,25 @@ export function buildCharacter(
     smile.position.set(0, -0.095, 0.27);
     smile.rotation.set(0.22, 0, Math.PI); // arc opens upward ⇒ smile
     head.add(smile);
+    // G5 Ekstase-Mund: derselbe Ink-Ton als geschlossener Ring, im Ruhezustand
+    // auf REST_SCALE geschrumpft (NICHT `visible = false` — der glTF-Export
+    // läuft mit `onlyVisible: true` und ließe ihn sonst aus den Modellen fallen).
+    const oMouth = new THREE.Mesh(new THREE.TorusGeometry(grin * 0.62, 0.022, 8, 18), inkFlat);
+    oMouth.name = 'mouth-o';
+    // Mitte der Mundzone (das Lächeln spannt von -0.095 bis -0.095−grin).
+    oMouth.position.set(0, -0.095 - grin * 0.45, 0.275);
+    oMouth.scale.setScalar(REST_SCALE);
+    head.add(oMouth);
+    // Die Grimasse dreht DENSELBEN Bogen um 180° und senkt ihn um seinen
+    // Radius — sonst wölbt er sich über die Nase statt in die Mundzone.
+    faceLife.mouth = {
+      arc: smile,
+      smileZ: smile.rotation.z,
+      frownZ: smile.rotation.z - Math.PI,
+      smileY: smile.position.y,
+      frownY: smile.position.y - grin,
+      o: oMouth,
+    };
     if (opts.blush !== undefined) {
       [-1, 1].forEach((s) => {
         const b = new THREE.Mesh(
@@ -309,6 +354,9 @@ export function buildCharacter(
       const px = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.14, 0.03), glowT);
       px.position.set(s * 0.11, 0.05, 0.3);
       head.add(px);
+      // G5: Der Robo hat kein Gesicht — statt Lidern fahren die Visor-Pixel im
+      // Blinzel-Takt zusammen (`applyFace` schreibt nur ihr `scale.y`).
+      faceLife.visorPixels.push(px);
     });
     const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.3, 8), jointT);
     ant.position.y = 0.44;
@@ -954,5 +1002,5 @@ export function buildCharacter(
     c.z = t.z;
   });
 
-  return { rig, cheeks };
+  return { rig, cheeks, face: faceLife };
 }

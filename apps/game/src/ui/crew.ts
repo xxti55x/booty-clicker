@@ -14,13 +14,17 @@ import {
   maxAffordable,
   nextAbility,
   nextLevelCost,
+  retrainSlotOrdinal,
 } from '../game/heroes';
+import { retrainCost, retrainRollCount } from '../game/retrain';
+import { type MasteryProgress, addMastery, masteryProgress, masteryRank } from '../game/mastery';
 import { soulMult } from '../game/ascension';
 import { ancientClickMult, ancientDpsMult } from '../game/ancients';
 import { clickGearMult, dpsGearMult } from '../game/gear';
 import { heavenGlobalMult, soulBonusEff } from '../game/heaven';
-import { fmt } from './format';
+import { fmt, fmtInt } from './format';
 import { abilityBurst, coinFly } from './fx';
+import { portraitSvg, portraitTile, tierClass } from './avatars';
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -47,10 +51,60 @@ const KIND_ICON: Record<AbilityKind, string> = {
   idle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V11h3.6v9H4Zm6.2 0V4h3.6v16h-3.6Zm6.2 0V8H20v12h-3.6Z" fill="currentColor"/></svg>',
 };
 
+/**
+ * Die Rahmenfarbe je Meisterschafts-Rang (1a): Kupfer → Silber → Gold →
+ * Legende. Der Legenden-Wert ist nur der FALLBACK — seinen Regenbogen-Schimmer
+ * malt die CSS-Animation `.av.mr4` (Animationen schlagen die Inline-Variable).
+ */
+const MASTERY_FRAME: readonly string[] = ['', '#c47a3a', '#cfd8e0', '#ffcf5e', '#c79bf0'];
+
+/** Die Meisterschafts-Zeile einer Crew-Card („Meisterschaft: Silber · 1.240/8.000"). */
+function masteryLine(p: MasteryProgress): string {
+  if (p.xp <= 0) return '';
+  const body =
+    p.rank === 0
+      ? `${fmtInt(p.xp)}/${fmtInt(p.next)} → ${p.nextName}`
+      : p.next > 0
+        ? `${p.name} · ${fmtInt(p.xp)}/${fmtInt(p.next)}`
+        : `${p.name} · ${fmtInt(p.xp)}`;
+  const title =
+    p.next > 0
+      ? `Einsatz-XP: ${fmtInt(p.xp)} von ${fmtInt(p.next)} Lebenszeit-Leveln bis ${p.nextName}`
+      : `Einsatz-XP: ${fmtInt(p.xp)} Lebenszeit-Level — höchster Rang erreicht`;
+  return `<div class="mr-line mr${p.rank}" title="${title}">Meisterschaft: ${body}</div>`;
+}
+
+/**
+ * Das Werkzeug-Icon des Umschul-Knopfes (3b) — Schraubenschlüssel in derselben
+ * Stroke-Sprache wie die Tab-Ikonen, kein Emoji.
+ */
+const TOOL_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 3.6a5.4 5.4 0 0 0-5 8.9L4 18.2l1.8 1.8 5.7-5.7a5.4 5.4 0 0 0 7.4-6.6l-3 3-2.3-2.3 3-3a5.4 5.4 0 0 0-1.9-.8Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
+
+/** Portrait + Sorten-Badge einer Fähigkeits-Kachel (Power-Stufen flexen). */
+function slotArt(id: string, kind: AbilityKind, badge: string): string {
+  return (
+    portraitSvg(id, kind === 'power' ? 'power' : 'base', 'ab-av') +
+    `<span class="ab-badge">${badge}</span>`
+  );
+}
+
 export interface CrewDeps {
   state: ChState;
   /** Called after a successful purchase (refresh HUD, persist). */
   onBuy: () => void;
+  /**
+   * Ein Mitglied hat mit DIESEM Kauf einen Meisterschafts-Rang erreicht (1a) —
+   * die Glue feiert das mit einem Meilenstein-Toast. Optional, damit Tests die
+   * Card ohne Toast-Stack bauen können.
+   */
+  onRankUp?: (cfg: HeroConfig, progress: MasteryProgress) => void;
+  /**
+   * Der Umschul-Knopf an einem GEKAUFTEN Spezial-Slot wurde gedrückt (3b) — die
+   * Glue öffnet den Dialog (Portrait groß, zwei Angebote, Kosten). Optional,
+   * damit Tests die Card ohne Dialog bauen können.
+   */
+  onRetrain?: (cfg: HeroConfig, tier: number) => void;
 }
 
 /**
@@ -60,6 +114,19 @@ export interface CrewDeps {
  * output, even tiers the member's THEMED SPECIAL (v11 — Gold, Krit, Boss,
  * Combo, Beat oder Ekstase). The slot row shows a pulsing kind-tinted buy
  * button once the level requirement is met.
+ *
+ * **1a — Crew-Meisterschaft.** Jeder gekaufte Level bucht Einsatz-XP
+ * (`addMastery`); die Card zeigt Rang-Rahmen ums Portrait, die Fortschritts-
+ * Zeile zum nächsten Rang und meldet einen Rang-Aufstieg über `onRankUp` an die
+ * Glue (Toast). Der Legenden-Slot wird NICHT hier gebucht, sondern von der Glue
+ * in `onBuy` — sie ist die einzige Stelle, die ihn auch nach einem Reset und
+ * beim Boot vergibt.
+ *
+ * **3b — Crew-Umschulung.** Jede GEKAUFTE Spezial-Kachel trägt zusätzlich einen
+ * Werkzeug-Knopf; er meldet nur (`onRetrain`), gekauft und gewürfelt wird im
+ * Dialog. Welche SORTE eine Kachel zeigt, liest die Card über dieselbe
+ * `abilityKind(cfg, tier, retrain)` wie Spiel und Sim — die Kachel eines
+ * umgeschulten Slots wechselt damit ohne Sonderfall ihr Badge und ihr Label.
  */
 export class Crew {
   private readonly body = byId('tabCrew');
@@ -99,6 +166,16 @@ export class Crew {
     const list = byId('crewList');
     list.addEventListener('click', (ev) => {
       const t = ev.target as HTMLElement;
+      // 3b: Der Umschul-Knopf sitzt IN einer gekauften Kachel, die wiederum in der
+      // Zeile sitzt — er wird deshalb ZUERST geprüft und beendet den Handler, sonst
+      // würde derselbe Klick zusätzlich die Level-Zeile darunter kaufen.
+      const rt = t.closest<HTMLElement>('.ab-rt');
+      if (rt?.dataset.rt) {
+        const cfg = CREW.find((c) => c.id === rt.dataset.rt);
+        const tier = Number(rt.dataset.rtTier);
+        if (cfg && Number.isInteger(tier) && tier > 0) this.deps.onRetrain?.(cfg, tier);
+        return;
+      }
       const ab = t.closest<HTMLElement>('.ab.ready');
       if (ab?.dataset.ab) {
         const cfg = CREW.find((c) => c.id === ab.dataset.ab);
@@ -150,14 +227,22 @@ export class Crew {
 
   /** Level kaufen — `true`, wenn wirklich gekauft wurde (G6: Feedback-Gate). */
   private buy(cfg: HeroConfig): boolean {
-    const level = this.deps.state.crew[cfg.id] ?? 0;
+    const s = this.deps.state;
+    const level = s.crew[cfg.id] ?? 0;
     const count = Math.max(0, this.countFor(cfg, level));
     if (count <= 0) return false;
     const cost = bulkCost(cfg, level, count);
-    if (cost > this.deps.state.gold) return false;
-    this.deps.state.gold -= cost;
-    this.deps.state.crew[cfg.id] = level + count;
+    if (cost > s.gold) return false;
+    s.gold -= cost;
+    s.crew[cfg.id] = level + count;
+    // 1a: JEDER gekaufte Level zählt in die Einsatz-XP — auch ×10/Max, auch der
+    // allererste („Anheuern"). Der Rang wird VOR und NACH der Buchung gelesen,
+    // damit der Meilenstein-Toast genau einmal feuert.
+    const before = masteryRank(s.crewMastery[cfg.id] ?? 0);
+    s.crewMastery = addMastery(s.crewMastery, cfg.id, count);
+    const after = masteryProgress(s.crewMastery[cfg.id] ?? 0);
     this.deps.onBuy();
+    if (after.rank > before) this.deps.onRankUp?.(cfg, after);
     this.render();
     return true;
   }
@@ -191,7 +276,7 @@ export class Crew {
       ancientDpsMult(s.ancients) *
       global *
       dpsGearMult(s.gear) *
-      crewSpecialBonuses(s.crewUp).idleMult;
+      crewSpecialBonuses(s.crewUp, s.crewRetrain).idleMult;
     const clickMult = sm * ancientClickMult(s.ancients) * global * clickGearMult(s.gear);
     const rows: string[] = [];
     CREW.forEach((cfg, i) => {
@@ -202,9 +287,10 @@ export class Crew {
       const cost = count > 0 ? bulkCost(cfg, level, count) : nextLevelCost(cfg, level);
       const affordable = count > 0 && cost <= s.gold;
       const gild = s.gilds[cfg.id] ?? 0;
+      const mp = masteryProgress(s.crewMastery[cfg.id] ?? 0);
       const out = cfg.click
-        ? heroClick(cfg, level, gild, ups) * clickMult
-        : heroDps(cfg, level, gild, ups) * dpsMult;
+        ? heroClick(cfg, level, gild, ups, mp.xp) * clickMult
+        : heroDps(cfg, level, gild, ups, mp.xp) * dpsMult;
       const outLabel = cfg.click ? 'Klick' : 'DPS';
       const gildBadge =
         gild > 0 ? `<span class="gild" title="×1.25 pro Vergoldung">🏅${gild}</span>` : '';
@@ -220,33 +306,57 @@ export class Crew {
           '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12.5l5 5L19.5 7" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         const slots: string[] = [];
         for (let t = 1; t <= ups; t++) {
-          const k = abilityKind(cfg, t);
+          const k = abilityKind(cfg, t, s.crewRetrain);
+          // 3b: Jeder GEKAUFTE Spezial-Slot trägt den Umschul-Knopf (Werkzeug-Icon
+          // in der Stroke-Sprache) — Power-Slots nicht, deren Sorte ist der
+          // Rhythmus selbst und rollt nie.
+          const slot = retrainSlotOrdinal(cfg, t);
+          const rt =
+            slot > 0
+              ? `<button class="ab-rt" data-rt="${cfg.id}" data-rt-tier="${t}" type="button"
+                   title="Fähigkeit ${t} umschulen (${fmt(retrainCost(slot, retrainRollCount(s.retrainRolls, cfg.id)))} 🧩)"
+                   aria-label="Fähigkeit ${t} von ${cfg.name} umschulen">${TOOL_ICON}</button>`
+              : '';
+          // 4b: auch die gekauften Kacheln zeigen WER und WAS — der Haken oben
+          // rechts bleibt das „gekauft"-Signal.
           slots.push(
-            `<span class="ab done" title="Fähigkeit ${t}: ${abilityKindLabel(k, outLabel)} — gekauft">${CHECK}</span>`,
+            `<span class="ab done ${tierClass(t)}" title="Fähigkeit ${t}: ${abilityKindLabel(k, outLabel)} — gekauft">` +
+              `${slotArt(cfg.id, k, KIND_ICON[k])}<span class="ab-check">${CHECK}</span>${rt}</span>`,
           );
         }
-        const k = abilityKind(cfg, ab.tier);
+        const k = abilityKind(cfg, ab.tier, s.crewRetrain);
         const abLabel = abilityKindLabel(k, outLabel);
         if (ab.unlocked) {
           const can = ab.cost <= s.gold;
           slots.push(
-            `<button class="ab ready k-${k} ${can ? '' : 'poor'}" data-ab="${cfg.id}" type="button"
-               title="Fähigkeit ${ab.tier}: ${abLabel} kaufen">${KIND_ICON[k]}</button>`,
+            `<button class="ab ready k-${k} ${tierClass(ab.tier)} ${can ? '' : 'poor'}" data-ab="${cfg.id}" type="button"
+               title="Fähigkeit ${ab.tier}: ${abLabel} kaufen">${slotArt(cfg.id, k, KIND_ICON[k])}</button>`,
           );
           slots.push(
             `<span class="ab-cost ${can ? '' : 'bad'}">${abLabel} · ${fmt(ab.cost)} BP</span>`,
           );
         } else {
           slots.push(
-            `<span class="ab lk" title="Fähigkeit ${ab.tier} (${abLabel}) ab Lv ${ab.level}">Lv${ab.level}</span>`,
+            `<span class="ab lk ${tierClass(ab.tier)}" title="Fähigkeit ${ab.tier} (${abLabel}) ab Lv ${ab.level}">Lv${ab.level}</span>`,
           );
         }
         abRow = `<div class="ab-slots">${slots.join('')}</div>`;
       }
       rows.push(
         `<div class="item ${affordable ? '' : 'locked'}" data-id="${cfg.id}">
-          <div class="nm">${cfg.name}${gildBadge}<span class="lv">Lv ${level}${ups > 0 ? ` · ×${abilityMult(cfg, ups)}` : ''}</span></div>
-          <div class="ds">${cfg.ds}</div>
+          <div class="crew-head">
+            ${portraitTile(
+              cfg.id,
+              'base',
+              `av-lg${mp.rank > 0 ? ` mr mr${mp.rank}` : ''}`,
+              mp.rank > 0 ? MASTERY_FRAME[mp.rank] : undefined,
+            )}
+            <div class="crew-id">
+              <div class="nm">${cfg.name}${gildBadge}<span class="lv">Lv ${level}${ups > 0 ? ` · ×${abilityMult(cfg, ups)}` : ''}</span></div>
+              <div class="ds">${cfg.ds}</div>
+              ${masteryLine(mp)}
+            </div>
+          </div>
           <div class="crew-foot">
             <span class="cost ${affordable ? '' : 'bad'}">${label} · ${fmt(cost)} BP</span>
             <span class="dps">${level > 0 ? `${fmt(out)} ${outLabel}` : '—'}</span>

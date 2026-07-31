@@ -2758,6 +2758,224 @@ body {
   }
 }
 
+/* ---- Avatare (IDEEN-GAMEPLAY 4a/4b) ----------------------------------------
+   Ein Portrait ist ein zwei Knoten großes `<svg><use/></svg>` auf das einmalige
+   `<symbol>`-Sprite (ui/avatars.ts). Die Tinte ERBT sich aus dem Umfeld
+   (Pergament-Tinte in der Karte, Gold-Tinte auf der Kachel), die Mitglieds-
+   Palette kommt als `--av-frame` in den Rahmen. */
+.av {
+  display: inline-flex;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 1px;
+  border: 2px solid var(--av-frame, var(--parch-line));
+  border-radius: 9px;
+  background: rgba(255, 252, 240, 0.62);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  /* Die Kachel steht IMMER auf Pergament (Crew-Card, Ahnen-Zeile) — die Tinte
+     kommt daher hier fest, statt sich vom hellen Body-Text zu erben. */
+  color: var(--parch-ink);
+}
+.av.av-lg {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+}
+.av-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* Klick-Sicherheit (Guardrail 4b + Ability-Kauf-Bugfix): kein Portrait-Knoten
+   liegt je im Delegations-Klickpfad — `closest('.ab.ready')`/`closest('.item')`
+   sieht immer die Kauf-Fläche selbst, nie die Grafik darauf. */
+.av,
+.av-svg,
+.ab-av,
+.ab-badge,
+.ab-check,
+.sc-av {
+  pointer-events: none;
+}
+/* Crew-Card: Portrait links, Name + Beschreibung daneben. */
+.crew-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+.crew-id {
+  flex: 1;
+  min-width: 0;
+}
+.crew-head .ds {
+  margin: 3px 0 0;
+}
+/* ---- Meisterschafts-Rang (IDEEN-GAMEPLAY 1a) --------------------------------
+   Der Rang malt den Rahmen ums Portrait: Kupfer → Silber → Gold → Regenbogen.
+   Die FARBE reist als `--av-frame` mit der Zeile mit (ui/crew.ts setzt sie
+   inline, der Rahmen-Selektor `.av` von 4b bleibt unverändert) — hier stehen nur
+   der zusätzliche Schein und der Legenden-Schimmer. Die Animation schlägt in der
+   Kaskade auch die Inline-Deklaration, deshalb kann `mr4` den Rahmen färben. */
+.av.mr {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 0 0 1px rgba(70, 44, 12, 0.35),
+    0 0 6px var(--av-frame);
+}
+.av.mr4 {
+  animation: mrshimmer 3.2s linear infinite;
+}
+@keyframes mrshimmer {
+  0% {
+    border-color: #ff6ab0;
+  }
+  25% {
+    border-color: #ffcf5e;
+  }
+  50% {
+    border-color: #6ee7a8;
+  }
+  75% {
+    border-color: #6ec3e3;
+  }
+  100% {
+    border-color: #ff6ab0;
+  }
+}
+/* Die Fortschritts-Zeile unter der Beschreibung („Meisterschaft: Silber ·
+   1.240/8.000"). Klein, in der Rang-Farbe, nie im Klickpfad. */
+.mr-line {
+  margin-top: 3px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  color: var(--parch-soft);
+  pointer-events: none;
+}
+.mr-line.mr1 {
+  color: #a4632c;
+}
+.mr-line.mr2 {
+  color: #6f7c88;
+}
+.mr-line.mr3 {
+  color: #96660c;
+}
+.mr-line.mr4 {
+  color: #8b3fd0;
+}
+
+/* Ahnen-Zeile: Portrait vor dem Namen, Level bleibt rechtsbündig. */
+.nm-who {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+/* ---- Fähigkeits-Kachel mit Portrait + Sorten-Badge + Tier-Rahmen (4b) ---- */
+.ab-slots {
+  flex-wrap: wrap;
+  /* 9 px statt 5: Sorten-Badge und Haken ragen über den Kachelrand hinaus und
+     dürfen der Nachbar-Kachel nicht ins Bild laufen. */
+  gap: 9px;
+  row-gap: 10px;
+}
+.ab {
+  position: relative;
+  width: 32px;
+  height: 32px;
+}
+.ab .ab-av {
+  width: 100%;
+  height: 100%;
+}
+.ab-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  background: var(--parch);
+}
+.ab .ab-badge svg {
+  width: 10px;
+  height: 10px;
+}
+.ab-check {
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #2e7d32;
+  color: #eafbe6;
+}
+.ab .ab-check svg {
+  width: 9px;
+  height: 9px;
+}
+/* Tier-Rahmen: Kupfer → Silber → Gold → Platin → Prisma (je zwei Stufen). Steht
+   NACH den Sorten-Tönungen, damit der Rahmen die Tiefe zeigt und die Füllung
+   weiter die Sorte. */
+.ab.tr1 {
+  border-color: #b07a4a;
+}
+.ab.tr2 {
+  border-color: #98a3ad;
+}
+.ab.tr3 {
+  border-color: var(--gold-base);
+}
+.ab.tr4 {
+  border-color: #7fd8c4;
+}
+.ab.tr5 {
+  border-color: #c79bf0;
+}
+/* Gekaufte Kachel: das Portrait bleibt lesbar (dunkles Grün auf hellem Grund),
+   der Haken oben rechts trägt weiter das „erledigt". */
+.ab.done {
+  color: #1f5c23;
+  background: rgba(126, 190, 90, 0.3);
+}
+
+/* ---- Gear-Card: der echte Render als Avatar (4b) ---- */
+.sc-head {
+  gap: 6px;
+}
+.sc-av {
+  width: 42px;
+  height: 53px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: #2b2a3d;
+}
+.sc-hmeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.skincard.active .sc-av {
+  border-color: #a8e831;
+}
+.skincard.locked .sc-av {
+  filter: grayscale(0.85) brightness(0.55);
+}
+
 /* ---- Bühnen-Bildleiste (Goal: Zonen als Insel-Thumbnails) ---- */
 .zonestrip {
   display: flex;
@@ -3603,4 +3821,1233 @@ body {
   .topui {
     width: min(340px, 42vw);
   }
+}
+
+/* ---- 3b: Crew-Umschulung — Knopf am Slot + Reforge-Dialog ---------------- */
+/* Der Umschul-Knopf sitzt UNTEN LINKS an der gekauften Kachel — die drei
+   anderen Ecken sind vergeben (Haken oben rechts, Sorten-Badge unten rechts). */
+.ab-rt {
+  position: absolute;
+  left: -6px;
+  bottom: -6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1.5px solid #6d5433;
+  border-radius: 50%;
+  background: var(--parch);
+  color: #6d5433;
+  cursor: pointer;
+  /* Der Klickpfad der Delegation greift den Knopf über `.closest('.ab-rt')` ab;
+     das SVG darin darf also nie selbst Ziel sein (sonst zeigte `closest` auf ein
+     Kind ohne `data-rt`). */
+  line-height: 0;
+}
+.ab-rt svg {
+  width: 11px;
+  height: 11px;
+  pointer-events: none;
+}
+/* Der Knopf ist optisch 16 px klein (mehr Platz hat die Kachel-Ecke nicht), seine
+   TREFFERFLÄCHE aber 28 px — unsichtbar aufgeblasen statt größer gemalt. Nach
+   links wächst sie nur in die 9-px-Lücke der Slot-Reihe und höchstens auf eine
+   bereits gekaufte (nicht klickbare) Nachbarkachel, nie auf den Kauf-Knopf:
+   der steht in der Reihe IMMER rechts von allen gekauften Kacheln. */
+.ab-rt::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+.ab-rt:active {
+  transform: translateY(1px);
+}
+.ab-rt:hover {
+  background: #fff3d4;
+  border-color: #3f2f16;
+  color: #3f2f16;
+}
+
+.dialog.rt {
+  max-width: 340px;
+  width: 88vw;
+  /* Im kurzen Querformat (740×380) ist der Dialog höher als das Fenster — dann
+     scrollt er IN SICH, statt oben und unten aus dem Bild zu laufen. */
+  max-height: 92vh;
+  overflow-y: auto;
+}
+/* Der Dialog blendet seine Knöpfe je Phase um (Vorschau ⇄ bezahltes Angebot).
+   `.hidden` ist im Projekt bewusst pro Element definiert, nicht global — hier
+   also die drei Knöpfe dieses Dialogs. */
+#rtRoll.hidden,
+#rtKeep.hidden,
+#rtClose.hidden {
+  display: none;
+}
+/* `.btn.ghost` ist für die dunkle HUD gebaut (helle Schrift auf Schwarz) — auf
+   dem Pergament des Dialogs wäre „Behalten" damit fast unlesbar, obwohl es eine
+   vollwertige Wahl ist. Also dieselbe Form, aber in Pergament-Tinte. */
+/* Die Statuszeile lebt hier auf Pergament, nicht auf der dunklen HUD — die
+   HUD-Grün-/Rot-Töne wären darauf kaum lesbar. */
+.dialog.rt .msg.ok {
+  color: #2e6b1f;
+}
+.dialog.rt .msg.bad {
+  color: #a32b1c;
+}
+.dialog.rt .msg {
+  color: var(--parch-soft);
+}
+.dialog.rt .btn.ghost {
+  background: rgba(90, 66, 30, 0.14);
+  color: #4a3a1c;
+  border-color: rgba(90, 66, 30, 0.38);
+  box-shadow: 0 3px 0 rgba(90, 66, 30, 0.28);
+}
+/* Das große Portrait ist die Szene: „an DIESEM Charakter wird geschmiedet." */
+.rt-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 10px;
+  text-align: left;
+}
+.av.av-xl {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  padding: 2px;
+}
+.rt-who {
+  min-width: 0;
+}
+.rt-name {
+  font-family: var(--display);
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--parch-ink);
+}
+.rt-slot {
+  font-size: 11.5px;
+  color: var(--parch-soft);
+}
+/* „Aktuell" und „Angebot" stehen als Überschrift ÜBER ihrer Karte, nicht daneben:
+   so fluchten beide Karten auf derselben Kante und die Sorte davor/danach lässt
+   sich direkt vergleichen. */
+.rt-now {
+  margin-bottom: 8px;
+  text-align: left;
+}
+.rt-k {
+  display: block;
+  margin-bottom: 4px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: var(--parch-soft);
+  text-transform: uppercase;
+}
+/* Die zwei Angebote stehen UNTEREINANDER, nicht nebeneinander: Sorten-Namen wie
+   „Ekstase-Ladung" brechen in einer halben Dialogbreite mitten im Wort, und die
+   Karten sollen exakt so breit lesen wie die „Aktuell"-Zeile darüber. */
+.rt-offers {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.rt-offers.hidden {
+  display: none;
+}
+.rt-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 2px solid var(--parch-line);
+  border-radius: 12px;
+  background: #fff8e6;
+  color: var(--parch-ink);
+  text-align: left;
+  font: inherit;
+}
+.rt-card.now {
+  cursor: default;
+  opacity: 0.85;
+}
+.rt-card.offer {
+  cursor: pointer;
+  box-shadow: 0 3px 0 rgba(20, 10, 2, 0.28);
+}
+.rt-card.offer:hover {
+  border-color: #3f2f16;
+}
+.rt-card.offer:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(20, 10, 2, 0.28);
+}
+.rt-glyph {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1.5px solid currentColor;
+  font-size: 14px;
+  line-height: 1;
+}
+.rt-ct {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.rt-ct b {
+  font-size: 12.5px;
+}
+.rt-eff {
+  font-size: 11px;
+  color: var(--parch-soft);
+}
+/* Sorten-Tönung der Karten — dieselben Hues wie die Kauf-Kacheln (v11). */
+.rt-card.k-gold {
+  color: #6b4a00;
+  background: linear-gradient(180deg, #fff3cf, #f7e2a8);
+}
+.rt-card.k-crit,
+.rt-card.k-critdmg {
+  color: #7a1f11;
+  background: linear-gradient(180deg, #ffe0d2, #f7c4a8);
+}
+.rt-card.k-boss {
+  color: #4a1a5e;
+  background: linear-gradient(180deg, #f1e2f7, #ddc2ec);
+}
+.rt-card.k-combo {
+  color: #1d5c2a;
+  background: linear-gradient(180deg, #e4f6d9, #c9ecb4);
+}
+.rt-card.k-beat {
+  color: #12475e;
+  background: linear-gradient(180deg, #dcf2fa, #b8e6f5);
+}
+.rt-card.k-ekstase {
+  color: #7a1148;
+  background: linear-gradient(180deg, #ffdcec, #ffc0dd);
+}
+.rt-card.k-idle {
+  color: #114a44;
+  background: linear-gradient(180deg, #d8f6ee, #b4ecdd);
+}
+
+/* Und auf sehr flachen Geräten schrumpft zuerst das, was nur schmückt: Portrait
+   und Abstände. Die Wahl selbst (zwei Karten + Knöpfe) bleibt unangetastet. */
+@media (max-height: 480px) {
+  .dialog.rt {
+    padding: 14px 18px;
+  }
+  .av.av-xl {
+    width: 52px;
+    height: 52px;
+    border-radius: 12px;
+  }
+  .rt-hero {
+    margin: 8px 0 6px;
+  }
+}
+
+/* ---- IDEEN-GAMEPLAY 2a: Die Legenden-Konstellation (Sternbild-Karte) ----
+   Der eine Ort im Spiel, der NICHT nach Pergament aussieht: drei Ausschnitte
+   Nachthimmel im 📋 Ziele-Tab. Alles ist Inline-SVG in der Stroke-Sprache der
+   übrigen Ikonen (keine Bild-Assets, keine neue Dependency) — Linien zwischen
+   den Sternen, vierzackige Blenden als Sterne, Gold für „steht", Kohle für
+   „fehlt noch". */
+.cs-head {
+  background: linear-gradient(180deg, #17132a 0%, #0d0a1c 100%);
+  border: 2px solid #3b2f63;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  box-shadow: inset 0 1px 0 rgba(180, 160, 255, 0.18);
+}
+.cs-bank {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cs-dust {
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 800;
+  color: #ffe08a;
+  text-shadow: 0 0 10px rgba(255, 210, 120, 0.45);
+}
+.cs-prog {
+  font-size: 11px;
+  font-weight: 700;
+  color: #c9bff0;
+  margin-top: 4px;
+}
+.cs-src {
+  margin-top: 5px;
+  line-height: 1.45;
+}
+.cs-src b {
+  color: #ffe08a;
+}
+.cs-maps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cs-card {
+  background: radial-gradient(120% 140% at 20% 0%, #1d1740 0%, #0b0918 70%);
+  border: 2px solid #342a57;
+  border-radius: 12px;
+  padding: 8px 10px 7px;
+  cursor: pointer;
+  transition: 0.14s;
+}
+.cs-card:hover {
+  border-color: #55458c;
+}
+.cs-card.sel {
+  border-color: var(--gold-base);
+  box-shadow: 0 0 0 1px rgba(255, 207, 94, 0.35);
+}
+.cs-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.cs-nm {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 800;
+  color: #efe6ff;
+}
+.cs-cnt {
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffcf5e;
+}
+/* Der Himmel selbst: fest 62 px hoch, damit drei Karten zusammen in die
+   Bottom-Sheet-Höhe des Telefons passen (X6: ~55 vh). */
+.cs-sky {
+  display: block;
+  width: 100%;
+  height: 62px;
+  margin: 4px 0 5px;
+  overflow: visible;
+}
+.cs-link {
+  stroke: #372c5e;
+  stroke-width: 0.7;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.cs-link.on {
+  stroke: rgba(255, 207, 94, 0.75);
+  stroke-width: 1.1;
+  filter: drop-shadow(0 0 2px rgba(255, 207, 94, 0.7));
+}
+.cs-star {
+  fill: #2c2350;
+  stroke: #4a3c7d;
+  stroke-width: 0.5;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.cs-star.on {
+  fill: var(--gold-hi);
+  stroke: #fff6dc;
+  filter: drop-shadow(0 0 3px rgba(255, 210, 120, 0.9));
+}
+.cs-star.big {
+  stroke-width: 0.8;
+}
+.cs-star.big.on {
+  fill: #fff3cf;
+  filter: drop-shadow(0 0 5px rgba(255, 225, 150, 1));
+}
+/* Der nächste Stern ist das EINZIGE, was man kaufen kann — er trägt deshalb den
+   Goldrand der gekauften, aber (noch) nicht deren Füllung, und pulsiert. */
+.cs-star.next {
+  fill: #6a5aa8;
+  stroke: var(--gold-base);
+  stroke-width: 0.9;
+  animation: csPulse 1.8s ease-in-out infinite;
+}
+@keyframes csPulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    filter: none;
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 3px rgba(255, 207, 94, 0.85));
+  }
+}
+.cs-card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.cs-ds {
+  flex: 1;
+  line-height: 1.35;
+}
+.cs-foot {
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.cs-foot.ok {
+  color: #a8e831;
+}
+.cs-foot.bad {
+  color: #8d7fb8;
+}
+.cs-foot.done {
+  color: #ffcf5e;
+}
+.cs-detail {
+  background: linear-gradient(180deg, #17132a 0%, #0d0a1c 100%);
+  border: 2px solid #3b2f63;
+  border-radius: 12px;
+  padding: 10px 12px 11px;
+  margin-top: 9px;
+}
+.cs-det-nm {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 800;
+  color: #ffe08a;
+}
+.cs-det-ds {
+  font-size: 12px;
+  color: #d6cdf0;
+  margin-top: 3px;
+  line-height: 1.4;
+}
+.cs-det-id {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ff9ecb;
+  margin-top: 4px;
+}
+.cs-det-next {
+  margin-top: 6px;
+  line-height: 1.4;
+}
+.cs-detail .btn.armed {
+  background: linear-gradient(180deg, #ffd9ec, #ff9ecb 60%, #f06ba6);
+  color: #4a0f2c;
+}
+/* Auf dem Telefon steht die Karte in einem 55-vh-Bottom-Sheet: der Himmel wird
+   flacher, damit alle drei Sternbilder plus Detail-Zeile ohne Scroll-Jagd
+   nebeneinander lesbar bleiben. */
+@media (max-width: 640px) {
+  .cs-sky {
+    height: 50px;
+  }
+  .cs-dust {
+    font-size: 18px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   IDEEN-GAMEPLAY 1b — Gebietsherrschaft: die vier Ruf-Leisten (Ruhm-Tab).
+   Die Leiste ist in ZEHN Segmente geteilt, weil die Ruf-Stufe die Zahl ist, die
+   zählt — zehn Kästchen kann man erfassen, ohne die Beschriftung zu lesen. Das
+   laufende Segment füllt sich anteilig. Die Leiste des Themes, auf dem man
+   gerade steht, trägt einen Rahmen (`.here`).
+--------------------------------------------------------------------------- */
+.tr-head {
+  line-height: 1.45;
+  margin-bottom: 9px;
+}
+.tr-row {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  padding: 9px 10px 8px;
+  margin-bottom: 8px;
+}
+.tr-row.here {
+  border-color: #a8e831;
+  box-shadow: 0 0 0 1px rgba(168, 232, 49, 0.25);
+  background: rgba(168, 232, 49, 0.05);
+}
+.tr-top {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.tr-ic {
+  font-size: 14px;
+}
+.tr-nm {
+  font-size: 12px;
+  font-weight: 800;
+  color: #e8e8ef;
+}
+.tr-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffd24d;
+}
+.tr-title.none {
+  color: #6d6d80;
+  font-weight: 400;
+}
+.tr-rank {
+  margin-left: auto;
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 800;
+  color: #e8e8ef;
+}
+.tr-rank i {
+  font-style: normal;
+  font-size: 10px;
+  color: #6d6d80;
+}
+.tr-bar {
+  display: flex;
+  gap: 3px;
+  margin: 7px 0 6px;
+}
+.tr-seg {
+  flex: 1;
+  height: 8px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.tr-seg i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #8b5cf6, #a8e831);
+  transition: width 0.2s ease-out;
+}
+.tr-row.t2 .tr-seg.on i {
+  background: linear-gradient(90deg, #9fb6d6, #e8f0ff);
+}
+.tr-row.t3 .tr-seg.on i {
+  background: linear-gradient(90deg, #e0a63a, #ffe08a);
+}
+.tr-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+.tr-bonus {
+  color: #6d6d80;
+}
+.tr-bonus.on {
+  color: #a8e831;
+  font-weight: 700;
+}
+.tr-max {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffd24d;
+}
+.tr-rep {
+  margin-top: 3px;
+}
+/* Auf dem Telefon steht der Ruhm-Tab im Bottom-Sheet: Bonus-Zeile und
+   Rest-Hinweis stapeln sich dort, statt in zwei Spalten zu quetschen. */
+@media (max-width: 640px) {
+  .tr-foot {
+    flex-direction: column;
+    gap: 2px;
+  }
+}
+
+/* ===========================================================================
+   IDEEN-GAMEPLAY 1c + 3a — Relikte & Skin-Schmiede
+   ---------------------------------------------------------------------------
+   EINE Qualitäts-Farbskala für beide Systeme (Grob → Makellos), weil beide aus
+   demselben Affix-Pool ziehen: Ein „makelloser Hüftschwung" muss auf dem
+   Relikt und in der Schmiede-Kachel gleich aussehen, sonst lernt man die Skala
+   zweimal. Die Töne steigen von grau über grün und blau nach gold — dieselbe
+   Ordnung, die Spieler aus jedem Loot-Spiel kennen.
+   ======================================================================== */
+:root {
+  --q0: #9aa0a6;
+  --q1: #63b06a;
+  --q2: #59a2d8;
+  --q3: #e2b13c;
+}
+
+/* --- Die Affix-Kachel (Relikt-Slots, Sammlung) --------------------------- */
+.af {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px 3px 5px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  line-height: 1.25;
+  max-width: 100%;
+}
+.af + .af {
+  margin-top: 4px;
+}
+.af-g {
+  font-style: normal;
+  font-size: 13px;
+  flex: none;
+}
+.af-n {
+  font-weight: 800;
+  white-space: nowrap;
+}
+.af-v {
+  color: rgba(255, 255, 255, 0.72);
+  white-space: nowrap;
+}
+/* Die kompakte Variante der drei Trage-Slots: nur Glyph + Wert, und beides
+   darf notfalls kürzen statt die Nachbarkarte zu überschreiben. */
+.af.mini {
+  padding: 2px 5px;
+  gap: 3px;
+  min-width: 0;
+}
+.af.mini .af-v {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.af.q0 {
+  border-color: var(--q0);
+}
+.af.q1 {
+  border-color: var(--q1);
+}
+.af.q2 {
+  border-color: var(--q2);
+}
+.af.q3 {
+  border-color: var(--q3);
+  background: rgba(226, 177, 60, 0.12);
+}
+
+/* --- Die drei Trage-Slots ------------------------------------------------ */
+.rl-head {
+  font-size: 11px;
+  line-height: 1.45;
+  margin-bottom: 10px;
+}
+.rl-slots {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.rl-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+  padding: 7px 6px 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  min-width: 0;
+}
+.rl-slot.empty {
+  border-style: dashed;
+  opacity: 0.6;
+  align-items: center;
+  justify-content: center;
+  min-height: 62px;
+}
+.rl-slot.q1 {
+  border-color: var(--q1);
+}
+.rl-slot.q2 {
+  border-color: var(--q2);
+}
+.rl-slot.q3 {
+  border-color: var(--q3);
+}
+.rl-sn {
+  font-size: 10px;
+  font-weight: 800;
+  opacity: 0.65;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.rl-none {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.rl-zone {
+  font-size: 10px;
+  opacity: 0.55;
+}
+/* Das × ist optisch 16 px, hat aber über das ::after-Inset eine 30-px-Trefferfläche
+   (dieselbe Lehre wie beim Umschul-Werkzeug in 3b) — und sitzt in der einen Ecke,
+   die die Affix-Kacheln nicht brauchen. */
+.rl-x {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+  line-height: 15px;
+  cursor: pointer;
+}
+.rl-x::after {
+  content: '';
+  position: absolute;
+  inset: -7px;
+}
+.rl-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+.rl-best {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+/* --- Die Sammlung -------------------------------------------------------- */
+.rl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rl-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 7px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+.rl-row.worn {
+  border-color: rgba(120, 220, 140, 0.5);
+  background: rgba(120, 220, 140, 0.07);
+}
+.rl-slot .rl-aff {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+  min-width: 0;
+  padding-right: 14px;
+}
+.rl-row .rl-aff {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.rl-meta {
+  font-size: 10px;
+  flex: none;
+}
+.rl-acts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.rl-sb {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.rl-sb.on {
+  border-color: rgba(120, 220, 140, 0.8);
+  background: rgba(120, 220, 140, 0.22);
+}
+.rl-melt {
+  padding: 4px 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 150, 80, 0.35);
+  background: rgba(255, 150, 80, 0.12);
+  color: #ffc79a;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* --- Die Schmiede-Reihe auf der Skin-Karte ------------------------------- */
+.gb-ember {
+  color: #ffb27a;
+}
+.gb-swap {
+  padding: 2px 7px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 150, 80, 0.4);
+  background: rgba(255, 150, 80, 0.14);
+  color: #ffc79a;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.gb-swap.off {
+  opacity: 0.4;
+  cursor: default;
+}
+.sc-forge {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 6px 0 4px;
+}
+.sc-fh {
+  align-self: center;
+  font-size: 10px;
+  flex: none;
+}
+.fs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.fs.off {
+  border-style: solid;
+  opacity: 0.45;
+  cursor: default;
+  justify-content: center;
+}
+.fs.q0,
+.fs.q1,
+.fs.q2,
+.fs.q3 {
+  border-style: solid;
+}
+.fs.q0 {
+  border-color: var(--q0);
+}
+.fs.q1 {
+  border-color: var(--q1);
+}
+.fs.q2 {
+  border-color: var(--q2);
+}
+.fs.q3 {
+  border-color: var(--q3);
+  background: rgba(226, 177, 60, 0.12);
+}
+.fs-g {
+  font-style: normal;
+  font-size: 12px;
+  flex: none;
+}
+.fs-t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fs-q {
+  margin-left: auto;
+  flex: none;
+  opacity: 0.8;
+}
+
+/* --- Der Schmiede-Dialog ------------------------------------------------- */
+.dialog.fg {
+  max-width: 340px;
+  width: 88vw;
+  /* Wie beim Umschul-Dialog: im kurzen Querformat (740×380) scrollt er IN SICH,
+     statt oben und unten aus dem Bild zu laufen. */
+  max-height: 92vh;
+  overflow-y: auto;
+}
+/* Der Dialog blendet seine Knöpfe je Phase um — `.hidden` ist im Projekt
+   bewusst PRO ELEMENT definiert, nicht global, sonst gewinnt die spätere
+   gleich-spezifische Regel. */
+#fgRoll.hidden,
+#fgTake.hidden,
+#fgKeep.hidden,
+#fgClose.hidden,
+#fgLock.hidden,
+#fgOffer.hidden {
+  display: none;
+}
+.dialog.fg .msg.ok {
+  color: #2e6b1f;
+}
+.dialog.fg .msg.bad {
+  color: #a32b1c;
+}
+.dialog.fg .msg {
+  color: var(--parch-soft);
+}
+.dialog.fg .btn.ghost {
+  background: rgba(90, 66, 30, 0.14);
+  color: #4a3a1c;
+  border-color: rgba(90, 66, 30, 0.38);
+  box-shadow: 0 3px 0 rgba(90, 66, 30, 0.28);
+}
+.fg-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0 12px;
+}
+.fg-av {
+  width: 48px;
+  height: 60px;
+  border-radius: 8px;
+  border: 2px solid var(--parch-line);
+  object-fit: cover;
+  flex: none;
+}
+.fg-who {
+  text-align: left;
+  min-width: 0;
+}
+.fg-name {
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--parch-ink);
+}
+.fg-slot {
+  font-size: 11px;
+  color: var(--parch-soft);
+}
+.fg-k {
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--parch-soft);
+  margin-bottom: 4px;
+  text-align: left;
+}
+.fg-now,
+.fg-offer {
+  margin-bottom: 10px;
+}
+.fg-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 2px solid var(--parch-line);
+  background: rgba(255, 255, 255, 0.4);
+  text-align: left;
+}
+.fg-card.none {
+  border-style: dashed;
+  opacity: 0.72;
+}
+.fg-card.q0 {
+  border-color: #8b8f93;
+}
+.fg-card.q1 {
+  border-color: #3f8a48;
+}
+.fg-card.q2 {
+  border-color: #2f7bb5;
+}
+.fg-card.q3 {
+  border-color: #b8860b;
+  background: rgba(226, 177, 60, 0.22);
+}
+.fg-g {
+  font-size: 22px;
+  flex: none;
+}
+.fg-ct {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  color: var(--parch-ink);
+}
+.fg-ct b {
+  font-size: 14px;
+}
+.fg-eff {
+  font-size: 12px;
+  color: var(--parch-soft);
+}
+.fg-q {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--parch-soft);
+}
+/* Der Lock ist ein SCHALTER, kein Knopf: Er zeigt seinen Zustand (offen/zu),
+   statt eine Aktion zu versprechen. */
+.fg-lock {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 2px dashed rgba(90, 66, 30, 0.4);
+  background: rgba(90, 66, 30, 0.08);
+  color: var(--parch-soft);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.fg-lock.on {
+  border-style: solid;
+  border-color: #b8860b;
+  background: rgba(226, 177, 60, 0.25);
+  color: var(--parch-ink);
+}
+.fg-lock:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.fg-pity {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--parch-soft);
+  margin-bottom: 8px;
+  text-align: left;
+}
+
+/* ---------------------------------------------------------------------------
+   IDEEN-GAMEPLAY 2b — Skin-Meisterschafts-Pfad an der Skin-Karte
+   Fünf Knoten-Punkte, ein Balken, eine Klartext-Zeile. Die Reihe ist bewusst so
+   flach wie die Schmiede-Reihe darüber (dieselbe 4-px-Rhythmik), damit die
+   Karte durch den Zusatz nicht in eine zweite Bildschirmhöhe rutscht.
+   --------------------------------------------------------------------------- */
+.sc-path {
+  margin: 4px 0 6px;
+}
+.sp-dots {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+.sp-dot {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 15px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 9px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.42);
+  line-height: 1;
+}
+.sp-dot.on {
+  border-color: rgba(168, 232, 49, 0.6);
+  background: rgba(168, 232, 49, 0.2);
+  color: #dcffa6;
+}
+.sp-dot.sig.on {
+  border-color: rgba(255, 210, 77, 0.75);
+  background: rgba(255, 210, 77, 0.24);
+  color: #fff3cc;
+}
+.sp-bar {
+  display: block;
+  height: 3px;
+  margin-top: 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.sp-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #a8e831, #58c9f3);
+}
+.sp-bar.full > i {
+  background: linear-gradient(90deg, #ffd24d, #ff9f1a);
+}
+.sp-t {
+  margin-top: 3px;
+  font-size: 9.5px;
+  line-height: 1.25;
+}
+
+/* ---------------------------------------------------------------------------
+   IDEEN-GAMEPLAY 3c — Erben-Dialog (Portraits aus dem 4a-Baukasten)
+   --------------------------------------------------------------------------- */
+.dialog.heir {
+  max-width: 400px;
+  width: 92vw;
+  /* Wie beim Umschul-Dialog: im kurzen Querformat (740×380) scrollt der Dialog
+     IN SICH, statt oben und unten aus dem Bild zu laufen. */
+  max-height: 92vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.heir-sub {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--parch-soft);
+  margin: 8px 0 10px;
+  text-align: left;
+}
+.heir-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.heir-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px;
+  border-radius: 10px;
+  border: 2px solid rgba(90, 66, 30, 0.28);
+  background: rgba(255, 255, 255, 0.4);
+  color: var(--parch-ink);
+  font: inherit;
+  cursor: pointer;
+  text-align: center;
+}
+.heir-card:hover {
+  border-color: rgba(90, 66, 30, 0.5);
+}
+.heir-card.on {
+  border-color: #a8e831;
+  background: rgba(168, 232, 49, 0.3);
+  box-shadow: 0 0 0 2px rgba(168, 232, 49, 0.35);
+}
+.heir-card .heir-x {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  border: 2px dashed rgba(90, 66, 30, 0.4);
+  font-size: 20px;
+  color: var(--parch-soft);
+}
+.heir-nm {
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+.heir-xp {
+  font-size: 9px;
+  color: var(--parch-soft);
+}
+.heir-gain {
+  font-size: 9px;
+  font-weight: 800;
+  color: #2e6b1f;
+}
+.heir-gain.dim {
+  color: var(--parch-soft);
+  font-weight: 600;
+}
+.dialog.heir .msg {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--parch-soft);
+  text-align: left;
+  margin-bottom: 10px;
+}
+.dialog.heir .btn.ghost {
+  background: rgba(90, 66, 30, 0.14);
+  color: #4a3a1c;
+}
+
+/* ---------------------------------------------------------------------------
+   IDEEN-GAMEPLAY 1d — Legenden-Level-Zähler + 3c-Erben-Zeile im 🔮 Tab
+   --------------------------------------------------------------------------- */
+.tc-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.tl-n {
+  flex: none;
+  min-width: 54px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 210, 77, 0.55);
+  background: rgba(255, 210, 77, 0.16);
+  color: #ffe9a8;
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 800;
+  text-align: center;
+  line-height: 1.1;
+}
+.tl-t {
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.tc-heir {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.tc-heir.none .th-t {
+  color: rgba(255, 255, 255, 0.62);
+}
+.th-t {
+  font-size: 11.5px;
+  line-height: 1.35;
 }

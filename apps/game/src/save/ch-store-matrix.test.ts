@@ -1,7 +1,7 @@
 /**
  * X7 — Save-Migrations-Matrix (ROADMAP-V2, „Save-Hygiene vor neuen Feldern").
  *
- * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v11). Pro Version
+ * Ein Test-Tisch über JEDEN historischen CH-Schema-Stand (v1 … v18). Pro Version
  * zwei Inline-Fixtures (kein Datei-IO):
  *
  *   1. ein REALISTISCHER Save der jeweiligen Ära, der die volle Ladekette
@@ -30,8 +30,10 @@ import {
   createPeach,
   createStats,
 } from '../game/ch-state';
+import { createForge } from '../game/forge';
 import { createGear } from '../game/gear';
 import { createHeaven } from '../game/heaven';
+import { dustEntitlement } from '../game/constellation';
 import { createMeta } from '../game/quests';
 import { createTranscend } from '../game/transcend';
 import { CH_SAVE_KEY, CH_SCHEMA, type ChStorage, deserializeCh, loadCh, saveCh } from './ch-store';
@@ -47,7 +49,7 @@ function memStorage(): ChStorage & { map: Map<string, string> } {
 }
 
 /** Every historical CH schema version, oldest first — the spine of the matrix. */
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18] as const;
 type SchemaVersion = (typeof VERSIONS)[number];
 
 const LAST_SEEN = 1_752_800_000_000;
@@ -164,6 +166,32 @@ const TRANSCEND = { te: 4, teLifetime: 6, transcendences: 2, mythos: { diamantBo
 const CREW_UP = { boss: 2, hype: 1 };
 
 /**
+ * v13 (1a): Crew-Meisterschaft — Lebenszeit-Level je Mitglied. Bewusst ÜBER dem
+ * aktuellen `crew`-Stand (boss 80 ⇒ 900 je gekaufte Level): der Save hat schon
+ * aszendiert, die Leiter also mehrfach hochgekauft. Genau das kann eine
+ * Migration aus einem Alt-Save NICHT wissen — sie startet deshalb beim
+ * aktuellen Stand (`MASTERY_PRE_V13`).
+ */
+const CREW_MASTERY = { boss: 900, hype: 460, dj: 120, legend: 6 };
+/**
+ * Was ein Save VOR v13 nach der Migration in der Meisterschaft stehen haben
+ * muss: seinen AKTUELLEN Crew-Stand. „Die Level, die du JETZT hältst, hast du
+ * nachweislich einmal gekauft" — großzügig, aber ehrlich, und die einzige
+ * Untergrenze, die aus einem Alt-Save überhaupt ableitbar ist.
+ */
+const MASTERY_PRE_V13 = { ...CORE.crew };
+
+/**
+ * v14 (3b): Crew-Umschulung. `boss` folgt Muster 0 (P S P S), Stufe 2 ist also
+ * sein erster Spezial-Slot — hier auf `idle` gerollt (Stock wäre `critdmg`).
+ * `hype` folgt Muster 1 (P P S S), Stufe 3 ist sein erster Spezial-Slot — auf
+ * `gold` gerollt (Stock wäre `combo`). Dazu ein Eskalator-Stand: An `boss` wurde
+ * in DIESER Aszension schon zweimal gerollt, der nächste Roll kostet also ×4.
+ */
+const CREW_RETRAIN = { boss: { '2': 'idle' }, hype: { '3': 'gold' } };
+const RETRAIN_ROLLS = { boss: 2 };
+
+/**
  * v11 (P1): Bühnen-Sterne. Bühne 5 voll (Boss-Gate: geclert + ohne Timeout +
  * Combo), Bühne 10 halb, Bühne 7 als Nicht-Boss-Bühne mit ihren zwei möglichen
  * Sternen — Summe 3 + 2 + 2 = 7, also noch kein Meilenstein (15) fällig.
@@ -172,6 +200,123 @@ const STAGE_STARS = { '5': 7, '7': 5, '10': 3 };
 const STARS_AWARDED = 0;
 /** Run-Zustand: an Bühne 10 lief eben die Uhr ab (der Timeout-Stern bleibt zu). */
 const BOSS_FOUL_ZONE = 10;
+
+/**
+ * v15 (2a): Legenden-Konstellation. „Der Aufbruch" steht bis Stern 3 (2+3+5 =
+ * 10 💫), „Das Tempo" hat den ersten (2 💫) — zusammen 12 💫 verbaut, bei 96 💫
+ * je verdient. Bewusst ÜBER dem, was die drei Quellen dieses Fixtures gerade
+ * hergeben: `earned` ist ein Lebenszeit-Highwater und darf nie unter den
+ * Anspruch von IRGENDWANN fallen (der Save hat vor der Himmelfahrt tiefer
+ * gestanden, als `lifetimeMaxZone` heute behauptet).
+ */
+const CONSTELLATION = { earned: 96, spent: 12, nodes: { aufbruch: 3, tempo: 1 } };
+
+/**
+ * v16 (1b): Gebietsherrschaft. Vier Ruf-Zähler in ganz verschiedenen Ständen —
+ * Club knapp über Stufe 5 (2 700 ≥ 2 624), Synth auf Stufe 3, Beach ohne Rang
+ * (unter den 250 der ersten Stufe), Space gar nicht erst im Save (fehlt = 0).
+ * Genau diese Streuung ist der Punkt der Leiste: Wo man farmt, zählt.
+ */
+const TERRITORY = { club: 2_700, synth: 900, beach: 120 };
+
+/**
+ * v17 (1c): Relikte. Drei gefundene Stücke in verschiedenen Formen — eines mit
+ * zwei Affixen, zwei mit einem —, davon zwei getragen und eines nur in der
+ * Sammlung. Der Gate-Highwater steht auf 55: Bühne 55 hat schon gewürfelt, das
+ * nächste berechtigte Gate ist 60. Pity 2 = zwei Gates ohne Drop seit dem
+ * letzten Relikt.
+ */
+const RELICS = {
+  owned: [
+    { id: 1, zone: 50, affixes: [{ id: 'click', q: 2 }] },
+    {
+      id: 2,
+      zone: 55,
+      affixes: [
+        { id: 'boss', q: 3 },
+        { id: 'gold', q: 0 },
+      ],
+    },
+    { id: 3, zone: 55, affixes: [{ id: 'luck', q: 1 }] },
+  ],
+  slots: [2, 0, 1],
+  nextId: 4,
+  pity: 2,
+  deepestGate: 55,
+};
+
+/**
+ * v17 (3a): die Skin-Schmiede. Der getragene Disco-King hat Level 12, also
+ * genau EINEN offenen Slot — er trägt sein skin-exklusives „Sequin-Crit". Der
+ * zweite Slot ist leer, hat aber schon sieben trockene Rolls gesehen (die
+ * Mindest-Qualität steht dort also bereits auf „Solide"). Dazu ein zweiter Skin
+ * mit einem geschmiedeten Slot, den sein Level (4) gerade NICHT freigeschaltet
+ * hat — er bleibt im Save stehen und faltet trotzdem ×1.
+ */
+const FORGE = {
+  ember: 140,
+  slots: {
+    disco: [
+      { affix: { id: 'sequin', q: 3 }, dry: 0 },
+      { affix: null, dry: 7 },
+      { affix: null, dry: 0 },
+    ],
+    classic: [
+      { affix: { id: 'click', q: 1 }, dry: 3 },
+      { affix: null, dry: 0 },
+      { affix: null, dry: 0 },
+    ],
+  },
+};
+
+/**
+ * v18 (2b): Skin-Meisterschafts-Pfade. Drei Skins in ganz verschiedenen
+ * Ständen — der getragene Disco-King mit VOLLEM Pfad (720 000 Pfad-Sekunden
+ * ⇒ alle fünf Knoten inklusive Signature-Move), der Klassiker mitten in der
+ * Leiter (Knoten 2: 30 000 Trage-Sekunden + 40 Bosse = 37 200) und Robo mit
+ * reiner Tragezeit unter Knoten 1. Genau diese Streuung ist der Punkt: Der Pfad
+ * misst TREUE, und Treue verteilt sich nicht gleichmäßig.
+ */
+const SKIN_PATH = {
+  disco: { s: 600_000, b: 700 },
+  classic: { s: 30_000, b: 40 },
+  robo: { s: 1_500, b: 0 },
+};
+
+/** v18 (3c): Der Erbe dieser Ära — DJ Wumms trägt seine Ränge doppelt. */
+const HEIR = 'dj';
+
+/** v18 (1d): Legenden-Level — 12 Himmelfahrten nach der ersten Transzendenz. */
+const LEGEND = 12;
+
+/**
+ * Was ein Save VOR v17 nach der Migration in den Relikten stehen haben muss:
+ * eine LEERE Sammlung, aber einen GESETZTEN Gate-Highwater. Die Sammlung ist
+ * leer, weil gefallene Relikte, die nie gefallen sind, erfunden wären; der
+ * Highwater ist gesetzt, weil dieses Fixture Bühne 55 erreicht hat und damit
+ * jedes Gate bis einschließlich 50 nachweislich geclert hat — ohne die Saat
+ * bekäme es genau diese Gates beim nächsten Rückweg ein zweites Mal ausgezahlt.
+ */
+const RELICS_PRE_V17 = { owned: [], slots: [0, 0, 0], nextId: 1, pity: 0, deepestGate: 50 };
+/**
+ * Was ein Save VOR v15 nach der Migration im Konto stehen haben muss: den
+ * RÜCKWIRKEND gerechneten Anspruch aus genau diesem Fixture. Er hängt an der
+ * ÄRA, denn ältere Saves haben schlicht weniger Quellen: Erfolge gibt es erst
+ * ab v8, Bühnen-Sterne erst ab v11 — die Boss-Gates dagegen stecken schon im
+ * v1-Kern (`lifetimeMaxZone` 55 ⇒ die Gates 25…50 sind gefallen, 6 × 2 = 12 💫).
+ * Der Baum selbst startet in jeder Ära leer.
+ */
+function constellationPreV15(v: SchemaVersion): { earned: number; spent: number; nodes: object } {
+  return {
+    earned: dustEntitlement({
+      stars: v >= 11 ? 7 : 0, // STAGE_STARS: 3 + 2 + 2, noch kein 15er-Meilenstein
+      achievements: v >= 8 ? ACHIEVEMENTS.length : 0,
+      deepestZone: CORE.lifetimeMaxZone,
+    }),
+    spent: 0,
+    nodes: {},
+  };
+}
 
 /**
  * Der eine Spielstand, ausgedrückt im Schema-Stand `v`: jede Slice erscheint
@@ -232,6 +377,34 @@ function saveAt(v: SchemaVersion): Record<string, unknown> {
     raw.stageStars = { ...STAGE_STARS };
     raw.starsAwarded = STARS_AWARDED;
     raw.bossFoulZone = BOSS_FOUL_ZONE;
+  }
+  if (v >= 13) raw.crewMastery = { ...CREW_MASTERY };
+  if (v >= 15) raw.constellation = { ...CONSTELLATION, nodes: { ...CONSTELLATION.nodes } };
+  if (v >= 14) {
+    raw.crewRetrain = { boss: { ...CREW_RETRAIN.boss }, hype: { ...CREW_RETRAIN.hype } };
+    raw.retrainRolls = { ...RETRAIN_ROLLS };
+  }
+  if (v >= 16) raw.territory = { ...TERRITORY };
+  if (v >= 17) {
+    raw.relics = {
+      ...RELICS,
+      slots: [...RELICS.slots],
+      owned: RELICS.owned.map((r) => ({ ...r, affixes: r.affixes.map((a) => ({ ...a })) })),
+    };
+    raw.forge = {
+      ...FORGE,
+      slots: Object.fromEntries(
+        Object.entries(FORGE.slots).map(([k, row]) => [
+          k,
+          row.map((s) => ({ affix: s.affix ? { ...s.affix } : null, dry: s.dry })),
+        ]),
+      ),
+    };
+  }
+  if (v >= 18) {
+    raw.skinPath = Object.fromEntries(Object.entries(SKIN_PATH).map(([k, e]) => [k, { ...e }]));
+    raw.heir = HEIR;
+    raw.legend = LEGEND;
   }
   return raw;
 }
@@ -301,6 +474,48 @@ function expectSlices(s: ChState, v: SchemaVersion): void {
   expect(s.stageStars).toEqual(v >= 11 ? STAGE_STARS : {});
   expect(s.starsAwarded).toBe(v >= 11 ? STARS_AWARDED : 0);
   expect(s.bossFoulZone).toBe(v >= 11 ? BOSS_FOUL_ZONE : 0);
+  // v13 — Crew-Meisterschaft (1a). Ältere Ären starten NICHT bei 0, sondern beim
+  // gehaltenen Crew-Stand: der einzige Einsatz-XP-Betrag, den ein Alt-Save
+  // beweisen kann (siehe `migrateChV12toV13`).
+  expect(s.crewMastery).toEqual(v >= 13 ? CREW_MASTERY : MASTERY_PRE_V13);
+  // v14 — Crew-Umschulung (3b). Ältere Ären starten LEER: Wer nie Splitter für
+  // eine Umschulung bezahlt hat, trägt überall die Stock-Sorte — genau das sagt
+  // die leere Map, es geht also nichts verloren.
+  expect(s.crewRetrain).toEqual(v >= 14 ? CREW_RETRAIN : {});
+  expect(s.retrainRolls).toEqual(v >= 14 ? RETRAIN_ROLLS : {});
+  // v15 — Legenden-Konstellation (2a). Ältere Ären starten mit LEEREM Baum, aber
+  // gefülltem Konto: Sternenstaub ist der Lohn für Dinge, die der Save schon
+  // BEWEIST (Erfolge stehen als Liste drin, Sterne sind summierbar, gefallene
+  // Boss-Gates stecken in der Bestzone) — anders als bei den Bühnen-Sternen
+  // selbst ist die Rückwirkung hier also nicht geraten, sondern gerechnet.
+  expect(s.constellation).toEqual(v >= 15 ? CONSTELLATION : constellationPreV15(v));
+  // v16 — Gebietsherrschaft (1b). Ältere Ären starten bei NULL, und zwar bewusst:
+  // Ruf entsteht nur aus Kills PRO THEME, und diese Zählung hat das Spiel nie
+  // geführt — weder `stats.bossKills` (kennt kein Theme) noch `lifetimeMaxZone`
+  // (kennt keine Wiederholungen) trügen sie. Anders als beim Sternenstaub (v15)
+  // gibt es hier also nichts zu rechnen; jede Herleitung wäre eine Erfindung.
+  expect(s.territory).toEqual(v >= 16 ? TERRITORY : {});
+  // v17 — Relikte (1c) + Schmiede (3a). Zwei GEGENSÄTZLICHE Entscheidungen im
+  // selben Bump: Die Schmiede startet komplett leer (Glut und gerollte Affixe
+  // lassen sich aus nichts herleiten — eine erfundene Qualität hätte niemand
+  // gewürfelt), der Relikt-Gate-Highwater dagegen wird ZWINGEND gesät. Ohne ihn
+  // bekäme ein Alt-Save jedes längst geclerte Gate ab Bühne 50 noch einmal
+  // ausgezahlt; die Zahl ist gerechnet (`clearedGateFor`), nicht geraten.
+  expect(s.relics).toEqual(v >= 17 ? RELICS : RELICS_PRE_V17);
+  expect(s.forge).toEqual(v >= 17 ? FORGE : createForge());
+  // v18 — Skin-Pfade (2b) + Erbe (3c) + Legenden-Level (1d). ALLE DREI starten
+  // in älteren Ären leer, und jedes aus seinem eigenen Grund:
+  //  · Tragezeit hat das Spiel nie gemessen — `stats.playTimeS` kennt die
+  //    Spielzeit, aber nicht, WELCHER Skin dabei anlag.
+  //  · Ein Erbe entsteht nur durch eine WAHL in der Zeremonie; ihn zu raten
+  //    hieße, dem Spieler genau die Entscheidung abzunehmen, um die es geht.
+  //  · Für das Legenden-Level bräuchte es einen Lebenszeit-Zähler der
+  //    Himmelfahrten. Der einzige Kandidat (`heaven.ascensions2`) wird von
+  //    `transcendState` auf 0 zurückgesetzt, zählt also nur die laufende Ära —
+  //    aus ihm zu säen wäre eine untere Schranke mit dem Anschein einer Zahl.
+  expect(s.skinPath).toEqual(v >= 18 ? SKIN_PATH : {});
+  expect(s.heir).toBe(v >= 18 ? HEIR : '');
+  expect(s.legend).toBe(v >= 18 ? LEGEND : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -522,6 +737,46 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
       expect(s.bossFoulZone).toBe(0);
     },
   },
+  13: {
+    what: 'Meisterschaft mit Müll-Ids, negativen und gebrochenen Lebenszeit-Ständen',
+    damage: (raw) => {
+      raw.crewMastery = {
+        boss: 900.7, // krumm ⇒ abgerundet, echter Fortschritt bleibt
+        hype: -40, // negativ ⇒ raus (ein Highwater ist nie negativ)
+        dj: 'viele', // typfalsch ⇒ raus
+        legend: Number.NaN, // JSON ⇒ null ⇒ raus
+        junk: 5_000, // kein Crew-Mitglied ⇒ raus
+      };
+    },
+    check: (s) => {
+      expect(s.crewMastery).toEqual({ boss: 900 });
+      // Bewusst NICHT auf den Crew-Stand gehoben: die Reparatur repariert, sie
+      // erfindet nicht (hype hält Lv 30, seine kaputte XP-Zahl bleibt weg).
+      expect(s.crew).toEqual(CORE.crew);
+    },
+  },
+  14: {
+    what: 'Umschul-Map auf einer POWER-Stufe, mit Müll-Sorten, -Ids und -Schlüsseln',
+    damage: (raw) => {
+      raw.crewRetrain = {
+        boss: {
+          '1': 'gold', // Stufe 1 ist im Muster 0 eine POWER-Stufe ⇒ raus
+          '2': 'idle', // echter Spezial-Slot ⇒ bleibt
+          '4': 'power', // `power` ist keine Spezial-Sorte ⇒ raus
+          '04': 'gold', // Nicht-Normalform ⇒ raus (zwei Schlüssel, ein Slot)
+          x: 'gold', // keine Stufen-Nummer ⇒ raus
+        },
+        hype: { '3': 'quatsch' }, // unbekannte Sorte ⇒ raus, Mitglied fällt ganz weg
+        junk: { '2': 'gold' }, // kein Crew-Mitglied ⇒ raus
+      };
+      raw.retrainRolls = { boss: 2.8, hype: -1, junk: 4 };
+    },
+    check: (s) => {
+      // Der Rhythmus ist unantastbar: Nur echte Spezial-Slots überleben.
+      expect(s.crewRetrain).toEqual({ boss: { '2': 'idle' } });
+      expect(s.retrainRolls).toEqual({ boss: 2 });
+    },
+  },
   12: {
     what: 'Wochen-Paar mit krummem Index und negativer Bestzone (A5)',
     damage: (raw) => {
@@ -537,6 +792,145 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
       // Der restliche Meta-Slice bleibt unangetastet — der Schaden ist lokal.
       expect(s.meta.streak).toBe(META.streak);
       expect(s.meta.streakProtectWeek).toBe(META.streakProtectWeek);
+    },
+  },
+  15: {
+    what: 'Konstellation mit übervollen/negativen Ketten, Müll-Linie und NaN-Konto',
+    damage: (raw) => {
+      raw.constellation = {
+        earned: Number.NaN, // JSON ⇒ null ⇒ 0, wird aus `spent` wieder gehoben
+        spent: 0, // gelogen: die Knoten unten kosten 70 💫
+        nodes: { aufbruch: 99, tempo: -2, junk: 4, ausdauer: 'x' },
+      };
+    },
+    check: (s) => {
+      // Die Kette wird auf ihre acht Sterne gedeckelt, negative/typfalsche
+      // Linien fallen weg, eine unbekannte Linien-Id existiert nicht.
+      expect(s.constellation.nodes).toEqual({ aufbruch: 8 });
+      // `spent` wird NEU GERECHNET (2+3+5+7+9+12+14+18 = 70) — der gelogene
+      // Nullwert kauft sich keinen Rabatt …
+      expect(s.constellation.spent).toBe(70);
+      // … und `earned` wird nach OBEN korrigiert, statt echte Knoten zu nuken.
+      expect(s.constellation.earned).toBe(70);
+    },
+  },
+  16: {
+    what: 'Ruf-Tafel mit erfundenem Gebiet, negativen, krummen und typfalschen Zählern',
+    damage: (raw) => {
+      raw.territory = {
+        club: 2_700.9, // krumm ⇒ abgerundet, echter Ruf bleibt
+        synth: -900, // negativ ⇒ raus (ein Highwater ist nie negativ)
+        beach: 'viel', // typfalsch ⇒ raus
+        space: Number.NaN, // JSON ⇒ null ⇒ raus
+        vegas: 99_999, // KEIN Bühnen-Theme ⇒ raus (es gibt keine Vegas-Bühne)
+      };
+    },
+    check: (s) => {
+      expect(s.territory).toEqual({ club: 2_700 });
+      // Bewusst NICHT gegen den Spielstand geklemmt: Ein Ruf-Zähler ist ein
+      // Highwater über ALLE Touren, während `zone`/`lifetimeMaxZone` bei
+      // Himmelfahrt und Transzendenz auf 1 zurückfallen — es gibt keine Zahl im
+      // Save, gegen die ein Vergleich stimmen würde.
+      expect(s.lifetimeMaxZone).toBe(CORE.lifetimeMaxZone);
+    },
+  },
+  17: {
+    what: 'Relikte mit Doppel-Ids/Müll-Affixen und eine Schmiede mit Phantom-Skin',
+    damage: (raw) => {
+      raw.relics = {
+        owned: [
+          // gültig, aber mit einem Müll-Affix und einer übervollen Qualität
+          {
+            id: 1,
+            zone: 50,
+            affixes: [
+              { id: 'click', q: 99 },
+              { id: 'nope', q: 1 },
+            ],
+          },
+          // dieselbe Id ein zweites Mal ⇒ der zweite Treffer fliegt raus
+          { id: 1, zone: 60, affixes: [{ id: 'gold', q: 1 }] },
+          // zwei Affixe DERSELBEN Sorte ⇒ das zweite fällt weg
+          {
+            id: 5,
+            zone: 65,
+            affixes: [
+              { id: 'dps', q: 2 },
+              { id: 'dps', q: 3 },
+            ],
+          },
+          // gar kein gültiges Affix ⇒ das ganze Relikt fällt weg
+          { id: 6, zone: 70, affixes: [{ id: 'phantom', q: 2 }] },
+          { id: -3, zone: 75, affixes: [{ id: 'boss', q: 1 }] }, // Id ≤ 0 ⇒ raus
+        ],
+        slots: [1, 1, 404], // dasselbe Relikt doppelt + eine unbekannte Id
+        nextId: 2, // gelogen: Id 5 ist vergeben
+        pity: -4, // negativ ⇒ 0
+        deepestGate: 65.9, // krumm ⇒ abgerundet
+      };
+      raw.forge = {
+        ember: -50, // negativ ⇒ 0
+        slots: {
+          disco: [
+            { affix: { id: 'sequin', q: 2 }, dry: -1 },
+            { affix: { id: 'nope', q: 1 }, dry: 2 },
+          ],
+          vegasking: [{ affix: { id: 'click', q: 3 }, dry: 0 }], // KEIN echter Skin ⇒ raus
+        },
+      };
+    },
+    check: (s) => {
+      // Zwei Relikte überleben: das erste (Müll-Affix weg, Qualität geklemmt)
+      // und das dritte (die doppelte Sorte fällt weg).
+      expect(s.relics.owned).toEqual([
+        { id: 1, zone: 50, affixes: [{ id: 'click', q: 3 }] },
+        { id: 5, zone: 65, affixes: [{ id: 'dps', q: 2 }] },
+      ]);
+      // Ein Relikt kann nie zweimal wirken, eine unbekannte Id nie einmal.
+      expect(s.relics.slots).toEqual([1, 0, 0]);
+      // `nextId` wird über die größte vergebene Id gehoben — sonst zeigte ein
+      // Slot später auf ein FREMDES Relikt.
+      expect(s.relics.nextId).toBe(6);
+      expect(s.relics.pity).toBe(0);
+      expect(s.relics.deepestGate).toBe(65);
+      // Schmiede: nur echte Skin-Ids, Müll-Affix wird ein leerer Slot, der
+      // Trocken-Zähler dort bleibt aber stehen (er ist bezahlt).
+      expect(s.forge.ember).toBe(0);
+      expect(Object.keys(s.forge.slots)).toEqual(['disco']);
+      expect(s.forge.slots.disco).toEqual([
+        { affix: { id: 'sequin', q: 2 }, dry: 0 },
+        { affix: null, dry: 2 },
+        { affix: null, dry: 0 },
+      ]);
+    },
+  },
+  18: {
+    what: 'Pfad mit Phantom-Skin/NaN, Erbe ohne Crew-Mitglied, krummes Legenden-Level',
+    damage: (raw) => {
+      raw.skinPath = {
+        disco: { s: 600_000, b: 700 }, // heil — muss unangetastet durchkommen
+        classic: { s: Number.NaN, b: 40.7 }, // NaN-Sekunden ⇒ 0, krumme Bosse ⇒ abgerundet
+        robo: { s: -900, b: -3 }, // beides negativ ⇒ das Fach fällt ganz weg
+        vegasking: { s: 99_999, b: 99 }, // KEIN echter Skin ⇒ raus
+        toString: { s: 10, b: 1 }, // Prototyp-Schlüssel ⇒ raus
+        host: 'kaputt', // gar kein Objekt ⇒ raus
+      };
+      raw.heir = 'niemand'; // keine Crew-Id ⇒ ''
+      raw.legend = 12.9; // krumm ⇒ abgerundet
+    },
+    check: (s) => {
+      // Nur echte Skin-Ids mit echtem Fortschritt überleben. Die Sekunden
+      // bleiben BEWUSST ungefloort (die Glue bucht Bruchteile je 0,25-s-Tick),
+      // die Boss-Stückzahlen werden gefloort.
+      expect(s.skinPath).toEqual({
+        disco: { s: 600_000, b: 700 },
+        classic: { s: 0, b: 40 },
+      });
+      // Eine Müll-Id hinge sonst als Geist in `heirWeightFor` und käme nie zu
+      // einer Wirkung — sie wird zu „kein Erbe".
+      expect(s.heir).toBe('');
+      // Der Zähler ist unendlich und wird deshalb NICHT gedeckelt, nur gefloort.
+      expect(s.legend).toBe(12);
     },
   },
 };

@@ -22,6 +22,12 @@
  * member while the long-run balance stays identical. The `CrewUps` ledger
  * stays a plain bought-count, so saves migrate for free.
  *
+ * **1a — Crew-Meisterschaft.** Obendrauf trägt jedes Mitglied seine Einsatz-XP
+ * (Lebenszeit-Level, `mastery.ts`): ein permanenter, additiv-kleiner Eigen-Perk
+ * (+2 % je Rang, gedeckelt bei +6 %) und ab Legende die Gratis-Erststufe
+ * (`grantFreeMasteryTiers`). Der Faktor hängt in `heroDps`/`heroClick`, also in
+ * genau EINER Multiplikation — Spiel, Sim-Bot und Kauf-Tipp lesen dieselbe.
+ *
  * Clicks still land `CLICK_DPS_SHARE` of total crew DPS on top of the Boss line,
  * so active twerking stays the star at every depth (P1).
  *
@@ -35,8 +41,17 @@
  * utility kinds below (same hooks the Twerk-Ahnen use; `idle` folds into
  * `dpsOf` like the idle gear does).
  */
+import { HEIR_WEIGHT, type CrewMastery, masteryFreeFirstTier, masteryOwnMult } from './mastery';
+import { type CrewRetrain, retrainedKind } from './retrain';
+
 export type AbilityKind =
   'power' | 'gold' | 'crit' | 'critdmg' | 'boss' | 'combo' | 'beat' | 'ekstase' | 'idle';
+
+/**
+ * Die Sorten, die eine SPEZIAL-Stufe zahlen kann — alles außer `power`. Der
+ * Roll-Pool der Umschulung (3b) ist genau diese Menge (`SPECIAL_KINDS`).
+ */
+export type SpecialKind = Exclude<AbilityKind, 'power'>;
 
 /**
  * v11.1 „Abwechslung": Mitglieder folgen unterschiedlichen TIER-RHYTHMEN statt
@@ -64,7 +79,7 @@ export interface HeroConfig {
   /** Slot-1 marker: levels raise CLICK damage instead of idle DPS. */
   readonly click?: boolean;
   /** This member's themed special — granted on its special tiers (v11). */
-  readonly special: Exclude<AbilityKind, 'power'>;
+  readonly special: SpecialKind;
   /** Tier-Rhythmus-Index in `TIER_PATTERNS` (v11.1 Abwechslung). */
   readonly rhythm: 0 | 1 | 2;
 }
@@ -301,10 +316,34 @@ export function abilityTiersUnlocked(level: number): number {
  * member's TIER-RHYTHMUS (`TIER_PATTERNS[cfg.rhythm]`, 4er-Zyklus). Every
  * pattern carries 2 power + 2 special per cycle, so the long-run balance is
  * rhythm-independent; only the ORDER differs per member.
+ *
+ * **3b — die EINE Lesekette.** Ist der Slot ein SPEZIAL-Slot und trägt die
+ * Umschul-Map (`retrain`) für ihn einen Eintrag, gewinnt dieser Eintrag über
+ * `cfg.special`. POWER-Slots ignorieren jeden Override: Der Rhythmus (WELCHE
+ * Stufen Spezial sind) ist unantastbar, nur die SORTE rollt. Spiel-Glue,
+ * `crewSpecialBonuses`, Sim, Kauf-Tipp und Crew-Card fragen alle hier — es gibt
+ * keinen zweiten Pfad zur Sorte eines Slots. Ohne Map (Default `{}`) verhält
+ * sich die Funktion exakt wie vor 3b, also falten Alt-Aufrufer unverändert.
  */
-export function abilityKind(cfg: HeroConfig, tier: number): AbilityKind {
+export function abilityKind(cfg: HeroConfig, tier: number, retrain: CrewRetrain = {}): AbilityKind {
   const pat = TIER_PATTERNS[cfg.rhythm];
-  return pat[(Math.max(1, Math.floor(tier)) - 1) % pat.length] === 'power' ? 'power' : cfg.special;
+  const t = Math.max(1, Math.floor(tier));
+  if (pat[(t - 1) % pat.length] === 'power') return 'power';
+  return retrainedKind(retrain, cfg.id, t) ?? cfg.special;
+}
+
+/**
+ * Die 1-basierte Nummer eines Spezial-Slots innerhalb seines Mitglieds
+ * (Stufe 2 im Muster 0 ⇒ Slot 1, Stufe 4 ⇒ Slot 2, …) — **0**, wenn `tier` eine
+ * Power-Stufe ist. Genau diese Nummer treibt die Umschul-Kosten (3b:
+ * `retrainCost`), und sie ist rhythmus-bewusst: Im Muster „P P S S" ist Stufe 3
+ * der erste Spezial-Slot, im Muster „P S P S" die Stufe 2.
+ */
+export function retrainSlotOrdinal(cfg: HeroConfig, tier: number): number {
+  const pat = TIER_PATTERNS[cfg.rhythm];
+  const t = Math.max(1, Math.floor(tier));
+  if (pat[(t - 1) % pat.length] === 'power') return 0;
+  return specialTiers(cfg, t);
 }
 
 /** How many POWER tiers are among a member's first `bought` tiers (rhythm-aware). */
@@ -358,9 +397,16 @@ export interface CrewSpecialBonuses {
  * combo/beat windows are capped here (they gate skill checks); crit chance and
  * the Ekstase reduction are clamped by their existing pipeline caps at the
  * call sites.
+ *
+ * **3b — umgeschulte Slots.** Trägt die Umschul-Map für ein Mitglied Einträge,
+ * kann dessen Sorte je Stufe verschieden sein; dann wird Stufe für Stufe über
+ * `abilityKind` gezählt — dieselbe Funktion, die auch die Card beschriftet. Für
+ * jedes Mitglied OHNE Eintrag bleibt der alte O(1)-Pfad (`specialTiers`)
+ * erhalten: Ein Save ohne Umschulung — und damit jeder Sim-Lauf, denn der Bot
+ * schult nie um — rechnet exakt so schnell und exakt dieselben Zahlen wie vor 3b.
  */
-export function crewSpecialBonuses(ups: CrewUps): CrewSpecialBonuses {
-  const n: Record<Exclude<AbilityKind, 'power'>, number> = {
+export function crewSpecialBonuses(ups: CrewUps, retrain: CrewRetrain = {}): CrewSpecialBonuses {
+  const n: Record<SpecialKind, number> = {
     gold: 0,
     crit: 0,
     critdmg: 0,
@@ -370,7 +416,18 @@ export function crewSpecialBonuses(ups: CrewUps): CrewSpecialBonuses {
     ekstase: 0,
     idle: 0,
   };
-  for (const cfg of CREW) n[cfg.special] += specialTiers(cfg, ups[cfg.id] ?? 0);
+  for (const cfg of CREW) {
+    const bought = Math.max(0, Math.floor(ups[cfg.id] ?? 0));
+    const slots = retrain[cfg.id];
+    if (!slots) {
+      n[cfg.special] += specialTiers(cfg, bought);
+      continue;
+    }
+    for (let t = 1; t <= bought; t++) {
+      const kind = abilityKind(cfg, t, retrain);
+      if (kind !== 'power') n[kind] += 1;
+    }
+  }
   return {
     goldMult: 1 + SPECIAL_GOLD * n.gold,
     critChance: SPECIAL_CRIT_CHANCE * n.crit,
@@ -381,6 +438,34 @@ export function crewSpecialBonuses(ups: CrewUps): CrewSpecialBonuses {
     ekstaseChargeRed: SPECIAL_EKSTASE * n.ekstase,
     idleMult: 1 + SPECIAL_IDLE * n.idle,
   };
+}
+
+/**
+ * Der NAME einer Sorte (was sie ist), Gegenstück zu `abilityKindLabel` (was sie
+ * zahlt). Der Umschul-Dialog stellt beide übereinander — „Boss-Schaden" über
+ * „+25% Boss-Schaden" liest sich als Karte, zwei nackte Prozentzeilen nicht.
+ */
+export function abilityKindName(kind: AbilityKind): string {
+  switch (kind) {
+    case 'power':
+      return 'Verstärkung';
+    case 'gold':
+      return 'Gold';
+    case 'crit':
+      return 'Krit-Chance';
+    case 'critdmg':
+      return 'Krit-Schaden';
+    case 'boss':
+      return 'Boss-Schaden';
+    case 'combo':
+      return 'Combo-Fenster';
+    case 'beat':
+      return 'Beat-Fenster';
+    case 'ekstase':
+      return 'Ekstase-Ladung';
+    case 'idle':
+      return 'Groove (Crew-DPS)';
+  }
 }
 
 /** Short German UI label for an ability tier of `kind` (power appends the out-label). */
@@ -429,6 +514,16 @@ export function nextAbility(
   return { tier, level: lv, cost: abilityCost(cfg, tier), unlocked: level >= lv };
 }
 
+/**
+ * **Die Erben-Gewichtung** (3c): {@link HEIR_WEIGHT} für das beim Transzendieren
+ * gewählte Mitglied, sonst 1. Eine leere Erben-Id (der Normalfall — es gibt
+ * genau EINEN Erben je Ära, und vor der ersten Transzendenz gar keinen) faltet
+ * damit für JEDES Mitglied ×1, also rechnen alle Alt-Aufrufer zahlengleich.
+ */
+export function heirWeightFor(id: string, heir: string): number {
+  return heir !== '' && id === heir ? HEIR_WEIGHT : 1;
+}
+
 /** Permanent DPS multiplier from `gildCount` gilds on a member (×1.25 each, §4.3.4). */
 export function gildMult(gildCount: number): number {
   return Math.pow(GILD_DPS_MULT, Math.max(0, gildCount));
@@ -436,18 +531,52 @@ export function gildMult(gildCount: number): number {
 
 /**
  * A single member's DPS at `level` (0 when un-recruited or for the click hero),
- * scaled by BOUGHT abilities (`ups`) and gilds. Abilities no longer come free
- * with levels — pass the purchased count.
+ * scaled by BOUGHT abilities (`ups`), gilds and — seit 1a — den Eigen-Perk
+ * seiner Meisterschaft (`masteryXp`, Lebenszeit-Level; 0 ⇒ ×1, sodass jeder
+ * ältere Aufrufer unverändert faltet). Abilities no longer come free with
+ * levels — pass the purchased count.
  */
-export function heroDps(cfg: HeroConfig, level: number, gildCount = 0, ups = 0): number {
+export function heroDps(
+  cfg: HeroConfig,
+  level: number,
+  gildCount = 0,
+  ups = 0,
+  masteryXp = 0,
+  heirWeight = 1,
+): number {
   if (level <= 0 || cfg.click) return 0;
-  return cfg.baseDps * DPS_TUNE * level * abilityMult(cfg, ups) * gildMult(gildCount);
+  return (
+    cfg.baseDps *
+    DPS_TUNE *
+    level *
+    abilityMult(cfg, ups) *
+    gildMult(gildCount) *
+    masteryOwnMult(masteryXp, heirWeight)
+  );
 }
 
-/** The click hero's shake damage at `level` (0 for DPS members), same scaling. */
-export function heroClick(cfg: HeroConfig, level: number, gildCount = 0, ups = 0): number {
+/**
+ * The click hero's shake damage at `level` (0 for DPS members), same scaling —
+ * beim Klick-Mitglied zahlt der Meisterschafts-Perk also auf den KLICK, genau
+ * wie seine Level (Ideen-Dokument 1a: „+2 % Eigen-DPS bzw. Klick beim
+ * boss-Mitglied").
+ */
+export function heroClick(
+  cfg: HeroConfig,
+  level: number,
+  gildCount = 0,
+  ups = 0,
+  masteryXp = 0,
+  heirWeight = 1,
+): number {
   if (level <= 0 || !cfg.click) return 0;
-  return cfg.baseDps * level * abilityMult(cfg, ups) * gildMult(gildCount);
+  return (
+    cfg.baseDps *
+    level *
+    abilityMult(cfg, ups) *
+    gildMult(gildCount) *
+    masteryOwnMult(masteryXp, heirWeight)
+  );
 }
 
 /** Cost to buy the NEXT level from `level`: floor(baseCost · growth^level). */
@@ -488,12 +617,60 @@ export function createCrewUps(): CrewUps {
   return {};
 }
 
-/** Total raw crew DPS (before global/soul/frenzy multipliers): gilds + bought abilities. */
-export function totalRawDps(levels: CrewLevels, gilds: CrewGilds = {}, ups: CrewUps = {}): number {
+/**
+ * Total raw crew DPS (before global/soul/frenzy multipliers): gilds + bought
+ * abilities + Meisterschafts-Perks (1a). Eine fehlende Meisterschafts-Tafel
+ * faltet ×1 — Alt-Tests und Sim-Fixtures bleiben zahlengleich.
+ */
+export function totalRawDps(
+  levels: CrewLevels,
+  gilds: CrewGilds = {},
+  ups: CrewUps = {},
+  mastery: CrewMastery = {},
+  heir = '',
+): number {
   let dps = 0;
   for (const cfg of CREW)
-    dps += heroDps(cfg, levels[cfg.id] ?? 0, gilds[cfg.id] ?? 0, ups[cfg.id] ?? 0);
+    dps += heroDps(
+      cfg,
+      levels[cfg.id] ?? 0,
+      gilds[cfg.id] ?? 0,
+      ups[cfg.id] ?? 0,
+      mastery[cfg.id] ?? 0,
+      heirWeightFor(cfg.id, heir),
+    );
   return dps;
+}
+
+/**
+ * **Die Gratis-Erststufen des Legenden-Rangs (1a).** Wer ein Mitglied bis
+ * Legende gespielt hat, bekommt dessen ERSTE Fähigkeits-Stufe nach jedem Reset
+ * geschenkt: Sobald das Level die Tier-1-Schwelle (Lv 25) erreicht und noch
+ * nichts gekauft ist, wird Stufe 1 ohne BP-Abzug gutgeschrieben.
+ *
+ * Bewusst als PURE Funktion über (Level, Ledger, Meisterschaft) statt als
+ * Sonderfall im Kauf-Code: Die Glue ruft sie an genau drei Stellen (Boot, nach
+ * jedem Level-Kauf, nach jedem der drei Resets), der Sim-Bot an einer — und
+ * alle bekommen dieselbe Antwort. Liefert einen NEUEN Ledger plus die Ids, die
+ * frisch gutgeschrieben wurden (leer ⇒ nichts zu tun, `ups` kommt unverändert
+ * zurück, sodass der Aufrufer ohne Kosten prüfen kann).
+ */
+export function grantFreeMasteryTiers(
+  levels: CrewLevels,
+  ups: CrewUps,
+  mastery: CrewMastery,
+): { ups: CrewUps; granted: string[] } {
+  const granted: string[] = [];
+  for (const cfg of CREW) {
+    if (!masteryFreeFirstTier(mastery[cfg.id] ?? 0)) continue;
+    if ((levels[cfg.id] ?? 0) < ABILITY_FIRST_LEVEL) continue;
+    if ((ups[cfg.id] ?? 0) > 0) continue;
+    granted.push(cfg.id);
+  }
+  if (granted.length === 0) return { ups, granted };
+  const next: CrewUps = { ...ups };
+  for (const id of granted) next[id] = 1;
+  return { ups: next, granted };
 }
 
 // ---------------------------------------------------------------------------
@@ -517,8 +694,8 @@ export interface CrewBuy {
  * „1 Klick-Schaden ≈ Klicks/s DPS" nah genug für eine Greedy-Rangfolge und hält
  * die Schleife mitglieds-agnostisch.
  */
-function outputAt(cfg: HeroConfig, level: number, gild: number, ups: number): number {
-  return cfg.click ? heroClick(cfg, level, gild, ups) : heroDps(cfg, level, gild, ups);
+function outputAt(cfg: HeroConfig, level: number, gild: number, ups: number, xp: number): number {
+  return cfg.click ? heroClick(cfg, level, gild, ups, xp) : heroDps(cfg, level, gild, ups, xp);
 }
 
 /**
@@ -545,6 +722,7 @@ export function bestCrewBuy(
   ups: CrewUps,
   gilds: CrewGilds,
   budget: number,
+  mastery: CrewMastery = {},
 ): CrewBuy | null {
   let best: CrewBuy | null = null;
   let bestRoi = 0;
@@ -552,9 +730,13 @@ export function bestCrewBuy(
     const lvl = levels[cfg.id] ?? 0;
     const bought = ups[cfg.id] ?? 0;
     const gild = gilds[cfg.id] ?? 0;
+    // 1a: Der Meisterschafts-Perk ist ein KONSTANTER Faktor auf den Output
+    // dieses Mitglieds — er kürzt sich im Grenznutzen also nicht heraus, sondern
+    // hebt die Rangfolge eines gemeisterten Mitglieds um genau seine 2–6 %.
+    const xp = mastery[cfg.id] ?? 0;
     const cost = nextLevelCost(cfg, lvl);
     if (cost <= budget) {
-      const gain = outputAt(cfg, lvl + 1, gild, bought) - outputAt(cfg, lvl, gild, bought);
+      const gain = outputAt(cfg, lvl + 1, gild, bought, xp) - outputAt(cfg, lvl, gild, bought, xp);
       const roi = gain / cost;
       if (roi > bestRoi) {
         bestRoi = roi;
@@ -563,7 +745,8 @@ export function bestCrewBuy(
     }
     const ab = nextAbility(cfg, lvl, bought);
     if (ab.unlocked && ab.cost <= budget && bought < abilityTiersUnlocked(lvl)) {
-      const direct = outputAt(cfg, lvl, gild, bought + 1) - outputAt(cfg, lvl, gild, bought);
+      const direct =
+        outputAt(cfg, lvl, gild, bought + 1, xp) - outputAt(cfg, lvl, gild, bought, xp);
       let roi = direct / ab.cost;
       if (direct <= 0) {
         // Special-Stufe(n): die Klammer bis zur nächsten Power-Stufe zusammen
@@ -574,7 +757,7 @@ export function bestCrewBuy(
           const nxt = nextAbility(cfg, lvl, k);
           if (!nxt.unlocked || k >= abilityTiersUnlocked(lvl)) break;
           costSum += nxt.cost;
-          const gain = outputAt(cfg, lvl, gild, k + 1) - outputAt(cfg, lvl, gild, bought);
+          const gain = outputAt(cfg, lvl, gild, k + 1, xp) - outputAt(cfg, lvl, gild, bought, xp);
           if (gain > 0) {
             if (costSum <= budget) roi = gain / costSum;
             break;
@@ -599,9 +782,18 @@ export function clickDamageRaw(
   levels: CrewLevels,
   gilds: CrewGilds = {},
   ups: CrewUps = {},
+  mastery: CrewMastery = {},
+  heir = '',
 ): number {
   let click = CLICK_BASE;
   for (const cfg of CREW)
-    click += heroClick(cfg, levels[cfg.id] ?? 0, gilds[cfg.id] ?? 0, ups[cfg.id] ?? 0);
-  return click + CLICK_DPS_SHARE * totalRawDps(levels, gilds, ups);
+    click += heroClick(
+      cfg,
+      levels[cfg.id] ?? 0,
+      gilds[cfg.id] ?? 0,
+      ups[cfg.id] ?? 0,
+      mastery[cfg.id] ?? 0,
+      heirWeightFor(cfg.id, heir),
+    );
+  return click + CLICK_DPS_SHARE * totalRawDps(levels, gilds, ups, mastery, heir);
 }

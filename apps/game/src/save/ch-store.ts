@@ -33,7 +33,16 @@ import {
   CREW,
   abilityTiersUnlocked,
   createCrewUps,
+  retrainSlotOrdinal,
 } from '../game/heroes';
+import { type CrewMastery, createMastery } from '../game/mastery';
+import {
+  type CrewRetrain,
+  type RetrainRolls,
+  createRetrain,
+  createRetrainRolls,
+  isSpecialKind,
+} from '../game/retrain';
 import {
   DAILY_QUEST_SLOTS,
   MAX_REROLLS,
@@ -44,14 +53,39 @@ import {
   isQuestId,
 } from '../game/quests';
 import { isAchievementId } from '../game/ch-achievements';
-import { type StageStars, STAR_MILESTONE, createStageStars, starMaskFor } from '../game/stars';
+import {
+  type ConstellationState,
+  CONSTELLATION_NODE_COUNT,
+  CONSTELLATIONS,
+  constellationSpend,
+  createConstellation,
+  dustEntitlement,
+} from '../game/constellation';
+import {
+  type StageStars,
+  STAR_MILESTONE,
+  createStageStars,
+  starMaskFor,
+  totalStars,
+} from '../game/stars';
+import { type Territory, ZONE_THEMES, createTerritory } from '../game/territory';
+import { FORGE_SLOTS, RELIC_MAX_AFFIXES, RELIC_SLOTS, clampQuality } from '../game/affixes';
+import {
+  type Relic,
+  type RelicsState,
+  RELIC_MIN_ZONE,
+  createRelics,
+  isRolledAffix,
+} from '../game/relics';
+import { type ForgeSlot, type ForgeState, createForge } from '../game/forge';
+import { type SkinPath, createSkinPath } from '../game/skin-path';
 import { type TranscendState, createTranscend } from '../game/transcend';
 import { SKINS } from '../character/skins';
 import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 12;
+export const CH_SCHEMA = 18;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -81,7 +115,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (v12, Wochen-Bestzone): ChState + envelope. */
+/** The current persisted shape (v18, Skin-Pfade · Erbe · Legenden-Level): ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -110,7 +144,7 @@ function isFiniteNumber(v: unknown): v is number {
  * critical fields are checked strictly (a corrupt one ⇒ reject ⇒ fresh start).
  * The meta/juice fields (rng/stats/legacyImported/ability/combo/gilds/rsLifetime/
  * ancients/heaven/gear/chests/permTokens/peach/meta/achievements/transcend/
- * stageStars) are
+ * stageStars/crewMastery/crewRetrain/constellation/territory/relics/forge/skinPath/heir/legend) are
  * deliberately NOT gated here: they are runtime bookkeeping and get repaired (fresh
  * seed / zeroed stats / false flag / default ability+combo / pruned gilds / clamped
  * highwater / sanitised ancients+heaven+gear / defaulted loot slices / defaulted
@@ -449,6 +483,90 @@ function repairCrewUps(v: unknown, crew: Record<string, number>): CrewUps {
 }
 
 /**
+ * Repair die Crew-Meisterschaft (v13, 1a): je Mitglied ein nicht-negativer
+ * ganzzahliger Lebenszeit-Zähler; Müll-Ids (kein Crew-Mitglied), negative,
+ * gebrochene und nicht-endliche Werte fallen raus, eine komplett kaputte Tafel
+ * wird leer.
+ *
+ * Bewusst NICHT gegen den aktuellen `crew`-Stand geklemmt — anders als beim
+ * Fähigkeits-Ledger (`repairCrewUps`, wo ein gebastelter Save sich sonst
+ * ungekaufte Stufen erschwindeln könnte) gibt es hier keine Richtung, in der ein
+ * Vergleich stimmt: Nach jedem Reset steht das Level auf 0, während die
+ * Lebenszeit-Zahl hoch bleibt (das ist der ganze Sinn), und umgekehrt kann ein
+ * Level aus GESCHENKTEN Quellen stammen (Himmelsbaum-„Frühstarter", Mythos-
+ * „Frühstart"), die nie Einsatz-XP gezahlt haben. Ein Highwater darf ohnehin nur
+ * wachsen; nach unten zu korrigieren hieße, echten Fortschritt zu nuken.
+ */
+function repairCrewMastery(v: unknown): CrewMastery {
+  if (!isRecord(v)) return createMastery();
+  const out: CrewMastery = {};
+  for (const cfg of CREW) {
+    const raw = v[cfg.id];
+    if (!isFiniteNumber(raw) || raw <= 0) continue;
+    const n = Math.floor(raw);
+    if (n > 0) out[cfg.id] = n;
+  }
+  return out;
+}
+
+/**
+ * Repair die Crew-Umschulung (v14, 3b): die Override-Map wird gegen die REGELN
+ * gelesen, nicht nur gegen Typen — ein Eintrag überlebt nur, wenn
+ *
+ *  · die Mitglieds-Id ein echtes Crew-Mitglied ist,
+ *  · der Stufen-Schlüssel eine positive ganze Zahl in Normalform ist („4", nicht
+ *    „04"/„4.0" — sonst zeigten zwei Schlüssel auf denselben Slot),
+ *  · diese Stufe im Rhythmus des Mitglieds WIRKLICH ein Spezial-Slot ist
+ *    (`retrainSlotOrdinal > 0`) und
+ *  · der Wert eine echte Spezial-Sorte ist (nie `power`).
+ *
+ * Der dritte Punkt ist der eigentliche Schutz: Ohne ihn könnte ein
+ * handgeschriebener Save eine POWER-Stufe zur Spezial-Stufe erklären und damit
+ * das 2P+2S-Verhältnis kippen — die eine Leitplanke, die 3b nicht anfassen darf.
+ * Bewusst NICHT gegen `crewUp` geklemmt: Nach jedem Reset steht der Ledger auf 0,
+ * während die erkaufte Sorte bleibt (genau ihr Sinn). Nie werfend; eine komplett
+ * kaputte Map wird leer.
+ */
+function repairCrewRetrain(v: unknown): CrewRetrain {
+  if (!isRecord(v)) return createRetrain();
+  const out: CrewRetrain = {};
+  for (const cfg of CREW) {
+    const slots = v[cfg.id];
+    if (!isRecord(slots)) continue;
+    const clean: CrewRetrain[string] = {};
+    let any = false;
+    for (const [key, kind] of Object.entries(slots)) {
+      const tier = Number(key);
+      if (!Number.isInteger(tier) || tier < 1 || String(tier) !== key) continue;
+      if (retrainSlotOrdinal(cfg, tier) <= 0) continue; // niemals auf eine Power-Stufe
+      if (!isSpecialKind(kind)) continue;
+      clean[key] = kind;
+      any = true;
+    }
+    if (any) out[cfg.id] = clean;
+  }
+  return out;
+}
+
+/**
+ * Repair den Umschul-Eskalator (v14, 3b): je Mitglied eine nicht-negative ganze
+ * Zahl. Nur echte Crew-Ids, Müll fällt raus. Ein zu HOHER Zähler schadet nur
+ * seinem Besitzer (teurere Rolls), deshalb wird er nicht gedeckelt — und ein zu
+ * niedriger ist ohnehin nach der nächsten Aszension die Wahrheit.
+ */
+function repairRetrainRolls(v: unknown): RetrainRolls {
+  if (!isRecord(v)) return createRetrainRolls();
+  const out: RetrainRolls = {};
+  for (const cfg of CREW) {
+    const raw = v[cfg.id];
+    if (!isFiniteNumber(raw) || raw <= 0) continue;
+    const n = Math.floor(raw);
+    if (n > 0) out[cfg.id] = n;
+  }
+  return out;
+}
+
+/**
  * Repair the Bühnen-Sterne slice (v11, P1): keep only entries whose KEY is a real
  * zone number (positive integer) and mask each value down to the bits that zone can
  * actually carry (`starMaskFor` — a Nicht-Boss-Bühne has no timeout star), dropping
@@ -481,6 +599,256 @@ function repairStarsAwarded(v: unknown): number {
   return Math.floor(v / STAR_MILESTONE) * STAR_MILESTONE;
 }
 
+/**
+ * Repair die Legenden-Konstellation (v15, 2a). Drei Regeln, jede an ihrem
+ * eigenen Rand:
+ *
+ *  · **Die Ketten sind die Wahrheit.** Jede Linie wird auf 0 …
+ *    {@link CONSTELLATION_NODE_COUNT} geklemmt, unbekannte Linien-Ids fallen
+ *    weg — mehr Form gibt es nicht zu prüfen, weil eine streng lineare Kette
+ *    keine Lücke darstellen kann.
+ *  · **`spent` wird NEU GERECHNET** (`constellationSpend`) statt gelesen: Der
+ *    Ausgabe-Stand ist eine Funktion der Ketten, und zwei Quellen für dieselbe
+ *    Zahl driften irgendwann auseinander. Ein Save, der weniger behauptet, als
+ *    seine Knoten kosten, kann sich damit keinen Rabatt erschwindeln.
+ *  · **`earned` wird nach OBEN korrigiert** (`max(earned, spent)`) — dieselbe
+ *    Richtung wie bei `repairTranscend`: Was gekauft ist, war offenbar bezahlt;
+ *    die Knoten wegzunehmen wäre das Nuken echten Fortschritts. Nach unten
+ *    korrigiert nie jemand: `earned` ist ein Highwater, und die Boot-Synchro
+ *    (`syncDust`) hebt ihn ohnehin sofort wieder auf den Anspruch aus Sternen,
+ *    Erfolgen und Boss-Gates.
+ *
+ * Nie werfend; ein komplett kaputter Slice wird ein frischer, leerer Baum.
+ */
+function repairConstellation(v: unknown): ConstellationState {
+  if (!isRecord(v)) return createConstellation();
+  const nodes: Record<string, number> = {};
+  const src = isRecord(v.nodes) ? v.nodes : {};
+  for (const cfg of CONSTELLATIONS) {
+    const raw = src[cfg.id];
+    if (!isFiniteNumber(raw) || raw <= 0) continue;
+    const n = Math.min(CONSTELLATION_NODE_COUNT, Math.floor(raw));
+    if (n > 0) nodes[cfg.id] = n;
+  }
+  const spent = constellationSpend(nodes);
+  const earned = Math.max(
+    isFiniteNumber(v.earned) && v.earned > 0 ? Math.floor(v.earned) : 0,
+    spent,
+  );
+  return { earned, spent, nodes };
+}
+
+/**
+ * Repair die Gebietsherrschaft (v16, 1b): je Theme ein nicht-negativer
+ * ganzzahliger Lebenszeit-Zähler. Nur die VIER echten Bühnen-Themen
+ * (`ZONE_THEMES`) bekommen ein Konto — ein erfundener Schlüssel („vegas") hätte
+ * keine Bühne, auf der er je wirken könnte, und würde die Leiste nur verwässern.
+ *
+ * Bewusst in KEINE Richtung an den Spielstand geklemmt (wie `repairCrewMastery`,
+ * anders als `repairCrewUps`): Ein Ruf-Zähler ist ein Highwater über ALLE Touren,
+ * während `zone`/`lifetimeMaxZone` nach Himmelfahrt und Transzendenz auf 1
+ * zurückfallen — es gibt schlicht keine Zahl im Save, gegen die ein Vergleich
+ * stimmen würde. Ein zu hoher Zähler ist außerdem harmlos gedeckelt: Die Wirkung
+ * endet bei Stufe 10 (+15 % BP auf den eigenen Bühnen), egal wie groß die Zahl
+ * darunter ist. Nie werfend; eine komplett kaputte Tafel wird leer.
+ */
+function repairTerritory(v: unknown): Territory {
+  if (!isRecord(v)) return createTerritory();
+  const out: Territory = {};
+  for (const theme of ZONE_THEMES) {
+    const raw = v[theme];
+    if (!isFiniteNumber(raw) || raw <= 0) continue;
+    const n = Math.floor(raw);
+    if (n > 0) out[theme] = n;
+  }
+  return out;
+}
+
+/**
+ * Repair die **Relikte** (v17, 1c). Fünf Regeln, jede an ihrem eigenen Rand:
+ *
+ *  · **Ein Relikt überlebt nur vollständig.** Positive ganzzahlige Id, echte
+ *    Katalog-Sorten, Qualität auf 0…3 geklemmt, höchstens
+ *    {@link RELIC_MAX_AFFIXES} Affixe und keine Sorte doppelt (zwei gleiche
+ *    Affixe auf einem Stück wären eine verdoppelte Zahl, die kein Wurf je
+ *    erzeugen kann). Bleibt danach kein Affix übrig, fällt das ganze Relikt
+ *    weg — ein leeres Relikt wäre eine Zeile ohne Wirkung.
+ *  · **Ids sind eindeutig.** Ein handgeschriebener Save mit zweimal derselben
+ *    Id hätte zwei Stücke, auf die ein Trage-Slot gleichzeitig zeigt; der
+ *    zweite Treffer fliegt raus.
+ *  · **Die Slots zeigen nur auf Vorhandenes** — und nie zweimal auf dasselbe
+ *    Relikt (sonst zählte ein Stück doppelt, exakt der Fall, den
+ *    `equipRelic` im Spiel ausschließt).
+ *  · **`nextId` wird nach OBEN korrigiert** (über die größte vergebene Id) —
+ *    dieselbe Richtung wie bei `repairTranscend`: Eine zu kleine Zahl würde
+ *    Ids recyceln und einen Slot auf ein FREMDES Relikt zeigen lassen.
+ *  · **`deepestGate` wird NICHT gedeckelt.** Ein zu hoher Wert schadet nur
+ *    seinem Besitzer (er sperrt eigene Drops aus) — genau wie der Roll-Zähler
+ *    in `repairRetrainRolls`. Ein zu niedriger ist nach dem nächsten Vorstoß
+ *    ohnehin wieder die Wahrheit.
+ *
+ * Nie werfend; ein komplett kaputter Slice wird eine frische, leere Sammlung.
+ */
+function repairRelics(v: unknown): RelicsState {
+  const def = createRelics();
+  if (!isRecord(v)) return def;
+  const owned: Relic[] = [];
+  const seen = new Set<number>();
+  if (Array.isArray(v.owned)) {
+    for (const raw of v.owned) {
+      if (!isRecord(raw)) continue;
+      const id = isFiniteNumber(raw.id) && raw.id > 0 ? Math.floor(raw.id) : 0;
+      if (id <= 0 || seen.has(id)) continue;
+      if (!Array.isArray(raw.affixes)) continue;
+      const affixes: { id: string; q: number }[] = [];
+      const kinds = new Set<string>();
+      for (const a of raw.affixes) {
+        if (affixes.length >= RELIC_MAX_AFFIXES) break;
+        if (!isRolledAffix(a) || kinds.has(a.id)) continue;
+        kinds.add(a.id);
+        affixes.push({ id: a.id, q: clampQuality(a.q) });
+      }
+      if (affixes.length === 0) continue;
+      const zone = isFiniteNumber(raw.zone) && raw.zone > 0 ? Math.floor(raw.zone) : RELIC_MIN_ZONE;
+      seen.add(id);
+      owned.push({ id, zone, affixes });
+    }
+  }
+  const ids = new Set(owned.map((r) => r.id));
+  const slots = new Array<number>(RELIC_SLOTS).fill(0);
+  if (Array.isArray(v.slots)) {
+    const used = new Set<number>();
+    for (let i = 0; i < RELIC_SLOTS; i++) {
+      const raw = v.slots[i];
+      const id = isFiniteNumber(raw) && raw > 0 ? Math.floor(raw) : 0;
+      if (id > 0 && ids.has(id) && !used.has(id)) {
+        used.add(id);
+        slots[i] = id;
+      }
+    }
+  }
+  let maxId = 0;
+  for (const r of owned) if (r.id > maxId) maxId = r.id;
+  const nextId = Math.max(
+    isFiniteNumber(v.nextId) && v.nextId > 0 ? Math.floor(v.nextId) : 1,
+    maxId + 1,
+  );
+  return {
+    owned,
+    slots,
+    nextId,
+    pity: isFiniteNumber(v.pity) && v.pity > 0 ? Math.floor(v.pity) : 0,
+    deepestGate: isFiniteNumber(v.deepestGate) && v.deepestGate > 0 ? Math.floor(v.deepestGate) : 0,
+  };
+}
+
+/**
+ * Repair die **Skin-Schmiede** (v17, 3a): gehaltene Glut als nicht-negative
+ * ganze Zahl, und je Skin höchstens {@link FORGE_SLOTS} Slots. Ein Slot behält
+ * sein Affix nur, wenn Sorte UND Qualität den Katalog überstehen; alles andere
+ * wird ein leerer Slot (statt das ganze Skin-Fach zu verwerfen, denn Slot 2
+ * darf nicht an Slot 1 sterben).
+ *
+ * Nur echte Skin-Ids bekommen ein Fach (`Object.hasOwn(SKINS, …)`, dieselbe
+ * Disziplin wie `repairGear.crafted`) — ein erfundener Skin hätte keinen
+ * Level, der seine Slots je freischalten könnte, und wäre stiller Ballast.
+ *
+ * Bewusst NICHT gegen `gear.skinLevels` geklemmt: `forgeAffixes` liest ohnehin
+ * nur die Slots, die der aktuelle Level freigeschaltet hat, also WIRKT ein
+ * verwaister Slot nicht — aber er bleibt erhalten, falls der Level später
+ * wiederkommt. Wegzuwerfen hieße, bezahlte Glut zu nuken.
+ */
+function repairForge(v: unknown): ForgeState {
+  const def = createForge();
+  if (!isRecord(v)) return def;
+  const slots: Record<string, ForgeSlot[]> = {};
+  if (isRecord(v.slots)) {
+    for (const [skin, raw] of Object.entries(v.slots)) {
+      if (!Object.hasOwn(SKINS, skin) || !Array.isArray(raw)) continue;
+      const row: ForgeSlot[] = [];
+      let any = false;
+      for (let i = 0; i < FORGE_SLOTS; i++) {
+        const s = raw[i];
+        if (!isRecord(s)) {
+          row.push({ affix: null, dry: 0 });
+          continue;
+        }
+        const affix = isRolledAffix(s.affix)
+          ? { id: s.affix.id, q: clampQuality(s.affix.q) }
+          : null;
+        const dry = isFiniteNumber(s.dry) && s.dry > 0 ? Math.floor(s.dry) : 0;
+        if (affix || dry > 0) any = true;
+        row.push({ affix, dry });
+      }
+      if (any) slots[skin] = row;
+    }
+  }
+  return { ember: isFiniteNumber(v.ember) && v.ember > 0 ? Math.floor(v.ember) : 0, slots };
+}
+
+/**
+ * Repair die **Skin-Meisterschafts-Pfade** (v18, 2b): je ECHTER Skin-Id ein Paar
+ * aus getragenen Sekunden und Boss-Kills, beide nicht-negativ und endlich.
+ *
+ *  · **Nur Katalog-Skins bekommen ein Fach** (`Object.hasOwn(SKINS, …)`, dieselbe
+ *    Disziplin wie `repairGear.crafted` und `repairForge`) — ein erfundener Skin
+ *    hätte keinen `star.stat`, auf den sein Pfad je zahlen könnte, und wäre
+ *    stiller Ballast.
+ *  · **Die Sekunden bleiben GEBROCHEN** (nur auf ≥ 0 und endlich geprüft, nicht
+ *    gefloort): Die Glue bucht Bruchteile pro 0,25-s-Tick, ein Floor beim
+ *    Speichern verlöre also bei jedem Reload bis zu einer Sekunde. Die
+ *    Boss-Kills dagegen sind Stückzahlen und werden gefloort.
+ *  · **In KEINE Richtung an den Spielstand geklemmt** (wie `repairCrewMastery`
+ *    und `repairTerritory`): Ein Pfad ist ein Lebenszeit-Highwater, während
+ *    `gear.skin` nur sagt, was GERADE getragen wird — es gibt keine Zahl im
+ *    Save, gegen die ein Vergleich stimmen würde. Ein zu hoher Wert ist zudem
+ *    gedeckelt: Die Wirkung endet bei Knoten 5.
+ *
+ * Ein Fach ohne jeden Fortschritt fällt weg (statt eine Null zu persistieren).
+ * Nie werfend; eine komplett kaputte Tafel wird leer.
+ */
+function repairSkinPath(v: unknown): SkinPath {
+  if (!isRecord(v)) return createSkinPath();
+  const out: SkinPath = {};
+  for (const [id, raw] of Object.entries(v)) {
+    if (!Object.hasOwn(SKINS, id) || !isRecord(raw)) continue;
+    const sec = isFiniteNumber(raw.s) && raw.s > 0 ? raw.s : 0;
+    const bosses = isFiniteNumber(raw.b) && raw.b > 0 ? Math.floor(raw.b) : 0;
+    if (sec > 0 || bosses > 0) out[id] = { s: sec, b: bosses };
+  }
+  return out;
+}
+
+/**
+ * Repair den **Erben** (v18, 3c): eine echte Crew-Id oder `''`.
+ *
+ * Bewusst NICHT gegen `crewMastery` geprüft — ein Erbe ohne Rang ist eine
+ * legale (wenn auch wirkungslose) Wahl, und die Ränge fallen ohnehin nie. Auch
+ * NICHT gegen `transcend.transcendences`: Ein Save, der einen Erben trägt, hat
+ * ihn per Konstruktion in einer Zeremonie gewählt; ihn wegen einer anderen Zahl
+ * zu löschen, hieße eine bezahlte Entscheidung zu nuken. Eine Müll-Id (kein
+ * Crew-Mitglied, `"toString"`, eine Zahl) wird dagegen `''`, weil sie sonst als
+ * Geist in `heirWeightFor` hinge und nie zu einer Wirkung käme.
+ */
+function repairHeir(v: unknown): string {
+  if (typeof v !== 'string' || v === '') return '';
+  return CREW.some((cfg) => cfg.id === v) ? v : '';
+}
+
+/**
+ * Repair das **Legenden-Level** (v18, 1d): eine nicht-negative ganze Zahl.
+ *
+ * Bewusst NICHT nach oben gedeckelt — der Zähler IST unendlich, das ist sein
+ * ganzer Sinn, und weil er rein additiv wirkt (`1 + 0.005·L`) kann selbst ein
+ * absurder Wert weder den Float-Guard (§9.3) noch einen Anker sprengen: Bei
+ * `L = 1e15` steht der Faktor bei ×5e12, nicht bei Unendlich. Eine
+ * exponentielle Formel hätte hier einen Deckel gebraucht — genau deshalb ist
+ * sie additiv.
+ */
+function repairLegend(v: unknown): number {
+  return isFiniteNumber(v) && v > 0 ? Math.floor(v) : 0;
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
 function stateFromSave(save: ChSaveLatest): ChState {
   const souls = save.souls;
@@ -493,6 +861,9 @@ function stateFromSave(save: ChSaveLatest): ChState {
     runMaxZone: Math.max(save.runMaxZone, save.zone),
     crew: { ...save.crew },
     crewUp: repairCrewUps(save.crewUp, save.crew),
+    crewMastery: repairCrewMastery(save.crewMastery),
+    crewRetrain: repairCrewRetrain(save.crewRetrain),
+    retrainRolls: repairRetrainRolls(save.retrainRolls),
     souls,
     lifetimeMaxZone,
     totalClicks: save.totalClicks,
@@ -520,6 +891,13 @@ function stateFromSave(save: ChSaveLatest): ChState {
     starsAwarded: repairStarsAwarded(save.starsAwarded),
     // Reiner Run-Zustand: eine gültige Bühnen-Nummer oder 0 (kein offener Fehlversuch).
     bossFoulZone: isNonNegInt(save.bossFoulZone) ? save.bossFoulZone : 0,
+    constellation: repairConstellation(save.constellation),
+    territory: repairTerritory(save.territory),
+    relics: repairRelics(save.relics),
+    forge: repairForge(save.forge),
+    skinPath: repairSkinPath(save.skinPath),
+    heir: repairHeir(save.heir),
+    legend: repairLegend(save.legend),
   };
 }
 
@@ -703,6 +1081,211 @@ function migrateChV11toV12(raw: Record<string, unknown>): Record<string, unknown
   };
 }
 
+/**
+ * v12 → v13: die **Crew-Meisterschaft** (IDEEN-GAMEPLAY 1a) — Lebenszeit-Level je
+ * Mitglied als eigener, von keinem Reset berührter Highwater.
+ *
+ * Ein Alt-Save startet NICHT bei 0, sondern mit seinem AKTUELLEN `crew`-Stand:
+ * Die Level, die ein Spieler gerade hält, hat er nachweislich einmal gekauft —
+ * das ist die größzügige, aber ehrliche Untergrenze. (Alles davor ist
+ * unrekonstruierbar: Wie oft jemand vor seinen Aszensionen dieselbe Leiter
+ * hochgekauft hat, weiß der Save nicht. Bei 0 zu starten wäre die genauso
+ * falsche Behauptung „du hast noch nie ein Level gekauft" und würde ausgerechnet
+ * die treuesten Spielstände am härtesten treffen.) Ein frisch aszendierter
+ * Alt-Save mit leerer Crew startet folgerichtig leer und sammelt ab dem nächsten
+ * Kauf.
+ *
+ * Übernommen werden nur echte Crew-Ids mit positiven ganzen Zahlen — dieselbe
+ * Disziplin, die `repairCrewMastery` danach dauerhaft hält. Für jedes bestehende
+ * Feld verlustfrei.
+ */
+function migrateChV12toV13(raw: Record<string, unknown>): Record<string, unknown> {
+  const crew = isRecord(raw.crew) ? raw.crew : {};
+  const mastery: CrewMastery = {};
+  for (const cfg of CREW) {
+    const lv = crew[cfg.id];
+    if (isNonNegInt(lv) && lv > 0) mastery[cfg.id] = lv;
+  }
+  return {
+    ...raw,
+    v: 13,
+    crewMastery: mastery,
+  };
+}
+
+/**
+ * v13 → v14: die **Crew-Umschulung** (IDEEN-GAMEPLAY 3b) — eine leere Override-Map
+ * und ein leerer Roll-Eskalator.
+ *
+ * Bewusst OHNE Rückwirkung: Ein Alt-Save hat nie Splitter für eine Umschulung
+ * bezahlt, also trägt jeder seiner Slots die Stock-Sorte seines Mitglieds — genau
+ * das sagt die leere Map (`abilityKind` fällt ohne Eintrag auf `cfg.special`
+ * zurück). Der Bump ist trotzdem echt und nicht bloß ein `repair`-Default: Die
+ * persistierte FORM hat sich geändert, und die X7-Matrix hängt an der
+ * Versionsnummer — sie erzwingt das v13-Fixture-Paar, bevor die Migration als
+ * fertig gilt. Für jedes bestehende Feld verlustfrei.
+ */
+function migrateChV13toV14(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    v: 14,
+    crewRetrain: createRetrain(),
+    retrainRolls: createRetrainRolls(),
+  };
+}
+
+/**
+ * v14 → v15: die **Legenden-Konstellation** (IDEEN-GAMEPLAY 2a) — ein leerer
+ * Baum mit einem RÜCKWIRKEND gefüllten Sternenstaub-Konto.
+ *
+ * Anders als bei den Bühnen-Sternen (v10→v11, die bewusst leer starten) ist die
+ * Rückwirkung hier nicht nur möglich, sondern zwingend: Sternenstaub ist per
+ * Definition der Lohn für Dinge, die der Save SCHON BEWEIST — freigeschaltete
+ * Erfolge stehen als Liste drin, die Sterne-Summe ist aus `stageStars`
+ * ausrechenbar, und die gefallenen Boss-Gates stecken in der tiefsten je
+ * erreichten Bühne. Ein Spieler mit 20 Erfolgen und Bühne 60 bekommt beim
+ * ersten Start nach dem Update also sofort sein Konto (hier: 60 + 5·… + …) und
+ * darf sich damit die ersten Knoten kaufen — er hat sie längst verdient.
+ *
+ * Gerechnet wird mit derselben Formel, die danach jede Sekunde läuft
+ * (`constellation.dustEntitlement`); die Boot-Synchro in der Glue wäre also
+ * ohnehin dieselbe Zahl. Die Migration nimmt sie nur vorweg, damit der Anspruch
+ * schon im Save steht und nicht erst durch einen Tick entsteht. Für jedes
+ * bestehende Feld verlustfrei.
+ */
+function migrateChV14toV15(raw: Record<string, unknown>): Record<string, unknown> {
+  const stars = totalStars(repairStageStars(raw.stageStars));
+  const achievements = repairAchievements(raw.achievements).length;
+  // Tiefste JE erreichte Bühne: `lifetimeMaxZone` fällt bei Himmelfahrt/Transzendenz
+  // auf 1 zurück, der Gear-Latch `zoneEver` nicht — deshalb das Maximum aus allen
+  // vier Zahlen (exakt die Regel aus `ch-state.unlockZone`, plus die Run-Werte).
+  const gear = isRecord(raw.gear) ? raw.gear : {};
+  const deepestZone = Math.max(
+    isFiniteNumber(raw.lifetimeMaxZone) ? raw.lifetimeMaxZone : 1,
+    isFiniteNumber(raw.runMaxZone) ? raw.runMaxZone : 1,
+    isFiniteNumber(raw.zone) ? raw.zone : 1,
+    isFiniteNumber(gear.zoneEver) ? gear.zoneEver : 1,
+  );
+  const constellation: ConstellationState = {
+    ...createConstellation(),
+    earned: dustEntitlement({ stars, achievements, deepestZone }),
+  };
+  return { ...raw, v: 15, constellation };
+}
+
+/**
+ * v15 → v16: die **Gebietsherrschaft** (IDEEN-GAMEPLAY 1b) — vier Ruf-Zähler,
+ * die bewusst bei **0** starten.
+ *
+ * Anders als bei der Konstellation (v14→v15, wo der Anspruch aus lauter im Save
+ * vorhandenen Highwatern GERECHNET werden konnte) gibt es hier nichts zu
+ * rekonstruieren: Ruf entsteht ausschließlich aus KILLS pro Theme, und eine
+ * solche Zählung hat das Spiel nie geführt — weder `stats.bossKills` (kennt kein
+ * Theme) noch `lifetimeMaxZone` (kennt keine Wiederholungen) noch `stageStars`
+ * (kennt kein WIE OFT) tragen die Information. Jede Herleitung wäre eine
+ * Erfindung, und eine erfundene Ruf-Zahl verschenkt echte Macht (BP-Prozente)
+ * für einen Nachweis, den niemand erbracht hat.
+ *
+ * Das ist dieselbe Entscheidung wie bei den Bühnen-Sternen in v10→v11 („bewusst
+ * leer"), nur mit dem zusätzlichen Argument der Balance: Die Leiste ist eine
+ * Langzeit-Kurve über Wochen; ein rückwirkendes Startguthaben wäre nicht ein
+ * paar Prozent, sondern die ersten Stufen geschenkt. Alle bestehenden Felder
+ * bleiben unangetastet, die Migration ist verlustfrei.
+ */
+function migrateChV15toV16(raw: Record<string, unknown>): Record<string, unknown> {
+  return { ...raw, v: 16, territory: createTerritory() };
+}
+
+/**
+ * Das tiefste Boss-Gate, das ein Save nachweislich schon GECLERT hat. Ein Gate
+ * `Z` gilt als gefallen, wenn die tiefste je erreichte Bühne ÜBER `Z` liegt
+ * (man kommt nur an ihm vorbei, indem man es besiegt) — exakt die Regel aus
+ * `ch-state.bossFirstKillZones`. Die Tiefe selbst ist das Maximum aus allen
+ * vier Zahlen, die sie tragen können: `lifetimeMaxZone` und die Run-Werte
+ * fallen bei Himmelfahrt/Transzendenz auf 1 zurück, der Gear-Latch `zoneEver`
+ * nicht.
+ */
+function clearedGateFor(raw: Record<string, unknown>): number {
+  const gear = isRecord(raw.gear) ? raw.gear : {};
+  const deepest = Math.max(
+    isFiniteNumber(raw.lifetimeMaxZone) ? raw.lifetimeMaxZone : 1,
+    isFiniteNumber(raw.runMaxZone) ? raw.runMaxZone : 1,
+    isFiniteNumber(raw.zone) ? raw.zone : 1,
+    isFiniteNumber(gear.zoneEver) ? gear.zoneEver : 1,
+  );
+  const gate = Math.floor((deepest - 1) / 5) * 5;
+  return gate >= RELIC_MIN_ZONE ? gate : 0;
+}
+
+/**
+ * v16 → v17: **Relikte** (1c) + **Skin-Schmiede** (3a) — ein Loot-Paket, zwei
+ * Slices, und zwei GEGENSÄTZLICHE Migrations-Entscheidungen im selben Schritt.
+ *
+ * **Die Schmiede startet komplett leer.** Weder Glut noch geschmiedete Affixe
+ * lassen sich aus irgendetwas herleiten: Glut entsteht aus Duplikat-Jackpots
+ * und getauschten Splittern, und beides hat das Spiel nie gezählt (der Save
+ * kennt nur den AKTUELLEN Splitter-Stand, nicht die Historie). Ein
+ * geschmiedetes Affix wäre vollends erfunden — es hätte eine gerollte Qualität,
+ * die niemand gerollt hat. Dasselbe „bewusst leer" wie bei den Bühnen-Sternen
+ * (v10→v11) und der Umschulung (v13→v14).
+ *
+ * **Der Relikt-Gate-Highwater wird dagegen ZWINGEND gesät** — und das ist der
+ * interessante Fall. Die Sammlung selbst startet leer (aus demselben Grund wie
+ * die Schmiede: gefallene Relikte, die nie gefallen sind, wären erfunden), aber
+ * `deepestGate` MUSS auf das tiefste bereits geclerte Gate gesetzt werden. Ohne
+ * das bekäme ein Alt-Save auf Bühne 200 beim nächsten Rückweg dreißig Gates
+ * geschenkt, die er längst hinter sich hat — ein Regen von zehn Relikten für
+ * Arbeit, die vor dem Update passiert ist. Die Zahl ist dabei nicht geraten,
+ * sondern GERECHNET (`clearedGateFor`, dieselbe Regel wie
+ * `bossFirstKillZones`), und sie ist die einzige Richtung, die niemandem etwas
+ * wegnimmt: Sie verschenkt nichts und sperrt nichts, was noch aussteht.
+ *
+ * Ein Alt-Save rechnet nach dem Update also bit-gleich weiter (ein leeres
+ * Loadout faltet überall ×1) und würfelt sein erstes Relikt an dem Gate, das
+ * ihn ohnehin als Nächstes erwartet. Für jedes bestehende Feld verlustfrei.
+ */
+function migrateChV16toV17(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    v: 17,
+    relics: { ...createRelics(), deepestGate: clearedGateFor(raw) },
+    forge: createForge(),
+  };
+}
+
+/**
+ * v17 → v18: **Skin-Pfade** (2b) + **Erbe** (3c) + **Legenden-Level** (1d) —
+ * drei neue Felder, und alle drei starten bewusst LEER.
+ *
+ * **Skin-Pfade**: Tragezeit hat das Spiel nie gemessen. `stats.playTimeS` kennt
+ * die Gesamt-Spielzeit, aber nicht, WELCHER Skin dabei anlag (`gear.skin` ist
+ * eine Momentaufnahme, keine Historie), und `stats.bossKills` kennt kein Gear.
+ * Die Gesamt-Spielzeit auf den aktuell getragenen Skin zu buchen, wäre die
+ * Erfindung „du hast diesen Skin schon immer getragen" — bei einem Spieler, der
+ * gerade erst gewechselt hat, würde sie einen fremden Pfad verschenken.
+ *
+ * **Erbe**: `''`. Ein Erbe entsteht ausschließlich durch eine Wahl in der
+ * Transzendenz-Zeremonie; ihn zu raten (etwa „das Mitglied mit den meisten
+ * Einsatz-XP") hieße, dem Spieler die eine Entscheidung abzunehmen, um die es
+ * bei 3c geht. Wer schon transzendiert hat, wählt beim nächsten Mal.
+ *
+ * **Legenden-Level**: 0 — und das ist die interessante Prüfung. Die Regel lautet
+ * „jede Himmelfahrt NACH der ersten Transzendenz", ein Save müsste dafür also
+ * einen LEBENSZEIT-Zähler der Himmelfahrten tragen. Es gibt ihn nicht:
+ * `heaven.ascensions2` ist der einzige Kandidat, und ausgerechnet er wird von
+ * `transcendState` mit `createHeaven()` auf 0 zurückgesetzt — er zählt also nur
+ * die Himmelfahrten der LAUFENDEN Ära und verschweigt alle früheren. Aus ihm zu
+ * säen wäre keine Herleitung, sondern eine untere Schranke mit dem Anschein
+ * einer Zahl. Dasselbe „bewusst leer" wie bei der Gebietsherrschaft (v15→v16):
+ * Der Zähler beginnt mit der nächsten Himmelfahrt zu ticken.
+ *
+ * Für jedes bestehende Feld verlustfrei; ein Alt-Save rechnet nach dem Update
+ * bit-gleich weiter (leerer Pfad, leerer Erbe und L = 0 falten überall ×1).
+ */
+function migrateChV17toV18(raw: Record<string, unknown>): Record<string, unknown> {
+  return { ...raw, v: 18, skinPath: createSkinPath(), heir: '', legend: 0 };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
@@ -715,6 +1298,12 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
   9: migrateChV9toV10,
   10: migrateChV10toV11,
   11: migrateChV11toV12,
+  12: migrateChV12toV13,
+  13: migrateChV13toV14,
+  14: migrateChV14toV15,
+  15: migrateChV15toV16,
+  16: migrateChV16toV17,
+  17: migrateChV17toV18,
 };
 
 /**

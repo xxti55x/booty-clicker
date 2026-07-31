@@ -1,5 +1,10 @@
 # ROADMAP V2 — Anreifen: Progression · Grafik · Abwechslung · Unfinished Business
 
+> **Status: ✅ komplett umgesetzt** (alle 18 Pakete; Umsetzung Opus-Agenten,
+> Review Fable, Verlauf in DECISIONS.md). Bekannte Rest-Punkte: der tote
+> Bloom-Pfad bleibt aus (Known Issue, eigenes Paket) und das Mobil-Preset
+> wählt sich nicht selbst (Restschuld aus X6).
+
 Nachfolger von `ROADMAP.md` (dessen Phasen T + L sind umgesetzt; die offenen
 Phasen U + F gehen hier in Säule G und Säule X auf). Vier Säulen, jede mit
 Ist-Stand-Anker, konkreten Paketen und einer Messlatte (DoD). Aufwand:
@@ -32,7 +37,7 @@ Der Kern dreht: langsam, mit echten Wänden und drei Prestige-Schichten. Was
 fehlt, ist **Griffigkeit** — sichtbare Nahziele zwischen den Wänden und
 Entscheidungen, die sich wie Spielzüge anfühlen statt wie Warten.
 
-### P1 · Bühnen-Sterne (Nahziele im Kern-Loop) · M
+### P1 · Bühnen-Sterne (Nahziele im Kern-Loop) · M · ✅
 
 Jede Bühne trägt bis zu 3 ⭐: (1) geclert, (2) Boss ohne Timeout,
 (3) Boss mit ≥ x3-Combo besiegt. Sterne sind rein kosmetisch-sammelnd
@@ -42,7 +47,7 @@ bekommen ein Ziel jenseits von „farmen müssen".
 **DoD**: Sterne persistieren im Save (v-Bump + Migration + Tests), Strip
 zeigt sie, Meilenstein-Toast feuert, Sim unbeeinflusst (kosmetisch).
 
-### P2 · Transzendenz-Teaser + TE-Sink · M
+### P2 · Transzendenz-Teaser + TE-Sink · M · ✅
 
 Der 🔮-Tab erscheint erst mit der ersten Himmelfahrt (~15 h) — korrekt fürs
 Pacing, aber die dritte Schicht ist bis dahin UNSICHTBARES Versprechen.
@@ -54,7 +59,7 @@ nur Zahl.
 **DoD**: Teaser sichtbar ab Aszension 1 (Headless-Beweis mit präpariertem
 Save), TE-Shop mit Kosten-Kurve + Tests, Sim-Anker nachgezogen falls nötig.
 
-### P3 · Wand-Telemetrie im Spiel (Ehrlichkeit statt Frust) · S
+### P3 · Wand-Telemetrie im Spiel (Ehrlichkeit statt Frust) · S · ✅
 
 An der Frontier-Boss-Bühne zeigt die Boss-Card eine ehrliche Schätzung:
 „Dein Burst: ~X · Boss-Ausdauer: Y" + Tipp, welcher Kauf die Lücke am
@@ -64,7 +69,7 @@ nicht WARUM man verlor.
 **DoD**: Hint erscheint nur bei erkennbarer Lücke (> 20 %), verschwindet im
 Kampf, ein Unit-Test auf die Empfehlungslogik.
 
-### P4 · Himmelsbaum-Ausbau (Schicht 2 vertiefen) · L
+### P4 · Himmelsbaum-Ausbau (Schicht 2 vertiefen) · L · ✅
 
 Der Himmelsbaum ist der dünnste Prestige-Layer: wenige Knoten, kaum
 Verzweigung. Ausbau auf 3 Äste (Ökonomie / Kampf / Ritual) mit je 4–5
@@ -75,7 +80,7 @@ liegt die längste Strecke des Spiels — sie braucht Entscheidungs-Dichte.
 E-Sim-Anker (Himmelfahrts-Kadenz) bleibt im Fenster oder wird begründet
 re-ankert.
 
-### P5 · Balance-Ritual formalisieren · S
+### P5 · Balance-Ritual formalisieren · S · ✅
 
 Die Sim-Anker sind Gold wert, aber verstreut. Ein `npm run balance`-Skript
 druckt die Kennlinien (t10/t25/t75, erste Himmelfahrt, längste Durststrecke,
@@ -91,7 +96,7 @@ Phase T/L (Texturen, Licht, Bloom) sind durch — die Lücke ist jetzt
 **Bewegung und Momente**: alles steht noch hart im Raum, Übergänge sind Cuts.
 (Absorbiert Phase F der alten Roadmap.)
 
-### G1 · Bühnen-Wechsel als Moment · M
+### G1 · Bühnen-Wechsel als Moment · M · ✅
 
 Beim Theme-Wechsel (nach Boss ODER Rückreise über eine Theme-Grenze) fährt
 die alte Insel nach unten aus, die neue schwebt ein (~1.2 s, Kamera ruhig).
@@ -100,7 +105,7 @@ die alte Insel nach unten aus, die neue schwebt ein (~1.2 s, Kamera ruhig).
 **DoD**: Headless-Frame-Serie des Übergangs (6 Frames) ohne Hard-Cut;
 Rückreise-Übergang ebenso; low-Preset überspringt die Animation.
 
-### G2 · Boss-Auftritt + Sieg-Beat · M
+### G2 · Boss-Auftritt + Sieg-Beat · M · ✅
 
 Boss-Spawn: 0.8 s Licht-Dim auf den Rivalen, Kamera-Punch-In, Namens-Banner
 rollt ein (CSS), Bass-Drop-Stinger. Boss-Kill: Konfetti-Burst + Fanfare +
@@ -110,7 +115,7 @@ wie jeder Rivalen-Wechsel.
 **DoD**: 30-s-Screencast Boss-Ankunft → Kill → Theme-Wechsel liest sich wie
 ein fertiges Spiel; Effekte hängen am Quality-Preset.
 
-### G3 · Idle-Leben pro Theme · S
+### G3 · Idle-Leben pro Theme · S · ✅
 
 3–4 extrem billige Ambient-Sprites je Theme auf Kurven: Club Glühwürmchen/
 Konfetti-Drift (existiert teils), Synth Sternschnuppen, Beach Möwen +
@@ -119,7 +124,7 @@ Inselrand, die zum Beat wippen (Instanced Quads, ein Material).
 **DoD**: Draw-Calls pro Bühne bleiben < 250; Screenshot je Theme zeigt
 Leben; low-Preset halbiert die Dichte.
 
-### G4 · Prestige-Zeremonien · M
+### G4 · Prestige-Zeremonien · M · ✅
 
 Aszension/Himmelfahrt/Transzendenz sind heute ein Klick + Toast — für
 Aktionen, die Stunden Fortschritt wipen, viel zu beiläufig. Vollbild-Blende
@@ -128,7 +133,7 @@ danach der frische Run mit kurzem „Neustart"-Sweep über die Insel.
 **DoD**: je Schicht eine unterscheidbare Zeremonie, abbrechbar (Skip-Tap),
 Headless-Screenshot je Zeremonie-Peak.
 
-### G5 · Gesichter leben · S
+### G5 · Gesichter leben · S · ✅
 
 Die Cartoon-Real-Gesichter sind statisch. Billige Wins im bestehenden Rig:
 Blinzeln (Lid-Scale-Keyframe alle 3–6 s), Pupillen tracken den Rivalen
@@ -138,7 +143,7 @@ Physik-Kontrakt unberührt.
 **DoD**: Nahaufnahme-Screenshots der 4 Zustände; kein neuer Bone, Export-
 Kette läuft unverändert durch.
 
-### G6 · UI-Zahlen-Leben (Alt-Phase U, gezielt) · M
+### G6 · UI-Zahlen-Leben (Alt-Phase U, gezielt) · M · ✅
 
 Das Wichtigste aus der alten Phase U, nicht alles: BP-Zähler tweent, Käufe
 lösen Coin-Fly zum Zähler aus, Ability-Kauf feiert im Slot (Mini-Konfetti),
@@ -155,7 +160,7 @@ Der Loop ist solide, aber jede Bühne spielt sich identisch. Abwechslung
 heißt: **Regeln, die pro Bühne/Kampf variieren** — klein genug, um die
 Balance-Anker nicht zu sprengen.
 
-### A1 · Bühnen-Modifikatoren · L
+### A1 · Bühnen-Modifikatoren · L · ✅
 
 Ab Bühne 11 trägt jede Nicht-Boss-Bühne einen von ~8 seeded Modifikatoren,
 im Strip + der Bühnen-Card sichtbar: „Goldrausch" (+50 % BP, −25 % Combo-
@@ -166,7 +171,7 @@ Rückreisen wird damit strategisch: Farm-Bühne nach Modifikator wählen.
 Modifikatoren (Anker nachgezogen und in DECISIONS begründet); Strip-Badge +
 Card-Erklärung; seeded pro Run (Aszension remixt).
 
-### A2 · Boss-Gimmicks pro Theme · L
+### A2 · Boss-Gimmicks pro Theme · L · ✅
 
 Bosse unterscheiden sich nur in HP. Je Theme EIN Mechanik-Twist:
 **Club** „Spotlight-Phasen" (2×5 s: nur Klicks zählen, DPS pausiert),
@@ -178,7 +183,7 @@ Man scheitert an einer MECHANIK und rüstet gezielt dagegen.
 **DoD**: je Theme ein Gimmick, im Boss-Banner erklärt (ein Satz), pure
 Logik + Tests, Sim-Bosse rechnen die Gimmicks (Anker-Lauf dokumentiert).
 
-### A3 · Truhen-Kobold (aktives Event) · S
+### A3 · Truhen-Kobold (aktives Event) · S · ✅
 
 Alle ~4–7 min hoppelt ein Kobold mit Truhe über die Insel (8 s sichtbar);
 5 schnelle Klicks fangen ihn → Truhe + kurzer Frenzy. Verpasst = weg.
@@ -186,7 +191,7 @@ Nutzt die Golden-Peach-Infrastruktur (Spawn-Kurve, Klick-Fang).
 **DoD**: Fang-/Verpass-Pfad getestet, Spawn hängt an Sichtbarkeit (kein
 Spawn im Hintergrund-Tab), Sim modelliert ihn als kleinen Faucet.
 
-### A4 · Choreo-Set-Rotation · S
+### A4 · Choreo-Set-Rotation · S · ✅
 
 8 Moves existieren, aber die Auswahl ist energie-getrieben gleichförmig.
 Pro Bühne ein „Set" aus 3 Moves (seeded), Boss-Kampf erzwingt die zwei
@@ -210,20 +215,20 @@ Board-Platzierung).
 
 Ehrliche Restliste — Dinge, die angefangen, versprochen oder halb sind.
 
-### X1 · Alt-Phase U/F-Reste · (in G1–G6 absorbiert)
+### X1 · Alt-Phase U/F-Reste · (in G1–G6 absorbiert) · ✅
 
 Die offenen Punkte der alten Roadmap leben jetzt als G1 (Insel-Übergang),
 G2 (Boss-Auftritt/Sieg-Beat), G3 (Idle-Leben), G6 (UI-Feedback + leere
 Zustände + Konsistenz-Audit der Rest-Emojis). `ROADMAP.md` bekommt einen
 Verweis hierher. **DoD**: alte Datei markiert, keine Doppel-Liste.
 
-### X2 · Ekstase-Fenster komplettieren · S
+### X2 · Ekstase-Fenster komplettieren · S · ✅
 
 CSS-Rand-Glow existiert, Musik-Layer existiert, Shimmy existiert — es fehlt
 der Deck-Emissive-Puls und ein HUD-Countdown-Ring am Ekstase-Button.
 **DoD**: Screenshot Ekstase an/aus; Puls hängt am Quality-Preset.
 
-### X3 · Offline-Rückkehr-Moment · S
+### X3 · Offline-Rückkehr-Moment · S · ✅
 
 `offlineGold` zahlt aus, aber die Rückkehr ist ein stiller Kontostand.
 Welcome-Back-Card: „Du warst X h weg · Crew hat Y BP erspielt · [Einsacken]"
@@ -231,7 +236,7 @@ mit Cap-Anzeige (und Hinweis auf den Cap-Ausbau im Himmelsbaum → P4).
 **DoD**: Card erscheint ab > 10 min Abwesenheit, Zahlen matchen
 `offlineGold` exakt (Test), Screenshot.
 
-### X4 · Leaderboard-UI-Endausbau · M
+### X4 · Leaderboard-UI-Endausbau · M · ✅
 
 API v2 (Saisons, mehrere Boards) ist fertiger als die UI: Im Spiel fehlt
 Saison-Anzeige/-Countdown und der Board-Wechsler (Bestzone / wöchentlich →
@@ -239,7 +244,7 @@ A5). Plus Submit-Fehlerpfad sichtbar machen (heute stumm).
 **DoD**: UI zeigt Saison + zwei Boards, Fehlerpfad mit Retry-Toast,
 Worker-Tests grün.
 
-### X5 · Audio-Lücken · M
+### X5 · Audio-Lücken · M · ✅
 
 Fehlt: Boss-Stinger (G2), Zeremonie-Klänge (G4), je Theme eine zweite
 Instrumenten-Lage ab Ekstase, Kobold-Jingle (A3). Alles im bestehenden
@@ -247,7 +252,7 @@ WebAudio-Graph, keine Samples > 50 KB.
 **DoD**: Audio-Smoke-Test (Mute-Toggle, keine Clipping-Warnung), Bundle
 bleibt < 1.5 MB.
 
-### X6 · Mobile-QA-Runde · M
+### X6 · Mobile-QA-Runde · M · ✅
 
 Portrait-Kamera existiert, aber: Touch-Ziele im Strip (46 px ok, Gap-Slot
 prüfen), Boss-Button unter dem Daumen, Bottom-Sheet-Federung (G6),
@@ -256,7 +261,7 @@ falls verfügbar).
 **DoD**: Headless-Portrait-Serie aller Kern-Flows (Klick, Kauf, Boss,
 Prestige) ohne Layout-Bruch; fps-Messung im Log.
 
-### X7 · Save-Hygiene vor neuen Feldern · S
+### X7 · Save-Hygiene vor neuen Feldern · S · ✅
 
 P1 (Sterne), A1 (Modifikator-Seeds), P4 (Baum) bumpen das Schema. Vorher:
 ein Migrations-Sammeltest, der JEDEN historischen Save-Stand (v5…v10)

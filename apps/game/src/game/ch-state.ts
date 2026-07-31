@@ -26,6 +26,7 @@ import {
   permTokenGoldMult,
 } from './chests';
 import {
+  type GearBonus,
   type GearState,
   type UnlockCtx,
   chestLuckBonus,
@@ -33,8 +34,21 @@ import {
   createGear,
   dpsGearMult,
   goldGearMult,
+  emptyGearBonus,
   keyDropBonus,
+  skinLevel,
 } from './gear';
+import { type RolledAffix, foldAffixes } from './affixes';
+import { type RelicsState, createRelics, equippedRelicAffixes } from './relics';
+import { type ForgeState, createForge, forgeAffixes } from './forge';
+import {
+  type ConstellationState,
+  constellationChestLuckBonus,
+  constellationClickMult,
+  constellationDpsMult,
+  constellationGoldMult,
+  createConstellation,
+} from './constellation';
 import { type Gilds, createGilds } from './gild';
 import {
   type HeavenState,
@@ -56,6 +70,11 @@ import {
   crewSpecialBonuses,
   totalRawDps,
 } from './heroes';
+import { type CrewMastery, createMastery } from './mastery';
+import { gainLegend, legendGlobalMult } from './legend';
+import { type SkinPath, createSkinPath, skinPathBonus } from './skin-path';
+import { type CrewRetrain, type RetrainRolls, createRetrain, createRetrainRolls } from './retrain';
+import { type Territory, createTerritory } from './territory';
 import { incomeMultiplier } from './peach';
 import { type MetaState, createMeta } from './quests';
 import { type StageStars, createStageStars } from './stars';
@@ -187,6 +206,30 @@ export interface ChState {
    * every reset that clears levels clears the bought abilities too.
    */
   crewUp: CrewUps;
+  /**
+   * Crew-Meisterschaft (CH-save v13, IDEEN-GAMEPLAY 1a): Lebenszeit-Level je
+   * Mitglied. Ein reiner Highwater — er zählt bei JEDEM Level-Kauf hoch und ist
+   * die einzige Crew-Zahl, die KEINER der drei Resets anfasst (Aszension,
+   * Himmelfahrt, Transzendenz tragen ihn alle weiter). Treibt Rang-Perks
+   * (`mastery.ts`) und den Rahmen ums Portrait.
+   */
+  crewMastery: CrewMastery;
+  /**
+   * Crew-Umschulung (CH-save v14, IDEEN-GAMEPLAY 3b): pro Mitglied die
+   * Spezial-Slots, deren SORTE gegen Splitter umgerollt wurde (Stufen-Index →
+   * Sorte; fehlt = Stock-Sorte des Mitglieds). Wie die Meisterschaft eine
+   * PERMANENTE Schicht: Die Slots selbst (`crewUp`) fallen bei jedem Reset und
+   * werden neu gekauft — sie kommen dann in der umgeschulten Sorte zurück, sonst
+   * wäre der Splitter-Einsatz nach der nächsten Aszension verpufft.
+   */
+  crewRetrain: CrewRetrain;
+  /**
+   * Bezahlte Umschul-Rolls je Mitglied in der LAUFENDEN Aszension (3b) — der
+   * Kosten-Eskalator (jeder weitere Roll am selben Mitglied ×2). Bewusst RUN-
+   * Zustand und damit das Gegenstück zu `crewRetrain`: Die Bremse gegen
+   * Roll-Spam soll sich durch Weiterspielen lösen, nicht durch Warten.
+   */
+  retrainRolls: RetrainRolls;
   /** Banked Ruhm-Seelen (permanent damage bonus). */
   souls: number;
   /** Deepest zone reached across ALL runs (drives soul gains). */
@@ -258,6 +301,57 @@ export interface ChState {
    * Persistiert, damit ein Reload mitten im Retry den Fehlversuch nicht vergisst.
    */
   bossFoulZone: number;
+  /**
+   * Die Legenden-Konstellation (CH-save v15, IDEEN-GAMEPLAY 2a): Sternenstaub-
+   * Konto (`earned`/`spent`) plus die drei freigeschalteten Ketten. Die einzige
+   * Schicht, die ALLE drei Resets überlebt UND ihre eigene, endliche Währung
+   * hat — Sternenstaub entsteht nur aus Bühnen-Sterne-Meilensteinen, Erfolgen
+   * und Boss-Gate-Erstkills, also aus lauter Lebenszeit-Highwatern.
+   */
+  constellation: ConstellationState;
+  /**
+   * Gebietsherrschaft (CH-save v16, IDEEN-GAMEPLAY 1b): der Ruf je Bühnen-Theme
+   * (Club/Synth/Beach/Space). Vier monotone Lebenszeit-Zähler — sie wachsen mit
+   * jedem Kill auf einer Bühne des jeweiligen Themes und werden von KEINEM der
+   * drei Resets angefasst. Ihre Stufen zahlen einen BP-Bonus, der ausschließlich
+   * auf Bühnen des eigenen Themes greift (`territory.territoryGoldMult`).
+   */
+  territory: Territory;
+  /**
+   * Relikte (CH-Save v17, IDEEN-GAMEPLAY 1c): die Sammlung, die drei Trage-Slots,
+   * der Drop-Pity und der Gate-Highwater. PERMANENTER Loot wie Truhen-Skins und
+   * Gear — kein Reset fasst ihn an; der Gate-Highwater ist sogar genau deshalb
+   * da, damit ein Reset die Drop-Leiter nicht neu auszahlt.
+   */
+  relics: RelicsState;
+  /**
+   * Die Skin-Schmiede (CH-Save v17, IDEEN-GAMEPLAY 3a): gehaltene Schmiede-Glut
+   * plus je Skin bis zu drei geschmiedete Affix-Slots. Ebenfalls permanent —
+   * die Slots hängen an `gear.skinLevels`, und das Gear überlebt jeden Reset.
+   */
+  forge: ForgeState;
+  /**
+   * Skin-Meisterschafts-Pfade (CH-Save v18, IDEEN-GAMEPLAY 2b): je Skin die
+   * Tragezeit in Sekunden und die Boss-Kills in ihm. PERMANENT wie das Gear
+   * selbst — kein Reset fasst die Tafel an; sie misst Treue über die gesamte
+   * Lebenszeit eines Spielstands, nicht über eine Tour.
+   */
+  skinPath: SkinPath;
+  /**
+   * Der **Erbe** dieser Ära (CH-Save v18, IDEEN-GAMEPLAY 3c): die Crew-Id, deren
+   * Meisterschafts-Perks doppelt zählen (`heroes.heirWeightFor`), oder `''`
+   * (kein Erbe). Gesetzt wird sie ausschließlich in der Transzendenz-Zeremonie;
+   * sie überlebt Aszension und Himmelfahrt und wird bei der NÄCHSTEN Transzendenz
+   * neu gewählt — ein Erbe je Ära.
+   */
+  heir: string;
+  /**
+   * Legenden-Level (CH-Save v18, IDEEN-GAMEPLAY 1d): ein unendlicher
+   * Lebenszeit-Zähler. Jede Himmelfahrt NACH der ersten Transzendenz gibt genau
+   * eins, jedes zahlt +0,5 % global — **additiv** (`legend.legendGlobalMult`).
+   * Von keinem der drei Resets angefasst, auch nicht vom tiefsten.
+   */
+  legend: number;
 }
 
 /** A brand-new run/profile. */
@@ -269,6 +363,9 @@ export function createChState(): ChState {
     runMaxZone: 1,
     crew: createCrew(),
     crewUp: createCrewUps(),
+    crewMastery: createMastery(),
+    crewRetrain: createRetrain(),
+    retrainRolls: createRetrainRolls(),
     souls: 0,
     lifetimeMaxZone: 1,
     totalClicks: 0,
@@ -292,6 +389,13 @@ export function createChState(): ChState {
     stageStars: createStageStars(),
     starsAwarded: 0,
     bossFoulZone: 0,
+    constellation: createConstellation(),
+    territory: createTerritory(),
+    relics: createRelics(),
+    forge: createForge(),
+    skinPath: createSkinPath(),
+    heir: '',
+    legend: 0,
   };
 }
 
@@ -307,7 +411,69 @@ type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'hea
   transcend?: TranscendState;
   /** Bought crew abilities (optional so pre-v10 test fixtures fold ×1). */
   crewUp?: CrewUps;
+  /** Crew-Meisterschaft (optional so pre-v13 callers/tests fold ×1). */
+  crewMastery?: CrewMastery;
+  /** Crew-Umschulung (optional so pre-v14 callers/tests fold die Stock-Sorten). */
+  crewRetrain?: CrewRetrain;
+  /** Legenden-Konstellation (optional so pre-v15 callers/tests fold ×1). */
+  constellation?: ConstellationState;
+  /** Relikte (optional so pre-v17 callers/tests fold ×1). */
+  relics?: RelicsState;
+  /** Skin-Schmiede (optional so pre-v17 callers/tests fold ×1). */
+  forge?: ForgeState;
+  /** Skin-Meisterschafts-Pfade (optional so pre-v18 callers/tests fold ×1). */
+  skinPath?: SkinPath;
+  /** Der Erbe dieser Ära (optional/leer ⇒ jedes Mitglied zählt einfach). */
+  heir?: string;
+  /** Legenden-Level (optional so pre-v18 callers/tests fold ×1). */
+  legend?: number;
 };
+
+/**
+ * **Der Affix-Fold des Loadouts** (1c + 3a) — die EINE Stelle, an der die
+ * getragenen Relikte und die Schmiede-Slots des AKTIVEN Skins zu einem einzigen
+ * `GearBonus` zusammenlaufen. Von hier liest die abgeleitete Pipeline über
+ * dieselben `1 + x`-Griffe wie beim Gear; einen zweiten Rechenweg gibt es nicht.
+ *
+ * Warum hier und nicht in `affixes.ts`: Der Pool kennt bewusst weder die
+ * Relikt- noch die Schmiede-Slice (er ist reine Arithmetik über Sorte und
+ * Qualität). Das ZUSAMMENFÜHREN ist Aufgabe der Zustands-Schicht — genau wie
+ * `gearUnlockCtx` die Unlock-Regeln mit dem Save verheiratet.
+ *
+ * Fehlt eine der beiden Slices (alte Tests, pre-v17-Aufrufer), faltet sie
+ * schlicht nichts bei. Die Schmiede zählt nur Slots, die der LEVEL des aktiven
+ * Skins freigeschaltet hat.
+ */
+export function loadoutBonus(
+  state: Pick<ChState, 'gear'> & { relics?: RelicsState; forge?: ForgeState },
+): GearBonus {
+  const list: RolledAffix[] = [];
+  if (state.relics) list.push(...equippedRelicAffixes(state.relics));
+  if (state.forge) {
+    list.push(
+      ...forgeAffixes(state.forge, state.gear.skin, skinLevel(state.gear, state.gear.skin)),
+    );
+  }
+  return foldAffixes(list);
+}
+
+/** Derselbe Fold für die optionale `DerivedInput`-Form (fehlendes Gear ⇒ leer). */
+function loadoutOf(state: DerivedInput | { gear?: GearState }): GearBonus {
+  const s = state as { gear?: GearState; relics?: RelicsState; forge?: ForgeState };
+  if (!s.gear) return foldAffixes([]);
+  return loadoutBonus({ gear: s.gear, relics: s.relics, forge: s.forge });
+}
+
+/**
+ * **Der Pfad-Bonus des AKTIVEN Skins** (2b) — dieselbe Bauform wie `loadoutOf`:
+ * eine Stelle, die aus dem Save einen `GearBonus` macht, damit die abgeleiteten
+ * Pipelines ihn über dieselben `1 + x`-Griffe lesen. Ohne Gear oder ohne Tafel
+ * (Alt-Tests, pre-v18-Aufrufer) faltet er überall ×1.
+ */
+export function skinPathOf(state: { gear?: GearState; skinPath?: SkinPath }): GearBonus {
+  if (!state.gear || !state.skinPath) return emptyGearBonus();
+  return skinPathBonus(state.skinPath, state.gear.skin);
+}
 
 /**
  * Total crew DPS: raw crew (with gilds) × the held-soul multiplier (amplified by
@@ -316,12 +482,20 @@ type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'hea
  * neutral) × the gear DPS mult (§5) × the permanent-token crew-DPS mult (§6.2).
  * Idle DPS never draws crit/combo/beat/frenzy — active clicking stays king (P1).
  * `permTokens`/`transcend` are optional so callers/tests without those slices fold
- * the empty (×1) bonus.
+ * the empty (×1) bonus. Der Meisterschafts-Perk (1a) steckt NICHT als eigener
+ * Faktor hier, sondern PRO MITGLIED in `totalRawDps` — er ist per Definition
+ * kein globaler Term, sondern gehört genau dem Mitglied, das ihn erspielt hat.
  */
 export function dpsOf(state: DerivedInput): number {
   const hpf = state.heaven.hpf;
   return (
-    totalRawDps(state.crew, state.gilds, state.crewUp ?? {}) *
+    totalRawDps(
+      state.crew,
+      state.gilds,
+      state.crewUp ?? {},
+      state.crewMastery ?? {},
+      state.heir ?? '',
+    ) *
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientDpsMult(state.ancients) *
     heavenGlobalMult(hpf) *
@@ -332,7 +506,22 @@ export function dpsOf(state: DerivedInput): number {
     (state.gear ? dpsGearMult(state.gear) : 1) *
     (state.permTokens ? permTokenDpsMult(state.permTokens) : 1) *
     // v11.1 `idle`-Special („Groove"): hebt wie das Idle-Gear NUR die DPS-Seite.
-    (state.crewUp ? crewSpecialBonuses(state.crewUp).idleMult : 1)
+    // 3b: mit der Umschul-Map, damit ein auf `idle` gerollter Slot hier exakt so
+    // zählt wie ein von Haus aus `idle`-Mitglied.
+    (state.crewUp ? crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).idleMult : 1) *
+    // 2a: die Ausdauer-Knoten der Legenden-Konstellation (+2 %/Knoten, ×1 ohne
+    // Baum). Wie der Meisterschafts-Perk bewusst NUR auf der Idle-Seite — die
+    // Konstellation hat für den Klick ihre eigenen Knoten (P1 bleibt unberührt).
+    (state.constellation ? constellationDpsMult(state.constellation) : 1) *
+    // 1c + 3a: die `dpsPct`-Affixe der getragenen Relikte und der Schmiede des
+    // aktiven Skins — EIN summierter, gedeckelter Term, exakt wie ein Skin-Buff.
+    (1 + loadoutOf(state).dpsPct) *
+    // 2b: der Skin-Pfad des AKTIVEN Skins (nur Diamant-Booty zahlt hier über
+    // seinen `allPct`-Stern; jeder andere Pfad faltet auf der Idle-Seite ×1).
+    (1 + skinPathOf(state).dpsPct) *
+    // 1d: die Legenden-Level — `1 + 0.005·L`, ADDITIV, und derselbe Skalar wie
+    // im Klick-Term (P1-neutral, exakt wie die Transzendenz-Schicht darüber).
+    legendGlobalMult(state.legend ?? 0)
   );
 }
 
@@ -346,7 +535,13 @@ export function dpsOf(state: DerivedInput): number {
 export function clickDamageOf(state: DerivedInput): number {
   const hpf = state.heaven.hpf;
   return (
-    clickDamageRaw(state.crew, state.gilds, state.crewUp ?? {}) *
+    clickDamageRaw(
+      state.crew,
+      state.gilds,
+      state.crewUp ?? {},
+      state.crewMastery ?? {},
+      state.heir ?? '',
+    ) *
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientClickMult(state.ancients) *
     heavenGlobalMult(hpf) *
@@ -355,7 +550,16 @@ export function clickDamageOf(state: DerivedInput): number {
     // der Baum das Klick:Idle-Verhältnis immer nur in EINE Richtung kippen.
     heavenClickMult(state.heaven) *
     (state.transcend ? transcendGlobalMult(state.transcend.te) : 1) *
-    (state.gear ? clickGearMult(state.gear) : 1)
+    (state.gear ? clickGearMult(state.gear) : 1) *
+    // 2a: die Klick-Knoten der Legenden-Konstellation (+2 %/Knoten, ×1 ohne Baum).
+    (state.constellation ? constellationClickMult(state.constellation) : 1) *
+    // 1c + 3a: die `clickPct`-Affixe des Loadouts (×1 ohne Relikte/Schmiede).
+    (1 + loadoutOf(state).clickPct) *
+    // 2b: der Skin-Pfad (Klassiker zahlt hier bis zu +8 % — der stärkste Fall
+    // des ganzen Systems, und damit exakt der Richtwert des Ideen-Dokuments).
+    (1 + skinPathOf(state).clickPct) *
+    // 1d: derselbe additive Legenden-Faktor wie in `dpsOf` (P1-neutral).
+    legendGlobalMult(state.legend ?? 0)
   );
 }
 
@@ -373,33 +577,62 @@ export function goldMult(
   state: Pick<ChState, 'ancients' | 'gear'> & {
     permTokens?: PermTokens;
     crewUp?: CrewUps;
+    crewRetrain?: CrewRetrain;
     heaven?: HeavenState;
+    constellation?: ConstellationState;
+    relics?: RelicsState;
+    forge?: ForgeState;
+    skinPath?: SkinPath;
   },
 ): number {
   return (
     ancientGoldMult(state.ancients) *
     goldGearMult(state.gear) *
     (state.permTokens ? permTokenGoldMult(state.permTokens) : 1) *
-    (state.crewUp ? crewSpecialBonuses(state.crewUp).goldMult : 1) *
-    (state.heaven ? goldeneHandeMult(state.heaven) : 1)
+    (state.crewUp ? crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).goldMult : 1) *
+    (state.heaven ? goldeneHandeMult(state.heaven) : 1) *
+    // 2a: „Anfängerglück" + „Tantiemen" der Konstellation (+2 %/Knoten, ×1 ohne Baum).
+    (state.constellation ? constellationGoldMult(state.constellation) : 1) *
+    // 1c + 3a: die `goldPct`-Affixe des Loadouts (×1 ohne Relikte/Schmiede).
+    (1 + loadoutOf(state).goldPct) *
+    // 2b: der Skin-Pfad (Pfirsich-Pirat zahlt hier, Diamant über `allPct`).
+    (1 + skinPathOf(state).goldPct)
   );
 }
 
 /**
  * Summed Truhen-Luck fraction fed to `openChest` as `ctx.luck` (§6.3.4): the gear
  * chest-luck total (which already folds Tyrann-skin stars) + Truhilda's Ancient
- * chest-luck. Pure over `(gear, ancients)`; `applyLuck` clamps it to `LUCK_MAX_SHIFT`.
+ * chest-luck + die Truhen-Knoten der Konstellation (2a). Pure over
+ * `(gear, ancients, constellation)`; `applyLuck` clamps it to `LUCK_MAX_SHIFT`.
  */
-export function chestLuck(state: Pick<ChState, 'gear' | 'ancients'>): number {
-  return chestLuckBonus(state.gear) + ancientChestLuckBonus(state.ancients);
+export function chestLuck(
+  state: Pick<ChState, 'gear' | 'ancients'> & {
+    constellation?: ConstellationState;
+    relics?: RelicsState;
+    forge?: ForgeState;
+    skinPath?: SkinPath;
+  },
+): number {
+  return (
+    chestLuckBonus(state.gear) +
+    ancientChestLuckBonus(state.ancients) +
+    (state.constellation ? constellationChestLuckBonus(state.constellation) : 0) +
+    // 1c + 3a: die „Spürnase"-Affixe des Loadouts (0 ohne Relikte/Schmiede).
+    loadoutOf(state).chestLuck +
+    // 2b: der Skin-Pfad (Goldener Twerk-Tyrann zahlt hier, Diamant über `allPct`).
+    skinPathOf(state).chestLuck
+  );
 }
 
 /**
  * Multiplier applied to key-drop chances (§6.1): `1 + gear keyDrop + Truhen-Magnet`
  * (the Himmelsbaum node, +25 %). Pure over `(gear, heaven)`.
  */
-export function keyDropMult(state: Pick<ChState, 'gear' | 'heaven'>): number {
-  return 1 + keyDropBonus(state.gear) + truhenMagnetBonus(state.heaven);
+export function keyDropMult(
+  state: Pick<ChState, 'gear' | 'heaven'> & { skinPath?: SkinPath },
+): number {
+  return 1 + keyDropBonus(state.gear) + truhenMagnetBonus(state.heaven) + skinPathOf(state).keyDrop;
 }
 
 /**
@@ -512,6 +745,14 @@ export function ascendState(state: ChState): ChState {
     stats: state.stats,
     legacyImported: state.legacyImported,
     gilds: state.gilds,
+    // Crew-Meisterschaft (1a) ist ein LEBENSZEIT-Zähler wie `totalClicks` — die
+    // Level fallen, was man in sie investiert hat, bleibt.
+    crewMastery: state.crewMastery,
+    // Crew-Umschulung (3b) ebenso: Die Slots fallen mit `crewUp`, ihre erkaufte
+    // SORTE bleibt und steht wieder da, sobald der Slot neu gekauft ist. Der
+    // Roll-Eskalator (`retrainRolls`) fällt hier bewusst weg — er ist Run-Zustand
+    // und `createChState()` liefert ihn frisch leer.
+    crewRetrain: state.crewRetrain,
     transcend: state.transcend, // L3 survives every lower-layer reset (§4.5.3)
     ancients: state.ancients, // Ancients survive L1 (§4.5 reset table)
     heaven: state.heaven, // L2 state survives L1
@@ -533,6 +774,21 @@ export function ascendState(state: ChState): ChState {
     // und fällt bewusst auf 0 zurück).
     stageStars: state.stageStars,
     starsAwarded: state.starsAwarded,
+    // Legenden-Konstellation (2a): der Baum, den KEINE Prestige-Schicht wipet.
+    constellation: state.constellation,
+    // Gebietsherrschaft (1b): vier Lebenszeit-Zähler wie `totalClicks` — die
+    // Bühnen fallen auf 1 zurück, der Ruf für sie bleibt.
+    territory: state.territory,
+    // Relikte (1c) + Schmiede (3a): permanenter Loot wie Truhen-Skins und Gear.
+    // Der Gate-Highwater in `relics` MUSS mitwandern — sonst zahlte jede
+    // Aszension die Drop-Leiter ab Bühne 50 ein zweites Mal aus.
+    relics: state.relics,
+    forge: state.forge,
+    // Skin-Pfade (2b), Erbe (3c) und Legenden-Level (1d): drei permanente
+    // Zahlen, die eine Tour-Zurücksetzung nichts angeht.
+    skinPath: state.skinPath,
+    heir: state.heir,
+    legend: state.legend,
   };
 }
 
@@ -548,6 +804,8 @@ export function himmelfahrtState(state: ChState): ChState {
     ...createChState(),
     heaven,
     gilds: state.gilds, // Vergoldungen survive Himmelfahrt (M10-AC2)
+    crewMastery: state.crewMastery, // Einsatz-XP überleben auch L2 (1a)
+    crewRetrain: state.crewRetrain, // Umgeschulte Sorten überleben auch L2 (3b)
     transcend: state.transcend, // L3 survives every lower-layer reset (§4.5.3)
     totalClicks: state.totalClicks,
     rng: state.rng,
@@ -572,6 +830,19 @@ export function himmelfahrtState(state: ChState): ChState {
     // Bühnen-Sterne (P1) — Lebenszeit-Sammlung, überlebt auch L2.
     stageStars: state.stageStars,
     starsAwarded: state.starsAwarded,
+    // Legenden-Konstellation (2a) — überlebt auch L2, Konto wie Knoten.
+    constellation: state.constellation,
+    // Gebietsherrschaft (1b) — der Ruf überlebt auch L2.
+    territory: state.territory,
+    // Relikte (1c) + Schmiede (3a) überleben auch L2 — inklusive des
+    // Gate-Highwaters, der die Drop-Leiter genau einmal im Leben auszahlt.
+    relics: state.relics,
+    forge: state.forge,
+    // Skin-Pfade (2b) und Erbe (3c) überleben die Himmelfahrt unverändert; das
+    // Legenden-Level (1d) wächst hier — sofern schon einmal transzendiert wurde.
+    skinPath: state.skinPath,
+    heir: state.heir,
+    legend: gainLegend(state.legend, state.transcend.transcendences),
   };
 }
 
@@ -590,12 +861,14 @@ export function himmelfahrtState(state: ChState): ChState {
  * MUST gate the button on `canTranscend(state.transcend, state.heaven.hpfLifetime)`
  * so the reset is never triggered without a real gain.
  */
-export function transcendState(state: ChState): ChState {
+export function transcendState(state: ChState, heir = ''): ChState {
   const transcend = bankTranscendence(state.transcend, state.heaven.hpfLifetime);
   return {
     ...createChState(), // fresh L1 tour + fresh L2 heaven (createHeaven())
     transcend, // the banked L3 slice survives (held TE + Mythos ledger carry over)
     gilds: state.gilds, // Vergoldungen survive every reset
+    crewMastery: state.crewMastery, // Einsatz-XP überleben auch den tiefsten Reset (1a)
+    crewRetrain: state.crewRetrain, // Umgeschulte Sorten ebenso (3b)
     totalClicks: state.totalClicks,
     rng: state.rng,
     stats: state.stats,
@@ -618,5 +891,24 @@ export function transcendState(state: ChState): ChState {
     // Bühnen-Sterne (P1) — Lebenszeit-Sammlung, überlebt auch L3.
     stageStars: state.stageStars,
     starsAwarded: state.starsAwarded,
+    // Legenden-Konstellation (2a) — der tiefste Reset des Spiels lässt sie
+    // unangetastet; das ist der ganze Sinn dieser Schicht.
+    constellation: state.constellation,
+    // Gebietsherrschaft (1b) — ebenso: Ruf ist verdient, nicht geliehen.
+    territory: state.territory,
+    // Relikte (1c) + Schmiede (3a) — gefundener und geschmiedeter Loot ist
+    // Besitz, kein Ausbau; der tiefste Reset des Spiels lässt ihn stehen.
+    relics: state.relics,
+    forge: state.forge,
+    // 2b: Tragezeit und Boss-Kills sind erspielte Lebenszeit — wie die
+    // Crew-Meisterschaft überstehen sie auch den tiefsten Reset.
+    skinPath: state.skinPath,
+    // 3c: DER ERBEN-MOMENT. Die Wahl gilt für die NEUE Ära; der Aufrufer
+    // übergibt sie hier (leer = kein Erbe). Der alte Erbe der abgelaufenen Ära
+    // wird bewusst NICHT weitergetragen — ein Erbe je Ära, neu gewählt.
+    heir,
+    // 1d: unendlich und nie gewipet — der tiefste Reset des Spiels lässt ihn
+    // stehen. Die Transzendenz selbst zahlt KEIN Level (nur Himmelfahrten tun das).
+    legend: state.legend,
   };
 }

@@ -5,17 +5,25 @@ import { pendingSouls, soulsForMaxZone } from '../game/ascension';
 import {
   type ChState,
   ascendState,
+  clickDamageOf,
   createChState,
   createChests,
   createComboSave,
   createPeach,
   createStats,
+  dpsOf,
   himmelfahrtState,
+  loadoutBonus,
   transcendState,
 } from '../game/ch-state';
+import { CH_ACHIEVEMENT_IDS } from '../game/ch-achievements';
+import { createConstellation, dustEntitlement, dustHeld } from '../game/constellation';
 import { createGear } from '../game/gear';
+import { createForge, forgeAffixes, forgeSlotsUnlocked } from '../game/forge';
+import { createRelics, equippedRelicAffixes, relicGateEligible } from '../game/relics';
 import { TREE_NODES, treeLevel } from '../game/heaven';
 import { createMeta, dailyQuests } from '../game/quests';
+import { createTerritory, rankOf, territoryGoldMult } from '../game/territory';
 import { createTranscend, transcendGlobalMult } from '../game/transcend';
 import { monsterHp } from '../game/combat';
 import {
@@ -1330,5 +1338,611 @@ describe('ch-store — v11 migration & repair (Bühnen-Sterne, P1)', () => {
       // Der offene Fehlversuch ist Run-Zustand — jeder Reset startet sauber.
       expect(next.bossFoulZone).toBe(0);
     }
+  });
+});
+
+describe('ch-store — v13 migration & repair (Crew-Meisterschaft, 1a)', () => {
+  it('sät einen v12-Save aus seinem AKTUELLEN Crew-Stand (großzügig, aber beweisbar)', () => {
+    // Ein realistischer v12-Save: mitten im Lauf, ohne Meisterschafts-Feld.
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 12;
+    delete raw.crewMastery;
+    raw.gold = 5150;
+    raw.crew = { boss: 140, hype: 95, dj: 0 };
+    const store = memStorage();
+    store.setItem(CH_SAVE_KEY, JSON.stringify(raw));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    expect(s.gold).toBe(5150);
+    // „Die Level, die du JETZT hältst, hast du nachweislich einmal gekauft."
+    // Ein Lv-0-Mitglied bringt nichts mit (kein Eintrag, keine 0-Leiche).
+    expect(s.crewMastery).toEqual({ boss: 140, hype: 95 });
+  });
+
+  it('startet einen frisch aszendierten v12-Save leer (nichts zu beweisen)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 12;
+    delete raw.crewMastery;
+    raw.crew = {};
+    raw.souls = 900;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.crewMastery).toEqual({});
+    expect(s!.souls).toBe(900); // der Rest des Saves bleibt unangetastet
+  });
+
+  it('round-trippt die Tafel und putzt gebastelte Stände', () => {
+    const s: ChState = {
+      ...createChState(),
+      crew: { boss: 40 },
+      crewMastery: { boss: 9_400, hype: 1_200 },
+    };
+    const round = deserializeCh(serializeCh(s, 1000));
+    expect(round!.crewMastery).toEqual({ boss: 9_400, hype: 1_200 });
+
+    const raw = JSON.parse(serializeCh(s, 1000)) as Record<string, unknown>;
+    raw.crewMastery = { boss: 9_400.9, hype: -3, dj: 'x', junk: 5_000, legend: 0 };
+    const repaired = deserializeCh(JSON.stringify(raw));
+    // Krumm ⇒ abgerundet, negativ/typfalsch/0 ⇒ raus, Nicht-Mitglied ⇒ raus.
+    expect(repaired!.crewMastery).toEqual({ boss: 9_400 });
+  });
+
+  it('klemmt die Lebenszeit-Zahl bewusst NICHT an den aktuellen Crew-Stand', () => {
+    // Genau der Normalfall nach einem Reset: Level 0, Einsatz-XP hoch.
+    const s: ChState = { ...createChState(), crew: {}, crewMastery: { boss: 12_000 } };
+    expect(deserializeCh(serializeCh(s, 1000))!.crewMastery).toEqual({ boss: 12_000 });
+  });
+
+  it('repariert eine komplett kaputte Tafel, ohne anderen Fortschritt zu nuken', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.crewMastery = 'garbage';
+    raw.souls = 33;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.crewMastery).toEqual({});
+    expect(s!.souls).toBe(33);
+  });
+
+  it('trägt die Meisterschaft durch ALLE drei Prestige-Schichten', () => {
+    const base: ChState = {
+      ...createChState(),
+      crew: { boss: 120, hype: 80 },
+      crewUp: { boss: 2 },
+      runMaxZone: 60,
+      lifetimeMaxZone: 60,
+      rsLifetime: 500,
+      souls: 500,
+      heaven: { hpf: 0, hpfLifetime: 200, ascensions2: 1, tree: {} },
+      crewMastery: { boss: 9_400, hype: 1_200 },
+    };
+    for (const next of [ascendState(base), himmelfahrtState(base), transcendState(base)]) {
+      expect(next.crewMastery).toEqual({ boss: 9_400, hype: 1_200 });
+      // Gegenprobe: Level und Fähigkeits-Ledger fallen sehr wohl.
+      expect(next.crew).toEqual({});
+      expect(next.crewUp).toEqual({});
+    }
+  });
+});
+
+describe('ch-store — v14 migration & repair (Crew-Umschulung, 3b)', () => {
+  it('startet einen v13-Save mit leerer Map (Stock-Sorten überall, kein Verlust)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 13;
+    delete raw.crewRetrain;
+    delete raw.retrainRolls;
+    raw.gold = 7_400;
+    raw.crew = { boss: 140 };
+    raw.crewUp = { boss: 2 };
+    const store = memStorage();
+    store.setItem(CH_SAVE_KEY, JSON.stringify(raw));
+    const loaded = loadCh(store);
+    expect(loaded).not.toBeNull();
+    const s = loaded!.state;
+    // Wer nie umgeschult hat, trägt überall die Stock-Sorte — die leere Map sagt
+    // genau das, also ist die Migration verlustfrei und rückwirkungsfrei.
+    expect(s.crewRetrain).toEqual({});
+    expect(s.retrainRolls).toEqual({});
+    expect(s.gold).toBe(7_400);
+    expect(s.crewUp).toEqual({ boss: 2 });
+  });
+
+  it('round-trippt Overrides und Eskalator', () => {
+    const s: ChState = {
+      ...createChState(),
+      crew: { boss: 200 },
+      crewUp: { boss: 4 },
+      crewRetrain: { boss: { '2': 'idle', '4': 'gold' } },
+      retrainRolls: { boss: 3 },
+    };
+    const round = deserializeCh(serializeCh(s, 1000));
+    expect(round!.crewRetrain).toEqual({ boss: { '2': 'idle', '4': 'gold' } });
+    expect(round!.retrainRolls).toEqual({ boss: 3 });
+  });
+
+  it('lässt keinen Override auf eine POWER-Stufe durch (die Leitplanke von 3b)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    // Booty-Boss folgt P S P S: Stufe 1 und 3 sind Power und dürfen NIE rollen.
+    raw.crewRetrain = { boss: { '1': 'gold', '2': 'beat', '3': 'idle' } };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.crewRetrain).toEqual({ boss: { '2': 'beat' } });
+  });
+
+  it('putzt Müll-Sorten, Müll-Ids und Nicht-Normalform-Schlüssel', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.crewRetrain = {
+      boss: { '2': 'power', '4': 'quatsch', '02': 'gold', '2.0': 'gold', x: 'gold' },
+      junk: { '2': 'gold' },
+      hype: 'garbage',
+    };
+    raw.retrainRolls = { boss: -2, hype: 2.7, junk: 9 };
+    const s = deserializeCh(JSON.stringify(raw));
+    // Nichts davon überlebt: `power` ist keine Sorte, `quatsch` keine Sorte,
+    // „02"/„2.0" sind keine Normalform (zwei Schlüssel zeigten sonst auf EINEN
+    // Slot), `junk` ist kein Mitglied.
+    expect(s!.crewRetrain).toEqual({});
+    expect(s!.retrainRolls).toEqual({ hype: 2 });
+  });
+
+  it('repariert eine komplett kaputte Slice, ohne anderen Fortschritt zu nuken', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.crewRetrain = 'garbage';
+    raw.retrainRolls = 42;
+    raw.souls = 77;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.crewRetrain).toEqual({});
+    expect(s!.retrainRolls).toEqual({});
+    expect(s!.souls).toBe(77);
+  });
+
+  it('klemmt die Map bewusst NICHT an den Fähigkeits-Ledger (Reset-Normalfall)', () => {
+    // Nach jedem Reset steht `crewUp` auf 0, während die erkaufte Sorte bleibt —
+    // genau ihr Sinn. Sie muss den Reload also auch ohne gekauften Slot überleben.
+    const s: ChState = {
+      ...createChState(),
+      crew: {},
+      crewUp: {},
+      crewRetrain: { boss: { '2': 'idle' } },
+    };
+    expect(deserializeCh(serializeCh(s, 1000))!.crewRetrain).toEqual({ boss: { '2': 'idle' } });
+  });
+});
+
+describe('ch-store — v15 migration & repair (Legenden-Konstellation, 2a)', () => {
+  it('zahlt einem v14-Save seinen Sternenstaub RÜCKWIRKEND aus', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 14;
+    delete raw.constellation;
+    // Ein gestandener Spielstand: 20 Erfolge, 34 Bühnen-Sterne (2 volle
+    // Meilensteine), Bestzone 62 (die Gates 25 … 60 sind gefallen = 8 Stück).
+    raw.achievements = CH_ACHIEVEMENT_IDS.slice(0, 20);
+    raw.stageStars = { '5': 7, '6': 5, '7': 5, '10': 7, '11': 5, '15': 7, '20': 7 }; // 3+2+2+3+2+3+3 = 18
+    raw.lifetimeMaxZone = 62;
+    raw.runMaxZone = 62;
+    raw.zone = 62;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    const want = dustEntitlement({ stars: 18, achievements: 20, deepestZone: 62 });
+    // 1 Meilenstein (18 Sterne) × 5 + 20 Erfolge × 3 + 8 Gates × 2 = 5 + 60 + 16.
+    expect(want).toBe(81);
+    expect(s!.constellation).toEqual({ earned: want, spent: 0, nodes: {} });
+    // Der Baum selbst startet leer — verdient ist verdient, gekauft ist nichts.
+    expect(dustHeld(s!.constellation)).toBe(want);
+  });
+
+  it('liest die Bestzone Himmelfahrt-fest aus dem Gear-Latch', () => {
+    // Nach einer Himmelfahrt steht `lifetimeMaxZone` auf 1, `gear.zoneEver` hält
+    // die echte Tiefe — die Gates dürfen dadurch nicht „ungefallen" werden.
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 14;
+    delete raw.constellation;
+    raw.achievements = [];
+    raw.lifetimeMaxZone = 1;
+    raw.runMaxZone = 1;
+    raw.zone = 1;
+    raw.gear = { ...createGear(), zoneEver: 80 };
+    const s = deserializeCh(JSON.stringify(raw));
+    // Bühne 80 ⇒ die Gates 25 … 75 sind gefallen (11 Stück) ⇒ 22 💫.
+    expect(s!.constellation.earned).toBe(22);
+  });
+
+  it('startet einen ganz frischen Spielstand bei null (nichts verdient, nichts geschenkt)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 14;
+    delete raw.constellation;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.constellation).toEqual(createConstellation());
+  });
+
+  it('round-trippt Konto und Ketten', () => {
+    const s: ChState = {
+      ...createChState(),
+      constellation: { earned: 140, spent: 12, nodes: { aufbruch: 3, tempo: 1 } },
+    };
+    const round = deserializeCh(serializeCh(s, 1000));
+    expect(round!.constellation).toEqual({
+      earned: 140,
+      spent: 12,
+      nodes: { aufbruch: 3, tempo: 1 },
+    });
+  });
+
+  it('rechnet `spent` beim Laden NEU — ein gelogenes Konto kauft keinen Rabatt', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.constellation = { earned: 500, spent: 0, nodes: { aufbruch: 4 } };
+    const s = deserializeCh(JSON.stringify(raw));
+    // 2 + 3 + 5 + 7 = 17 — unabhängig davon, was der Save behauptet.
+    expect(s!.constellation.spent).toBe(17);
+    expect(dustHeld(s!.constellation)).toBe(483);
+  });
+
+  it('hebt `earned` auf `spent`, statt gekaufte Sterne zu nuken', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.constellation = { earned: 0, spent: 0, nodes: { ausdauer: 8 } };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.constellation.nodes).toEqual({ ausdauer: 8 });
+    expect(s!.constellation.spent).toBe(70);
+    expect(s!.constellation.earned).toBe(70); // nach OBEN korrigiert (wie repairTranscend)
+    expect(dustHeld(s!.constellation)).toBe(0);
+  });
+
+  it('überlebt alle drei Resets im geladenen Zustand (die Kern-Zusage von 2a)', () => {
+    const s: ChState = {
+      ...createChState(),
+      rsLifetime: 5_000_000,
+      heaven: { hpf: 30, hpfLifetime: 300, ascensions2: 4, tree: {} },
+      constellation: { earned: 210, spent: 210, nodes: { aufbruch: 8, tempo: 8, ausdauer: 8 } },
+    };
+    const after = transcendState(himmelfahrtState(ascendState(s)));
+    expect(after.constellation).toEqual(s.constellation);
+    // Und der round-trip durch den Store ändert daran nichts.
+    expect(deserializeCh(serializeCh(after, 1000))!.constellation).toEqual(s.constellation);
+  });
+});
+
+describe('ch-store — v16 migration & repair (Gebietsherrschaft, 1b)', () => {
+  it('startet einen v15-Save bei NULL — es gibt nichts zu rekonstruieren', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 15;
+    delete raw.territory;
+    // Ein gestandener Spielstand: tiefe Bühne, viele Boss-Kills, volle Sterne-
+    // Sammlung. NICHTS davon sagt, auf WELCHEM Theme diese Kills passiert sind —
+    // deshalb bleibt die Ruf-Tafel leer (anders als der Sternenstaub in v15,
+    // dessen Anspruch aus vorhandenen Highwatern GERECHNET werden kann).
+    raw.lifetimeMaxZone = 120;
+    raw.runMaxZone = 120;
+    raw.zone = 120;
+    raw.stats = { ...createStats(), bossKills: 400 };
+    raw.stageStars = { '5': 7, '10': 7, '15': 7, '20': 7 };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.territory).toEqual(createTerritory());
+    // Und damit ist der BP-Faktor auf jeder Bühne exakt neutral: Ein Alt-Save
+    // rechnet nach dem Update bit-gleich weiter, bis er den ersten Kill macht.
+    for (const zone of [1, 7, 13, 19]) expect(territoryGoldMult(s!.territory, zone)).toBe(1);
+  });
+
+  it('round-trippt die vier Zähler', () => {
+    const s: ChState = { ...createChState(), territory: { club: 2_700, synth: 900, beach: 120 } };
+    const round = deserializeCh(serializeCh(s, 1000));
+    expect(round!.territory).toEqual({ club: 2_700, synth: 900, beach: 120 });
+    expect(rankOf(round!.territory, 'club')).toBe(5);
+    expect(rankOf(round!.territory, 'synth')).toBe(3);
+    expect(rankOf(round!.territory, 'beach')).toBe(0);
+    expect(rankOf(round!.territory, 'space')).toBe(0);
+  });
+
+  it('kennt nur die vier echten Themen und putzt jeden anderen Schlüssel weg', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.territory = { club: 900.7, synth: -5, beach: 'x', space: null, vegas: 10_000, 7: 42 };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.territory).toEqual({ club: 900 });
+  });
+
+  it('repariert eine komplett kaputte Tafel, ohne anderen Fortschritt zu nuken', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.territory = 'garbage';
+    raw.souls = 77;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.territory).toEqual({});
+    expect(s!.souls).toBe(77);
+  });
+
+  it('klemmt den Ruf bewusst NICHT an die Bühnen-Highwater (Reset-Normalfall)', () => {
+    // Nach einer Himmelfahrt steht `lifetimeMaxZone` auf 1, während der Ruf hoch
+    // bleibt — genau sein Sinn. Ein Vergleich gegen den Spielstand hätte hier
+    // also gar keine richtige Richtung.
+    const s: ChState = {
+      ...createChState(),
+      zone: 1,
+      runMaxZone: 1,
+      lifetimeMaxZone: 1,
+      territory: { space: 60_000 },
+    };
+    expect(deserializeCh(serializeCh(s, 1000))!.territory).toEqual({ space: 60_000 });
+  });
+
+  it('überlebt alle drei Resets im geladenen Zustand (die Kern-Zusage von 1b)', () => {
+    const s: ChState = {
+      ...createChState(),
+      rsLifetime: 5_000_000,
+      heaven: { hpf: 30, hpfLifetime: 300, ascensions2: 4, tree: {} },
+      territory: { club: 2_700, synth: 900, beach: 120, space: 49_590 },
+    };
+    // Alle drei Schichten hintereinander: Aszension (L1) → Himmelfahrt (L2) →
+    // Transzendenz (L3). Der Ruf hängt an keiner von ihnen — auch nicht an der
+    // Gear-Slice, die die Skins/Level trägt.
+    const after = transcendState(himmelfahrtState(ascendState(s)));
+    expect(after.territory).toEqual(s.territory);
+    expect(deserializeCh(serializeCh(after, 1000))!.territory).toEqual(s.territory);
+    // Und die Wirkung steht danach unverändert da: Space voll, Club auf Stufe 5.
+    expect(territoryGoldMult(after.territory, 18)).toBeCloseTo(1.15, 10);
+    expect(territoryGoldMult(after.territory, 3)).toBeCloseTo(1.075, 10);
+  });
+});
+
+describe('ch-store — v17 migration & repair (Relikte 1c + Skin-Schmiede 3a)', () => {
+  it('sät den Gate-Highwater aus der geclerten Tiefe — sonst regnet es Relikte', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 16;
+    delete raw.relics;
+    delete raw.forge;
+    // Ein gestandener Spielstand auf Bühne 203: die Gates 50…200 sind längst
+    // gefallen. Ohne die Saat bekäme er sie beim nächsten Rückweg ALLE noch
+    // einmal ausgezahlt — dreißig Würfe für Arbeit von vor dem Update.
+    raw.lifetimeMaxZone = 203;
+    raw.runMaxZone = 203;
+    raw.zone = 203;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    // Die SAMMLUNG startet leer (gefallene Relikte, die nie fielen, wären erfunden) …
+    expect(s!.relics.owned).toEqual([]);
+    expect(s!.relics.slots).toEqual([0, 0, 0]);
+    expect(s!.relics.pity).toBe(0);
+    // … der HIGHWATER dagegen steht auf dem tiefsten geclerten Gate (200).
+    expect(s!.relics.deepestGate).toBe(200);
+    expect(relicGateEligible(s!.relics, 200)).toBe(false);
+    expect(relicGateEligible(s!.relics, 205)).toBe(true);
+  });
+
+  it('liest die Tiefe auch aus dem Himmelfahrt-festen `zoneEver`-Latch', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 16;
+    delete raw.relics;
+    delete raw.forge;
+    // Frisch transzendiert: die Run-Zahlen stehen auf 1, nur der Gear-Latch
+    // erinnert sich an Bühne 140 — genau die Regel aus `bossFirstKillZones`.
+    raw.lifetimeMaxZone = 1;
+    raw.runMaxZone = 1;
+    raw.zone = 1;
+    raw.gear = { ...createGear(), zoneEver: 140 };
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.relics.deepestGate).toBe(135); // Gate 140 ist noch NICHT geclert
+  });
+
+  it('ein flacher Alt-Save wird gar nicht erst gesperrt', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 16;
+    delete raw.relics;
+    delete raw.forge;
+    raw.lifetimeMaxZone = 50; // steht AUF Bühne 50, hat sie aber nicht geclert
+    raw.runMaxZone = 50;
+    raw.zone = 50;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s!.relics.deepestGate).toBe(0);
+    expect(relicGateEligible(s!.relics, 50)).toBe(true);
+  });
+
+  it('die Schmiede startet komplett leer — Glut und Rolls sind nicht herleitbar', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 16;
+    delete raw.relics;
+    delete raw.forge;
+    raw.gear = { ...createGear(), skinLevels: { disco: 42 }, shards: 99_999 };
+    const s = deserializeCh(JSON.stringify(raw));
+    // Level 42 hätte drei Slots offen — aber keiner trägt etwas, und die
+    // 99 999 Splitter werden NICHT stillschweigend in Glut umgerechnet.
+    expect(forgeSlotsUnlocked(42)).toBe(3);
+    expect(s!.forge).toEqual(createForge());
+    expect(forgeAffixes(s!.forge, 'disco', 42)).toEqual([]);
+  });
+
+  it('ein Alt-Save rechnet nach dem Update bit-gleich weiter (leeres Loadout ⇒ ×1)', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.v = 16;
+    delete raw.relics;
+    delete raw.forge;
+    raw.lifetimeMaxZone = 90;
+    const s = deserializeCh(JSON.stringify(raw))!;
+    const bonus = loadoutBonus(s);
+    expect(bonus.clickPct).toBe(0);
+    expect(bonus.dpsPct).toBe(0);
+    expect(bonus.goldPct).toBe(0);
+    expect(bonus.chestLuck).toBe(0);
+  });
+
+  it('round-trippt Sammlung, Slots und Schmiede', () => {
+    const relics = {
+      owned: [
+        { id: 1, zone: 50, affixes: [{ id: 'click', q: 3 }] },
+        {
+          id: 2,
+          zone: 65,
+          affixes: [
+            { id: 'boss', q: 1 },
+            { id: 'gold', q: 2 },
+          ],
+        },
+      ],
+      slots: [2, 1, 0],
+      nextId: 3,
+      pity: 1,
+      deepestGate: 65,
+    };
+    const forge = {
+      ember: 88,
+      slots: {
+        lava: [
+          { affix: { id: 'glut', q: 3 }, dry: 6 },
+          { affix: null, dry: 0 },
+          { affix: null, dry: 0 },
+        ],
+      },
+    };
+    const s: ChState = { ...createChState(), relics, forge };
+    const round = deserializeCh(serializeCh(s, 1000))!;
+    expect(round.relics).toEqual(relics);
+    expect(round.forge).toEqual(forge);
+    // Und die Wirkung kommt an: getragen sind Relikt 2 (zwei Affixe) + Relikt 1.
+    expect(equippedRelicAffixes(round.relics).length).toBe(3);
+  });
+
+  it('ein Relikt kann nie zweimal wirken, auch nicht aus einem gebastelten Save', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.relics = {
+      owned: [{ id: 1, zone: 50, affixes: [{ id: 'click', q: 3 }] }],
+      slots: [1, 1, 1],
+      nextId: 2,
+      pity: 0,
+      deepestGate: 50,
+    };
+    const s = deserializeCh(JSON.stringify(raw))!;
+    expect(s.relics.slots).toEqual([1, 0, 0]);
+    expect(equippedRelicAffixes(s.relics).length).toBe(1);
+  });
+
+  it('repariert kaputte Slices isoliert, ohne anderen Fortschritt zu nuken', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1000)) as Record<string, unknown>;
+    raw.relics = 'garbage';
+    raw.forge = 42;
+    raw.souls = 77;
+    const s = deserializeCh(JSON.stringify(raw));
+    expect(s).not.toBeNull();
+    expect(s!.relics).toEqual(createRelics());
+    expect(s!.forge).toEqual(createForge());
+    expect(s!.souls).toBe(77);
+  });
+
+  it('überlebt alle drei Resets — Loot ist Besitz, kein Ausbau', () => {
+    const relics = {
+      owned: [{ id: 1, zone: 80, affixes: [{ id: 'click', q: 3 }] }],
+      slots: [1, 0, 0],
+      nextId: 2,
+      pity: 2,
+      deepestGate: 80,
+    };
+    const forge = {
+      ember: 55,
+      slots: { classic: [{ affix: { id: 'gold', q: 2 }, dry: 3 }] },
+    };
+    const base: ChState = {
+      ...createChState(),
+      relics,
+      forge,
+      runMaxZone: 80,
+      lifetimeMaxZone: 80,
+      rsLifetime: 5_000,
+      heaven: { ...createChState().heaven, hpfLifetime: 1e12 },
+    };
+    for (const next of [ascendState(base), himmelfahrtState(base), transcendState(base)]) {
+      expect(next.relics).toEqual(relics);
+      expect(next.forge).toEqual(forge);
+      // Der Gate-Highwater MUSS mitwandern, sonst zahlte jeder Reset die
+      // Drop-Leiter ab Bühne 50 ein zweites Mal aus.
+      expect(next.relics.deepestGate).toBe(80);
+    }
+  });
+});
+
+describe('ch-store — v18 migration & repair (Skin-Pfade 2b + Erbe 3c + Legenden-Level 1d)', () => {
+  it('migriert v17 → v18: alle drei Felder starten LEER', () => {
+    const v17 = {
+      ...JSON.parse(serializeCh(createChState(), 1_752_800_000_000)),
+      v: 17,
+      // Ein Save, der reichlich Anhaltspunkte BÖTE — und aus keinem davon wird
+      // gesät: `playTimeS` kennt den Skin nicht, `ascensions2` wird von jeder
+      // Transzendenz genullt, und ein Erbe entsteht nur durch eine Wahl.
+      stats: { ...createStats(), playTimeS: 500_000, bossKills: 900 },
+      heaven: { hpf: 40, hpfLifetime: 12_000, ascensions2: 6, tree: {} },
+      transcend: { te: 2, teLifetime: 4, transcendences: 3, mythos: {} },
+      crewMastery: { dj: 90_000 },
+      gear: { ...createGear(), skin: 'lava' },
+    };
+    delete (v17 as Record<string, unknown>).skinPath;
+    delete (v17 as Record<string, unknown>).heir;
+    delete (v17 as Record<string, unknown>).legend;
+    const s = deserializeCh(JSON.stringify(v17));
+    expect(s).not.toBeNull();
+    expect(s!.skinPath).toEqual({});
+    expect(s!.heir).toBe('');
+    expect(s!.legend).toBe(0);
+    // Verlustfrei für alles Bestehende.
+    expect(s!.transcend.transcendences).toBe(3);
+    expect(s!.heaven.ascensions2).toBe(6);
+    expect(s!.crewMastery).toEqual({ dj: 90_000 });
+  });
+
+  it('rechnet nach der Migration bit-gleich weiter (leere Felder falten ×1)', () => {
+    const base = createChState();
+    const withPath: ChState = {
+      ...base,
+      crew: { boss: 40, dj: 40 },
+      crewMastery: { dj: 8_000 },
+    };
+    expect(dpsOf(withPath)).toBe(dpsOf({ ...withPath, skinPath: {}, heir: '', legend: 0 }));
+    expect(clickDamageOf(withPath)).toBe(
+      clickDamageOf({ ...withPath, skinPath: {}, heir: '', legend: 0 }),
+    );
+  });
+
+  it('repariert Müll in allen drei Feldern, ohne echten Fortschritt zu nuken', () => {
+    const raw = JSON.parse(serializeCh(createChState(), 1_752_800_000_000));
+    raw.skinPath = {
+      disco: { s: 12_345.5, b: 7 }, // heil (die Sekunden bleiben GEBROCHEN)
+      lava: { s: -1, b: -1 }, // nichts Gültiges ⇒ Fach fällt weg
+      vegasking: { s: 900, b: 9 }, // kein Katalog-Skin ⇒ raus
+    };
+    raw.heir = 'niemand';
+    raw.legend = -4;
+    const s = deserializeCh(JSON.stringify(raw))!;
+    expect(s.skinPath).toEqual({ disco: { s: 12_345.5, b: 7 } });
+    expect(s.heir).toBe('');
+    expect(s.legend).toBe(0);
+  });
+
+  it('trägt Pfade und Legenden-Level durch JEDEN Reset — der Erbe nur bis zur nächsten Ära', () => {
+    const skinPath = { disco: { s: 60_000, b: 120 }, pirate: { s: 720_000, b: 0 } };
+    const base: ChState = {
+      ...createChState(),
+      skinPath,
+      heir: 'dj',
+      legend: 9,
+      runMaxZone: 80,
+      lifetimeMaxZone: 80,
+      rsLifetime: 5_000,
+      transcend: { te: 2, teLifetime: 2, transcendences: 1, mythos: {} },
+      heaven: { ...createChState().heaven, hpfLifetime: 1e12 },
+    };
+    // Aszension: alles bleibt stehen.
+    const asc = ascendState(base);
+    expect(asc.skinPath).toEqual(skinPath);
+    expect(asc.heir).toBe('dj');
+    expect(asc.legend).toBe(9);
+    // Himmelfahrt: der Zähler WÄCHST (die Transzendenz ist gebucht).
+    const hf = himmelfahrtState(base);
+    expect(hf.skinPath).toEqual(skinPath);
+    expect(hf.heir).toBe('dj');
+    expect(hf.legend).toBe(10);
+    // …aber nicht ohne Transzendenz.
+    expect(
+      himmelfahrtState({ ...base, transcend: { ...base.transcend, transcendences: 0 } }).legend,
+    ).toBe(9);
+    // Transzendenz: Pfade und Zähler bleiben, der Erbe wird NEU gewählt.
+    const tc = transcendState(base, 'hype');
+    expect(tc.skinPath).toEqual(skinPath);
+    expect(tc.legend).toBe(9); // die Transzendenz selbst zahlt kein Level
+    expect(tc.heir).toBe('hype');
+    expect(transcendState(base).heir).toBe(''); // ohne Wahl: kein Erbe
   });
 });

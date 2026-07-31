@@ -8,9 +8,37 @@ import { buildCharacter, type CharacterInstance } from './character/rig';
 import { buildEntity, entityVariant, type EntityInstance } from './character/entity';
 import { DT, renderCheeks, stepPhysics } from './character/physics';
 import { applyAccents, createAccents, stepAccents, triggerClickAccent } from './character/accents';
+import {
+  RIVAL_AIM_UP,
+  aimPupils,
+  applyFace,
+  createFaceState,
+  faceView,
+  forceBlink,
+  lidClose,
+  stepFace,
+  triggerGrimace,
+} from './character/face-life';
 import { SKINS } from './character/skins';
+import { affixText } from './ui/affix-text';
 import { Choreographer, MOVES } from './choreo/moves';
 import { VICTORY_MOVE, activeSet } from './choreo/sets';
+import {
+  PATH_NODES,
+  addPathBoss,
+  addWear,
+  pathAmount,
+  pathNodes,
+  signatureMove,
+  skinPathBonus,
+} from './game/skin-path';
+import { legendGlobalMult } from './game/legend';
+import {
+  HEIR_WEIGHT,
+  MASTERY_DPS_PER_RANK,
+  MASTERY_DPS_RANKS,
+  masteryProgress,
+} from './game/mastery';
 import { createControls, frameCamera } from './engine/camera';
 import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
@@ -47,6 +75,7 @@ import {
   himmelfahrtState,
   keyDropAmount,
   keyDropMult,
+  loadoutBonus,
   peachIncomeMult,
   rivalChestChance,
   transcendState,
@@ -152,6 +181,7 @@ import {
   travelTo,
 } from './game/combat';
 import {
+  type GearBonus,
   accrueSugar,
   beatWindowBonus,
   bossDmgMult,
@@ -191,8 +221,27 @@ import {
   truhenFokusChestMult,
 } from './game/heaven';
 import { canAscend } from './game/ascension';
+import {
+  type DustSources,
+  WARMUP_S,
+  constellationComboWindowBonus,
+  constellationCritChanceBonus,
+  constellationOfflineCapBonusS,
+  constellationOfflineRateBonus,
+  constellationStartGold,
+  buyNode as buyConstellationNode,
+  hasWarmupStart,
+  secondWindKills,
+  syncDust,
+} from './game/constellation';
 import type { CeremonyKind } from './game/ceremony';
-import { CREW, type CrewLevels, type CrewSpecialBonuses, crewSpecialBonuses } from './game/heroes';
+import {
+  CREW,
+  type CrewLevels,
+  type CrewSpecialBonuses,
+  crewSpecialBonuses,
+  grantFreeMasteryTiers,
+} from './game/heroes';
 import { buildAchievementCtx, newlyUnlocked } from './game/ch-achievements';
 import {
   type LoginReward,
@@ -225,6 +274,15 @@ import {
   mythosPeachGapMult,
   transcendGlobalMult,
 } from './game/transcend';
+import {
+  addRep,
+  rankOf,
+  repForKill,
+  territoryGoldMult,
+  territoryTitle,
+  themeConfig,
+  trophyTier,
+} from './game/territory';
 import { isTranscendEnabled } from './game/flags';
 import { shouldShakeOnKey } from './game/input';
 import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
@@ -236,11 +294,19 @@ import { loadGame } from './save/store';
 import { Rng } from './util/rng';
 import { AbilityBar } from './ui/ability-bar';
 import { Ancients } from './ui/ancients';
+import { mountAvatarSprite } from './ui/avatars';
 import { Ceremony } from './ui/ceremony';
 import { ChHud, rivalName } from './ui/ch-hud';
 import { ChSettings } from './ui/ch-settings';
 import { Chests } from './ui/chest-panel';
+import { Constellation } from './ui/constellation-panel';
+import { equipBestRelics, equipRelic, gateRelicRoll, meltRelic, relicById } from './game/relics';
+import { addEmber, emberForDuplicate, shardsForEmber } from './game/forge';
+import { affixConfig } from './game/affixes';
 import { Crew } from './ui/crew';
+import { RetrainDialog } from './ui/retrain-dialog';
+import { ForgeDialog } from './ui/forge-dialog';
+import { RelicPanel } from './ui/relic-panel';
 import { Gear } from './ui/gear-panel';
 import { Heaven } from './ui/heaven-panel';
 import { Haptics } from './ui/haptics';
@@ -250,8 +316,10 @@ import { Pops } from './ui/pops';
 import { fmt, titleFor } from './ui/format';
 import { Onboarding } from './ui/onboarding';
 import { Prestige } from './ui/prestige';
+import { TerritoryPanel } from './ui/territory-panel';
 import { Toasts } from './ui/toasts';
 import { Transcend } from './ui/transcend-panel';
+import { HeirDialog } from './ui/heir-dialog';
 import { World } from './world/backgrounds';
 import { ISLAND_C } from './world/island';
 
@@ -416,12 +484,97 @@ let dps = 0;
 let clickDmg = 1;
 // Crew-wide special-ability bonuses (v11) — cached alongside dps/clickDmg since
 // they only change on the same events (ability buy, prestige, import).
-let crewSpec: CrewSpecialBonuses = crewSpecialBonuses(state.crewUp);
+// 3b: mit der Umschul-Map — ein umgeschulter Slot wirkt überall wie ein von Haus
+// aus so geborener (die Map ist der EINZIGE Unterschied, den die Faltung sieht).
+let crewSpec: CrewSpecialBonuses = crewSpecialBonuses(state.crewUp, state.crewRetrain);
 function recompute(): void {
   dps = dpsOf(state);
   clickDmg = clickDamageOf(state);
-  crewSpec = crewSpecialBonuses(state.crewUp);
+  crewSpec = crewSpecialBonuses(state.crewUp, state.crewRetrain);
 }
+
+/**
+ * **IDEEN-GAMEPLAY 2b — der Pfad-Bonus des AKTIVEN Skins**, in der Form eines
+ * `GearBonus`. Die vier Terme, die ohnehin zentral durch `ch-state` laufen
+ * (Klick, Crew-DPS, BP, Truhen-Luck), holen sich ihren Anteil dort; alles
+ * andere — Coach-cps (Robo), Krit-Multiplikator (Disco), Combo-Verfall
+ * (Showmaster), On-Beat (Neon), Ekstase-Sekunden (Lava), Ladebedarf (Gyrator)
+ * und die `allPct`-Verteilung des Diamanten — liest diesen Getter an genau der
+ * Stelle, an der auch der GEAR-Wert desselben Stats gelesen wird. Eine Zeile
+ * neben der anderen, damit man beim Lesen sieht, dass es dieselbe Skala ist.
+ *
+ * Kosten: ein Objekt-Literal plus zwei Additionen. Das ist exakt das, was
+ * `gearBonus(state.gear)` an denselben Stellen ohnehin schon jedes Mal tut.
+ */
+function pathB(): GearBonus {
+  return skinPathBonus(state.skinPath, state.gear.skin);
+}
+
+/**
+ * **IDEEN-GAMEPLAY 1c + 3a — der Affix-Fold des Loadouts**, nach demselben
+ * Muster wie {@link pathB}: Klick, Crew-DPS, BP und Truhen-Luck laufen zentral
+ * durch `ch-state`; die übrigen Affix-Terme (Krit-Chance/Sequin, Krit-
+ * Multiplikator, Combo-Fenster, Coach-cps/Servo, Offline-Rate, Boss-Schaden)
+ * liest dieser Getter an genau der Summen-Stelle des jeweiligen Gear-Stats —
+ * die Sim faltet über `foldAffixes` bereits dieselben Terme, hier zieht das
+ * Live-Spiel nach.
+ */
+function loadout(): GearBonus {
+  return loadoutBonus(state);
+}
+
+/**
+ * 2b: Gemerkter Knoten-Stand des GETRAGENEN Skins, damit ein Aufstieg ein
+ * Moment wird statt einer stillen Zahl. Er wird bei jedem Tick und bei jedem
+ * Boss-Kill geprüft — beides sind Ein-Vergleich-Operationen, also darf das im
+ * Hot-Path stehen; gebaut (Toast, `recompute`, Panel) wird nur beim Wechsel.
+ * Der Eintrag ist PRO SKIN, sonst meldete ein Skin-Wechsel einen Aufstieg.
+ */
+const pathSeen = new Map<string, number>();
+
+function notePathNodes(): void {
+  const id = state.gear.skin;
+  const now = pathNodes(state.skinPath, id);
+  const before = pathSeen.get(id);
+  if (before === undefined) {
+    pathSeen.set(id, now);
+    return;
+  }
+  if (now <= before) return;
+  pathSeen.set(id, now);
+  const cfg = SKINS[id];
+  const last = now >= PATH_NODES;
+  toasts.show(
+    last ? '💃' : '🎽',
+    `${cfg.name} — Pfad-Knoten ${now}/${PATH_NODES}`,
+    last
+      ? `Signature-Move freigeschaltet: „${signatureMove(state.skinPath, id) ?? ''}" nach jedem Boss-Sieg`
+      : `${affixText(cfg.star.stat, pathAmount(id, now))} · Meisterschaft dieses Skins`,
+  );
+  recompute(); // der Knoten hängt in Klick/DPS/BP — sofort neu rechnen
+  gearPanel.render();
+  persist();
+}
+
+/**
+ * IDEEN-GAMEPLAY 1a — der Legenden-Perk: „die erste Fähigkeits-Stufe ist nach
+ * jedem Reset gratis". Die Entscheidung, WER etwas bekommt, ist pur
+ * (`grantFreeMasteryTiers`); hier wird sie nur gebucht. Aufgerufen beim Boot
+ * (ein Save aus der Zeit vor dem Rang bekommt seinen Slot sofort), nach jedem
+ * Crew-Level-Kauf (der Slot fällt in der Sekunde, in der Lv 25 erreicht ist —
+ * nicht erst beim nächsten Reset), nach jedem der drei Resets (dort trägt die
+ * Meisterschaft den Slot, nicht der Ledger) und nach einem Save-Import.
+ *
+ * Liefert die Namen der frisch beschenkten Mitglieder — leer heißt „nichts
+ * passiert", der Aufrufer spart sich dann Toast und Re-Render.
+ */
+function applyMasteryFreeTiers(): string[] {
+  const r = grantFreeMasteryTiers(state.crew, state.crewUp, state.crewMastery);
+  if (r.granted.length === 0) return [];
+  state.crewUp = r.ups;
+  return r.granted.map((id) => CREW.find((c) => c.id === id)?.name ?? id);
+}
+applyMasteryFreeTiers();
 recompute();
 
 // The active seasonal banner (§7.5) — a purely cosmetic, date-based flavor read
@@ -453,6 +606,8 @@ function ekstaseChargeMax(): number {
     0.9,
     ancientEkstaseChargeReduction(state.ancients) +
       frenzyChargeReduction(state.gear) +
+      // 2b: Der Gyrator-Pfad zahlt auf denselben Reduktions-Stack wie seine Sterne.
+      pathB().frenzyCharge +
       crewSpec.ekstaseChargeRed +
       // A1 „Konfetti-Regen": die Bühne selbst lädt die Ekstase schneller. Sie
       // hängt im GLEICHEN, gedeckelten Reduktions-Stack — kein Sonderweg.
@@ -474,19 +629,33 @@ function offlineOpts(): {
 } {
   return {
     clickDmg,
-    coachCps: coachCps(state.heaven) + coachCpsBonus(state.gear),
+    // 2b: Der Robo-Pfad zahlt Coach-cps — sein Stern-Stat, exakt wie im
+    // Ideen-Dokument („Robo: Coach-cps"). 3a: „Servo-Boost" im selben Term.
+    coachCps:
+      coachCps(state.heaven) + coachCpsBonus(state.gear) + pathB().coachCps + loadout().coachCps,
     // Nachtschicht (Himmelsbaum) + Beach-Gear + der Mythos-Knoten „Nachtschwärmer"
     // (+4 h, ROADMAP-V2 P2) — dieselbe Summe füttert die X3-Willkommen-zurück-Card,
     // deren Cap-Zeile den Ausbau also sofort spiegelt.
     capS:
       offlineCapS(state.heaven) +
       offlineCapBonus(state.gear) +
-      mythosOfflineCapBonusS(state.transcend),
+      mythosOfflineCapBonusS(state.transcend) +
+      // 2a ★ „Sternenwanderer": +2 h, additiv auf alles andere — genau wie im
+      // Ideen-Dokument versprochen („stackt mit allem").
+      constellationOfflineCapBonusS(state.constellation),
     // Peachiel × gold-gear × permanent gold-tokens (§6.2). The transient peach ×3
     // boost is a 60-s live event — immaterial to multi-hour offline accrual and a
     // stale boostUntil would be wrong — so it is deliberately excluded here.
-    goldMult: goldMult(state),
-    rateBonus: offlineRateBonus(state.gear),
+    // 1b: Der Ruf-Faktor der Bühne, auf der die Crew offline farmt — `offlineGold`
+    // rechnet ausdrücklich mit den Rivalen DIESER Bühne, also gilt ihr Theme.
+    goldMult: goldMult(state) * territoryGoldMult(state.territory, combat.zone),
+    // Endless-Summer-Gear + die beiden Ausdauer-Knoten der Konstellation (2a)
+    // hängen im GLEICHEN additiven Term; `offlineGold` deckelt die Summe bei 100 %.
+    rateBonus:
+      offlineRateBonus(state.gear) +
+      constellationOfflineRateBonus(state.constellation) +
+      pathB().offlineRate + // 2b: nur über Diamant-Booty (`allPct`)
+      loadout().offlineRate, // 1c „Nachtschwärmer": derselbe additive Term
   };
 }
 /**
@@ -527,6 +696,11 @@ const audio = new AudioEngine();
 const beatTracker = new BeatTracker();
 const choreo = new Choreographer();
 const accents = createAccents(); // Klick→Pose-Akzente (transient, nie persistiert)
+// ROADMAP-V2 G5: Gesichts-Leben (Blinzeln, Pupillen, Mund-Zustand) — derselbe
+// Schnitt wie die Akzente: ein transienter Zustand, den die Loop tickt. Er
+// überlebt einen Skin-Wechsel (die HANDLES kommen frisch mit dem neuen Rig).
+const faceState = createFaceState();
+const faceAim = new THREE.Vector3();
 // The equipped skin drives the 3D rig now (§5) — no longer always classic.
 let char: CharacterInstance = buildCharacter(scene, SKINS[state.gear.skin]);
 // Show-Spin (Goal: „der Spieler dreht sich manchmal, wie die Gegner"): applyPose
@@ -567,8 +741,33 @@ function syncChoreoSet(): void {
   choreo.useSet(activeSet(combat.zone, combat.remix, combat.boss));
   if (victoryDance) {
     victoryDance = false;
-    choreo.setMove(VICTORY_MOVE);
+    choreo.setMove(victoryMoveIdx());
   }
+}
+
+/**
+ * Der Name des laufenden Moves landet als `data-move` am Canvas. Der Haken
+ * (`Choreographer.onMove`) existierte seit A4 als „HUD hook" und war nie
+ * verdrahtet; 2b braucht ihn, weil ein Signature-Move sonst nur ein Bild wäre,
+ * das man mit dem Standard-Move verwechseln kann. Kosten: ein Attribut-Schreiben
+ * pro Move-Wechsel (alle 18 Klicks), keine Optik.
+ */
+choreo.onMove = (name) => {
+  canvas.dataset.move = name;
+};
+
+/**
+ * **2b, Knoten 5 — der Signature-Move.** Wer den Pfad seines Skins vollendet
+ * hat, bekommt nach einem Boss-Sieg SEINEN Move statt des allgemeinen
+ * Diva-Turns. Reine AUSWAHL: Der Name wird in `MOVES` nachgeschlagen, ein
+ * unbekannter Name (oder ein unvollendeter Pfad) fällt auf `VICTORY_MOVE`
+ * zurück. Keine neue Pose, kein neuer Bone — der Physik-Kontrakt ist unberührt.
+ */
+function victoryMoveIdx(): number {
+  const name = signatureMove(state.skinPath, state.gear.skin);
+  if (name === null) return VICTORY_MOVE;
+  const idx = MOVES.findIndex((m) => m.name === name);
+  return idx >= 0 ? idx : VICTORY_MOVE;
 }
 
 /** Rebuild the rival entity only when its look actually changes (cheap check). */
@@ -587,6 +786,9 @@ function syncEntity(): void {
 let currentBg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
 let currentBgVariant = bgVariant(combat.zone);
 if (state.gear.bgAuto) state.gear.bg = currentBg;
+// 1b: Die Trophäen-Stufe VOR dem ersten `setBackground` setzen (wie die
+// G3-Ambient-Dichte), damit die Boot-Bühne den Pokal direkt mitbaut.
+syncTrophy(false);
 world.setBackground(currentBg, currentBgVariant);
 audio.setBackground(currentBg);
 recompute(); // fold the (possibly view-synced) kulisse buff into the derived numbers
@@ -677,14 +879,61 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('beforeunload', persist);
 
 // ---------- shop panels ----------
+// IDEEN-GAMEPLAY 4a: die Portrait-Geometrie wandert GENAU EINMAL als
+// `<symbol>`-Sprite ins DOM, bevor irgendein Panel baut — die Zeilen der Crew-
+// und Ahnen-Listen referenzieren sie danach nur noch per `<use>` (die Crew-Liste
+// baut sich im 0.25-s-Tick komplett neu auf).
+mountAvatarSprite();
+
 const crew = new Crew({
   state,
   onBuy: () => {
+    // 1a: erst den Legenden-Slot buchen, DANN rechnen — sonst zeigte die HUD
+    // eine Sekunde lang die Zahlen ohne die frisch geschenkte Stufe.
+    const freed = applyMasteryFreeTiers();
     recompute();
     audio.buy();
     hud.update(state, combat, dps, clickDmg);
+    if (freed.length > 0) {
+      toasts.show(
+        '🏆',
+        'Legenden-Bonus',
+        `${freed.join(', ')}: erste Fähigkeit gratis freigeschaltet.`,
+      );
+    }
     persist();
   },
+  // 1a Meilenstein: ein Rang-Aufstieg ist ein Moment, kein stiller Zahlenwechsel.
+  onRankUp: (cfg, p) => {
+    audio.unlock();
+    toasts.show(
+      '🏆',
+      `Meisterschaft: ${p.name}`,
+      `${cfg.name} — ${p.rank < 4 ? `+${p.rank * 2} % Eigen-Leistung` : 'erste Fähigkeit ab sofort gratis'}`,
+    );
+  },
+  // 3b: Der Werkzeug-Knopf an einem gekauften Spezial-Slot öffnet den Dialog.
+  onRetrain: (cfg, tier) => retrainDialog.show(cfg, tier),
+});
+
+/**
+ * 3b — der Umschul-Dialog. Er zieht seine zwei Angebote aus DEMSELBEN
+ * persistierten Strom wie Krits/Truhen/Vergoldungen (`rng.next()`), bucht
+ * Splitter und Eskalator direkt im State und meldet jede Änderung über
+ * `onChange` zurück: neu rechnen (die Sorte kann DPS/BP verschieben), HUD und
+ * Crew-Card auffrischen, sichern.
+ */
+const retrainDialog = new RetrainDialog({
+  state,
+  roll: () => rng.next(),
+  onChange: () => {
+    recompute();
+    hud.update(state, combat, dps, clickDmg);
+    crew.render();
+    gearPanel.render();
+    persist();
+  },
+  toast: (icon, title, sub) => toasts.show(icon, title, sub),
 });
 
 // 🎽 Gear/Skins (§5): equipping rebuilds the 3D rig for the new skin and re-folds
@@ -692,6 +941,18 @@ const crew = new Crew({
 // too; the kulisse chooser drives the background + auto-rotation toggle.
 const gearPanel = new Gear({
   state,
+  // 3a: Der Schmiede-Dialog gehört dem Skin, an dem geschmiedet wird — die
+  // Karte reicht nur Id und Slot durch.
+  openForge: (id, slot) => forgeDialog.show(id, slot),
+  // 3a: Splitter → Glut, Stück für Stück (der Kurs ist bewusst ungünstig).
+  exchangeShards: (ember) => {
+    const cost = shardsForEmber(ember);
+    if (ember <= 0 || state.gear.shards < cost) return;
+    state.gear.shards -= cost;
+    state.forge = addEmber(state.forge, ember);
+    audio.buy();
+    persist();
+  },
   onEquip: () => {
     char = buildCharacter(scene, SKINS[state.gear.skin], char);
     adoptPlayerIntoSpin();
@@ -743,6 +1004,32 @@ function applyMythosFruhstart(): void {
 }
 
 /**
+ * IDEEN-GAMEPLAY 2a — was die Legenden-Konstellation einer FRISCHEN Tour
+ * mitgibt: das Startkapital der drei „Aufbruch"-Knoten und, mit dem
+ * Identitäts-Stern „Warm-up-Start", `WARMUP_S` Sekunden Kobold-Buff ab der
+ * ersten Sekunde.
+ *
+ * Läuft nach JEDEM der drei Resets — der Baum überlebt sie alle, also darf der
+ * Effekt an keiner Schicht hängen bleiben. Bewusst NICHT beim Boot oder Import:
+ * dort steht man mitten in einer laufenden Tour, und ein Neuladen dürfte nie
+ * Startkapital drucken.
+ *
+ * Der Buff nutzt das BESTEHENDE Kobold-Fenster (`goblin.buffUntil`, ×2 Klick)
+ * statt eines vierten Buff-Zustands: dieselbe Zahl, derselbe Rechenpfad im
+ * Klick-Term, kein neues Feld und keine zweite Anzeige.
+ */
+function applyConstellationStart(now = Date.now()): void {
+  const bp = constellationStartGold(state.constellation);
+  if (bp > 0) {
+    state.gold += bp;
+    state.stats.goldLifetime += bp;
+  }
+  if (hasWarmupStart(state.constellation)) {
+    goblin = { ...goblin, buffUntil: Math.max(goblin.buffUntil, now + WARMUP_S * 1000) };
+  }
+}
+
+/**
  * ROADMAP-V2 G4 — Die Zeremonie einer Prestige-Schicht anstoßen.
  *
  * Sie läuft IMMER erst, nachdem der Reset-Handler gebucht, zurückgesetzt und
@@ -777,6 +1064,8 @@ const prestige = new Prestige({
     Object.assign(state, ascendState(state)); // mutate in place — panels hold this ref
     applyFruhstarter(prevCrew);
     applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
+    applyMasteryFreeTiers(); // 1a: Legenden-Slot NACH dem Wiederanheuern buchen
+    applyConstellationStart(); // 2a: Startkapital + Warm-up-Buff der neuen Tour
     combat = newRunCombat();
     comboState = createCombo(state.combo.stacks); // run-scoped juice resets
     comboT3KeyAwardedThisRun = false; // the combo-Tier-3 key is once per run (§6.1)
@@ -798,6 +1087,40 @@ const prestige = new Prestige({
   },
 });
 
+/**
+ * IDEEN-GAMEPLAY 1b — die vier Ruf-Leisten. Sie montieren sich in den
+ * Platzhalter, den `Prestige` im Ruhm-Tab aufspannt, müssen also NACH `prestige`
+ * entstehen. Reine Anzeige: Ruf entsteht ausschließlich aus Kills, hier gibt es
+ * nichts zu kaufen und nichts zu bestätigen.
+ */
+const territoryPanel = new TerritoryPanel({ state, zone: () => combat.zone });
+
+/**
+ * 3a — der Schmiede-Dialog. Er zieht aus DEMSELBEN persistierten Strom wie
+ * Krits, Truhen und die Umschulung (`rng.next()`), bucht Glut und Pity direkt im
+ * State und meldet jede Änderung über `onChange` zurück.
+ */
+const forgeDialog = new ForgeDialog({
+  state,
+  roll: () => rng.next(),
+  onChange: () => afterLoadoutChange(),
+  toast: (icon, title, sub) => toasts.show(icon, title, sub),
+});
+
+/**
+ * Das gemeinsame Nachspiel jeder Loadout-Änderung (1c + 3a). Affixe hängen in
+ * `dpsOf`/`clickDamageOf`/`goldMult`/`chestLuck` — ein getauschtes Relikt oder
+ * ein angenommener Wurf verschiebt also sofort echte Zahlen, und beide Panels
+ * zeigen dieselbe Glut.
+ */
+function afterLoadoutChange(): void {
+  recompute();
+  hud.update(state, combat, dps, clickDmg);
+  relicPanel.refresh(true);
+  gearPanel.render();
+  persist();
+}
+
 const ancients = new Ancients({
   state,
   onBuy: () => {
@@ -814,8 +1137,11 @@ const heaven = new Heaven({
   onHimmelfahrt: () => {
     syncMaxZones();
     const hpfBefore = state.heaven.hpf; // G4: Betrag für den Aufzähler (nur Anzeige)
+    const legendBefore = state.legend; // 1d: die Zahl VOR der Himmelfahrt
     Object.assign(state, himmelfahrtState(state)); // mutate in place
     applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
+    applyMasteryFreeTiers(); // 1a: die Meisterschaft überlebt auch L2
+    applyConstellationStart(); // 2a: die Konstellation überlebt auch L2
     combat = newRunCombat();
     comboState = createCombo(state.combo.stacks);
     comboT3KeyAwardedThisRun = false; // once per run (§6.1)
@@ -831,6 +1157,18 @@ const heaven = new Heaven({
     hud.update(state, combat, dps, clickDmg);
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     toasts.show('🌈', 'Himmelfahrt!', `${fmt(state.heaven.hpf)} Himmelspfirsiche`);
+    // IDEEN-GAMEPLAY 1d: Nach der ersten Transzendenz zahlt JEDE Himmelfahrt ein
+    // Legenden-Level. `himmelfahrtState` hat es schon gebucht — hier wird es nur
+    // sichtbar, und zwar als EIGENER Toast: Der Zähler ist die Belohnung für
+    // Leute, für die die HPF-Zahl längst Routine ist.
+    if (state.legend > legendBefore) {
+      toasts.show(
+        '🏅',
+        `Legenden-Level ${fmt(state.legend)}`,
+        `+${(Math.round((legendGlobalMult(state.legend) - 1) * 1000) / 10).toFixed(1).replace('.', ',')} % global — additiv und für immer`,
+      );
+    }
+    transcendPanel?.refresh(); // 1d: der Zähler steht im 🔮 Tab
     checkAchievements(); // Himmelfahrt / HPF milestones (§7.3)
     persist();
     playCeremony('himmelfahrt', state.heaven.hpf - hpfBefore); // G4
@@ -875,17 +1213,29 @@ const heaven = new Heaven({
 // (its L2 state was reset) which the Himmelfahrt handler need not do.
 const transcendEnabled = isTranscendEnabled();
 let transcendPanel: Transcend | null = null;
-if (transcendEnabled) {
-  transcendPanel = new Transcend({
-    state,
-    onTranscend: () => {
+
+/** 3c: Die Erben-Wahl der Transzendenz-Zeremonie (Portraits aus dem 4a-Baukasten). */
+const heirDialog = new HeirDialog({ state });
+
+/**
+ * Die eigentliche Transzendenz, mit dem in der Zeremonie gewählten **Erben**
+ * (3c; `''` = keiner). Sie steht als eigene Funktion neben dem Panel, weil sie
+ * jetzt zwei Aufrufer hat: den Erben-Dialog (der Normalweg) und — falls der
+ * Dialog je übersprungen würde — den Panel-Knopf selbst. Die Gutschrift
+ * passiert wie gehabt VOR der Blende (G4-Vertrag).
+ */
+function doTranscend(heir: string): void {
+  {
+    {
       // Gate the deep reset on a real TE gain (the panel button is disabled otherwise,
       // but guard here too so a stray call can never wipe L1+L2 for nothing).
       if (!canTranscend(state.transcend, state.heaven.hpfLifetime)) return;
       syncMaxZones(); // fold live combat maxzones + RNG cursor + combo into state first
       const teBefore = state.transcend.te; // G4: Betrag für den Aufzähler (nur Anzeige)
-      Object.assign(state, transcendState(state)); // mutate in place (banks TE, wipes L1+L2)
+      Object.assign(state, transcendState(state, heir)); // banks TE, wipes L1+L2, setzt den Erben
       applyMythosFruhstart(); // P2: der Knoten überlebt den tiefsten Reset und greift hier
+      applyMasteryFreeTiers(); // 1a: die Meisterschaft überlebt auch den tiefsten Reset
+      applyConstellationStart(); // 2a: der Baum überlebt auch den tiefsten Reset
       // ---- re-seed, mirroring the Himmelfahrt handler exactly (L2-wipe hazard) ----
       combat = newRunCombat(); // zone/front travel reset to Bühne 1
       comboState = createCombo(state.combo.stacks); // run-scoped combo juice reset
@@ -907,9 +1257,36 @@ if (transcendEnabled) {
         'Transzendenz!',
         `${fmt(state.transcend.te)} TE · ×${fmt(transcendGlobalMult(state.transcend.te))} Boost`,
       );
+      // 3c: Der Erbe ist eine Charakter-Entscheidung — sie bekommt ihren
+      // eigenen Toast, sonst ginge sie zwischen TE und Boost unter.
+      if (heir !== '') {
+        const cfg = CREW.find((c) => c.id === heir);
+        const rank = masteryProgress(state.crewMastery[heir] ?? 0);
+        toasts.show(
+          '🧬',
+          `Erbe: ${cfg?.name ?? heir}`,
+          rank.rank > 0
+            ? `${rank.name}-Rang zählt in dieser Ära doppelt (+${Math.round(MASTERY_DPS_PER_RANK * Math.min(MASTERY_DPS_RANKS, rank.rank) * HEIR_WEIGHT * 100)} % Eigen-Output)`
+            : 'Noch ohne Rang — seine Einsatz-XP zählen ab jetzt doppelt',
+        );
+      }
       checkAchievements(); // Transzendenz / TE milestones (§7.3)
       persist();
       playCeremony('transcend', state.transcend.te - teBefore); // G4
+    }
+  }
+}
+
+if (transcendEnabled) {
+  transcendPanel = new Transcend({
+    state,
+    // 3c: Die Zeremonie fragt ZUERST, wen man mitnimmt, und transzendiert erst
+    // danach — die Wahl muss vor dem Reset fallen, weil sie über die NEUE Ära
+    // entscheidet, und sie muss sichtbar sein, weil genau das aus einem Reset
+    // eine Entscheidung macht.
+    onTranscend: () => {
+      if (!canTranscend(state.transcend, state.heaven.hpfLifetime)) return;
+      heirDialog.show((heir) => doTranscend(heir));
     },
     // ROADMAP-V2 P2 — Mythos-Shop: gehaltenes TE gegen einen permanenten Wahl-Knoten.
     // Der Kauf senkt `te` und damit den ×3^TE-Boost, deshalb muss der HUD-Multiplikator
@@ -943,6 +1320,36 @@ const chestPanel = new Chests({
   open: (tier) => openChestFromInventory(tier),
 });
 
+/**
+ * IDEEN-GAMEPLAY 1c — die Relikt-Sektion im 🎁 Truhen-Tab. Sie montiert sich in
+ * den Platzhalter, den `Chests` beim Aufbau des Tab-Bodys aufspannt, muss also
+ * NACH `chestPanel` entstehen.
+ *
+ * Jede der drei Aktionen (tragen, beste tragen, einschmelzen) verschiebt echte
+ * Macht — deshalb hängt an jeder dasselbe Nachspiel: neu rechnen, HUD und
+ * Skin-Karten auffrischen (die Schmiede-Zeile zeigt die Glut), sichern.
+ */
+const relicPanel = new RelicPanel({
+  state,
+  equip: (slot, id) => {
+    state.relics = equipRelic(state.relics, slot, id);
+    afterLoadoutChange();
+  },
+  equipBest: () => {
+    state.relics = equipBestRelics(state.relics);
+    afterLoadoutChange();
+  },
+  melt: (id) => {
+    const rel = relicById(state.relics, id);
+    if (!rel) return;
+    const res = meltRelic(state.relics, id);
+    state.relics = res.relics;
+    state.forge = addEmber(state.forge, res.ember);
+    toasts.show('🔥', 'Eingeschmolzen', `Relikt von Bühne ${rel.zone} → +${res.ember} Glut`);
+    afterLoadoutChange();
+  },
+});
+
 const chSettings = new ChSettings({
   getState: () => {
     syncMaxZones();
@@ -950,6 +1357,7 @@ const chSettings = new ChSettings({
   },
   applyImported: (imported) => {
     Object.assign(state, imported); // mutate in place — panels hold this ref
+    applyMasteryFreeTiers(); // 1a: der importierte Save bringt seine eigene Meisterschaft mit
     rng = new Rng(state.rng); // resume the imported save's RNG stream
     // Der importierte Save bringt seinen EIGENEN Seed + Aszensions-Stand mit, also
     // gehört die Modifikator-Karte neu abgeleitet (vorher fiel sie hier still auf
@@ -973,9 +1381,13 @@ const chSettings = new ChSettings({
     transcendPanel?.refresh(); // 🔮 L3 badge/mult must re-read the imported slice
     gearPanel.render();
     metaPanel.render(true);
+    constellationPanel.refresh(true); // 2a: der Import bringt sein eigenes Konto mit
+    territoryPanel.refresh(true); // 1b: … und seinen eigenen Ruf (Leisten + Pokal)
+    relicPanel.refresh(true); // 1c: … und seine eigene Relikt-Sammlung
     hud.update(state, combat, dps, clickDmg);
     abilityBar.update(state.ability, Date.now(), ekstaseChargeMax());
     checkAchievements(); // an imported save may already satisfy fresh achievements
+    syncConstellationDust(); // … und damit womöglich frischen Sternenstaub
     persist();
   },
   reset: () => {
@@ -1058,12 +1470,18 @@ function renderActiveTab(key: string): void {
   if (key === 'crew') crew.render();
   else if (key === 'gear') gearPanel.render();
   else if (key === 'anc') ancients.render();
-  else if (key === 'pr') prestige.refresh();
-  else if (key === 'heaven') heaven.refresh();
+  else if (key === 'pr') {
+    prestige.refresh();
+    territoryPanel.refresh(); // 1b: die Ruf-Leisten leben im Ruhm-Tab
+  } else if (key === 'heaven') heaven.refresh();
   else if (key === 'transcend') transcendPanel?.refresh();
-  else if (key === 'chest') chestPanel.render();
-  else if (key === 'meta') metaPanel.render();
-  else if (key === 'set') chSettings.render();
+  else if (key === 'chest') {
+    chestPanel.render();
+    relicPanel.refresh(); // 1c: die Relikte leben im Truhen-Tab
+  } else if (key === 'meta') {
+    metaPanel.render();
+    constellationPanel.refresh(); // 2a: die Karte lebt im Ziele-Tab
+  } else if (key === 'set') chSettings.render();
 }
 for (const tab of Array.from(document.querySelectorAll<HTMLElement>('.tab'))) {
   tab.addEventListener('click', () => {
@@ -1195,7 +1613,13 @@ muteBtn.addEventListener('click', () => {
 function updateBackground(force = false): void {
   const bg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
   const variant = bgVariant(combat.zone); // recolour lap follows depth even on a manual kulisse
-  if (!force && bg === currentBg && variant === currentBgVariant) return;
+  if (!force && bg === currentBg && variant === currentBgVariant) {
+    // Die Kulisse bleibt — aber die BÜHNE kann trotzdem das Theme gewechselt
+    // haben (manuell gewählte Kulisse, `bgAuto` aus). Dann steht hier eine andere
+    // Trophäe, und nur sie braucht den Rebuild.
+    syncTrophy();
+    return;
+  }
   currentBg = bg;
   currentBgVariant = variant;
   if (state.gear.bgAuto && state.gear.bg !== bg) {
@@ -1203,8 +1627,23 @@ function updateBackground(force = false): void {
     recompute(); // Space +5 % dpsPct etc. follow the auto-rotation
   }
   cancelCinematics(); // ein laufender Boss-Punch darf nicht ins neue Licht-Rig schreiben
+  // 1b: Trophäen-Stufe VOR dem Wechsel setzen, aber ohne eigenen Rebuild — die
+  // neue Bühne wird gleich ohnehin gebaut und nimmt den Pokal mit.
+  syncTrophy(false);
   world.setBackground(bg, variant, { animate: !force && preset.stageTransition });
   audio.setBackground(bg); // idempotent for a same-key (variant-only) rebuild
+}
+
+/**
+ * IDEEN-GAMEPLAY 1b — die Insel-Trophäe der Bühne, auf der gerade gekämpft wird.
+ *
+ * Maßgeblich ist das Theme der ZONE (`bgForZone`), nicht die angezeigte Kulisse:
+ * Ruf, BP-Bonus und Pokal gehören alle drei dem Gebiet, in dem man steht — wer
+ * die Kulisse manuell festgepinnt hat (§5.5), sieht auf Bühne 12 trotzdem den
+ * Beach-Pokal, weil er dort Beach-Ruf verdient.
+ */
+function syncTrophy(rebuild = true): void {
+  world.setTrophy(trophyTier(rankOf(state.territory, bgForZone(combat.zone))), rebuild);
 }
 
 // ---------- ROADMAP-V2 G2: Boss-Auftritt + Sieg-Beat ----------
@@ -1463,6 +1902,69 @@ function awardStar(zone: number, bit: number): void {
   );
 }
 
+/**
+ * IDEEN-GAMEPLAY 1b — Ruf für EINEN Kill buchen.
+ *
+ * Der Ruf gehört dem Theme der Bühne, auf der der Kill landete (`bgForZone` —
+ * dieselbe eine Quelle wie Kulisse, Zonen-Strip und Boss-Gimmick), ein Boss zahlt
+ * das Zehnfache. Steigt dabei die Ruf-STUFE, ist das ein Moment: Toast, und wenn
+ * die Trophäen-Stufe mitgewachsen ist, steht der Pokal in derselben Sekunde am
+ * Inselrand (`syncTrophy` baut die laufende Bühne dafür einmal neu).
+ *
+ * Bewusst OHNE `persist()`/`recompute()`: Der Ruf-Faktor greift erst beim
+ * NÄCHSTEN Kill (er hängt nicht in `dps`/`clickDmg`), und gespeichert wird
+ * ohnehin im selben Tick wie alles andere.
+ */
+function awardRep(zone: number, boss: boolean): void {
+  const theme = bgForZone(zone);
+  const before = rankOf(state.territory, theme);
+  state.territory = addRep(state.territory, theme, repForKill(boss));
+  const rank = rankOf(state.territory, theme);
+  if (rank === before) return;
+  const pct = Math.round((territoryGoldMult(state.territory, zone) - 1) * 1000) / 10;
+  toasts.show(
+    '🏆',
+    `${territoryTitle(theme, rank)} — Ruf-Stufe ${rank}`,
+    `${themeConfig(theme)?.name ?? ''}: +${String(pct).replace('.', ',')} % BP auf diesen Bühnen`,
+  );
+  syncTrophy(); // eine neue Trophäen-Stufe stellt den Pokal sofort hin
+  territoryPanel.refresh(true);
+}
+
+/**
+ * IDEEN-GAMEPLAY 1c — das Boss-Gate `zone` auf ein Relikt würfeln lassen.
+ *
+ * Alles Interessante steckt in `gateRelicRoll`: Es prüft selbst, ob das Gate
+ * überhaupt berechtigt ist (Boss-Bühne, ab Bühne 50, tiefer als
+ * jedes bisher gewürfelte), schreibt den Highwater fort und führt den Pity. Ist
+ * nichts zu tun, kommt dieselbe Referenz zurück und diese Funktion ist ein
+ * No-op — der häufigste Fall, denn die meisten Boss-Kills sind Wiederholungen.
+ *
+ * Ein gefundenes Relikt wandert NICHT automatisch in einen Slot: Was man trägt,
+ * ist eine Entscheidung (die der Knopf „✨ Beste tragen" abnimmt, wenn man sie
+ * nicht treffen will). Nur ein LEERER Slot wird gefüllt — ein leerer Slot ist
+ * keine Entscheidung, sondern ein Versäumnis.
+ */
+function awardRelic(zone: number): void {
+  const res = gateRelicRoll(state.relics, zone, rng);
+  if (res.relics === state.relics) return; // Gate war nicht berechtigt
+  state.relics = res.relics;
+  const relic = res.relic;
+  if (!relic) {
+    relicPanel.refresh(true); // der Pity-Zähler ist gewandert
+    return;
+  }
+  const free = state.relics.slots.indexOf(0);
+  if (free >= 0) state.relics = equipRelic(state.relics, free, relic.id);
+  const names = relic.affixes
+    .map((a) => affixConfig(a.id)?.name ?? '')
+    .filter(Boolean)
+    .join(' + ');
+  toasts.show('💎', 'Relikt gefunden!', `Bühne ${zone} · ${names}`);
+  audio.buy();
+  afterLoadoutChange();
+}
+
 function onKillProgress(
   r: ReturnType<typeof hit>,
   fromClick: boolean,
@@ -1480,13 +1982,28 @@ function onKillProgress(
   // Boss-Kill zahlt also unverändert.
   const killZone = r.advancedZone ? combat.zone - 1 : combat.zone;
   const stage = stageFactorsFor(killZone, combat.remix, combat.week);
-  const gold = Math.floor(r.gold * goldMult(state) * peachIncomeMult(state, now) * stage.gold);
+  // IDEEN-GAMEPLAY 1b: Der Ruf-Faktor der Bühne, auf der der Kill LANDETE —
+  // dieselbe `killZone` wie beim A1-BP-Faktor. Ein Ruf auf einem anderen Theme
+  // faltet hier per Konstruktion ×1 (das ist die ganze „kein Global-Creep"-Regel).
+  const gold = Math.floor(
+    r.gold *
+      goldMult(state) *
+      peachIncomeMult(state, now) *
+      stage.gold *
+      territoryGoldMult(state.territory, killZone),
+  );
   state.gold += gold;
   state.stats.goldLifetime += gold;
+  awardRep(killZone, wasBoss);
   if (wasBoss) {
     // Boss defeated (§7.3/§7.5): lifetime kill count, the no-timeout streak (reset on
     // a boss timeout in the loop) + its highwater, and the quest metric.
     state.stats.bossKills += 1;
+    // 2b: Der Boss-Kill zählt auf den Pfad des gerade GETRAGENEN Skins — die
+    // zweite der beiden Fortschritts-Quellen (die erste ist die Tragezeit im
+    // Tick). Ein Rangaufstieg meldet sich per Toast (`notePathNodes`).
+    state.skinPath = addPathBoss(state.skinPath, state.gear.skin);
+    notePathNodes();
     state.stats.bossStreak += 1;
     state.stats.maxBossStreak = Math.max(state.stats.maxBossStreak, state.stats.bossStreak);
     state.meta = advanceMeta(state.meta, 'bossKills');
@@ -1569,6 +2086,12 @@ function onKillProgress(
         `Boss besiegt!`,
         `${chestEmoji(tier)} · +${keys} 🔑 · +${shards} 🧩 (Bühne ${combat.zone})`,
       );
+      // IDEEN-GAMEPLAY 1c: Ab Bühne 50 würfelt JEDES Gate genau EINMAL im Leben
+      // auf ein Relikt (`relics.deepestGate` gattert das selbst — deshalb steht
+      // hier keine zusätzliche Frontier-Prüfung, und Wiederholungen per
+      // `travelTo`/`challengeBoss` zahlen nichts). Dieselbe eine Funktion, die
+      // auch der Bot fährt.
+      awardRelic(bossZone);
       audio.bossWin();
       victoryDance = true; // A4: der Sieges-Move, einmalig (siehe `syncChoreoSet`)
       bossConfetti(); // G2: Sieg-Beat über der Bühne
@@ -1597,6 +2120,10 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
     ? dmg *
       ancientBossDmgMult(state.ancients) *
       bossDmgMult(state.gear) *
+      // 2b: `bossDmg` erreicht der Pfad nur über Diamant-Booty (`allPct`).
+      // 1c/3a: „Gate-Brecher"/„Glut-Fokus" im SELBEN 1+x-Griff — additiv
+      // untereinander (und strukturell gedeckelt), multiplikativ zum Rest.
+      (1 + pathB().bossDmg + loadout().bossDmg) *
       crewSpec.bossMult *
       bossBreakerDmgMult(state.transcend)
     : dmg;
@@ -1676,7 +2203,11 @@ function doShake(x?: number, y?: number): void {
     COMBO_WINDOW_S +
       ancientComboWindowBonus(state.ancients) +
       comboWindowBonus(state.gear) +
-      crewSpec.comboWindowS,
+      crewSpec.comboWindowS +
+      // 2a „Langer Atem"/„Roter Faden": derselbe Term, nur permanent.
+      constellationComboWindowBonus(state.constellation) +
+      // 1c „Langer Atem"-Affix: Sekunden im selben additiven Fenster.
+      loadout().comboWindow,
   );
   drive = Math.min(drive + 1.2, 6);
 
@@ -1690,10 +2221,14 @@ function doShake(x?: number, y?: number): void {
       tierCritChanceBonus(tier) +
         ancientCritChanceBonus(state.ancients) +
         critChanceBonus(state.gear) +
+        pathB().critChance + // 2b (nur Diamant-Booty über `allPct`)
+        loadout().critChance + // 3a „Sequin-Crit": pp durch denselben 40-%-Deckel
         permTokenCritChance(state.permTokens) +
         crewSpec.critChance +
         // A1 „Krit-Funken": +5 pp, durch DENSELBEN 40-%-Deckel wie alles andere.
-        stage.crit,
+        stage.crit +
+        // 2a „Kalter Zünder"/„Scharfe Schneide"/„Blitzschlag": +0,5 pp je Stern.
+        constellationCritChanceBonus(state.constellation),
     ),
   );
   if (crit) {
@@ -1719,7 +2254,14 @@ function doShake(x?: number, y?: number): void {
     crit,
     // Combo-tier + Disco/Lava gear (§5) + Booty-Boss/A-Promi `critdmg`-specials
     // (v11) raise the crit multiplier; Neon-Ninja gear widens on-beat ×.
-    critMultBonus: tierCritMultBonus(tier) + critMultBonus(state.gear) + crewSpec.critDmg,
+    // 2b: Der Disco-King-Pfad zahlt Krit-Multiplikator-PUNKTE — sein Stern-Stat.
+    // 1c „Wuchtschlag": Multiplikator-PUNKTE, additiv wie alle Nachbarn.
+    critMultBonus:
+      tierCritMultBonus(tier) +
+      critMultBonus(state.gear) +
+      pathB().critMult +
+      loadout().critMult +
+      crewSpec.critDmg,
     // Permanent „+1 % Krit-Schaden" tokens scale the whole crit multiplier (§6.2) —
     // MAL dem P4-Knoten „Präzisions-Shake" (+25 %), der genau dieselbe Skala meint.
     critMultFactor: permTokenCritMult(state.permTokens) * heavenCritMultFactor(state.heaven),
@@ -1728,7 +2270,7 @@ function doShake(x?: number, y?: number): void {
     extraMult:
       // A1 „Beat-Nacht" weitet den On-Beat-Bonus additiv (×1.5 ⇒ ×2), genau wie
       // die Neon-Ninja-Sterne — eine Quelle, ein Term.
-      beatBonus(onBeat, onBeatMultBonus(state.gear) + stage.beat) *
+      beatBonus(onBeat, onBeatMultBonus(state.gear) + pathB().onBeatMult + stage.beat) *
       // P4 „Ekstase-Doktrin" (Ritual-Ast): dasselbe Fenster, nur ×12 statt ×10.
       frenzyMult(state.ability, now, ekstaseDoktrinMult(state.heaven, FRENZY_MULT)) *
       // A3: der Mini-Frenzy des Truhen-Kobolds (×2 für 10 s). Bewusst ein
@@ -1797,8 +2339,11 @@ function activateEkstase(): void {
   // Ekstase-Ausdauer (§4.5.2) + Lava gear flat seconds extend the base window, then
   // Gyrator gear scales the whole duration by (1 + frenzyDur) (§5).
   const durationMs =
-    (FRENZY_DURATION_MS + ekstaseBonusMs(state.heaven) + frenzyDurSecBonus(state.gear) * 1000) *
-    (1 + frenzyDurBonus(state.gear));
+    (FRENZY_DURATION_MS +
+      ekstaseBonusMs(state.heaven) +
+      // 2b: Der Lava-Pfad zahlt Ekstase-SEKUNDEN — sein Stern-Stat.
+      (frenzyDurSecBonus(state.gear) + pathB().frenzyDurSec) * 1000) *
+    (1 + frenzyDurBonus(state.gear) + pathB().frenzyDur);
   state.ability = activate(state.ability, now, chargeMax, durationMs);
   audio.unlockJingle();
   audio.setIntensity(3);
@@ -1947,7 +2492,15 @@ function ownChestSkin(id: string): void {
 function currentIncomePerSec(now: number): number {
   const hp = monsterHp(combat.zone);
   if (!(hp > 0) || !(dps > 0)) return 0;
-  return (dps / hp) * goldFor(combat.zone, false) * goldMult(state) * peachIncomeMult(state, now);
+  // 1b: derselbe Ruf-Faktor, den ein Kill auf DIESER Bühne bekommt — die
+  // Truhen-BP lesen damit dasselbe Einkommen, das die HUD zeigt.
+  return (
+    (dps / hp) *
+    goldFor(combat.zone, false) *
+    goldMult(state) *
+    peachIncomeMult(state, now) *
+    territoryGoldMult(state.territory, combat.zone)
+  );
 }
 
 /** Credit one resolved reward into the live state (§6.2 reward union). */
@@ -2009,7 +2562,18 @@ function openChestFromInventory(tier: ChestTier): readonly Reward[] | null {
   state.chests.pity = res.pity;
   const credited: Reward[] = [];
   for (const raw of res.rewards) {
+    // 3a: Ein Jackpot-Skin, den man schon besitzt, wird EINGESCHMOLZEN. Die 🧩
+    // aus `resolveDuplicate` (§6.3.2) bleiben unangetastet — sie sind zugesagt
+    // und tragen die in 3b geeichte Umschul-Leiter; die Glut kommt OBENDRAUF.
+    // Genau das meinte „Duplikate sind heute wertlos": Sie waren es nicht,
+    // aber sie waren auch nie mehr als ein Splitter-Häppchen.
+    const dup = raw.kind === 'jackpot' && ownedChestSkins().has(raw.jackpot.skin);
     const reward = raw.kind === 'jackpot' ? resolveDuplicate(raw, ownedChestSkins()) : raw;
+    if (dup && raw.kind === 'jackpot') {
+      const ember = emberForDuplicate(raw.jackpot.tier);
+      state.forge = addEmber(state.forge, ember);
+      toasts.show('🔥', 'Duplikat eingeschmolzen', `+${ember} Schmiede-Glut`);
+    }
     creditReward(reward);
     credited.push(reward);
   }
@@ -2158,6 +2722,34 @@ function checkAchievements(): void {
     toasts.show(a.icon, 'Erfolg freigeschaltet!', a.name);
   }
   metaPanel.render();
+  syncConstellationDust(); // 2a: jeder Erfolg zahlt sofort 💫 aus
+  persist();
+}
+
+/**
+ * IDEEN-GAMEPLAY 2a — den Sternenstaub-Highwater an die drei Quellen angleichen
+ * (Bühnen-Sterne-Meilensteine, Erfolge, Boss-Gate-Erstkills ab Bühne 25).
+ *
+ * `syncDust` rechnet den ANSPRUCH aus lauter Lebenszeit-Highwatern und hebt
+ * `earned` darauf — es wird nie „gutgeschrieben", also kann ein Reload, ein
+ * Import oder ein zweiter Aufruf im selben Tick nichts doppelt zahlen. Gibt es
+ * nichts Neues, kommt dieselbe Referenz zurück und die Funktion ist ein No-op
+ * (deshalb darf sie billig im 0.25-s-Tick hängen).
+ */
+function syncConstellationDust(): void {
+  const src: DustSources = {
+    stars: totalStars(state.stageStars),
+    achievements: state.achievements.length,
+    // Tiefste JE erreichte Bühne — `lifetimeMaxZone` fällt bei Himmelfahrt und
+    // Transzendenz auf 1, der Gear-Latch `zoneEver` nie (§5.3).
+    deepestZone: Math.max(state.lifetimeMaxZone, state.gear.zoneEver, combat.maxZone),
+  };
+  const next = syncDust(state.constellation, src);
+  if (next === state.constellation) return;
+  const gain = next.earned - state.constellation.earned;
+  state.constellation = next;
+  constellationPanel.refresh(true);
+  toasts.show('💫', `+${fmt(gain)} Sternenstaub`, 'Für die Legenden-Konstellation (Ziele-Tab)');
   persist();
 }
 
@@ -2277,6 +2869,29 @@ const metaPanel = new Meta({
   frontier: () => Math.max(state.runMaxZone, combat.maxZone),
   travel: (zone) => {
     if (travelToZone(zone)) metaPanel.render(true);
+  },
+});
+
+/**
+ * IDEEN-GAMEPLAY 2a — die Sternbild-Karte. Sie montiert sich in den Platzhalter,
+ * den `Meta` im Ziele-Tab aufspannt, also MUSS sie nach `metaPanel` entstehen.
+ * Ein Kauf ist unumkehrbar (kein Respec), deshalb bestätigt das Panel ihn selbst
+ * (Arm-Knopf) und die Glue bucht hier nur noch.
+ */
+const constellationPanel = new Constellation({
+  state,
+  onBuy: (id) => {
+    const r = buyConstellationNode(state.constellation, id);
+    if (!r.bought) return;
+    state.constellation = r.constellation;
+    // Klick-/DPS-/BP-Knoten hängen in `dpsOf`/`clickDamageOf`/`goldMult` — der
+    // HUD-Wert muss den Kauf in derselben Sekunde zeigen.
+    recompute();
+    audio.buy();
+    hud.update(state, combat, dps, clickDmg);
+    constellationPanel.refresh(true);
+    toasts.show('💫', `Stern freigeschaltet: ${r.node?.name ?? ''}`, r.node?.desc ?? '');
+    persist();
   },
 });
 
@@ -2494,6 +3109,10 @@ hud.update(state, combat, dps, clickDmg);
 // loaded save so anything already earned shows unlocked immediately (§7.3).
 maybeNewDay();
 checkAchievements();
+// 2a: Der Anspruch aus Sternen/Erfolgen/Gates wird beim Boot einmal angeglichen —
+// bei einem frisch migrierten Save ist das ein No-op (die Migration hat ihn schon
+// rückwirkend gebucht), bei jedem anderen die billige Sicherheitsnaht.
+syncConstellationDust();
 if (currentSeason) {
   toasts.show(currentSeason.emoji, `Saison: ${currentSeason.name}`, currentSeason.hint);
 }
@@ -2582,6 +3201,43 @@ let t0 = 0;
   // den Peak daran, statt ihn aus Pixeln zu raten.)
   cer: ceremony.active,
 });
+// ROADMAP-V2 G5: Gesichts-Hook für die Beweis-Serie — `blink()`/`grimace()`
+// zünden die beiden getakteten Zustände sofort (sonst wartet ein Screenshot
+// unter Software-GL minutenlang auf ein 120-ms-Fenster), `state()` liest den
+// Zustand als ZAHLEN, statt ihn aus Pixeln zu raten. Rein visuell, keine
+// Spielregel dahinter — dieselbe Familie wie `chVs`/`chGob`.
+(
+  window as unknown as {
+    chFace: {
+      blink(): void;
+      grimace(): void;
+      state(): {
+        lid: number;
+        px: number;
+        py: number;
+        mouth: string;
+        grim: number;
+        eyes: number;
+        visor: number;
+      };
+    };
+  }
+).chFace = {
+  blink: () => forceBlink(faceState),
+  grimace: () => triggerGrimace(faceState),
+  state: () => {
+    const v = faceView(faceState, isFrenzyActive(state.ability, Date.now()));
+    return {
+      lid: lidClose(faceState),
+      px: faceState.px,
+      py: faceState.py,
+      mouth: v.mouth,
+      grim: faceState.grimaceLeft,
+      eyes: char.face.lids.length, // 0 = Visor-/Masken-Stil ohne Gesicht
+      visor: char.face.visorPixels.length,
+    };
+  },
+};
 let uiTimer = 0;
 let lastRenderMs = 0;
 let firstFrame = true;
@@ -2593,6 +3249,11 @@ function loop(nowMs: number): void {
   const dt = Math.min(clock.getDelta(), 0.05);
   t0 += dt;
   state.stats.playTimeS += dt;
+  // 2b: Tragezeit. Sie hängt am selben Tick wie die Spielzeit — wer die Bühne
+  // offen hat, trägt seinen Skin, ob er klickt oder nicht. Offline-Zeit zählt
+  // bewusst NICHT (der Skin steht dann in keiner Show).
+  state.skinPath = addWear(state.skinPath, state.gear.skin, dt);
+  notePathNodes();
 
   // G1: Der Bühnen-Wechsel friert den Kampf für seine 1.2 s ein — sonst würde
   // Idle-DPS auf einen Rivalen einschlagen, der gar nicht auf der Bühne steht,
@@ -2624,11 +3285,14 @@ function loop(nowMs: number): void {
   // 25 % of the click value (no crit/beat, §4.3.5) — Robo gear stars add cps (§5),
   // the same sum the offline accrual uses; boss timer ticks down.
   if (dps > 0 && !swapping) applyHit(dps * dt, false);
-  const cps = coachCps(state.heaven) + coachCpsBonus(state.gear);
+  const cps =
+    coachCps(state.heaven) + coachCpsBonus(state.gear) + pathB().coachCps + loadout().coachCps;
   if (cps > 0 && !swapping) applyHit(coachDps(clickDmg, cps) * dt, false);
   if (combat.boss && !swapping) {
     const gateZone = combat.zone; // vor dem möglichen Rückwurf festhalten (P1)
-    const bt = tickBoss(combat, dt);
+    // 2a ★ „Zweiter Wind": Der Rückwurf erstattet 3 von 10 Rivalen der
+    // Rückfall-Bühne — die Bühne startet dann sichtbar bei 3/10 statt 0/10.
+    const bt = tickBoss(combat, dt, secondWindKills(state.constellation));
     combat = bt.state;
     if (bt.failed) {
       state.stats.bossTimeouts += 1;
@@ -2642,6 +3306,7 @@ function loop(nowMs: number): void {
         `Zurück auf Bühne ${combat.zone} — farm BP, kauf Upgrades, dann fordere den Boss erneut.`,
       );
       audio.bossLose();
+      triggerGrimace(faceState); // G5: 1.5 s Grimasse — der Verlust steht im Gesicht
       updateBackground(); // eine Bühne zurück kann ein Theme zurück bedeuten
       syncEntity(); // the boss bounced us — back to the normal rival body
     }
@@ -2655,7 +3320,9 @@ function loop(nowMs: number): void {
   // sich aus, weil Boss-Bühnen keinen Modifikator tragen.
   // P4 „Combo-Gedächtnis" (Ritual-Ast) hängt additiv im GLEICHEN Reduktions-Term
   // wie die Showmaster-Sterne (`combo.decay` deckelt die Summe bei 1).
-  const comboRed = comboDecayReduction(state.gear) + comboGedachtnisReduction(state.heaven);
+  // 2b: Der Showmaster-Pfad zahlt Combo-Verfall — sein Stern-Stat.
+  const comboRed =
+    comboDecayReduction(state.gear) + pathB().comboDecay + comboGedachtnisReduction(state.heaven);
   comboState =
     gimmickNow?.id === 'gravity'
       ? spaceComboStep(comboState, dt, comboRed)
@@ -2704,6 +3371,14 @@ function loop(nowMs: number): void {
     char.rig.root.updateMatrixWorld(true);
   }
   renderCheeks(char.rig, char.cheeks);
+  // ROADMAP-V2 G5: Gesichts-Leben. NACH dem Physik-/Akzent-Block, weil die
+  // Blickrichtung die frische Kopf-Matrix braucht; die Meshes selbst hängen
+  // unter dem head-Bone, der Physik-Kontrakt bleibt unberührt. Ziel ist der
+  // Rivale auf Augenhöhe (sein `root` steht auf dem Boden).
+  entity.root.getWorldPosition(faceAim); // Weltposition, auch falls er je umgehängt wird
+  faceAim.y += RIVAL_AIM_UP;
+  stepFace(faceState, dt, aimPupils(char.rig.head, faceAim));
+  applyFace(char.face, faceView(faceState, frenzy));
   particles.update(dt);
 
   const beatV = Math.max(0, Math.sin(choreo.phase * 2.2));
@@ -2758,6 +3433,7 @@ function loop(nowMs: number): void {
     // record (all no-ops when nothing changed / the leaderboard is off).
     maybeNewDay();
     checkAchievements();
+    syncConstellationDust(); // 2a: Sterne-Meilensteine + tiefe Boss-Gates zahlen aus
     maybeLeaderboardPrompt();
     hud.update(state, combat, dps, clickDmg);
     // ROADMAP-V2 P3: Wand-Telemetrie an der Frontier-Boss-Bühne. Bewusst NUR

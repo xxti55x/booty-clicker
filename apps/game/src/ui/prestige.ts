@@ -34,6 +34,17 @@ export class Prestige {
         <button class="btn danger" id="ascendBtn" type="button">Ruhm einheimsen</button>
       </div>
       <div class="settings-section">
+        <h3>Gebietsherrschaft 🏆</h3>
+        <!-- IDEEN-GAMEPLAY 1b: Die vier Ruf-Leisten (ui/territory-panel.ts)
+             montieren sich hier hinein — direkt UNTER den Knopf, der die ganze
+             Tour einkassiert: Was der Reset nimmt, steht oben; was er nie
+             anfassen kann, darunter. Der Ruhm-Tab ist zugleich der kürzeste des
+             Spiels (headless bei 390 px gemessen: 901 px inkl. der Leisten gegen
+             2 665 px im Ziele-Tab), die vier Leisten fallen hier also nicht
+             hinter zwei Bildschirmhöhen. -->
+        <div id="prTerritory"></div>
+      </div>
+      <div class="settings-section">
         <h3>Statistik</h3>
         <div class="stat-grid" id="prStats"></div>
       </div>`;

@@ -120,6 +120,15 @@ export class Chests {
     this.body.innerHTML = `
       <div class="chest-head" id="chestHead"></div>
       <div class="chest-inv" id="chestInv"></div>
+      <!-- IDEEN-GAMEPLAY 1c: Die Relikt-Sektion sitzt ZWISCHEN Inventar und
+           Drop-Tabellen — sie setzt die Loot-Leiter dort fort, wo die
+           Mythos-Truhe aufhört, und die Tabellen darunter erklären beides.
+           Gefüllt wird sie von ui/relic-panel.ts; dieser Body rührt sie nie an
+           (der 0,25-s-Tick baut nur die Kopf- und Inventar-Zeilen um). -->
+      <div class="settings-section">
+        <h3>💎 Relikte</h3>
+        <div id="relicSection"></div>
+      </div>
       <div class="settings-section">
         <h3>Drop-Chancen (transparent)</h3>
         <div class="dim chest-note">Alle Gewichte als %. 🔑 &amp; Truhen sind ausschließlich

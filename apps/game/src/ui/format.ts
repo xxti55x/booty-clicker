@@ -31,6 +31,20 @@ export function fmt(n: number): string {
   return mant.toFixed(2) + 'e' + exp;
 }
 
+/**
+ * Ganze Zahl mit deutschen Tausenderpunkten („1.240"). Für ZÄHLBARE Größen, die
+ * exakt gelesen werden wollen — der Meisterschafts-Fortschritt (1a) ist so ein
+ * Fall: „1.24K/8.00K" wäre für einen Fortschrittsbalken unbrauchbar. Bewusst
+ * ohne `toLocaleString` (kein ICU-Verlass in jsdom/Node-Builds) und bewusst nur
+ * für kleine, ganze Zahlen — alles Exponentielle bleibt bei `fmt`.
+ */
+export function fmtInt(n: number): string {
+  if (!Number.isFinite(n)) return '0';
+  const v = Math.floor(Math.abs(n));
+  const s = v.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return n < 0 ? `-${s}` : s;
+}
+
 /** Browser-tab title reflecting current BP (spec §5 M6). */
 export function titleFor(bp: number): string {
   return `${fmt(bp)} BP · Booty Clicker`;
