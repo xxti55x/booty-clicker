@@ -361,6 +361,9 @@ const BASE_EXPOSURE = renderer.toneMappingExposure;
 // Roadmap L: Bloom-Composer (nur high-Preset aktiv — sonst rendert der Loop direkt).
 const post = createPost(renderer, scene, camera);
 const controls = createControls(camera, renderer.domElement);
+// Debug-Handle für Szenen-Werkzeuge (Headless-Kalibrierung): nur Lesen, kein
+// Spielzustand — gleiche Kategorie wie `data-quality` am Dokument.
+(window as { __cam?: unknown }).__cam = camera;
 
 const effects = loadSettings();
 /**
@@ -826,7 +829,11 @@ function syncEntity(): void {
 // Kulisse (§5.5): in Tour-Modus (`bgAuto`) the background rotates with the zone tier;
 // otherwise the manually chosen `gear.bg` is fixed. Keep `gear.bg` in lockstep with
 // what's on screen so the kulisse mini-buff + set detection match the view.
-let currentBg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
+// Kulissen-Wahl entfernt (User-Auftrag): die Kulisse folgt IMMER der Bühne.
+// Alt-Saves mit fixer Wahl kehren beim Boot in den Tour-Modus zurück (reine
+// Wert-Normalisierung, kein Schema-Thema — die Felder existieren weiter).
+state.gear.bgAuto = true;
+let currentBg = bgForZone(combat.zone);
 let currentBgVariant = bgVariant(combat.zone);
 if (state.gear.bgAuto) state.gear.bg = currentBg;
 // 1b: Die Trophäen-Stufe VOR dem ersten `setBackground` setzen (wie die
@@ -1007,12 +1014,6 @@ const gearPanel = new Gear({
   onProgress: () => {
     recompute();
     audio.buy();
-    hud.update(state, combat, dps, clickDmg);
-    persist();
-  },
-  onKulisse: () => {
-    updateBackground(true);
-    recompute();
     hud.update(state, combat, dps, clickDmg);
     persist();
   },
@@ -1659,7 +1660,7 @@ muteBtn.addEventListener('click', () => {
  * hergibt (low: weiterhin Hard-Swap).
  */
 function updateBackground(force = false): void {
-  const bg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
+  const bg = bgForZone(combat.zone);
   const variant = bgVariant(combat.zone); // recolour lap follows depth even on a manual kulisse
   if (!force && bg === currentBg && variant === currentBgVariant) {
     // Die Kulisse bleibt — aber die BÜHNE kann trotzdem das Theme gewechselt

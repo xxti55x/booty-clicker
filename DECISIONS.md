@@ -3,6 +3,40 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Szenerie-Vollausbau + Kulisse folgt der Tour (User-Auftrag)
+
+- **Kulissen-Wahl entfernt:** Die Kulisse folgt IMMER dem Bühnen-Fortschritt
+  (`bgForZone`). Der Chooser im Skins-Tab ist raus; eine passive Zeile zeigt
+  weiterhin, welcher Kulissen-Mini-Buff gerade wirkt (der Buff folgt der Tour,
+  wie es der Auto-Modus immer tat). Alt-Saves mit fixer Wahl kehren beim Boot
+  in den Tour-Modus zurück — reine Wert-Normalisierung (`bgAuto = true`), die
+  Felder existieren unverändert weiter, kein Schema-Bump nötig.
+- **Die eigentliche Erkenntnis dieses Pakets: die Kamera-Wahrheit.** Der
+  Modul-Kommentar behauptete eine Boot-Kamera bei (−2.7, 3.8, −8.8); real
+  stellt `frameCamera` sie auf ≈ **(−9.6, 19.2, −33.9)** und kippt steil
+  abwärts (per Unprojection GEMESSEN, nachdem drei Platzierungs-Runden ins
+  Leere gingen und ein Debug-Kalibriergitter aus Farbkugeln nur am linken
+  Bildrand auftauchte). Konsequenz: Hinter der Insel gibt es KEINEN
+  Augenhöhen-Horizont — das sichtbare Fernfeld-Band liegt bei
+  **y(z) ≈ 19 − 0.45·(z + 34)** (z 30 ⇒ y −10), und der x-Keil öffnet nur
+  nach Welt-+x (Screen-links). Ferne Kulissen liegen also UNTER der
+  Schwebe-Insel — man blickt auf eine Welt hinab. Formel + Messweg stehen im
+  Modul-Kopf; das Kamera-Debug-Handle (`window.__cam`, nur Lesen) bleibt für
+  künftige Szenen-Werkzeuge.
+- **Die Horizont-Schicht** (`horizonLayer`, EIN Aufrufpunkt neben `audience`):
+  Club = Nachtstadt-Skyline unter der Insel (2 Turm-Reihen, instanziert,
+  UNBELEUCHTET — die Club-Spotlights mit Intensität 90 machten aus jedem
+  beleuchteten Turm eine Lichtwand, drei Anläufe dokumentiert) + Stadt-Glühen;
+  Synth = Neon-Grid-Boden bis zum Fluchtpunkt + Retro-Sonne mit Querbalken +
+  Bergkamm; Beach = gestaffelte Archipel-Inselchen + Wolken; Space = träge
+  rotierender Asteroiden-Bogen + Nebelbänke. Alles `fog: false` (Skybox-Regel:
+  der Distanz-Nebel verschluckte die erste Fassung komplett — Beweisbild),
+  alles display-referred, ~4–7 Draw-Calls je Theme (gebaked/instanziert).
+- **Verworfene Zwischenstände (alle mit Screenshot belegt):** Augenhöhen-
+  Platzierung (über dem Frustum, unsichtbar), Segelboote (das Meer liegt
+  hinter der Insel-Silhouette), Club-Fenster-Slab (Spotlight-Lichtwand),
+  Riesen-Glows (Grauwäsche übers ganze Bild).
+
 ## Politur-Paket nach externer Grafik-Analyse — verifizieren, dann fixen
 
 Eine eingereichte 8-Punkte-Analyse wurde Punkt für Punkt am ECHTEN Spiel

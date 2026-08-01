@@ -17,7 +17,7 @@ import {
   sugarCostForStar,
 } from '../game/gear';
 import { SKIN_UNLOCKS } from '../game/gear';
-import type { BackgroundKey, SkinKey, SkinRarity } from '../types';
+import type { SkinKey, SkinRarity } from '../types';
 import {
   FORGE_SLOTS,
   affixConfig,
@@ -74,22 +74,12 @@ const RARITY_LABEL: Record<SkinRarity, string> = {
   mythic: 'Mythisch',
 };
 
-/** Kulisse chooser buttons: id + label + a short mini-buff hint (§5.5). */
-const KULISSE_UI: { key: BackgroundKey; label: string }[] = [
-  { key: 'club', label: '🪩 Club' },
-  { key: 'synth', label: '🌆 Synth' },
-  { key: 'beach', label: '🏖 Beach' },
-  { key: 'space', label: '🚀 Space' },
-];
-
 export interface GearDeps {
   state: ChState;
   /** Equip changed: rebuild the 3D character, recompute, refresh HUD, persist. */
   onEquip: () => void;
   /** Level/star/craft changed the gear buffs: recompute, refresh HUD, persist. */
   onProgress: () => void;
-  /** Kulisse/Auto changed: apply the background (world + audio), recompute, persist. */
-  onKulisse: () => void;
   /** 3a: Den Schmiede-Dialog für einen Slot dieses Skins öffnen. */
   openForge: (id: SkinKey, slot: number) => void;
   /** 3a: Überschüssige Splitter in Schmiede-Glut tauschen (`SHARDS_PER_EMBER` : 1). */
@@ -109,13 +99,9 @@ export class Gear {
     this.body.innerHTML = `
       <div class="gear-bal" id="gearBal"></div>
       <div class="settings-section">
-        <h3>Kulisse</h3>
-        <div class="kulisse-row" id="kulisseRow"></div>
-        <div class="dim" id="kulisseHint"></div>
-      </div>
-      <div class="settings-section">
         <h3>Set-Boni</h3>
         <div id="gearSets"></div>
+        <div class="dim" id="kulisseHint"></div>
       </div>
       <div class="settings-section">
         <h3>Skins</h3>
@@ -182,22 +168,6 @@ export class Gear {
     this.render();
   }
 
-  private setKulisse(key: BackgroundKey): void {
-    const { state } = this.deps;
-    state.gear.bgAuto = false;
-    state.gear.bg = key;
-    this.deps.onKulisse();
-    this.render();
-  }
-
-  private setAuto(): void {
-    const { state } = this.deps;
-    if (state.gear.bgAuto) return;
-    state.gear.bgAuto = true;
-    this.deps.onKulisse();
-    this.render();
-  }
-
   private unlocked(id: SkinKey): boolean {
     return skinUnlocked(id, gearUnlockCtx(this.deps.state));
   }
@@ -217,34 +187,15 @@ export class Gear {
       `${SHARDS_PER_EMBER} 🧩 → 1 🔥</button>`;
     byId('gearSwap').addEventListener('click', () => this.swap());
 
-    this.renderKulisse();
     this.renderSets();
     this.renderGrid();
-  }
 
-  private renderKulisse(): void {
-    const { state } = this.deps;
-    const row = byId('kulisseRow');
-    const btns = KULISSE_UI.map((k) => {
-      const active = !state.gear.bgAuto && state.gear.bg === k.key;
-      return `<button class="kbtn ${active ? 'active' : ''}" data-bg="${k.key}" type="button">${k.label}</button>`;
-    });
-    btns.push(
-      `<button class="kbtn ${state.gear.bgAuto ? 'active' : ''}" data-bg="auto" type="button">🔄 Auto</button>`,
-    );
-    row.innerHTML = btns.join('');
-    for (const b of Array.from(row.querySelectorAll<HTMLButtonElement>('.kbtn'))) {
-      const bg = b.dataset.bg!;
-      b.addEventListener('click', () =>
-        bg === 'auto' ? this.setAuto() : this.setKulisse(bg as BackgroundKey),
-      );
-    }
-
-    const kul = KULISSE_BUFFS[state.gear.bg];
-    const kulTxt = affixText(kul.stat, kul.amount);
-    byId('kulisseHint').textContent = state.gear.bgAuto
-      ? `Tour-Modus: die Kulisse rotiert mit der Bühne. Aktiv: ${state.gear.bg} (${kulTxt}).`
-      : `Feste Kulisse: ${kulTxt}.`;
+    // Kulissen-Wahl gibt es nicht mehr (User-Auftrag): die Kulisse folgt IMMER
+    // dem Bühnen-Fortschritt. Die Zeile bleibt informativ — welcher Mini-Buff
+    // der aktuellen Kulisse gerade wirkt, sieht man weiterhin.
+    const kul = KULISSE_BUFFS[this.deps.state.gear.bg];
+    byId('kulisseHint').textContent =
+      `Kulisse folgt der Tour: ${this.deps.state.gear.bg} (${affixText(kul.stat, kul.amount)}).`;
   }
 
   private renderSets(): void {
