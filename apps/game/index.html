@@ -83,30 +83,6 @@
         </div>
       </div>
 
-      <div class="rival" id="rival">
-        <div class="rival-card">
-          <div class="rival-name" id="rivalName">Groupie</div>
-          <div class="rival-hpbar"><div class="rival-hpfill" id="rivalHpFill"></div></div>
-          <div class="rival-row">
-            <span class="rival-hp" id="rivalHpText">10 / 10</span>
-            <span class="rival-prog" id="zoneProgress">0 / 10</span>
-            <span class="rival-timer hidden" id="rivalTimer">30</span>
-          </div>
-          <!-- ROADMAP-V2 A1: Hausregel der Bühne — Icon + Name + ein Satz.
-               Nur auf Nicht-Boss-Bühnen ab Bühne 11. -->
-          <div class="stage-mod hidden" id="stageMod"></div>
-          <!-- ROADMAP-V2 A2: Theme-Gimmick des Bosses — steht klein an der
-               HP-Bar, solange der Boss tanzt (das Banner sagt es einmal groß an). -->
-          <div class="boss-gimmick hidden" id="bossGimmick"></div>
-          <button type="button" class="boss-challenge hidden" id="bossChallenge">
-            👑 Boss herausfordern
-          </button>
-          <!-- ROADMAP-V2 P3: Wand-Telemetrie — erscheint nur an der Frontier-
-               Boss-Bühne und nur bei erkennbarer Lücke (> 20 %). -->
-          <div class="boss-hint hidden" id="bossHint"></div>
-        </div>
-      </div>
-
       <!-- ROADMAP-V2 G2: Boss-Auftritts-Banner — rollt beim Spawn ein und
            verschwindet von selbst (reine CSS-Animation). -->
       <div class="boss-banner hidden" id="bossBanner"></div>
@@ -183,6 +159,30 @@
         </span>
         <span class="ability-label" id="ekstaseLabel">🍑 Ekstase</span>
       </button>
+    </div>
+
+    <div class="rival" id="rival">
+      <div class="rival-card">
+        <div class="rival-name" id="rivalName">Groupie</div>
+        <div class="rival-hpbar"><div class="rival-hpfill" id="rivalHpFill"></div></div>
+        <div class="rival-row">
+          <span class="rival-hp" id="rivalHpText">10 / 10</span>
+          <span class="rival-prog" id="zoneProgress">0 / 10</span>
+          <span class="rival-timer hidden" id="rivalTimer">30</span>
+        </div>
+        <!-- ROADMAP-V2 A1: Hausregel der Bühne — Icon + Name + ein Satz.
+               Nur auf Nicht-Boss-Bühnen ab Bühne 11. -->
+        <div class="stage-mod hidden" id="stageMod"></div>
+        <!-- ROADMAP-V2 A2: Theme-Gimmick des Bosses — steht klein an der
+               HP-Bar, solange der Boss tanzt (das Banner sagt es einmal groß an). -->
+        <div class="boss-gimmick hidden" id="bossGimmick"></div>
+        <button type="button" class="boss-challenge hidden" id="bossChallenge">
+          👑 Boss herausfordern
+        </button>
+        <!-- ROADMAP-V2 P3: Wand-Telemetrie — erscheint nur an der Frontier-
+               Boss-Bühne und nur bei erkennbarer Lücke (> 20 %). -->
+        <div class="boss-hint hidden" id="bossHint"></div>
+      </div>
     </div>
 
     <div class="hintbar">Klick / Leertaste = Twerken &amp; Schaden · Crew macht Idle-DPS</div>

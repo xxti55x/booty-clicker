@@ -658,6 +658,12 @@ export function buildCharacter(
     shoulder.add(elbow);
     if (robot) {
       elbow.add(O(new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 14), jointT), 0.012));
+    } else {
+      // Gelenk-Kugel (Politur-Paket): Ober- und Unterarm sind offene Zylinder —
+      // beim Beugen klaffte der Ellbogen. Radius = Unterarm-Oberkante (aw),
+      // Material wie der Unterarm, damit die Kugel im gestreckten Arm unsichtbar
+      // in der Silhouette verschwindet und nur die Beuge füllt.
+      elbow.add(O(new THREE.Mesh(new THREE.SphereGeometry(aw, 14, 14), host ? suitT : skinT)));
     }
     const fore = O(
       new THREE.Mesh(new THREE.CylinderGeometry(aw, aw - 0.025, 0.72, 16), host ? suitT : skinT),
@@ -768,6 +774,12 @@ export function buildCharacter(
     thigh.add(knee);
     if (robot) {
       knee.add(O(new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 14), jointT), 0.012));
+    } else {
+      // Gelenk-Kugel (Politur-Paket): dieselbe Lücke am Knie — Radius =
+      // Schienbein-Oberkante, Material wie das Schienbein darunter.
+      knee.add(
+        O(new THREE.Mesh(new THREE.SphereGeometry(lw - 0.015, 14, 14), host ? suitT : skinT)),
+      );
     }
     const shin = O(
       new THREE.Mesh(

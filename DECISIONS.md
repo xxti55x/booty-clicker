@@ -3,6 +3,47 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Politur-Paket nach externer Grafik-Analyse — verifizieren, dann fixen
+
+Eine eingereichte 8-Punkte-Analyse wurde Punkt für Punkt am ECHTEN Spiel
+geprüft (2×-Diagnose-Screenshots) statt blind umgesetzt — die Hälfte traf,
+die andere Hälfte diagnostizierte Systeme, die es hier so nicht gibt:
+
+- **„Banding = Smooth-Shading + Gradient" — Diagnose falsch, Symptom echt.**
+  Die Toon-Ramp existiert seit Wave 1; die „Banding-Ringe" am Synth-Rivalen
+  waren die `scanlineTex` (Zeilen alle 5 px, Alpha 0.28), die auf
+  Spieldistanz als Shading-Fehler liest. Fix: Alpha 0.28 → 0.13 — Ringe weg
+  (Vorher/Nachher-Screenshot), Bildschirm-Identität bleibt.
+- **Gelenk-Lücken — echt, aber nur für Nicht-Robo-Skins.** Ellbogen- und
+  Knie-Kugeln existierten NUR im Robo-Zweig; alle anderen Skins beugten
+  offene Zylinderenden. Fix: Kugeln (Radius = angrenzende Zylinder-Kante,
+  Material des Unterarms/Schienbeins) in den else-Zweig — im gestreckten
+  Glied unsichtbar, füllt nur die Beuge. Physik-Kontrakt unberührt (additive
+  Kind-Meshes, keine Pivots).
+- **Outline-Breite — echt.** Der Objekt-Space-Push multiplizierte mit jeder
+  Parent-Skalierung (×1.42-Boss ⇒ ×1.42-fette Linie). Fix: Push im VIEW
+  space entlang `normalMatrix`-Normalen, tiefenskaliert (−mv.z/45, geklemmt
+  0.6–1.6) — Linienbreite in Pixeln konstant, Look bei Bühnendistanz 45
+  unverändert kalibriert.
+- **„UI verdeckt die Figur" — beim BOSS dramatisch echt** (Screenshot: Diva
+  Supreme fast vollständig hinter der eigenen Karte). Fix wie von der
+  Analyse vorgeschlagen: Die Kampf-Karte ankert UNTEN über dem
+  Ekstase-Knopf (freier Deck-Vordergrund), als eigenes Fixed-Element —
+  in `.topui` machte deren `transform` jede Fixed-Verankerung zunichte
+  (transformierte Ahnen sind der Containing Block). Mobil (55-vh-Sheet)
+  ankert sie über der Sheet-Kante; die Media-Regel muss NACH der Basis-Regel
+  stehen (gleiche Spezifität — einmal falsch herum gebaut, DOM-Probe fand
+  computed bottom: 118px). Rivale zusätzlich +0.4 z (stand mit dem Kopf
+  unter der Karten-Unterkante).
+- **Abgelehnt mit Beweis:** Blob-Schatten statt Shadow Map (unser Schatten
+  HAT Form — Arme sichtbar im Deck-Schatten; ein Blob wäre der Rückschritt),
+  Juice fehlt (M8-Paket existiert: `ui/pops.ts`-Damage-Popups, Partikel,
+  Shake, Squash-Physik — auf Standbildern unsichtbar), UI-Entsättigung
+  (Gold/Holz-Chrome ist die beabsichtigte Identität aus der
+  Casual-Idle-Reskin-Abnahme), Kamera-Drehung (Fixed-Camera ist eine
+  abgenommene Design-Entscheidung). Store-Proportions-Hinweis notiert, aber
+  außerhalb dieses Pakets (Remodel aller 10 Skins).
+
 ## AAA-Grafik-Pass — Rim-Licht, Spekular-Glint, Grade/Vignette (Shader)
 
 - **„AAA" heißt hier: die Beleuchtungs-Sprache stilisierter AAA-Titel, nicht

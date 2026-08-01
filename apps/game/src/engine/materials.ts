@@ -193,10 +193,20 @@ export function outlineMaterial(
   const hit = outlineCache.get(key);
   if (hit) return hit;
   const m = new THREE.MeshBasicMaterial({ color, side: THREE.BackSide, toneMapped: false });
+  // Politur-Paket: Der Hull wird im VIEW space entlang der Normalen gedrückt und
+  // mit der Tiefe skaliert (−mv.z / 45 ≈ die feste Bühnen-Distanz der Kamera,
+  // geklemmt) — die Linienbreite ist damit in PIXELN konstant: ein ×1.42-Boss
+  // trägt dieselbe Ink-Linie wie ein dünner Arm, statt eine ×1.42-fette. Der
+  // Objekt-Space-Push davor multiplizierte mit jeder Parent-Skalierung.
   m.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>\n\ttransformed += normalize(normal) * ${thickness.toFixed(5)};`,
+      '#include <project_vertex>',
+      [
+        'vec4 inkMv = modelViewMatrix * vec4( transformed, 1.0 );',
+        'vec3 inkN = normalize( normalMatrix * normal );',
+        `inkMv.xyz += inkN * ${thickness.toFixed(5)} * clamp( -inkMv.z / 45.0, 0.6, 1.6 );`,
+        'gl_Position = projectionMatrix * inkMv;',
+      ].join('\n\t'),
     );
   };
   m.customProgramCacheKey = () => `ink-hull-${thickness.toFixed(5)}`;
