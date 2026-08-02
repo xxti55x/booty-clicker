@@ -1,5 +1,11 @@
 import type { ChState } from '../game/ch-state';
-import { FPS_CAPS, type GameSettings, type Quality, saveSettings } from '../game/settings';
+import {
+  FPS_CAPS,
+  type GameSettings,
+  type Quality,
+  type QualityChoice,
+  saveSettings,
+} from '../game/settings';
 import { type StatRow, statsView } from '../game/stats-view';
 import { exportCh, importCh } from '../save/ch-store';
 import { fmt } from './format';
@@ -11,7 +17,8 @@ function byId(id: string): HTMLElement {
 }
 
 const QUALITY_LABEL: Record<Quality, string> = { low: 'Niedrig', medium: 'Mittel', high: 'Hoch' };
-const QUALITY_CYCLE: readonly Quality[] = ['low', 'medium', 'high'];
+// V2-2: 'auto' ist die erste Wahl im Zyklus — das Gerät entscheidet.
+const QUALITY_CYCLE: readonly QualityChoice[] = ['auto', 'low', 'medium', 'high'];
 const RESET_ARM_MS = 4000;
 
 /** Seconds → a compact German duration (playtime stat). */
@@ -45,6 +52,8 @@ export interface ChSettingsDeps {
   reset: () => void;
   effects: GameSettings;
   onGraphicsChange: () => void;
+  /** V2-2: das gerade WIRKSAME Preset (nach Auto-Auflösung + Governor). */
+  effectiveQuality: () => Quality;
 }
 
 /** The ⚙️ tab: save export/import/reset (CH save) + effect & graphics toggles. */
@@ -110,13 +119,21 @@ export class ChSettings {
     const q = byId('gfxQuality') as HTMLButtonElement;
     const f = byId('gfxFps') as HTMLButtonElement;
     const paint = (): void => {
-      q.textContent = `Qualität: ${QUALITY_LABEL[this.deps.effects.quality]}`;
+      const choice = this.deps.effects.quality;
+      // Auto zeigt ehrlich, was gerade WIRKT: „Auto (Hoch)".
+      q.textContent =
+        choice === 'auto'
+          ? `Qualität: Auto (${QUALITY_LABEL[this.deps.effectiveQuality()]})`
+          : `Qualität: ${QUALITY_LABEL[choice]}`;
       const c = this.deps.effects.fpsCap;
       f.textContent = `FPS-Limit: ${c === 0 ? 'Aus' : c}`;
     };
     q.addEventListener('click', () => {
       const i = QUALITY_CYCLE.indexOf(this.deps.effects.quality);
       this.deps.effects.quality = QUALITY_CYCLE[(i + 1) % QUALITY_CYCLE.length];
+      // V2-2: JEDE Berührung des Zyklus ist eine dokumentierte eigene Wahl —
+      // auch die Rückkehr zu 'auto'. Der Loader erzwingt danach nichts mehr.
+      this.deps.effects.qualityChosen = true;
       saveSettings(this.deps.effects);
       this.deps.onGraphicsChange();
       paint();
@@ -125,6 +142,8 @@ export class ChSettings {
       const i = FPS_CAPS.indexOf(this.deps.effects.fpsCap);
       this.deps.effects.fpsCap = FPS_CAPS[(i + 1) % FPS_CAPS.length];
       saveSettings(this.deps.effects);
+      // V2-2: der Governor misst gegen das Limit — neu aufbauen.
+      this.deps.onGraphicsChange();
       paint();
     });
     paint();

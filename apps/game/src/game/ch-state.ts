@@ -168,6 +168,11 @@ export interface ChStats {
   maxBossStreak: number;
   /** Truhenschlüssel earned over the lifetime (§7.3/§7.5). */
   keysEarned: number;
+  /**
+   * Wie oft der Cheat-Code der Ahnen je getanzt wurde (Easter Egg). Der Wert
+   * ist der EINMAL-LATCH des BP-Jackpots: nur der Übergang 0 → 1 zahlt aus.
+   */
+  konami: number;
 }
 
 /** A zeroed stats block. */
@@ -185,6 +190,7 @@ export function createStats(): ChStats {
     bossStreak: 0,
     maxBossStreak: 0,
     keysEarned: 0,
+    konami: 0,
   };
 }
 

@@ -24,12 +24,13 @@ describe('game settings', () => {
     expect(loadSettings(null)).toEqual(defaultSettings());
   });
 
-  it('default settings shape', () => {
+  it('default settings shape — V2-2: Auto-Qualität ist der Default', () => {
     expect(defaultSettings()).toEqual({
       screenShake: true,
       particles: true,
       haptics: true,
-      quality: 'high',
+      quality: 'auto',
+      qualityChosen: false,
       fpsCap: 0,
       onboarded: false,
     });
@@ -42,6 +43,7 @@ describe('game settings', () => {
       particles: false,
       haptics: false,
       quality: 'low',
+      qualityChosen: true,
       fpsCap: 30,
       onboarded: true,
     };
@@ -65,21 +67,43 @@ describe('game settings', () => {
     const s = loadSettings(store);
     expect(s.screenShake).toBe(false);
     expect(s.particles).toBe(true); // invalid -> default
-    expect(s.quality).toBe('high'); // invalid enum -> default
+    expect(s.quality).toBe('auto'); // invalid enum + nie gewählt -> auto
     expect(s.fpsCap).toBe(0); // not in FPS_CAPS -> default
     expect(s.onboarded).toBe(false); // missing -> default
   });
 
-  it('accepts each valid quality and fps cap', () => {
+  it('accepts each valid quality and fps cap (als eigene Wahl markiert)', () => {
     const store = memStorage();
-    for (const quality of ['low', 'medium', 'high'] as const) {
+    for (const quality of ['auto', 'low', 'medium', 'high'] as const) {
       for (const fpsCap of [0, 30, 60]) {
-        saveSettings({ ...defaultSettings(), quality, fpsCap, onboarded: true }, store);
+        saveSettings(
+          { ...defaultSettings(), quality, qualityChosen: true, fpsCap, onboarded: true },
+          store,
+        );
         const s = loadSettings(store);
         expect(s.quality).toBe(quality);
         expect(s.fpsCap).toBe(fpsCap);
         expect(s.onboarded).toBe(true);
       }
     }
+  });
+
+  // V2-2: Alt-Saves speicherten den alten DEFAULT 'high' — das war nie eine
+  // Entscheidung. Ohne `qualityChosen` erzwingt der Loader die Automatik;
+  // eine dokumentierte eigene Wahl bleibt für immer stehen.
+  it('migrates the old high default into auto, keeps a real choice', () => {
+    const store = memStorage();
+    store.setItem(SETTINGS_KEY, JSON.stringify({ quality: 'high', onboarded: true }));
+    expect(loadSettings(store).quality).toBe('auto');
+    store.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ quality: 'low', qualityChosen: true, onboarded: true }),
+    );
+    expect(loadSettings(store).quality).toBe('low');
+    store.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ quality: 'high', qualityChosen: true, onboarded: true }),
+    );
+    expect(loadSettings(store).quality).toBe('high');
   });
 });

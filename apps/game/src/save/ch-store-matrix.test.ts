@@ -49,7 +49,7 @@ function memStorage(): ChStorage & { map: Map<string, string> } {
 }
 
 /** Every historical CH schema version, oldest first — the spine of the matrix. */
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19] as const;
 type SchemaVersion = (typeof VERSIONS)[number];
 
 const LAST_SEEN = 1_752_800_000_000;
@@ -89,6 +89,8 @@ const STATS_V8 = {
   maxBossStreak: 19,
   keysEarned: 55,
 };
+/** v19 (Easter Egg): der Konami-Latch in derselben stats-Slice — 2 = schon getanzt. */
+const STATS_V19 = { konami: 2 };
 
 /** v3 (M8): Ekstase + combo stacks. */
 const ABILITY = {
@@ -338,7 +340,11 @@ function saveAt(v: SchemaVersion): Record<string, unknown> {
   };
   if (v >= 2) {
     raw.rng = { ...RNG };
-    raw.stats = v >= 8 ? { ...STATS_V2, ...STATS_V8 } : { ...STATS_V2 };
+    raw.stats = {
+      ...STATS_V2,
+      ...(v >= 8 ? STATS_V8 : {}),
+      ...(v >= 19 ? STATS_V19 : {}),
+    };
     raw.legacyImported = true;
   }
   if (v >= 3) {
@@ -438,10 +444,11 @@ function expectSlices(s: ChState, v: SchemaVersion): void {
   }
   const stats =
     v >= 8
-      ? { ...createStats(), ...STATS_V2, ...STATS_V8 }
+      ? { ...createStats(), ...STATS_V2, ...STATS_V8, ...(v >= 19 ? STATS_V19 : {}) }
       : v >= 2
         ? { ...createStats(), ...STATS_V2 }
         : createStats();
+  // v19 — der Konami-Latch: vor v19 IMMER 0 (niemand kann getanzt haben).
   expect(s.stats).toEqual(stats);
   // v3 — Ekstase + Combo.
   expect(s.ability).toEqual(v >= 3 ? ABILITY : createAbility());
@@ -931,6 +938,19 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
       expect(s.heir).toBe('');
       // Der Zähler ist unendlich und wird deshalb NICHT gedeckelt, nur gefloort.
       expect(s.legend).toBe(12);
+    },
+  },
+  19: {
+    what: 'Konami-Latch krumm/negativ/als String — der Einmal-Jackpot darf nie neu scharf werden',
+    damage: (raw) => {
+      const stats = raw.stats as Record<string, unknown>;
+      stats.konami = 1.9; // krumm ⇒ abgerundet auf 1 (ein halber Tanz zählt nicht)
+    },
+    check: (s) => {
+      // 1.9 ⇒ 1: der Latch bleibt GEZOGEN. Abrunden auf 0 wäre der Bug, der
+      // den Einmal-Jackpot wieder scharf macht; NaN/negativ (⇒ 0) prüft die
+      // repairStats-Konvention wie bei jedem anderen Zähler.
+      expect(s.stats.konami).toBe(1);
     },
   },
 };

@@ -50,14 +50,17 @@ function forgeWith(
 }
 
 describe('forge — Freischaltung über den Skin-Level', () => {
-  it('öffnet die drei Slots bei 10 / 25 / 40', () => {
-    expect(FORGE_UNLOCK_LEVELS).toEqual([10, 25, 40]);
+  // V2-4: Slot 3 von Level 40 (Σ 301 060 🧩 ≈ 2 150 h — unerreichbar) auf 32
+  // (Σ 50 580 🧩 ≈ 361 h) geeicht: die längste Jagd des Spiels, mit Ankunft.
+  it('öffnet die drei Slots bei 10 / 25 / 32', () => {
+    expect(FORGE_UNLOCK_LEVELS).toEqual([10, 25, 32]);
     expect(forgeSlotsUnlocked(0)).toBe(0);
     expect(forgeSlotsUnlocked(9)).toBe(0);
     expect(forgeSlotsUnlocked(10)).toBe(1);
     expect(forgeSlotsUnlocked(24)).toBe(1);
     expect(forgeSlotsUnlocked(25)).toBe(2);
-    expect(forgeSlotsUnlocked(40)).toBe(3);
+    expect(forgeSlotsUnlocked(31)).toBe(2);
+    expect(forgeSlotsUnlocked(32)).toBe(3);
     expect(forgeSlotsUnlocked(50)).toBe(FORGE_SLOTS); // nie mehr als drei
     expect(forgeSlotsUnlocked(Number.NaN)).toBe(0);
   });
@@ -65,8 +68,8 @@ describe('forge — Freischaltung über den Skin-Level', () => {
   it('nennt das Level des nächsten Slots', () => {
     expect(nextForgeUnlock(0)).toBe(10);
     expect(nextForgeUnlock(10)).toBe(25);
-    expect(nextForgeUnlock(30)).toBe(40);
-    expect(nextForgeUnlock(40)).toBeNull();
+    expect(nextForgeUnlock(30)).toBe(32);
+    expect(nextForgeUnlock(32)).toBeNull();
   });
 
   it('nur die vom LEVEL freigeschalteten Slots wirken', () => {

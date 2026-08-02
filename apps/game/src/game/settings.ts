@@ -7,7 +7,15 @@
 export const SETTINGS_KEY = 'bootyclicker.settings';
 
 export type Quality = 'low' | 'medium' | 'high';
-const QUALITIES: readonly Quality[] = ['low', 'medium', 'high'];
+
+/**
+ * V2-2: Was der SPIELER wählt — `'auto'` (Default) heißt: das Gerät entscheidet
+ * (Signal-Wahl beim Boot + FPS-Governor zur Laufzeit, `engine/auto-quality`).
+ * Die Renderer-Seite ({@link Quality}) kennt weiterhin nur die drei Presets;
+ * `'auto'` wird in `main.ts` VOR `applyQuality` aufgelöst.
+ */
+export type QualityChoice = Quality | 'auto';
+const QUALITY_CHOICES: readonly QualityChoice[] = ['auto', 'low', 'medium', 'high'];
 
 /** Allowed FPS caps (0 = uncapped). */
 export const FPS_CAPS: readonly number[] = [0, 30, 60];
@@ -17,8 +25,15 @@ export interface GameSettings {
   particles: boolean;
   /** Click/crit/boss haptics (spec §8.8) — feature-detected, iOS is a no-op. */
   haptics: boolean;
-  /** Graphics preset: pixel ratio + shadows. */
-  quality: Quality;
+  /** Graphics preset — `'auto'` = Gerät entscheidet (V2-2). */
+  quality: QualityChoice;
+  /**
+   * V2-2: Hat der Spieler die Qualität je SELBST angefasst? Solange nicht,
+   * erzwingt der Loader `'auto'` — damit wandern Alt-Saves, die nur den alten
+   * Default `'high'` gespeichert hatten (das war nie eine Entscheidung), in die
+   * Automatik, während eine echte Wahl für immer respektiert wird.
+   */
+  qualityChosen: boolean;
   /** Frame-rate cap (0 = uncapped). */
   fpsCap: number;
   /** Whether the first-run onboarding has been shown. */
@@ -35,7 +50,8 @@ export function defaultSettings(): GameSettings {
     screenShake: true,
     particles: true,
     haptics: true,
-    quality: 'high',
+    quality: 'auto',
+    qualityChosen: false,
     fpsCap: 0,
     onboarded: false,
   };
@@ -49,9 +65,9 @@ function defaultStorage(): SettingsStorage | null {
   }
 }
 
-function asQuality(v: unknown, fallback: Quality): Quality {
-  return typeof v === 'string' && (QUALITIES as readonly string[]).includes(v)
-    ? (v as Quality)
+function asQualityChoice(v: unknown, fallback: QualityChoice): QualityChoice {
+  return typeof v === 'string' && (QUALITY_CHOICES as readonly string[]).includes(v)
+    ? (v as QualityChoice)
     : fallback;
 }
 
@@ -77,11 +93,15 @@ export function loadSettings(storage: SettingsStorage | null = defaultStorage())
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return d;
   const p = parsed as Record<string, unknown>;
+  const qualityChosen = p.qualityChosen === true;
   return {
     screenShake: typeof p.screenShake === 'boolean' ? p.screenShake : d.screenShake,
     particles: typeof p.particles === 'boolean' ? p.particles : d.particles,
     haptics: typeof p.haptics === 'boolean' ? p.haptics : d.haptics,
-    quality: asQuality(p.quality, d.quality),
+    // V2-2: Ohne dokumentierte eigene Wahl gilt 'auto' — auch für Alt-Saves,
+    // die nur den früheren Default 'high' gespeichert hatten (keine Wahl).
+    quality: qualityChosen ? asQualityChoice(p.quality, d.quality) : 'auto',
+    qualityChosen,
     fpsCap: asFpsCap(p.fpsCap, d.fpsCap),
     onboarded: typeof p.onboarded === 'boolean' ? p.onboarded : d.onboarded,
   };

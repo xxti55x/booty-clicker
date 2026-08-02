@@ -3,6 +3,285 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Lounge-Publikum + Ekstase-Drop + Bühnen-Kinetik (User-Auftrag)
+
+- **Lounge statt Schatten:** Die flachen Silhouetten-Instanzen sind ersetzt
+  durch drei geschwungene Sofa-Buchten mit Tischchen (zwei Bakes) und ECHTE
+  sitzende Cartoon-Gäste — gemergte Mini-Körper (Schoß/Torso/Kopf) als EIN
+  InstancedMesh mit `instanceColor`-Outfits (sieben Farben, HSL-gestreut).
+  Dazu ein zweites InstancedMesh „Hype-Arme" (V + Fäuste), im Grundzustand
+  auf Scale 0.001. Vier Draw-Calls für die ganze Lounge.
+- **„Publikum geht mehr ab":** `World.setHype(frenzy)` schreibt EIN geteiltes
+  Boolean in den BuildCtx (`ctx.hype`), die Publikums-Anim liest es pro Frame:
+  sitzend = sanftes beatV-Wippen; Ekstase = Sprünge mit dreifacher Amplitude
+  (|sin|-Hüpfkurve), Hüft-Sway und aufpoppende, winkende Arme. Headless mit
+  präpariertem Frenzy-Fenster bewiesen (Screenshot: Gäste in der Luft, Arme
+  oben, ×10-Ekstase-Pill sichtbar).
+- **Ekstase-Soundtrack („fetziger"):** `setEkstase(on)` zündet beim Öffnen
+  einmal den Drop-Impact (Sub-Kick 130→32 Hz + Noise-Crash) und schaltet den
+  Sequencer in den Drop-Groove: **Tempo +22 %** (wenig genug, dass der
+  On-Beat-Tap folgen kann), Four-on-the-floor-Kick, Hats auf jedem Achtel,
+  **Bass in doppelter Rate mit Wechsel auf die Quinte** — Skala und Arp
+  bleiben (der Grund-Groove rennt, statt ersetzt zu werden), die X5-Theme-
+  Zusatzstimme spielt weiter obendrauf. Schließen fällt hart zurück: der
+  Kontrast IST das Signal. Hörbarkeit ist headless nicht prüfbar — der Pfad
+  läuft durch die bestehenden Engine-Tests (No-throw + Mute-Vertrag).
+- **Bühnen-Kinetik** (`stageKinetics`, ein Hero-Element je Theme, 1–2
+  Draw-Calls, islandGroup): Club = rotierender 4-Klingen-Laserfächer mit
+  Beat-Nicken; Synth = 11-Balken-Equalizer-Wand hinter dem Deck; Beach =
+  schwingende Lichterkette am Deck-Rand; Space = zwei gegenläufige, atmende
+  Holo-Ringe um die Insel. Alle vier Themes per Screenshot abgenommen.
+
+## Szenerie-Vollausbau + Kulisse folgt der Tour (User-Auftrag)
+
+- **Kulissen-Wahl entfernt:** Die Kulisse folgt IMMER dem Bühnen-Fortschritt
+  (`bgForZone`). Der Chooser im Skins-Tab ist raus; eine passive Zeile zeigt
+  weiterhin, welcher Kulissen-Mini-Buff gerade wirkt (der Buff folgt der Tour,
+  wie es der Auto-Modus immer tat). Alt-Saves mit fixer Wahl kehren beim Boot
+  in den Tour-Modus zurück — reine Wert-Normalisierung (`bgAuto = true`), die
+  Felder existieren unverändert weiter, kein Schema-Bump nötig.
+- **Die eigentliche Erkenntnis dieses Pakets: die Kamera-Wahrheit.** Der
+  Modul-Kommentar behauptete eine Boot-Kamera bei (−2.7, 3.8, −8.8); real
+  stellt `frameCamera` sie auf ≈ **(−9.6, 19.2, −33.9)** und kippt steil
+  abwärts (per Unprojection GEMESSEN, nachdem drei Platzierungs-Runden ins
+  Leere gingen und ein Debug-Kalibriergitter aus Farbkugeln nur am linken
+  Bildrand auftauchte). Konsequenz: Hinter der Insel gibt es KEINEN
+  Augenhöhen-Horizont — das sichtbare Fernfeld-Band liegt bei
+  **y(z) ≈ 19 − 0.45·(z + 34)** (z 30 ⇒ y −10), und der x-Keil öffnet nur
+  nach Welt-+x (Screen-links). Ferne Kulissen liegen also UNTER der
+  Schwebe-Insel — man blickt auf eine Welt hinab. Formel + Messweg stehen im
+  Modul-Kopf; das Kamera-Debug-Handle (`window.__cam`, nur Lesen) bleibt für
+  künftige Szenen-Werkzeuge.
+- **Die Horizont-Schicht** (`horizonLayer`, EIN Aufrufpunkt neben `audience`):
+  Club = Nachtstadt-Skyline unter der Insel (2 Turm-Reihen, instanziert,
+  UNBELEUCHTET — die Club-Spotlights mit Intensität 90 machten aus jedem
+  beleuchteten Turm eine Lichtwand, drei Anläufe dokumentiert) + Stadt-Glühen;
+  Synth = Neon-Grid-Boden bis zum Fluchtpunkt + Retro-Sonne mit Querbalken +
+  Bergkamm; Beach = gestaffelte Archipel-Inselchen + Wolken; Space = träge
+  rotierender Asteroiden-Bogen + Nebelbänke. Alles `fog: false` (Skybox-Regel:
+  der Distanz-Nebel verschluckte die erste Fassung komplett — Beweisbild),
+  alles display-referred, ~4–7 Draw-Calls je Theme (gebaked/instanziert).
+- **Verworfene Zwischenstände (alle mit Screenshot belegt):** Augenhöhen-
+  Platzierung (über dem Frustum, unsichtbar), Segelboote (das Meer liegt
+  hinter der Insel-Silhouette), Club-Fenster-Slab (Spotlight-Lichtwand),
+  Riesen-Glows (Grauwäsche übers ganze Bild).
+
+## Politur-Paket nach externer Grafik-Analyse — verifizieren, dann fixen
+
+Eine eingereichte 8-Punkte-Analyse wurde Punkt für Punkt am ECHTEN Spiel
+geprüft (2×-Diagnose-Screenshots) statt blind umgesetzt — die Hälfte traf,
+die andere Hälfte diagnostizierte Systeme, die es hier so nicht gibt:
+
+- **„Banding = Smooth-Shading + Gradient" — Diagnose falsch, Symptom echt.**
+  Die Toon-Ramp existiert seit Wave 1; die „Banding-Ringe" am Synth-Rivalen
+  waren die `scanlineTex` (Zeilen alle 5 px, Alpha 0.28), die auf
+  Spieldistanz als Shading-Fehler liest. Fix: Alpha 0.28 → 0.13 — Ringe weg
+  (Vorher/Nachher-Screenshot), Bildschirm-Identität bleibt.
+- **Gelenk-Lücken — echt, aber nur für Nicht-Robo-Skins.** Ellbogen- und
+  Knie-Kugeln existierten NUR im Robo-Zweig; alle anderen Skins beugten
+  offene Zylinderenden. Fix: Kugeln (Radius = angrenzende Zylinder-Kante,
+  Material des Unterarms/Schienbeins) in den else-Zweig — im gestreckten
+  Glied unsichtbar, füllt nur die Beuge. Physik-Kontrakt unberührt (additive
+  Kind-Meshes, keine Pivots).
+- **Outline-Breite — echt.** Der Objekt-Space-Push multiplizierte mit jeder
+  Parent-Skalierung (×1.42-Boss ⇒ ×1.42-fette Linie). Fix: Push im VIEW
+  space entlang `normalMatrix`-Normalen, tiefenskaliert (−mv.z/45, geklemmt
+  0.6–1.6) — Linienbreite in Pixeln konstant, Look bei Bühnendistanz 45
+  unverändert kalibriert.
+- **„UI verdeckt die Figur" — beim BOSS dramatisch echt** (Screenshot: Diva
+  Supreme fast vollständig hinter der eigenen Karte). Fix wie von der
+  Analyse vorgeschlagen: Die Kampf-Karte ankert UNTEN über dem
+  Ekstase-Knopf (freier Deck-Vordergrund), als eigenes Fixed-Element —
+  in `.topui` machte deren `transform` jede Fixed-Verankerung zunichte
+  (transformierte Ahnen sind der Containing Block). Mobil (55-vh-Sheet)
+  ankert sie über der Sheet-Kante; die Media-Regel muss NACH der Basis-Regel
+  stehen (gleiche Spezifität — einmal falsch herum gebaut, DOM-Probe fand
+  computed bottom: 118px). Rivale zusätzlich +0.4 z (stand mit dem Kopf
+  unter der Karten-Unterkante).
+- **Abgelehnt mit Beweis:** Blob-Schatten statt Shadow Map (unser Schatten
+  HAT Form — Arme sichtbar im Deck-Schatten; ein Blob wäre der Rückschritt),
+  Juice fehlt (M8-Paket existiert: `ui/pops.ts`-Damage-Popups, Partikel,
+  Shake, Squash-Physik — auf Standbildern unsichtbar), UI-Entsättigung
+  (Gold/Holz-Chrome ist die beabsichtigte Identität aus der
+  Casual-Idle-Reskin-Abnahme), Kamera-Drehung (Fixed-Camera ist eine
+  abgenommene Design-Entscheidung). Store-Proportions-Hinweis notiert, aber
+  außerhalb dieses Pakets (Remodel aller 10 Skins).
+
+## AAA-Grafik-Pass — Rim-Licht, Spekular-Glint, Grade/Vignette (Shader)
+
+- **„AAA" heißt hier: die Beleuchtungs-Sprache stilisierter AAA-Titel, nicht
+  PBR-Fotorealismus.** Drei Shader-Bausteine, alle im bestehenden System:
+  (1) **Toon-Rim** — View-Space-Fresnel, hart per `smoothstep(0.62, 0.8)`
+  gestuft, kühl getönt (0xbcd2ff, Gegenfarbe zum warmen Key): die
+  Silhouetten-Lichtkante, die runde Formen vom Hintergrund löst.
+  (2) **Spekular-Glint** — Blinn-Halbvektor gegen einen FESTEN Bühnen-Key
+  (die Welt-Richtung des scene.ts-Key-Lichts), hoch potenziert und gestuft:
+  der kleine Lack-Tupfer auf Schultern und Booty. Kunstlicht wie im
+  Cartoon-Kino — es folgt der Bühne, nicht der Physik.
+  (3) **Grade-Abschluss** der V2-1-Post-Kette — der nackte CopyShader wurde
+  zu Kopie + sanfter Vignette (0.2, lenkt zur Bühnenmitte) + 5 % Sättigung +
+  warmem Lichter-Push (luma-selektiv ab 55 %). Bewusst display-space und
+  bewusst KEINE Transferkurve über den ganzen Puffer — die V2-1-Regel steht.
+- **Ein Programm, ein Schalter:** Rim+Glint injizieren über `onBeforeCompile`
+  in die EINE `toonMat`-Fabrik (alle Charaktere, Gegner, Kulissen teilen sie),
+  uniform-getrieben mit konstantem `customProgramCacheKey` — ein einziges
+  Shader-Programm für die ganze Welt, Stärken pro Material dosierbar. Das
+  Preset schaltet über EIN geteiltes Uniform-Objekt (`TOON_FX`), ohne
+  Recompile: `low` (Software-Rasterizer) zahlt die Per-Pixel-ALU nicht.
+- **Beweis als Build-A/B** (gleicher Save, gleiches Preset, alter vs. neuer
+  Build): medium p95 **+17/255** lokalisiert auf Silhouetten (Rauschboden
+  ~+1), high Ecken **−4,6** (Vignette) bei Zentrum ±0 — und mit eigenen Augen:
+  Charakter und Rivale tragen eine klare, nicht überkochte Lichtkante, das
+  alte Bild fällt flach von der Cel-Fläche in die Ink-Linie.
+- **Zwei Prozess-Fallen dokumentiert:** (a) Der A/B-Probe fehlte nach V2-2
+  `qualityChosen` — der Loader erzwang „auto" ⇒ SwiftShader ⇒ low ⇒ beide
+  Seiten OHNE Effekte, Delta ≈ 0. Erst die Null-Messung hinterfragen, dann
+  den Shader. (b) `git stash pop` aus dem Scratchpad-cwd schlägt fehl
+  („not a git repository") — Stash-Operationen immer vom Repo-Root.
+
+## Easter Egg — der Cheat-Code der Ahnen (Save v19)
+
+- **↑ ↑ ↓ ↓ ← → ← → B A** zündet den Pfirsich-Regen: Gold-Flash,
+  36 glühende 🍑 über dem ganzen Bild, Feder-Banner, Boss-Fanfare — und beim
+  ERSTEN Mal den Einmal-Jackpot plus den Erfolg „Cheat-Code der Ahnen" (🕹️,
+  Beschreibung bewusst als Rätsel formuliert statt als Tasten-Spoiler).
+- **Der Jackpot skaliert statt zu brechen:** `konamiJackpot(zone)` =
+  20 Boss-Drops der AKTUELLEN Bühne (≈ 40–60 min Farm-Ertrag — „sehr viele
+  BP", aber nie ein Sprung über die eigene Kurve; auf Bühne 1 sind es ehrliche
+  240 BP, auf Bühne 22 2,3 M — beides headless belegt). Einmal-Latch ist der
+  Lebenszeit-Zähler `stats.konami`: nur der Übergang 0 → 1 zahlt; jeder
+  weitere Tanz ist Spielzeug (Regen ja, Beute nein — „Die Ahnen nicken
+  anerkennend"). Kein Sim-Term: der Bot tippt keine Pfeiltasten, kein Anker
+  bewegt sich; der neue Erfolg speist wie jeder andere +3 💫 in die
+  Konstellation (endliche Quelle, Bot-Zahlen unverändert — er tanzt nie).
+- **Detektor-Detail:** Fehltritt wirft auf 0 zurück, AUSSER die falsche Taste
+  ist selbst der Sequenz-Anfang — ↑↑↑↓↓←→←→BA muss zünden (gehaltener
+  Anlauf, als Test gepinnt). Kein Feed bei `e.repeat` und nie beim Tippen in
+  Eingabefeldern (Import-Textarea: Pfeile sind dort Text, kein Tanz).
+- **Save-Disziplin wie immer:** v18 → v19 (nur Versions-Hub — niemand kann vor
+  v19 getanzt haben, `repairStats` defaultet 0), X7-Matrix-Fixture-Paar. Die
+  Kaputt-Zeile prüft die EINE gefährliche Ecke: `konami: 1.9` muss auf 1
+  runden, nicht auf 0 — sonst würde ein krummer Wert den Einmal-Jackpot
+  wieder scharf machen.
+- **Headless-Lehre (Instrument, nicht Produkt):** `getBoundingClientRect`
+  meldete alle 36 Pfirsiche als unbewegt, während der Screenshot den vollen
+  Regen zeigt — Compositor-getriebene Transform-Animationen spiegeln sich im
+  gedrosselten Headless-Tab nicht zuverlässig in Main-Thread-Rects. Verwandt
+  mit der dokumentierten `tb-in`-Falle: PIXEL prüfen, nicht Layout-Werte.
+
+## V2-3 — PWA: installierbar + offline ab dem ersten Besuch (Version 2.0.0)
+
+- **Precache LIEST die Build-Hashes statt sie zu kennen.** Ein statisches
+  `sw.js` kann Vites gehashte Dateinamen nicht wissen; statt eines
+  Build-Plugins parst der Install-Schritt die frisch geholte index.html auf
+  ihre `assets/`-Referenzen, das CSS auf seine `url()`-Assets (Font) und das
+  JS auf `avatars/`-Pfade. Möglich, weil das Spiel WINZIG ausliefert: die
+  Charaktere sind vollständig prozedural — der komplette Satz ist 1 JS + 1 CSS
+  - 1 Font + Icons (~950 KB). Kein Workbox, keine neue Dependency.
+- **Zwei headless gefundene Fallen, beide im Kommentar des Workers verewigt:**
+  (1) Die Shell-Fetches des ERSTEN Besuchs laufen, bevor der Worker die Seite
+  übernimmt — ohne Install-Precache hing der Offline-Reload im Loader
+  (beobachtet, Screenshot). (2) Der Server hängt `Vary: Origin` an die Assets,
+  und die `crossorigin`-Module-Requests tragen einen Origin-Header, den die
+  addAll-Einträge nicht haben — ohne `ignoreVary: true` verfehlte jeder
+  Offline-Match die eigenen Einträge (`ERR_FAILED` auf das gecachte Modul,
+  beobachtet). Same-origin + URL-adressiert ⇒ Vary ignorieren ist korrekt.
+- **Strategie je Ressourcen-Klasse** (Vite-Kontrakt): gehashte `assets/`
+  cache-first für immer; Navigationen network-first mit Cache-Fallback (online
+  gewinnt IMMER der frische Build — kein Stale-App-Problem); `public/`-Rest
+  stale-while-revalidate. Cross-Origin (Leaderboard-API) fasst der Worker nie
+  an, localStorage-Saves erst recht nicht. Registrierung nur im PROD-Build
+  (der Dev-Server transformiert on the fly — ein SW würde dort Chaos cachen).
+- **Abnahme headless**: SW `activated`, Manifest valide (3 Icons, standalone),
+  Offline-Reload bootet das VOLLE Spiel (dynamischer Titel, Auto-Quality
+  gesetzt, Bühne + HUD im Screenshot). Bekannte, bewusste Lücke: die
+  Skin-Thumbnails (`avatars/skin-*.jpg`) baut das JS zur Laufzeit aus
+  Segmenten — der Install-Parser sieht sie nicht; sie landen beim ersten
+  Online-Blick in den Skins-Tab im Laufzeit-Cache (SWR) und fehlen offline
+  nur, wenn man sie nie gesehen hat. App-Icons: gezeichneter Ink-Outline-
+  Pfirsich (PIL, 192/512/maskable/apple-touch, zusammen 42 KB).
+
+## V2-4 — Zwei dokumentierte Gameplay-Schulden beglichen (Schmiede-Slot 3, Advisor-Spiegel)
+
+- **Schmiede-Slot 3: Level 40 → 32, aus der Kostenkurve gerechnet.** Die
+  10/25/40-Leiter stammte wörtlich aus dem Ideen-Dokument; der 1c/3a-Agent hat
+  ihre Reichweite gemessen und bewusst NICHT verbogen (Σ 301 060 🧩 ≈ 2 150 h —
+  praktisch unerreichbar, als Nachzieher-Kandidat dokumentiert). Der Nachzieher
+  ist das hier: Level 32 = Σ 50 580 🧩 ≈ **361 h** bei den gemessenen
+  ~140 🧩/h — die LÄNGSTE Jagd des Spiels (über Skin-Pfad-Knoten 5 ≈ 103 h und
+  Ruf-Stufe 10 ≈ 73 h), aber eine mit Ankunft. Slots 1/2 (2,6 h / 76 h) waren
+  richtig geeicht und bleiben. Sim-Anker unberührt: der Bot modelliert kein
+  Skin-Gear, das Schmiede-Profil injiziert seine Affixe direkt — die Leiter
+  gate-t nur Menschen. Balance-Abschnitt 11 druckt die neue Reihe.
+- **Advisor spiegelt jetzt den VOLLEN Boss-Stack.** `advisor.bossDamageMult`
+  kannte Skin-Pfad (2b, via `allPct`) und Loadout-Affixe („Gate-Brecher"/
+  „Glut-Fokus") nicht — die P3-Wand-Telemetrie unterschätzte Träger systematisch
+  (nach dem Schritt-7-Review als bewusst-konservativ dokumentiert, jetzt
+  geschlossen). Der Spiegel nutzt DENSELBEN 1+x-Griff wie der Kampf-Stack in
+  `main.ts` und dieselben Fold-Funktionen (`skinPathOf`/`loadoutBonus`) — kein
+  zweiter Rechenweg; fehlende Slices (alte Fixtures) falten ×1.
+
+## V2-2 — Auto-Qualität: Signal-Wahl + FPS-Governor (X6-Restschuld geschlossen)
+
+- **`quality: 'auto'` ist der neue Default, und Provenienz schlägt Wert.** Der
+  alte Default `'high'` galt für JEDES Gerät — ein Telefon zahlte den vollen
+  PixelRatio-2-Preis, ein Software-Rasterizer alles. Der Loader erzwingt
+  `'auto'`, solange `qualityChosen` fehlt: Alt-Saves, die nur den alten Default
+  gespeichert hatten (keine Entscheidung), wandern in die Automatik; jede echte
+  Berührung des Qualitäts-Zyklus setzt das Flag und wird für immer respektiert.
+  Ein „gespeichert = gewollt"-Schluss wäre hier falsch gewesen — der Wert war
+  zu 100 % Default-Schreibung.
+- **Zwei Stufen, beide konservativ:** (1) Signal-Wahl beim Boot
+  (`pickQuality`): Software-GPU (SwiftShader/llvmpipe/…) ⇒ `low` — der String
+  kommt aus dem ECHTEN Renderer-Kontext, kein zweiter Probe-Kontext; Mobil
+  (Coarse-Pointer/UA) oder ≤ 4 Kerne ⇒ `medium`; sonst `high`. (2) FPS-Governor
+  zur Laufzeit: Median über 180 Frames (robust gegen GC-Spikes — ein
+  400-ms-Ausreißer trippt NICHT), Schwelle 24 ms (≈ 42 FPS), 6 s Warm-up
+  (Lade-Jank zählt nie), 8 s Abklingzeit, stuft NUR herab (Aufwärts-Flattern
+  wäre sichtbares Pumpen), `low` ist der Boden. Frames > 1 s verwerfen das
+  Fenster (Tab-Throttling ist kein Jank). Ein Spieler-FPS-Limit macht lange
+  Frames zur Absicht: gemessen wird dann gegen `capMs × 1.35`.
+- **Der Governor überstimmt nie eine Wahl** — er läuft nur bei `'auto'`, und
+  sein Ergebnis ist SESSION-LOKAL (nichts wird zurückgeschrieben): ein
+  gedrosseltes Notebook am Netzteil startet nächste Session wieder mit der
+  Signal-Wahl statt mit einer eingebrannten Strafe. Herabstufung meldet sich
+  als Toast mit Verweis auf die Einstellungen.
+- **Headless bewiesen** (`v2-autoq.cjs`): frischer Kontext auf SwiftShader ⇒
+  `low`; Alt-Default `high` ohne Flag ⇒ `low` (Automatik greift); echte Wahl
+  `high` + Flag ⇒ `high` trotz Software-GPU. Governor-Verhalten als 7
+  Unit-Tests (Fenster, Median, Warm-up, Throttle-Verwurf, Kaskade+Boden,
+  Cap-Toleranz). Settings-UI zeigt ehrlich „Auto (Hoch)" — den WIRKSAMEN Wert.
+
+## V2-1 — Bloom an: Display-Space-Overlay statt Linear-HDR-Kette (Known Issue geschlossen)
+
+- **Der alte Befund reproduziert, dann erst erklärt.** Die kanonische Kette
+  (RenderPass → UnrealBloom → OutputPass, three r180) wurde headless per
+  A/B-Screenshot gemessen: **Median +42/255 über das GANZE Bild, Schatten +38,
+  Lichter +8** — die Signatur einer zusätzlichen konkaven Transferkurve, kein
+  Bloom. Wurzel: Die Kette ist nur für Szenen korrekt, deren SÄMTLICHE
+  Materialien die konditionalen Farb-Chunks tragen. Diese Welt tut das bewusst
+  nicht — die Kulissen-Himmel sind `ShaderMaterial`s und die Ink-Kanten
+  `toneMapped: false`, beide DISPLAY-REFERRED geautored. Der OutputPass legt
+  ACES+sRGB über den GESAMTEN Puffer und hebt genau diese Flächen milchig an.
+  (Der r180-Kontrakt selbst ist sauber: `WebGLPrograms` schaltet Tone-Mapping
+  bei Target ≠ null ab — im Quelltext verifiziert. Er hilft nur nichts, wenn
+  Teile der Szene die Pipeline absichtlich verlassen.)
+- **Die Lösung dreht die Reihenfolge um:** Szene rendert UNVERÄNDERT direkt auf
+  die Leinwand (abgenommene Optik bleibt byte-identisch — sie IST die Basis),
+  `copyFramebufferToTexture` blittet den Frame in eine `FramebufferTexture`,
+  und NUR der Glow wird darauf gerechnet: TexturePass → UnrealBloom
+  (Threshold 0.78 im Display-Raum, Strength 0.4, Radius 0.25) → roher
+  CopyShader. Keine Farbraum-Konvertierung in der ganzen Kette ⇒ eine
+  Doppel-Anwendung ist strukturell unmöglich, nicht nur getuned.
+- **Abnahme in Zahlen** (Zone 7/Synth, 640×780-Canvas-Ausschnitt):
+  Dunkel-Region-Delta Bloom vs. aus **+3,24** — UNTER dem gemessenen
+  Rausch-Boden zweier identischer Läufe (**+3,51**; Animations-/Kampf-Drift).
+  Overall +3,1 (Rauschen +1,0), Rest ist lokalisierter Glow (Grid, Deck-Ring,
+  Spotlight, Sternschnuppe — Beweisbilder `v2-bloom-{off,on}.png`).
+- **Preset-Pflicht:** `bloom` ist ein Preset-Feld (nur `high`), Test pinnt es;
+  `applyQuality` synct `post.setSize` nach jedem PixelRatio-Wechsel, der
+  Resize-Pfad tat es schon.
+
 ## Review-Fix nach Schritt 7 — sechs Affix-Terme erreichen jetzt das Live-Spiel (1c/3a)
 
 - **Der Befund (aus dem Schritt-7-Abschlussbericht, im Review bestätigt):** Der

@@ -35,9 +35,45 @@ class MusicPlayer {
     this.intensity = Math.max(0, Math.min(3, Math.floor(level)));
   }
 
-  /** ROADMAP-V2 X5: Ekstase-Fenster auf/zu — schaltet die Theme-Zusatzstimme. */
+  /**
+   * ROADMAP-V2 X5 + „fetziger Soundtrack": Ekstase-Fenster auf/zu. Beim ÖFFNEN
+   * zündet einmal der Drop-Impact (Sub-Kick + Noise-Crash), danach schaltet der
+   * ganze Groove einen Gang hoch (siehe `tick`/`scheduleStep`): Tempo +22 %,
+   * Four-on-the-floor, durchlaufende Hats, doppelte Bass-Rate mit Quint-Wechsel
+   * — dazu weiter die Theme-Zusatzstimme. Schließen fällt hart zurück in den
+   * Grund-Groove (der Kontrast IST das Signal).
+   */
   setEkstase(on: boolean): void {
+    if (on && !this.ekstase) this.dropImpact(this.ctx.currentTime);
     this.ekstase = on;
+  }
+
+  /** Der eine große Schlag, wenn das Fenster aufgeht: Sub-Kick + Crash. */
+  private dropImpact(time: number): void {
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(130, time);
+    osc.frequency.exponentialRampToValueAtTime(32, time + 0.32);
+    g.gain.setValueAtTime(0.34, time);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + 0.42);
+    osc.connect(g);
+    g.connect(this.out);
+    osc.start(time);
+    osc.stop(time + 0.45);
+    const src = this.ctx.createBufferSource();
+    src.buffer = getNoiseBuffer(this.ctx);
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.setValueAtTime(1200, time);
+    const ng = this.ctx.createGain();
+    ng.gain.setValueAtTime(0.12, time);
+    ng.gain.exponentialRampToValueAtTime(0.0001, time + 0.6);
+    src.connect(hp);
+    hp.connect(ng);
+    ng.connect(this.out);
+    src.start(time);
+    src.stop(time + 0.65);
   }
 
   start(): void {
@@ -58,7 +94,9 @@ class MusicPlayer {
 
   private tick = (): void => {
     if (!this.playing) return;
-    const secPerStep = 60 / this.track.bpm / 2; // eighth-note grid
+    // Ekstase schaltet den Gang hoch: +22 % Tempo — genug für „fetzig",
+    // wenig genug, dass der On-Beat-Tap dem Takt noch folgen kann.
+    const secPerStep = (60 / this.track.bpm / 2) * (this.ekstase ? 0.82 : 1);
     while (this.nextNoteTime < this.ctx.currentTime + 0.2) {
       this.scheduleStep(this.step, this.nextNoteTime);
       this.nextNoteTime += secPerStep;
@@ -69,11 +107,21 @@ class MusicPlayer {
 
   private scheduleStep(step: number, time: number): void {
     const { rootHz, scale, wave } = this.track;
-    if (step % 4 === 0) this.voice(rootHz / 2, time, 0.32, wave, 0.14); // bass
     const deg = scale[step % scale.length]!;
     const oct = step % 8 >= 4 ? 2 : 1; // lift the arp an octave in the 2nd half
+    if (this.ekstase) {
+      // Der Drop-Groove: Four-on-the-floor, Hats auf JEDEM Achtel, Bass in
+      // doppelter Rate mit Wechsel auf die Quinte — der Grund-Groove darunter
+      // bleibt erkennbar (gleiche Skala, gleiches Arp), er rennt nur.
+      if (step % 2 === 0) this.kick(time);
+      this.hat(time);
+      const bSemi = step % 4 < 2 ? 0 : 7;
+      this.voice((rootHz / 2) * Math.pow(2, bSemi / 12), time, 0.2, wave, 0.16);
+    } else {
+      if (step % 4 === 0) this.voice(rootHz / 2, time, 0.32, wave, 0.14); // bass
+      if (step % 2 === 1) this.hat(time);
+    }
     this.voice(rootHz * oct * Math.pow(2, deg / 12), time, 0.16, wave, 0.06); // arp
-    if (step % 2 === 1) this.hat(time);
 
     // Additive combo-intensity layers (spec §8.10) — muteable (all under `out`),
     // lazy (only while the loop plays), never autoplaying.

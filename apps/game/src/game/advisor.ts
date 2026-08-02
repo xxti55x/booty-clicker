@@ -28,7 +28,7 @@
  *    die Schätzung bleibt also eine Untergrenze — der Tipp verspricht nie zu viel.
  */
 import { ancientBossDmgMult } from './ancients';
-import type { ChState } from './ch-state';
+import { type ChState, loadoutBonus, skinPathOf } from './ch-state';
 import { COMBO_CAP, CRIT_CHANCE, CRIT_MULT, comboMult } from './click';
 import { BOSS_TIME_S, type CombatState, bossHp } from './combat';
 import { bossDmgMult } from './gear';
@@ -68,7 +68,7 @@ export const HINT_BUDGET_REACH = 3;
  * zählt der Mythos-Knoten „Boss-Brecher" als ungekauft (×1).
  */
 type BurstInput = Pick<ChState, 'ancients' | 'gear' | 'crewUp'> &
-  Partial<Pick<ChState, 'transcend' | 'crewRetrain'>>;
+  Partial<Pick<ChState, 'transcend' | 'crewRetrain' | 'skinPath' | 'relics' | 'forge'>>;
 /**
  * Die Felder, aus denen der Kauf-Tipp folgt. `crewMastery` ist optional, damit
  * ältere Aufrufer/Fixtures ohne die 1a-Tafel weiter dieselbe Rangfolge sehen
@@ -90,6 +90,10 @@ function bossDamageMult(state: BurstInput): number {
     // 3b: mit der Umschul-Map — wer einen Slot auf `boss` gerollt hat, sieht das
     // sofort in der Wand-Telemetrie, sonst würde sie ihn systematisch unterschätzen.
     crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).bossMult *
+    // V2-4: Skin-Pfad (2b, via `allPct`) und Loadout-Affixe (1c/3a,
+    // „Gate-Brecher"/„Glut-Fokus") im SELBEN 1+x-Griff wie im Kampf-Stack von
+    // `main.ts` — fehlt eine Slice (alte Fixtures), faltet sie ×1.
+    (1 + skinPathOf(state).bossDmg + loadoutBonus(state).bossDmg) *
     (state.transcend ? bossBreakerDmgMult(state.transcend) : 1)
   );
 }

@@ -9,6 +9,11 @@
     <title>Booty Clicker · Endless Twerk</title>
     <meta name="description" content="Booty Clicker — endloser Twerk-Idle-Clicker in Three.js." />
     <meta name="theme-color" content="#07070b" />
+    <!-- V2-3: installierbare PWA — Manifest + Icons; sw.js cached nur Auslieferung. -->
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🍑%3C/text%3E%3C/svg%3E"
@@ -75,30 +80,6 @@
           <div class="stats" id="stats">DPS 0 · Klick 1</div>
           <div class="combo" id="combo"></div>
           <div class="ngplus hidden" id="souls"></div>
-        </div>
-      </div>
-
-      <div class="rival" id="rival">
-        <div class="rival-card">
-          <div class="rival-name" id="rivalName">Groupie</div>
-          <div class="rival-hpbar"><div class="rival-hpfill" id="rivalHpFill"></div></div>
-          <div class="rival-row">
-            <span class="rival-hp" id="rivalHpText">10 / 10</span>
-            <span class="rival-prog" id="zoneProgress">0 / 10</span>
-            <span class="rival-timer hidden" id="rivalTimer">30</span>
-          </div>
-          <!-- ROADMAP-V2 A1: Hausregel der Bühne — Icon + Name + ein Satz.
-               Nur auf Nicht-Boss-Bühnen ab Bühne 11. -->
-          <div class="stage-mod hidden" id="stageMod"></div>
-          <!-- ROADMAP-V2 A2: Theme-Gimmick des Bosses — steht klein an der
-               HP-Bar, solange der Boss tanzt (das Banner sagt es einmal groß an). -->
-          <div class="boss-gimmick hidden" id="bossGimmick"></div>
-          <button type="button" class="boss-challenge hidden" id="bossChallenge">
-            👑 Boss herausfordern
-          </button>
-          <!-- ROADMAP-V2 P3: Wand-Telemetrie — erscheint nur an der Frontier-
-               Boss-Bühne und nur bei erkennbarer Lücke (> 20 %). -->
-          <div class="boss-hint hidden" id="bossHint"></div>
         </div>
       </div>
 
@@ -178,6 +159,30 @@
         </span>
         <span class="ability-label" id="ekstaseLabel">🍑 Ekstase</span>
       </button>
+    </div>
+
+    <div class="rival" id="rival">
+      <div class="rival-card">
+        <div class="rival-name" id="rivalName">Groupie</div>
+        <div class="rival-hpbar"><div class="rival-hpfill" id="rivalHpFill"></div></div>
+        <div class="rival-row">
+          <span class="rival-hp" id="rivalHpText">10 / 10</span>
+          <span class="rival-prog" id="zoneProgress">0 / 10</span>
+          <span class="rival-timer hidden" id="rivalTimer">30</span>
+        </div>
+        <!-- ROADMAP-V2 A1: Hausregel der Bühne — Icon + Name + ein Satz.
+               Nur auf Nicht-Boss-Bühnen ab Bühne 11. -->
+        <div class="stage-mod hidden" id="stageMod"></div>
+        <!-- ROADMAP-V2 A2: Theme-Gimmick des Bosses — steht klein an der
+               HP-Bar, solange der Boss tanzt (das Banner sagt es einmal groß an). -->
+        <div class="boss-gimmick hidden" id="bossGimmick"></div>
+        <button type="button" class="boss-challenge hidden" id="bossChallenge">
+          👑 Boss herausfordern
+        </button>
+        <!-- ROADMAP-V2 P3: Wand-Telemetrie — erscheint nur an der Frontier-
+               Boss-Bühne und nur bei erkennbarer Lücke (> 20 %). -->
+        <div class="boss-hint hidden" id="bossHint"></div>
+      </div>
     </div>
 
     <div class="hintbar">Klick / Leertaste = Twerken &amp; Schaden · Crew macht Idle-DPS</div>

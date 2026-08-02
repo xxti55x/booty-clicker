@@ -7,6 +7,7 @@ import type { GlowSpriteFn, SceneLights } from '../engine/scene';
 import {
   bandsTex,
   craterTex,
+  dotsTex,
   gridTex,
   plankTex,
   platesTex,
@@ -32,6 +33,15 @@ import type { BackgroundKey, WorldAnim } from '../types';
  * left). Hero props live there — kept to the back/sides so they never occlude
  * the player (origin) or the rival (ENTITY_STAGE ≈ (3.5, -2.4, 4.4), screen
  * left) — with a sparser echo at −z so orbiting the camera still finds scenery.
+ *
+ * KALIBRIERUNG (Politur-Pass, per Unprojection GEMESSEN — der Boot-Kamera-Wert
+ * oben ist historisch): `frameCamera` stellt die Kamera real auf ≈
+ * (−9.6, 19.2, −33.9) und kippt steil abwärts. Das sichtbare Fernfeld-Band
+ * HINTER der Insel folgt deshalb ungefähr **y(z) ≈ 19 − 0.45·(z + 34)**
+ * (z 20 ⇒ y −5, z 30 ⇒ y −10, z 44 ⇒ y −16), und der sichtbare x-Keil öffnet
+ * sich nach Welt-+x (Screen-links): x ∈ [≈1 … 0.5·(z+34)−10]. Ferne Kulissen
+ * liegen also TIEF UNTER der Schwebe-Insel — man blickt auf eine Welt darunter
+ * hinab, nicht auf einen Augenhöhen-Horizont hinaus.
  */
 
 /** Hue-shift per recolour lap — matches the rival's `entityVariant` cadence. */
@@ -53,6 +63,12 @@ interface BuildCtx {
   hue: (hex: number) => THREE.Color;
   /** G3-Ambient-Dichte aus dem Quality-Preset (1 = voll, 0.5 = low, 0 = aus). */
   density: number;
+  /**
+   * Geteilter Ekstase-Flag (Lounge-Eskalation): `World.setHype` schreibt EIN
+   * Boolean, die Publikums-Anim liest es im selben Frame — kein Rebuild, kein
+   * Traversieren. Bewusst ein Objekt (Referenz), kein Wert.
+   */
+  hype: { on: boolean };
 }
 
 interface BgConfig {
@@ -590,60 +606,143 @@ function gulls(ctx: BuildCtx, base: number): void {
 }
 
 /**
- * Publikum-Silhouetten am hinteren Inselrand (G3). Ein `InstancedMesh` mit
- * einer Halbkörper-Silhouette (Kopf + Schultern als EINE `ShapeGeometry`), ein
- * unbeleuchtetes dunkles Material — 1 Draw-Call für die ganze Menge. Sie hängen
- * an der `islandGroup`, fahren beim G1-Wechsel also exakt mit der Bühne raus
- * und rein, und wippen mit `beatV` (Y-Bob + Stauchung).
+ * **Die Lounge** (User-Auftrag „Publikum soll in Lounge sitzen und mehr als
+ * nur Schatten sein"): drei geschwungene Sofa-Buchten mit Tischchen am
+ * hinteren Inselrand, darauf SITZENDE Cartoon-Gäste — echte kleine Körper
+ * (Schoß + Torso + Kopf, gemergt) mit `instanceColor`-Outfits statt flacher
+ * Schatten-Silhouetten. Budget: Sofas + Tische = zwei Bakes, Gäste = EIN
+ * InstancedMesh, Hype-Arme = ein zweites — vier Draw-Calls für die ganze
+ * Lounge.
+ *
+ * **Ekstase-Eskalation** („Publikum geht mehr ab"): solange `ctx.hype.on`
+ * steht, springen die Gäste vom Polster (dreifache Bob-Amplitude, schnellere
+ * Phase, Hüft-Sway) und die V-Arme poppen hoch (Scale 0 → 1) und winken. Im
+ * Grundzustand sitzen sie und wippen sanft mit `beatV`.
  */
-function audienceGeo(): THREE.ShapeGeometry {
-  const head = new THREE.Shape();
-  head.absarc(0, 0.6, 0.19, 0, Math.PI * 2, false);
-  const torso = new THREE.Shape();
-  torso.moveTo(-0.34, -0.55);
-  torso.lineTo(-0.3, 0.16);
-  torso.quadraticCurveTo(-0.26, 0.42, 0, 0.44);
-  torso.quadraticCurveTo(0.26, 0.42, 0.3, 0.16);
-  torso.lineTo(0.34, -0.55);
-  torso.closePath();
-  return new THREE.ShapeGeometry([head, torso], 8);
+const GUEST_COLORS = [0xff6b9a, 0x5ad1ff, 0xffd166, 0x7be878, 0xb98cff, 0xff9d5c, 0x6ef2d4];
+
+/** Sitzender Gast (Ursprung = Sitzfläche): Schoß + Torso + Kopf, EIN Merge. */
+function seatedGuestGeo(): THREE.BufferGeometry {
+  const lap = new THREE.BoxGeometry(0.42, 0.16, 0.38);
+  lap.translate(0, 0.1, 0.12);
+  const torso = new THREE.SphereGeometry(0.27, 10, 8);
+  torso.scale(1, 1.15, 0.78);
+  torso.translate(0, 0.44, 0);
+  const head = new THREE.SphereGeometry(0.16, 10, 8);
+  head.translate(0, 0.82, 0.02);
+  const parts = [lap, torso, head];
+  const geo = mergeGeometries(parts, false)!;
+  parts.forEach((g) => g.dispose());
+  return geo;
+}
+
+/** Die Hype-Arme: V nach oben plus Fäuste — poppen nur im Ekstase-Fenster auf. */
+function hypeArmsGeo(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  for (const sgn of [-1, 1]) {
+    const arm = new THREE.CapsuleGeometry(0.05, 0.34, 3, 6);
+    arm.rotateZ(sgn * 0.55);
+    arm.translate(sgn * 0.3, 0.82, 0);
+    const fist = new THREE.SphereGeometry(0.07, 6, 5);
+    fist.translate(sgn * 0.45, 1.04, 0);
+    parts.push(arm, fist);
+  }
+  const geo = mergeGeometries(parts, false)!;
+  parts.forEach((g) => g.dispose());
+  return geo;
 }
 
 function audience(ctx: BuildCtx): void {
-  const count = amount(ctx, 8);
+  const count = amount(ctx, 10);
   if (count === 0) return;
-  const mesh = new THREE.InstancedMesh(
-    audienceGeo(),
-    new THREE.MeshBasicMaterial({ color: 0x140f22, side: THREE.DoubleSide }),
-    count,
-  );
-  mesh.frustumCulled = false;
-  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  ctx.islandGroup.add(mesh);
-  const R = ISLAND_R - 0.6;
+  const rnd = lcg(777);
+  const R = ISLAND_R - 0.95;
+  // --- Sofa-Buchten + Tischchen (zwei Bakes: Polster-Ton + Korpus-Ton) ---
+  const seatParts: THREE.Mesh[] = [];
+  const frameParts: THREE.Mesh[] = [];
+  const boothAngles = [0.62, Math.PI / 2, Math.PI - 0.62];
+  for (const a of boothAngles) {
+    const x = ISLAND_C.x + Math.cos(a) * R;
+    const z = ISLAND_C.z + Math.sin(a) * R;
+    const rotY = Math.atan2(ISLAND_C.x - x, ISLAND_C.z - z);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.26, 0.8));
+    seat.position.set(x, TOP_Y + 0.24, z);
+    seat.rotation.y = rotY;
+    seatParts.push(seat);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.62, 0.16));
+    back.position.set(x - Math.sin(rotY) * 0.36, TOP_Y + 0.56, z - Math.cos(rotY) * 0.36);
+    back.rotation.y = rotY;
+    frameParts.push(back);
+    const sockel = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.14, 0.9));
+    sockel.position.set(x, TOP_Y + 0.07, z);
+    sockel.rotation.y = rotY;
+    frameParts.push(sockel);
+  }
+  for (const a of [1.05, Math.PI - 1.05]) {
+    const x = ISLAND_C.x + Math.cos(a) * (R - 0.9);
+    const z = ISLAND_C.z + Math.sin(a) * (R - 0.9);
+    const table = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.28, 0.5, 10));
+    table.position.set(x, TOP_Y + 0.25, z);
+    frameParts.push(table);
+  }
+  const seats = O(bake(seatParts, toonMat({ color: 0x5a3472 })), 0.025);
+  const frames = O(bake(frameParts, toonMat({ color: 0x2c1b38 })), 0.025);
+  ctx.islandGroup.add(seats, frames);
+  // Drinks: zwei kleine Glüh-Punkte auf den Tischen — die Lounge lebt.
+  for (const a of [1.05, Math.PI - 1.05]) {
+    const x = ISLAND_C.x + Math.cos(a) * (R - 0.9);
+    const z = ISLAND_C.z + Math.sin(a) * (R - 0.9);
+    ctx.islandGroup.add(ctx.glowSprite(0x9fffe0, 0.5, x, TOP_Y + 0.62, z));
+  }
+
+  // --- Die Gäste: ein InstancedMesh, Outfit-Farben per instanceColor ---
+  const guestMat = toonMat({ color: 0xf2e6da });
+  const body = new THREE.InstancedMesh(seatedGuestGeo(), guestMat, count);
+  const arms = new THREE.InstancedMesh(hypeArmsGeo(), guestMat, count);
+  for (const m of [body, arms]) {
+    m.frustumCulled = false;
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    ctx.islandGroup.add(m);
+  }
+  const tint = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    tint.setHex(GUEST_COLORS[i % GUEST_COLORS.length]!).offsetHSL((rnd() - 0.5) * 0.06, 0, 0);
+    body.setColorAt(i, tint);
+    arms.setColorAt(i, tint);
+  }
+
+  // Sitzplätze: je Bucht 3–4 Gäste nebeneinander, auf der Sitzfläche.
+  const spots: { x: number; z: number; rot: number; ph: number; s: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    const booth = boothAngles[i % boothAngles.length]!;
+    const slot = Math.floor(i / boothAngles.length) - 1;
+    const a = booth + slot * 0.17 + (rnd() - 0.5) * 0.04;
+    const x = ISLAND_C.x + Math.cos(a) * R;
+    const z = ISLAND_C.z + Math.sin(a) * R;
+    spots.push({
+      x,
+      z,
+      rot: Math.atan2(ISLAND_C.x - x, ISLAND_C.z - z),
+      ph: rnd() * Math.PI * 2,
+      s: 0.9 + rnd() * 0.25,
+    });
+  }
+  const baseY = TOP_Y + 0.37;
   ctx.anims.push((t, beatV) => {
+    const hype = ctx.hype.on;
     for (let i = 0; i < count; i++) {
-      // Der sichtbare Bogen liegt im +z-Halbraum — von der Diorama-Kamera aus
-      // also HINTER dem Duo, nie davor.
-      const a = 0.3 + (i / Math.max(1, count - 1)) * (Math.PI - 0.6);
-      const r = R - ((i * 3) % 4) * 0.22;
-      const x = ISLAND_C.x + Math.cos(a) * r;
-      const z = ISLAND_C.z + Math.sin(a) * r;
-      const ph = i * 0.9;
-      const bob = beatV * 0.16 + Math.sin(t * 1.6 + ph) * 0.05;
-      const s = 1.25 + ((i * 5) % 3) * 0.13;
-      put(
-        mesh,
-        i,
-        x,
-        TOP_Y + s * 0.55 + bob,
-        z,
-        Math.atan2(ISLAND_C.x - x, ISLAND_C.z - z),
-        s,
-        s * (1 - beatV * 0.07),
-      );
+      const sp = spots[i]!;
+      // Sitzend: sanftes Wippen. Hype: vom Polster springen + Hüft-Sway.
+      const bob = hype
+        ? Math.abs(Math.sin(t * 6.4 + sp.ph)) * 0.36 + beatV * 0.12
+        : beatV * 0.06 + Math.sin(t * 1.5 + sp.ph) * 0.03;
+      const sway = hype ? Math.sin(t * 5.1 + sp.ph) * 0.16 : Math.sin(t * 1.1 + sp.ph) * 0.04;
+      put(body, i, sp.x, baseY + bob, sp.z, sp.rot + sway, sp.s, sp.s * (1 - beatV * 0.05));
+      const armS = hype ? sp.s * (0.95 + Math.sin(t * 7.3 + sp.ph) * 0.1) : 0.001;
+      put(arms, i, sp.x, baseY + bob, sp.z, sp.rot + sway, armS, armS);
     }
-    mesh.instanceMatrix.needsUpdate = true;
+    body.instanceMatrix.needsUpdate = true;
+    arms.instanceMatrix.needsUpdate = true;
   });
 }
 
@@ -729,6 +828,319 @@ function trophy(ctx: BuildCtx, tier: number): void {
     cup.scale.set(k, k, k);
     cup.position.y = y0 + beatV * 0.03;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Horizont-Schicht (Politur „vollständige Szenerie") — jede Bühne bekommt eine
+// FERNE Kulissen-Ebene, damit die Insel nicht als mageres Floß im leeren
+// Farbverlauf schwebt: Club eine Skyline mit Lichtfenstern und Stadt-Glühen,
+// Synth den Grid-Boden bis zum Fluchtpunkt samt Retro-Sonne und Bergkamm,
+// Beach gestaffelte Inselchen, Segel und Wolken über dem Meer, Space einen
+// treibenden Asteroiden-Bogen mit Nebelbänken. Alles im +z-Sichtkeil der
+// festen Kamera, alles display-referred im Ton der Welt, und alles bewusst
+// billig: gebakte/instanzierte Silhouetten, ~4–7 Draw-Calls je Theme.
+// ---------------------------------------------------------------------------
+
+/**
+ * Horizont-Materialien sind HIMMEL, kein Szenen-Volumen: der Distanz-Nebel
+ * (FogExp2) verschluckte sie sonst vollständig (Beach-Inselchen und Club-Türme
+ * waren im ersten Screenshot schlicht unsichtbar — die Skybox-Regel gilt auch
+ * für gebaute Kulissen).
+ */
+function noFog<T extends THREE.Material & { fog: boolean }>(m: T): T {
+  m.fog = false;
+  return m;
+}
+
+/** Deterministischer Mini-LCG — die Kulisse würfelt nie den Spiel-RNG an. */
+function lcg(seed: number): () => number {
+  let s = seed;
+  return () => {
+    s = (s * 16807) % 2147483647;
+    return s / 2147483647;
+  };
+}
+
+function horizonLayer(ctx: BuildCtx, theme: BackgroundKey): void {
+  const { propGroup, glowSprite, anims, hue } = ctx;
+  if (theme === 'club') {
+    // Zwei Tiefenreihen dunkler Türme; die Fenster glühen als Emissive-Punkte.
+    // Hintere Reihe dunkler + schwächer — der Nebel staffelt den Rest.
+    const rnd = lcg(4711);
+    const rows = [
+      { z: 30, n: 6, tone: 0x2a2040, winI: 0.7, xMin: 4, xMax: 20, base: -22 },
+      { z: 40, n: 5, tone: 0x1d1730, winI: 0.45, xMin: 8, xMax: 26, base: -26 },
+    ];
+    for (const r of rows) {
+      const geo = new THREE.BoxGeometry(3.2, 10, 2.6);
+      geo.translate(0, 5, 0); // Fuß auf der Basislinie
+      // UNBELEUCHTET: die Club-Spotlights (Intensität 90) machten aus jedem
+      // beleuchteten Turm eine Lichtwand — Silhouetten gehören nicht ins
+      // Bühnenlicht. Die „Fenster" sind der Punkt-Texel im Map-Kanal.
+      const mat = noFog(
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color(r.tone).multiplyScalar(2.2),
+          map: repeated(dotsTex(3, 26), 1.4, 2.8),
+        }),
+      );
+      const im = new THREE.InstancedMesh(geo, mat, r.n);
+      for (let i = 0; i < r.n; i++) {
+        const x = r.xMin + (i / (r.n - 1)) * (r.xMax - r.xMin) + (rnd() - 0.5) * 3;
+        put(im, i, x, r.base, r.z + (rnd() - 0.5) * 3, 0, 0.7 + rnd() * 0.9, 1 + rnd() * 0.5);
+      }
+      im.instanceMatrix.needsUpdate = true;
+      propGroup.add(im);
+    }
+    // Stadt-Glühen: der warme Lichtdom, den eine Nachtstadt an den Himmel wirft.
+    propGroup.add(glowSprite(hue(0xff7a4a), 3.5, 14, -12, 34));
+  } else if (theme === 'synth') {
+    // Grid-Boden bis zum Fluchtpunkt — das Genre-Versprechen der Synth-Welt.
+    const grid = new THREE.Mesh(
+      new THREE.PlaneGeometry(150, 80),
+      noFog(
+        new THREE.MeshBasicMaterial({ color: hue(0xff3fa4), map: repeated(gridTex(10), 12, 6) }),
+      ),
+    );
+    grid.rotation.x = -Math.PI / 2;
+    grid.position.set(0, -7.4, 52);
+    propGroup.add(grid);
+    // Retro-Sonne: Scheibe mit den klassischen dunklen Querbalken im Unterteil.
+    const sunG = new THREE.Group();
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(7.5, 48),
+      noFog(new THREE.MeshBasicMaterial({ color: hue(0xffb84d) })),
+    );
+    sunG.add(disc);
+    const barMat = noFog(new THREE.MeshBasicMaterial({ color: 0x171226 }));
+    for (let i = 0; i < 3; i++) {
+      const bar = new THREE.Mesh(new THREE.PlaneGeometry(16, 0.55 + i * 0.3), barMat);
+      bar.position.set(0, -2.2 - i * 1.5, 0.05);
+      sunG.add(bar);
+    }
+    sunG.position.set(20, -19, 55);
+    sunG.rotation.y = Math.PI;
+    propGroup.add(sunG);
+    propGroup.add(glowSprite(hue(0xff5fa4), 12, 20, -18, 54));
+    // Bergkamm-Silhouette vor der Sonne — Tiefe zwischen Grid und Himmel.
+    const rnd = lcg(1337);
+    const ridge = new THREE.InstancedMesh(
+      new THREE.ConeGeometry(4.2, 6.5, 4),
+      noFog(toonMat({ color: 0x1b1430 })),
+      8,
+    );
+    for (let i = 0; i < 8; i++) {
+      const x = 4 + (i / 7) * 24 + (rnd() - 0.5) * 4;
+      put(ridge, i, x, -20, 42 + (rnd() - 0.5) * 6, rnd() * 0.8, 0.8 + rnd(), 0.7 + rnd() * 0.9);
+    }
+    ridge.instanceMatrix.needsUpdate = true;
+    propGroup.add(ridge);
+  } else if (theme === 'beach') {
+    // Gestaffelte Inselchen: die eine Mini-Insel wirkte wie vergessen — drei
+    // Größen in drei Tiefen erzählen einen Archipel.
+    const rnd = lcg(2024);
+    for (const [x, y, z, s] of [
+      [6, -7.5, 24, 1],
+      [16, -11, 32, 1.6],
+      [24, -15, 42, 2.2],
+    ] as const) {
+      const isle = new THREE.Group();
+      const rock = new THREE.Mesh(
+        new THREE.ConeGeometry(2.6 * s, 1.9 * s, 7),
+        noFog(toonMat({ color: 0x8a6a46 })),
+      );
+      rock.rotation.x = Math.PI; // Kegel als hängender Inselboden
+      rock.position.y = -0.6 * s;
+      const top = new THREE.Mesh(
+        new THREE.CylinderGeometry(2.5 * s, 2.7 * s, 0.5 * s, 9),
+        noFog(toonMat({ color: 0xd8b878 })),
+      );
+      const bush = new THREE.Mesh(
+        new THREE.SphereGeometry(1.05 * s, 10, 8),
+        noFog(toonMat({ color: 0x2fae4e })),
+      );
+      bush.scale.set(1.4, 0.75, 1.2);
+      bush.position.y = 0.75 * s;
+      isle.add(rock, top, bush);
+      isle.position.set(x, y, z);
+      propGroup.add(isle);
+    }
+    // Wolkenbänke: flache weiße Blob-Bakes, träge nach Screen-links ziehend.
+    const cloudMat = noFog(
+      new THREE.MeshBasicMaterial({ color: 0xfff2df, transparent: true, opacity: 0.88 }),
+    );
+    for (const [x, y, z, s, sp] of [
+      [-4, 8.5, -6, 1.1, 0.1],
+      [9, 10.5, -2, 1.5, 0.07],
+      [14, -10.5, 30, 1, 0.12],
+    ] as const) {
+      const parts: THREE.BufferGeometry[] = [];
+      for (let i = 0; i < 4; i++) {
+        const g = new THREE.SphereGeometry(1 + rnd() * 0.7, 8, 6);
+        g.scale(1.5, 0.55, 1);
+        g.translate(i * 1.3 - 2, (rnd() - 0.5) * 0.3, 0);
+        parts.push(g);
+      }
+      const cloud = new THREE.Mesh(mergeGeometries(parts, false)!, cloudMat);
+      for (const g of parts) g.dispose();
+      cloud.position.set(x, y, z);
+      cloud.scale.setScalar(s);
+      propGroup.add(cloud);
+      const x0 = x;
+      anims.push((t) => {
+        cloud.position.x = x0 + ((t * sp) % 8) - 4;
+      });
+    }
+  } else {
+    // Space: ein träge rotierender Asteroiden-Bogen + ferne Nebelbänke.
+    const rnd = lcg(9001);
+    const belt = new THREE.Group();
+    const rockMat = noFog(toonMat({ color: 0x6a6a80, map: repeated(craterTex(2), 1.5, 1.5) }));
+    const n = Math.max(8, amount(ctx, 14));
+    const rocks = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.75, 0), rockMat, n);
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1);
+      // Bogen durchs sichtbare linke Fenster (x 8..30), leicht ansteigend.
+      put(
+        rocks,
+        i,
+        3 + t * 19 + (rnd() - 0.5) * 3,
+        -5.5 - t * 8.5 + Math.sin(i * 2.7) * 1.5,
+        20 + t * 20 + (rnd() - 0.5) * 4,
+        rnd() * Math.PI,
+        0.5 + rnd() * 1.3,
+        0.5 + rnd() * 1.3,
+      );
+    }
+    rocks.instanceMatrix.needsUpdate = true;
+    belt.add(rocks);
+    propGroup.add(belt);
+    anims.push((t) => {
+      belt.rotation.y = t * 0.008; // kaum sichtbar — aber die Welt LEBT
+    });
+    propGroup.add(glowSprite(hue(0xb45cf6), 12, 18, -13, 38));
+    propGroup.add(glowSprite(hue(0x3adfc0), 8, 0, -5.5, 20));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bühnen-Kinetik („Stages sehr viel cooler"): EIN bewegtes Hero-Element je
+// Theme, nah an der Bühne (islandGroup — fährt beim G1-Wechsel mit):
+// Club = rotierender Laserfächer über der Tanzfläche, Synth = Equalizer-Wand
+// hinter dem Deck (Balken tanzen mit dem Beat), Beach = schwingende
+// Lichterkette am Deck-Rand, Space = zwei atmende Holo-Ringe um die Insel.
+// Alles additiv/unbeleuchtet, je 1–2 Draw-Calls, Animation ohne Allokation.
+// ---------------------------------------------------------------------------
+
+function stageKinetics(ctx: BuildCtx, theme: BackgroundKey): void {
+  const { islandGroup, anims, hue } = ctx;
+  if (ctx.density <= 0) return;
+  if (theme === 'club') {
+    // Laserfächer: vier lange dünne Klingen, additiv, rotieren über dem Floor
+    // und nicken mit dem Beat — DAS Club-Signal schlechthin.
+    const fan = new THREE.Group();
+    const cols = [0xff3fa4, 0x3adfc0, 0x8b5cf6, 0xffd166];
+    for (let i = 0; i < 4; i++) {
+      const blade = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.16, 13),
+        noFog(
+          new THREE.MeshBasicMaterial({
+            color: hue(cols[i]!),
+            transparent: true,
+            opacity: 0.32,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+          }),
+        ),
+      );
+      blade.geometry.translate(0, -6.5, 0); // Drehpunkt am oberen Ende
+      blade.rotation.z = 0.6;
+      const holder = new THREE.Group();
+      holder.rotation.y = (i / 4) * Math.PI * 2;
+      holder.add(blade);
+      fan.add(holder);
+    }
+    fan.position.set(ISLAND_C.x, TOP_Y + 6.2, ISLAND_C.z);
+    islandGroup.add(fan);
+    anims.push((t, beatV) => {
+      fan.rotation.y = t * 0.9;
+      const nick = 0.55 + beatV * 0.25;
+      fan.children.forEach((h, i) => {
+        (h.children[0] as THREE.Mesh).rotation.z = nick + Math.sin(t * 1.7 + i) * 0.12;
+      });
+    });
+  } else if (theme === 'synth') {
+    // Equalizer-Wand: 11 Neon-Balken hinter dem Deck, Höhen tanzen mit Beat.
+    const n = 11;
+    const barGeo = new THREE.BoxGeometry(0.5, 1, 0.22);
+    barGeo.translate(0, 0.5, 0); // Fuß auf Basislinie ⇒ Höhe skaliert nach oben
+    const bars = new THREE.InstancedMesh(
+      barGeo,
+      noFog(new THREE.MeshBasicMaterial({ color: hue(0xff3fa4) })),
+      n,
+    );
+    bars.frustumCulled = false;
+    bars.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    islandGroup.add(bars);
+    anims.push((t, beatV) => {
+      for (let i = 0; i < n; i++) {
+        const x = ISLAND_C.x - 3.6 + i * 0.72;
+        const h = 0.5 + Math.abs(Math.sin(t * 2.6 + i * 0.9)) * (1.1 + beatV * 1.6);
+        put(bars, i, x, TOP_Y + 0.05, ISLAND_C.z + ISLAND_R + 1.1, 0, 1, h);
+      }
+      bars.instanceMatrix.needsUpdate = true;
+    });
+  } else if (theme === 'beach') {
+    // Lichterkette: Glüh-Punkte auf zwei durchhängenden Bögen überm Deck-Rand,
+    // die ganze Kette schwingt sanft — Strandbar-Stimmung.
+    const chain = new THREE.Group();
+    const nL = 14;
+    for (let i = 0; i < nL; i++) {
+      const f = i / (nL - 1);
+      const a = 0.45 + f * (Math.PI - 0.9);
+      const sag = Math.sin(f * Math.PI * 2) * 0.001 + Math.sin(f * Math.PI) * -0.55;
+      const x = ISLAND_C.x + Math.cos(a) * (ISLAND_R + 0.15);
+      const z = ISLAND_C.z + Math.sin(a) * (ISLAND_R + 0.15);
+      const col = i % 3 === 0 ? 0xffd166 : i % 3 === 1 ? 0xff8a5c : 0xfff2b0;
+      chain.add(ctx.glowSprite(col, 0.55, x, TOP_Y + 2.1 + sag, z));
+    }
+    islandGroup.add(chain);
+    anims.push((t) => {
+      chain.rotation.z = Math.sin(t * 0.8) * 0.02;
+      chain.position.y = Math.sin(t * 1.1) * 0.05;
+    });
+  } else {
+    // Holo-Ringe: zwei dünne Tori um die Insel, gegenläufig rotierend und in
+    // der Deckkraft atmend — die Raumstation scannt ihre Tanzfläche.
+    const mk = (r: number, col: number): THREE.Mesh =>
+      new THREE.Mesh(
+        new THREE.TorusGeometry(r, 0.045, 6, 64),
+        noFog(
+          new THREE.MeshBasicMaterial({
+            color: col,
+            transparent: true,
+            opacity: 0.4,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+          }),
+        ),
+      );
+    const ringA = mk(ISLAND_R + 0.7, 0x3adfc0);
+    const ringB = mk(ISLAND_R + 1.3, 0xb45cf6);
+    for (const r of [ringA, ringB]) {
+      r.rotation.x = Math.PI / 2;
+      r.position.set(ISLAND_C.x, TOP_Y + 0.5, ISLAND_C.z);
+      islandGroup.add(r);
+    }
+    anims.push((t, beatV) => {
+      ringA.rotation.z = t * 0.5;
+      ringB.rotation.z = -t * 0.35;
+      ringA.position.y = TOP_Y + 0.5 + Math.sin(t * 1.3) * 0.18;
+      ringB.position.y = TOP_Y + 1.1 + Math.sin(t * 1.3 + 2) * 0.22;
+      (ringA.material as THREE.MeshBasicMaterial).opacity = 0.28 + beatV * 0.3;
+      (ringB.material as THREE.MeshBasicMaterial).opacity = 0.22 + beatV * 0.26;
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1437,6 +1849,8 @@ export class World {
   private ekstaseOn = false;
   /** G3: Dichte-Faktor der Ambient-Elemente (aus dem Quality-Preset). */
   private ambientLife = 1;
+  /** Ekstase-Fenster offen? (Lounge-Publikum eskaliert.) */
+  private readonly hypeFlag = { on: false };
   /**
    * 1b: Trophäen-Stufe der AKTUELLEN Bühne (0 = keine, 1–3 = Bronze/Silber/Gold).
    * Sie gehört dem THEME, nicht der Welt — die Glue setzt sie bei jedem
@@ -1612,14 +2026,24 @@ export class World {
       variant,
       hue,
       density: this.ambientLife,
+      hype: this.hypeFlag,
     };
     b.build(ctx);
+    // Politur „vollständige Szenerie": die ferne Horizont-Schicht des Themes —
+    // hier statt in den vier `build`-Funktionen, damit sie EIN Vertrag bleibt.
+    horizonLayer(ctx, key);
+    stageKinetics(ctx, key);
     // G3: Publikum-Silhouetten am hinteren Inselrand — für JEDE Bühne gleich
     // (das Publikum ist der Bühne eigen, nicht dem Theme), deshalb hier und
     // nicht in den vier `build`-Funktionen.
     audience(ctx);
     // 1b: …und daneben, im selben Ambient-Slot, die verdiente Insel-Trophäe.
     if (this.trophyTier > 0) trophy(ctx, this.trophyTier);
+  }
+
+  /** „Publikum geht ab": Ekstase-Fenster für die Lounge-Anim melden. */
+  setHype(on: boolean): void {
+    this.hypeFlag.on = on;
   }
 
   /** Bühnen-Versatz setzen (G1) — `y` in Welt-Einheiten, `tilt` in Radiant. */

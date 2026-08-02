@@ -85,7 +85,7 @@ import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 18;
+export const CH_SCHEMA = 19;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -115,7 +115,7 @@ export interface ChSaveV1 {
   totalClicks: number;
 }
 
-/** The current persisted shape (v18, Skin-Pfade · Erbe · Legenden-Level): ChState + envelope. */
+/** The current persisted shape (v19, Skin-Pfade · Erbe · Legenden-Level): ChState + envelope. */
 interface ChSaveLatest extends ChState {
   v: typeof CH_SCHEMA;
   lastSeen: number;
@@ -201,6 +201,8 @@ function repairStats(v: unknown): ChStats {
     bossStreak: num(src.bossStreak),
     maxBossStreak: num(src.maxBossStreak),
     keysEarned: num(src.keysEarned),
+    // v19: Easter-Egg-Latch — krumm ⇒ abgerundet (ein halber Tanz zählt nicht).
+    konami: Math.floor(num(src.konami)),
   };
 }
 
@@ -1286,6 +1288,17 @@ function migrateChV17toV18(raw: Record<string, unknown>): Record<string, unknown
   return { ...raw, v: 18, skinPath: createSkinPath(), heir: '', legend: 0 };
 }
 
+/**
+ * v18 → v19: das **Easter Egg** (Cheat-Code der Ahnen) — ein einziger neuer
+ * Lebenszeit-Zähler in `stats` (`konami`, der Einmal-Latch des Jackpots).
+ * Niemand kann ihn vor v19 ausgelöst haben ⇒ es gibt nichts zu säen; die
+ * Null kommt aus `repairStats` (fehlend ⇒ 0), die Migration hebt nur die
+ * Versionsnummer. Für jedes bestehende Feld verlustfrei.
+ */
+function migrateChV18toV19(raw: Record<string, unknown>): Record<string, unknown> {
+  return { ...raw, v: 19 };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
@@ -1304,6 +1317,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
   15: migrateChV15toV16,
   16: migrateChV16toV17,
   17: migrateChV17toV18,
+  18: migrateChV18toV19,
 };
 
 /**

@@ -1,9 +1,12 @@
 # ROADMAP V2 — Anreifen: Progression · Grafik · Abwechslung · Unfinished Business
 
 > **Status: ✅ komplett umgesetzt** (alle 18 Pakete; Umsetzung Opus-Agenten,
-> Review Fable, Verlauf in DECISIONS.md). Bekannte Rest-Punkte: der tote
-> Bloom-Pfad bleibt aus (Known Issue, eigenes Paket) und das Mobil-Preset
-> wählt sich nicht selbst (Restschuld aus X6).
+> Review Fable, Verlauf in DECISIONS.md). Die beiden einst offenen
+> Rest-Punkte sind seit dem V2-Aszensions-Pass (Version 2.0.0) geschlossen:
+> Bloom läuft als validiertes Display-Space-Overlay im high-Preset (V2-1),
+> und die Qualität wählt sich per Gerätesignal + FPS-Governor selbst (V2-2).
+> Dazu: PWA-Installierbarkeit + Offline-Spielbarkeit (V2-3) und die beiden
+> dokumentierten Gameplay-Schulden (V2-4). Verlauf in DECISIONS.md.
 
 Nachfolger von `ROADMAP.md` (dessen Phasen T + L sind umgesetzt; die offenen
 Phasen U + F gehen hier in Säule G und Säule X auf). Vier Säulen, jede mit

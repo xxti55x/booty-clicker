@@ -393,7 +393,9 @@ export function scanlineTex(gap = 5): THREE.CanvasTexture {
   return make(`scanline:${gap}`, 64, 64, (x) => {
     x.fillStyle = '#f1eff4';
     x.fillRect(0, 0, 64, 64);
-    x.fillStyle = 'rgba(130,120,155,0.28)';
+    // Politur-Paket: 0.28 → 0.13 — auf Spieldistanz lasen die dichten Zeilen
+    // als Shading-Banding-Ringe (Diagnose-Screenshot), nicht als Bildschirm.
+    x.fillStyle = 'rgba(130,120,155,0.13)';
     for (let y = 0; y < 64; y += gap) x.fillRect(0, y, 64, 1.6);
   });
 }

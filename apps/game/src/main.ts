@@ -42,6 +42,8 @@ import {
 import { createControls, frameCamera } from './engine/camera';
 import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
+import { type DeviceSignals, createFpsGovernor, pickQuality } from './engine/auto-quality';
+import { TOON_FX } from './engine/materials';
 import { effectivePixelRatio, qualityPreset } from './engine/quality';
 import { setTextureAnisotropy } from './engine/textures';
 import { createPost } from './engine/post';
@@ -287,8 +289,10 @@ import { isTranscendEnabled } from './game/flags';
 import { shouldShakeOnKey } from './game/input';
 import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
 import { applyLegacyInheritance } from './game/legacy-import';
-import { loadSettings, type Quality, saveSettings } from './game/settings';
+import { createKonami, konamiJackpot } from './game/konami';
+import { loadSettings, type Quality, type QualityChoice, saveSettings } from './game/settings';
 import { type WelcomeBackData, welcomeBackData } from './game/welcome-back';
+import { playKonamiCeremony } from './ui/easter-egg';
 import { loadCh, offlineGold, resetCh, saveCh } from './save/ch-store';
 import { loadGame } from './save/store';
 import { Rng } from './util/rng';
@@ -357,23 +361,57 @@ const BASE_EXPOSURE = renderer.toneMappingExposure;
 // Roadmap L: Bloom-Composer (nur high-Preset aktiv — sonst rendert der Loop direkt).
 const post = createPost(renderer, scene, camera);
 const controls = createControls(camera, renderer.domElement);
+// Debug-Handle für Szenen-Werkzeuge (Headless-Kalibrierung): nur Lesen, kein
+// Spielzustand — gleiche Kategorie wie `data-quality` am Dokument.
+(window as { __cam?: unknown }).__cam = camera;
 
 const effects = loadSettings();
+/**
+ * V2-2: Gerätesignale für die Auto-Qualität. Der GPU-String kommt aus dem
+ * ECHTEN Kontext des Renderers (kein zweiter Probe-Kontext) — auf ihm hängen
+ * Software-Rasterizer wie SwiftShader, die sofort auf `low` gehören.
+ */
+function deviceSignals(): DeviceSignals {
+  let gpu = '';
+  try {
+    const gl = renderer.getContext();
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    gpu = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+  } catch {
+    gpu = '';
+  }
+  const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  return {
+    mobile: coarse || /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent),
+    cores: navigator.hardwareConcurrency ?? 0,
+    gpu,
+  };
+}
+/** `'auto'` zur Boot-Zeit auflösen; explizite Wahl geht unverändert durch. */
+function resolveQuality(choice: QualityChoice): Quality {
+  return choice === 'auto' ? pickQuality(deviceSignals()) : choice;
+}
+/** Das gerade WIRKSAME Preset (nach Auto-Auflösung + Governor). */
+let effectiveQuality: Quality = resolveQuality(effects.quality);
 /**
  * Das aktive Grafik-Preset (ROADMAP-V2 Preset-Pflicht): G1-Bühnenwechsel,
  * G2-Regie und Konfetti-Dichte lesen es live, `applyQuality` schreibt es.
  */
-let preset = qualityPreset(effects.quality);
+let preset = qualityPreset(effectiveQuality);
 function applyQuality(q: Quality): void {
+  effectiveQuality = q;
+  // Sichtbar für Verifikation + künftige CSS-Hooks (kein Spiel-Verhalten).
+  document.documentElement.dataset.quality = q;
   preset = qualityPreset(q);
   renderer.setPixelRatio(effectivePixelRatio(q, window.devicePixelRatio));
-  // Roadmap L, KNOWN ISSUE (Review Schritt 4): `post.enabled` war nie true —
-  // die Zuweisung ging bei einem Refactor verloren, der Composer lief also nie
-  // und wurde nie visuell validiert. Beim Aktivieren zeigt die Kette eine
-  // uniforme Aufhellung (mutmaßlich doppelte sRGB-Konvertierung), Threshold-
-  // Tuning ändert daran nichts. Bewusst AUS gelassen, bis ein eigenes Paket
-  // die Farb-Pipeline fixt — das Spiel ist ohne Bloom abgenommen.
-  post.enabled = false;
+  // Roadmap L / V2-1: Bloom folgt dem Preset. Die Kette ist ein DISPLAY-SPACE-
+  // Overlay (Begründung + Messung im Kopf von `engine/post.ts`): die Basis ist
+  // der unveränderte Direkt-Render, nur der Glow kommt additiv obendrauf — per
+  // A/B-Screenshot bewiesen (DECISIONS „V2-1").
+  post.enabled = preset.bloom;
+  post.setSize(window.innerWidth, window.innerHeight);
+  // AAA-Toon-Pass: EIN geteilter Uniform-Wert, alle Materialien folgen sofort.
+  TOON_FX.value = preset.toonFx ? 1 : 0;
   // Roadmap T1: Textur-Anisotropie folgt dem Preset (GPU-Maximum deckelt real).
   setTextureAnisotropy(Math.min(preset.anisotropy, renderer.capabilities.getMaxAnisotropy() || 1));
   if (renderer.shadowMap.enabled !== preset.shadows) {
@@ -386,7 +424,15 @@ function applyQuality(q: Quality): void {
     });
   }
 }
-applyQuality(effects.quality);
+applyQuality(effectiveQuality);
+/**
+ * V2-2: Der FPS-Governor misst NUR im Auto-Modus (eine explizite Wahl wird nie
+ * überstimmt) und stuft bei anhaltendem Jank eine Stufe herab. Neu aufgebaut
+ * bei jedem Grafik-/FPS-Limit-Wechsel, damit Startstufe + Limit stimmen.
+ */
+let governor = createFpsGovernor(effectiveQuality, {
+  capMs: effects.fpsCap > 0 ? 1000 / effects.fpsCap : 0,
+});
 
 // ---------- state ----------
 let state = createChState();
@@ -783,7 +829,11 @@ function syncEntity(): void {
 // Kulisse (§5.5): in Tour-Modus (`bgAuto`) the background rotates with the zone tier;
 // otherwise the manually chosen `gear.bg` is fixed. Keep `gear.bg` in lockstep with
 // what's on screen so the kulisse mini-buff + set detection match the view.
-let currentBg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
+// Kulissen-Wahl entfernt (User-Auftrag): die Kulisse folgt IMMER der Bühne.
+// Alt-Saves mit fixer Wahl kehren beim Boot in den Tour-Modus zurück (reine
+// Wert-Normalisierung, kein Schema-Thema — die Felder existieren weiter).
+state.gear.bgAuto = true;
+let currentBg = bgForZone(combat.zone);
 let currentBgVariant = bgVariant(combat.zone);
 if (state.gear.bgAuto) state.gear.bg = currentBg;
 // 1b: Die Trophäen-Stufe VOR dem ersten `setBackground` setzen (wie die
@@ -964,12 +1014,6 @@ const gearPanel = new Gear({
   onProgress: () => {
     recompute();
     audio.buy();
-    hud.update(state, combat, dps, clickDmg);
-    persist();
-  },
-  onKulisse: () => {
-    updateBackground(true);
-    recompute();
     hud.update(state, combat, dps, clickDmg);
     persist();
   },
@@ -1397,10 +1441,15 @@ const chSettings = new ChSettings({
   },
   effects,
   onGraphicsChange: () => {
-    applyQuality(effects.quality);
+    applyQuality(resolveQuality(effects.quality));
     // G3: Dichte-Wechsel baut die laufende Bühne einmal neu (No-op bei gleichem Wert).
     world.setAmbientLife(preset.ambientLife);
+    // V2-2: neuer Governor mit frischer Startstufe + aktuellem FPS-Limit.
+    governor = createFpsGovernor(effectiveQuality, {
+      capMs: effects.fpsCap > 0 ? 1000 / effects.fpsCap : 0,
+    });
   },
+  effectiveQuality: () => effectiveQuality,
 });
 
 // ---------- welcome back (ROADMAP-V2 X3) ----------
@@ -1611,7 +1660,7 @@ muteBtn.addEventListener('click', () => {
  * hergibt (low: weiterhin Hard-Swap).
  */
 function updateBackground(force = false): void {
-  const bg = state.gear.bgAuto ? bgForZone(combat.zone) : state.gear.bg;
+  const bg = bgForZone(combat.zone);
   const variant = bgVariant(combat.zone); // recolour lap follows depth even on a manual kulisse
   if (!force && bg === currentBg && variant === currentBgVariant) {
     // Die Kulisse bleibt — aber die BÜHNE kann trotzdem das Theme gewechselt
@@ -2368,12 +2417,43 @@ canvas.addEventListener('pointerup', (e) => {
   const dist = Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY);
   if (dist <= 10 && performance.now() - downT <= 500) doShake(e.clientX, e.clientY);
 });
+// ---------- Easter Egg: Cheat-Code der Ahnen (v19) ----------
+const konami = createKonami();
+/**
+ * Die Zeremonie: Zähler hoch, beim ERSTEN Mal den Einmal-Jackpot gutschreiben
+ * (20 Boss-Drops der aktuellen Bühne — skaliert mit dem Spielstand statt die
+ * v12-Kurve zu brechen), Pfirsich-Regen + Fanfare, und `checkAchievements`
+ * schaltet „Cheat-Code der Ahnen" frei (Toast + 💫-Sync inklusive). Jede
+ * weitere Zündung ist reines Spielzeug: Regen ja, Beute nein — der
+ * Lebenszeit-Zähler `stats.konami` ist der Latch.
+ */
+function danceKonami(): void {
+  state.stats.konami += 1;
+  let label: string | null = null;
+  if (state.stats.konami === 1) {
+    const jackpot = konamiJackpot(combat.zone);
+    state.gold += jackpot;
+    state.stats.goldLifetime += jackpot;
+    label = `+${fmt(jackpot)} BP`;
+  }
+  playKonamiCeremony(label);
+  audio.bossWin();
+  persist(); // der Zähler selbst — checkAchievements persistiert nur bei Neuem
+  checkAchievements();
+  hud.update(state, combat, dps, clickDmg);
+}
+
 window.addEventListener('keydown', (e) => {
   audio.unlock();
   if (e.code === 'Space') e.preventDefault();
   // shouldShakeOnKey guards B4: a held (auto-repeating) space is not an autoclicker.
   if (shouldShakeOnKey(e.code, e.repeat)) doShake();
   if (e.code === 'KeyF' && !e.repeat) activateEkstase();
+  // Easter Egg: nie beim Tippen in Eingabefeldern (Import-Dialog, Name) —
+  // dort sind Pfeile und Buchstaben Text, kein Tanz.
+  const t = e.target as HTMLElement | null;
+  const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+  if (!typing && !e.repeat && konami.feed(e.code)) danceKonami();
 });
 
 // ---------- runtime signals ----------
@@ -3245,7 +3325,22 @@ let firstFrame = true;
 function loop(nowMs: number): void {
   requestAnimationFrame(loop);
   if (!frameDue(nowMs, lastRenderMs, effects.fpsCap)) return;
+  // V2-2: ROHE Frame-Dauer (ungeklemmt) für den Governor — nur im Auto-Modus,
+  // eine explizite Spieler-Wahl wird nie überstimmt.
+  const rawFrameMs = lastRenderMs > 0 ? nowMs - lastRenderMs : 0;
   lastRenderMs = nowMs;
+  if (effects.quality === 'auto' && rawFrameMs > 0) {
+    const dropped = governor.sample(rawFrameMs, nowMs);
+    if (dropped !== null) {
+      applyQuality(dropped);
+      world.setAmbientLife(preset.ambientLife);
+      toasts.show(
+        '⚙️',
+        `Grafik auf „${dropped === 'medium' ? 'Mittel' : 'Niedrig'}" gestellt`,
+        'Das Gerät hielt das Preset nicht — Einstellungen ▸ Grafik überstimmt das.',
+      );
+    }
+  }
   const dt = Math.min(clock.getDelta(), 0.05);
   t0 += dt;
   state.stats.playTimeS += dt;
@@ -3344,6 +3439,8 @@ function loop(nowMs: number): void {
   // (`intensityFor` gibt bei Tier 4 ebenfalls 3 zurück), das Fenster soll aber
   // seinen eigenen Klang haben.
   audio.setEkstase(frenzy);
+  // Lounge-Eskalation: das Publikum springt auf, solange das Fenster offen ist.
+  world.setHype(frenzy);
   abilityBar.update(state.ability, epochMs, ekstaseChargeMax());
   pops.frame(epochMs); // flush any trailing damage batch (B7)
 
@@ -3468,3 +3565,17 @@ function loop(nowMs: number): void {
   }
 }
 requestAnimationFrame(loop);
+
+// V2-3: PWA — der Service Worker cached AUSLIEFERUNG (gehashte Assets
+// cache-first, Navigation network-first, public/ stale-while-revalidate),
+// niemals Spielstand. Nur im Build: der Dev-Server transformiert Module on
+// the fly, ein SW würde dort Stale-Chaos stiften.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  const registerSw = (): void => {
+    navigator.serviceWorker.register('sw.js').catch(() => {
+      // Offline-Cache ist Komfort, kein Feature-Gate — still weiterspielen.
+    });
+  };
+  if (document.readyState === 'complete') registerSw();
+  else window.addEventListener('load', registerSw, { once: true });
+}
