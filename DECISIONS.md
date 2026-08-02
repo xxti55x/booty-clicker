@@ -3,6 +3,35 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Lounge-Publikum + Ekstase-Drop + Bühnen-Kinetik (User-Auftrag)
+
+- **Lounge statt Schatten:** Die flachen Silhouetten-Instanzen sind ersetzt
+  durch drei geschwungene Sofa-Buchten mit Tischchen (zwei Bakes) und ECHTE
+  sitzende Cartoon-Gäste — gemergte Mini-Körper (Schoß/Torso/Kopf) als EIN
+  InstancedMesh mit `instanceColor`-Outfits (sieben Farben, HSL-gestreut).
+  Dazu ein zweites InstancedMesh „Hype-Arme" (V + Fäuste), im Grundzustand
+  auf Scale 0.001. Vier Draw-Calls für die ganze Lounge.
+- **„Publikum geht mehr ab":** `World.setHype(frenzy)` schreibt EIN geteiltes
+  Boolean in den BuildCtx (`ctx.hype`), die Publikums-Anim liest es pro Frame:
+  sitzend = sanftes beatV-Wippen; Ekstase = Sprünge mit dreifacher Amplitude
+  (|sin|-Hüpfkurve), Hüft-Sway und aufpoppende, winkende Arme. Headless mit
+  präpariertem Frenzy-Fenster bewiesen (Screenshot: Gäste in der Luft, Arme
+  oben, ×10-Ekstase-Pill sichtbar).
+- **Ekstase-Soundtrack („fetziger"):** `setEkstase(on)` zündet beim Öffnen
+  einmal den Drop-Impact (Sub-Kick 130→32 Hz + Noise-Crash) und schaltet den
+  Sequencer in den Drop-Groove: **Tempo +22 %** (wenig genug, dass der
+  On-Beat-Tap folgen kann), Four-on-the-floor-Kick, Hats auf jedem Achtel,
+  **Bass in doppelter Rate mit Wechsel auf die Quinte** — Skala und Arp
+  bleiben (der Grund-Groove rennt, statt ersetzt zu werden), die X5-Theme-
+  Zusatzstimme spielt weiter obendrauf. Schließen fällt hart zurück: der
+  Kontrast IST das Signal. Hörbarkeit ist headless nicht prüfbar — der Pfad
+  läuft durch die bestehenden Engine-Tests (No-throw + Mute-Vertrag).
+- **Bühnen-Kinetik** (`stageKinetics`, ein Hero-Element je Theme, 1–2
+  Draw-Calls, islandGroup): Club = rotierender 4-Klingen-Laserfächer mit
+  Beat-Nicken; Synth = 11-Balken-Equalizer-Wand hinter dem Deck; Beach =
+  schwingende Lichterkette am Deck-Rand; Space = zwei gegenläufige, atmende
+  Holo-Ringe um die Insel. Alle vier Themes per Screenshot abgenommen.
+
 ## Szenerie-Vollausbau + Kulisse folgt der Tour (User-Auftrag)
 
 - **Kulissen-Wahl entfernt:** Die Kulisse folgt IMMER dem Bühnen-Fortschritt

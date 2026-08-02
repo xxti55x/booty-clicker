@@ -3439,6 +3439,8 @@ function loop(nowMs: number): void {
   // (`intensityFor` gibt bei Tier 4 ebenfalls 3 zurück), das Fenster soll aber
   // seinen eigenen Klang haben.
   audio.setEkstase(frenzy);
+  // Lounge-Eskalation: das Publikum springt auf, solange das Fenster offen ist.
+  world.setHype(frenzy);
   abilityBar.update(state.ability, epochMs, ekstaseChargeMax());
   pops.frame(epochMs); // flush any trailing damage batch (B7)
 
