@@ -48,8 +48,12 @@ export function buildCharacter(
   prev?: CharacterInstance | null,
 ): CharacterInstance {
   if (prev) {
-    scene.remove(prev.rig.root);
-    prev.cheeks.forEach((c) => scene.remove(c.g));
+    // Vom ECHTEN Parent lösen, nicht von der Szene: `main.ts` hängt den Rig
+    // nach dem Bau in die Show-Spin-Gruppe um — `scene.remove(root)` war dann
+    // ein No-op und jeder Skin-Wechsel ließ den alten Körper stehen (der
+    // „mehrere Charaktere auf der Bühne"-Bug).
+    prev.rig.root.parent?.remove(prev.rig.root);
+    prev.cheeks.forEach((c) => c.g.parent?.remove(c.g));
   }
 
   const robot = cfg.style === 'robot';
