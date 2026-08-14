@@ -14,10 +14,12 @@
  * {@link BOSS_SECONDS} Sekunden Tragezeit. Damit braucht der Pfad keine zweite
  * Schwellen-Reihe, keine „oder"-Logik und keine Anzeige, die zwei Balken
  * nebeneinanderstellt — und die Regel bleibt in einem Satz erklärbar. Der Wert
- * ist gemessen, nicht geraten (`npm run balance`, Abschnitt 12): Der Bot fällt
- * im ersten Sitting (45 min) etwa 8 Gates, ein Boss-Kill ist also mit 180 s rund
- * ein Drittel des Fortschritts einer aktiven Sitzung wert. Wer NUR idlet, kommt
- * trotzdem an — nur langsamer, und genau das meint „Tragezeit + Boss-Kills".
+ * ist gemessen, nicht geraten (`npm run balance`, Abschnitt 12): Seit dem
+ * Boss-Umbau fällt der Bot im ersten Sitting (45 min) etwa 2 Arenen (spätere
+ * Läufe je 3–4 beim Re-Clear), ein Boss-Kill ist mit 360 s also weiterhin rund
+ * ein Viertel bis Drittel des Fortschritts einer aktiven Sitzung wert. Wer NUR
+ * idlet, kommt trotzdem an — nur langsamer, und genau das meint „Tragezeit +
+ * Boss-Kills".
  *
  * ## Die Wirkung: ein Knoten ist ein FÜNFTEL Stern
  *
@@ -68,8 +70,13 @@ export function createSkinPath(): SkinPath {
   return {};
 }
 
-/** Sekunden Tragezeit, die ein Boss-Kill im Skin wert ist (Begründung im Kopf). */
-export const BOSS_SECONDS = 180;
+/**
+ * Sekunden Tragezeit, die ein Boss-Kill im Skin wert ist (Begründung im Kopf).
+ * Boss-Umbau: 180 → 360 — Gates liegen doppelt so weit auseinander, der
+ * verdoppelte Gegenwert hält den Boss-Anteil am Pfad-Fortschritt pro Sitzung
+ * („jede Arena zahlt doppelt", siehe `chests.ts`).
+ */
+export const BOSS_SECONDS = 360;
 
 /**
  * Der Skin, den der Sim-Bot trägt — der **Spiel-Standard** (`createGear().skin`).
@@ -85,7 +92,7 @@ export const SIM_SKIN = 'classic';
 export const PATH_NODES = 5;
 
 /**
- * Die fünf Schwellen in „Pfad-Sekunden" (Tragezeit + 180 s je Boss-Kill).
+ * Die fünf Schwellen in „Pfad-Sekunden" (Tragezeit + 360 s je Boss-Kill).
  * Gemessen gegen die Bot-Läufe (`npm run balance`, Abschnitt 12), nicht geraten:
  *
  * | Knoten | Schwelle | GEMESSEN (Bot 3 cps, MIT Loot) | Nur Tragezeit |

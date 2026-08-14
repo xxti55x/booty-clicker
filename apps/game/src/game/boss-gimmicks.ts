@@ -39,11 +39,14 @@ import { type ComboState, decay } from './combo';
 export const ZONE_THEMES: readonly BackgroundKey[] = ['club', 'synth', 'beach', 'space'];
 /**
  * Bühnen je Theme. Deckungsgleich mit `combat.BOSS_EVERY` — jeder Theme-Wechsel
- * liegt hinter einem Boss-Gate. Der Wert steht hier bewusst LOKAL (statt aus
- * `combat.ts` importiert), damit `combat.ts` seinerseits `bossHpScale` importieren
- * kann, ohne einen Import-Zyklus zu bauen; ein Test pinnt die Gleichheit fest.
+ * liegt hinter einem Boss-Gate, und die LETZTE Bühne eines Themes ist seit dem
+ * Boss-Umbau die eigene Boss-Arena des Themes (Bühne 10 = Club-Boss, 20 =
+ * Synth-Boss, …), sodass alle vier Gimmicks in der Rotation bleiben. Der Wert
+ * steht hier bewusst LOKAL (statt aus `combat.ts` importiert), damit `combat.ts`
+ * seinerseits `bossHpScale` importieren kann, ohne einen Import-Zyklus zu bauen;
+ * ein Test pinnt die Gleichheit fest.
  */
-export const ZONES_PER_THEME = 5;
+export const ZONES_PER_THEME = 10;
 
 /**
  * Das Theme einer Bühne. EINE Quelle für die Kulissen-Auto-Rotation (main.ts),

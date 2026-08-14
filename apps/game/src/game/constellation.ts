@@ -131,12 +131,21 @@ export { STAR_MILESTONE };
 export const DUST_PER_STAR_MILESTONE = 5;
 /** 💫 je freigeschaltetem Erfolg. */
 export const DUST_PER_ACHIEVEMENT = 3;
-/** 💫 je erstmals gefallenem Boss-Gate ab {@link DUST_GATE_MIN_ZONE}. */
-export const DUST_PER_GATE = 2;
-/** Ab dieser Bühne zahlt ein Boss-Gate-Erstkill Sternenstaub. */
-export const DUST_GATE_MIN_ZONE = 25;
+/**
+ * 💫 je erstmals gefallenem Boss-Gate ab {@link DUST_GATE_MIN_ZONE}. Boss-Umbau:
+ * 2 → 4, denn Gates liegen jetzt doppelt so weit auseinander (alle 10 statt 5) —
+ * der verdoppelte Betrag hält den Staub-Zufluss PRO BÜHNE Vorstoß exakt gleich
+ * (2💫/5 Bühnen = 4💫/10 Bühnen), nur in selteneren, größeren Häppchen.
+ */
+export const DUST_PER_GATE = 4;
+/**
+ * Ab dieser Bühne zahlt ein Boss-Gate-Erstkill Sternenstaub. Boss-Umbau: 25 → 30
+ * (25 ist kein Gate mehr; 30 ist das nächste, und der Wert muss ein Vielfaches
+ * von {@link GATE_EVERY} bleiben, damit `gatesCleared` ganzzahlig rechnet).
+ */
+export const DUST_GATE_MIN_ZONE = 30;
 /** Der Bühnen-Abstand der Boss-Gates (spiegelt `combat.BOSS_EVERY`). */
-const GATE_EVERY = 5;
+const GATE_EVERY = 10;
 
 /**
  * Die drei Quellen als Momentaufnahme. Alle drei Zahlen sind im Spiel

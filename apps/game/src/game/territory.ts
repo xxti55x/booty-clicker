@@ -118,12 +118,15 @@ export function isThemeKey(key: unknown): key is BackgroundKey {
 /** Ruf für eine erledigte Rivalin. */
 export const REP_PER_RIVAL = 1;
 /**
- * Ruf für einen Boss-Sieg. Zehnfach, weil ein Gate zehn Rivalen wert ist (jede
- * Bühne trägt `MONSTERS_PER_ZONE` = 10) — ein Theme-Zyklus aus fünf Bühnen zahlt
- * damit 50 + 10 = 60 Ruf, wovon der Boss ein Sechstel trägt: spürbar, ohne dass
- * Ruf allein am Gate hängt (wer an einem Gate scheitert, sammelt trotzdem).
+ * Ruf für einen Boss-Sieg. Zwanzigfach: Ein Gate war zehn Rivalen wert (jede
+ * Bühne trägt `MONSTERS_PER_ZONE` = 10), und der Boss-Umbau verdoppelt den Satz
+ * („jede Arena zahlt doppelt", siehe `chests.ts`), weil Gates doppelt so weit
+ * auseinanderliegen. Ein Theme-Zyklus aus zehn Bühnen — neun Wellen plus die
+ * Arena — zahlt damit 90 + 20 = 110 Ruf, wovon der Boss knapp ein Fünftel
+ * trägt: spürbar, ohne dass Ruf allein am Gate hängt (wer an einer Arena
+ * scheitert, sammelt trotzdem).
  */
-export const REP_PER_BOSS = 10;
+export const REP_PER_BOSS = 20;
 
 /** Ruf für EINEN Kill auf `zone` (Boss oder Rivalin) — die eine Gewinn-Regel. */
 export function repForKill(boss: boolean): number {

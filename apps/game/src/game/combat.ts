@@ -16,8 +16,12 @@ import { WEEK_OFF, weeklyHpScale } from './weekly';
 
 /** Normal rivals to out-twerk before a zone is cleared. */
 export const MONSTERS_PER_ZONE = 10;
-/** Every Nth zone is a boss gate. */
-export const BOSS_EVERY = 5;
+/**
+ * Every Nth zone is a boss gate. Seit dem Boss-Umbau (User-Auftrag): alle 10
+ * Bühnen, und die Gate-Bühne ist eine EIGENE Boss-Arena — kein Rivalen-Vorlauf
+ * mehr, der Boss steht sofort (siehe `spawnFor`).
+ */
+export const BOSS_EVERY = 10;
 /** Seconds to defeat a boss before it bounces you back to farming. */
 export const BOSS_TIME_S = 30;
 
@@ -122,7 +126,9 @@ export function spawnFor(
   remix: number = REMIX_OFF,
   week: number = WEEK_OFF,
 ): CombatState {
-  const boss = isBossZone(zone) && killsThisZone >= MONSTERS_PER_ZONE;
+  // Boss-Umbau: eine Gate-Bühne IST der Boss — kein Rivalen-Vorlauf, das
+  // Betreten (Vorstoß wie Rückreise) spawnt sofort den Gegner der Arena.
+  const boss = isBossZone(zone);
   const hpMax = boss ? bossHp(zone) : monsterHp(zone) * weeklyHpScale(zone, remix, week);
   return {
     zone,
@@ -160,9 +166,9 @@ export interface HitResult {
 
 /**
  * Apply `dmg` to the current target. On a kill, award gold and progress:
- *   · normal kill, zone not full  → next rival, same zone
- *   · normal kill, zone full, boss zone → spawn the boss
- *   · normal kill, zone full, normal zone → advance to next zone
+ *   · normal kill, zone not full → next rival, same zone
+ *   · normal kill, zone full → advance to next zone (is it a Gate-Bühne, steht
+ *     dort sofort der Boss — `bossSpawned` meldet den Betreten-Moment)
  *   · boss kill → advance to next zone
  */
 export function hit(state: CombatState, dmg: number): HitResult {
@@ -181,17 +187,16 @@ export function hit(state: CombatState, dmg: number): HitResult {
 
   if (state.boss) {
     const next = spawnFor(state.zone + 1, 0, state.maxZone, state.remix, state.week);
-    return { state: next, killed: true, gold, advancedZone: true, bossSpawned: false };
+    return { state: next, killed: true, gold, advancedZone: true, bossSpawned: next.boss };
   }
 
   const kills = state.killsThisZone + 1;
   if (kills >= MONSTERS_PER_ZONE) {
-    if (isBossZone(state.zone)) {
-      const boss = spawnFor(state.zone, kills, state.maxZone, state.remix, state.week);
-      return { state: boss, killed: true, gold, advancedZone: false, bossSpawned: true };
-    }
+    // Boss-Umbau: normale Bühnen sind NIE Gate-Bühnen — der Vorstoß auf eine
+    // Gate-Bühne spawnt den Boss direkt in `spawnFor` (bossSpawned meldet den
+    // Betreten-Moment für Banner/Stinger).
     const next = spawnFor(state.zone + 1, 0, state.maxZone, state.remix, state.week);
-    return { state: next, killed: true, gold, advancedZone: true, bossSpawned: false };
+    return { state: next, killed: true, gold, advancedZone: true, bossSpawned: next.boss };
   }
 
   const same = spawnFor(state.zone, kills, state.maxZone, state.remix, state.week);
@@ -212,11 +217,10 @@ export interface BossTickResult {
  *
  * `refundKills` (IDEEN-GAMEPLAY 2a, „Zweiter Wind") lässt die Rückfall-Bühne mit
  * bereits erledigten Rivalen starten — der Rückwurf kostet dann nur noch einen
- * Teil der Welle. Der Wert wird auf `0 … MONSTERS_PER_ZONE − 1` geklemmt: Eine
- * volle Welle würde auf einer Boss-Bühne sofort den nächsten Boss spawnen, und
- * die Rückfall-Bühne ist per Konstruktion nie eine (zone − 1 eines Vielfachen
- * von 5 ist keins) — der Deckel ist also reine Verteidigung gegen einen
- * absurden Aufrufer, nicht Mechanik.
+ * Teil der Welle. Der Wert wird auf `0 … MONSTERS_PER_ZONE − 1` geklemmt: Die
+ * Rückfall-Bühne ist per Konstruktion nie eine Boss-Bühne (zone − 1 eines
+ * Vielfachen von `BOSS_EVERY` ist keins) — der Deckel ist also reine
+ * Verteidigung gegen einen absurden Aufrufer, nicht Mechanik.
  */
 export function tickBoss(state: CombatState, dt: number, refundKills = 0): BossTickResult {
   if (!state.boss) return { state, failed: false };
@@ -231,17 +235,6 @@ export function tickBoss(state: CombatState, dt: number, refundKills = 0): BossT
     };
   }
   return { state: { ...state, bossTimer }, failed: false };
-}
-
-/**
- * Challenge the frontier boss directly (skip the remaining rival wave). Only
- * meaningful on the highest reached boss stage while its gate is unbeaten —
- * everywhere else this is a no-op. Skipping the wave is a strictly risky
- * trade (less farm gold, boss sooner), never an exploit.
- */
-export function challengeBoss(state: CombatState): CombatState {
-  if (!isBossZone(state.zone) || state.boss || state.zone !== state.maxZone) return state;
-  return spawnFor(state.zone, MONSTERS_PER_ZONE, state.maxZone, state.remix, state.week);
 }
 
 /** Fraction of the boss timer remaining (1..0), for the timer bar. */

@@ -28,10 +28,12 @@ import {
 describe('stars — Bit-Regeln pro Bühne (P1)', () => {
   it('Boss-Bühnen tragen drei Sterne, normale Bühnen zwei', () => {
     expect(isBossZone(BOSS_EVERY)).toBe(true);
-    expect(maxStarsFor(5)).toBe(3);
-    expect(starBitsFor(5)).toEqual([STAR_CLEARED, STAR_NO_TIMEOUT, STAR_COMBO]);
-    expect(starMaskFor(5)).toBe(STAR_ALL);
+    expect(maxStarsFor(10)).toBe(3);
+    expect(starBitsFor(10)).toEqual([STAR_CLEARED, STAR_NO_TIMEOUT, STAR_COMBO]);
+    expect(starMaskFor(10)).toBe(STAR_ALL);
     // Ohne Gate gibt es keinen Timeout, den man vermeiden könnte (Design-Entscheid).
+    // Boss-Umbau: Bühne 5 ist kein Halb-Gate mehr, also auch nur zwei Sterne.
+    expect(maxStarsFor(5)).toBe(2);
     expect(maxStarsFor(7)).toBe(2);
     expect(starBitsFor(7)).toEqual([STAR_CLEARED, STAR_COMBO]);
     expect(starMaskFor(7)).toBe(STAR_CLEARED | STAR_COMBO);
@@ -75,9 +77,9 @@ describe('stars — Sterne setzen (P1)', () => {
 
   it('maskiert unmögliche/kaputte Werte beim Lesen weg', () => {
     // Ein handgeschriebener Blob mit allen Bits auf einer Nicht-Boss-Bühne …
-    const crafted: StageStars = { '7': STAR_ALL, '5': STAR_ALL, x: 3, '9': Number.NaN };
+    const crafted: StageStars = { '7': STAR_ALL, '10': STAR_ALL, x: 3, '9': Number.NaN };
     expect(starsAt(crafted, 7)).toBe(STAR_CLEARED | STAR_COMBO); // Timeout-Bit fällt raus
-    expect(starsAt(crafted, 5)).toBe(STAR_ALL);
+    expect(starsAt(crafted, 10)).toBe(STAR_ALL);
     expect(starsAt(crafted, 9)).toBe(0);
     // … zählt in der Summe nur mit dem, was die Regeln hergeben: 2 + 3 = 5.
     expect(totalStars(crafted)).toBe(5);
@@ -86,8 +88,8 @@ describe('stars — Sterne setzen (P1)', () => {
   it('summiert über die ganze Sammlung', () => {
     let map: StageStars = createStageStars();
     for (const z of [1, 2, 3]) map = addStar(map, z, STAR_CLEARED);
-    map = addStar(map, 5, STAR_CLEARED);
-    map = addStar(map, 5, STAR_NO_TIMEOUT);
+    map = addStar(map, 10, STAR_CLEARED);
+    map = addStar(map, 10, STAR_NO_TIMEOUT);
     expect(totalStars(map)).toBe(5);
     expect(totalStars(createStageStars())).toBe(0);
   });

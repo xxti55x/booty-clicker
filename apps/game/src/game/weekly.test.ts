@@ -119,8 +119,9 @@ describe('weeklyZoneFor — die Bühnen-Formel', () => {
   it('läuft über 60 Wochen durch das ganze Fenster (kein kurzer Zyklus)', () => {
     const seen = new Set<number>();
     for (let w = 0; w < WEEKLY_SPAN; w++) seen.add(weeklyZoneFor(w));
-    // 60 Restklassen, 12 davon Boss-Gates ⇒ 48 verschiedene Nicht-Boss-Bühnen.
-    expect(seen.size).toBe(48);
+    // 60 Restklassen, 6 davon Boss-Gates (alle 10) ⇒ 54 verschiedene
+    // Nicht-Boss-Bühnen.
+    expect(seen.size).toBe(54);
     expect(weeklyZoneFor(WEEKLY_SPAN)).toBe(weeklyZoneFor(0)); // Zyklus schließt
   });
 

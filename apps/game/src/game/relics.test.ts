@@ -56,7 +56,8 @@ describe('relics — die Drop-Regel', () => {
     expect(relicGateEligible(r, 49)).toBe(false);
     expect(relicGateEligible(r, 50)).toBe(true);
     expect(relicGateEligible(r, 52)).toBe(false); // keine Boss-Bühne
-    expect(relicGateEligible(r, 55)).toBe(true);
+    expect(relicGateEligible(r, 55)).toBe(false); // Boss-Umbau: 55 ist kein Gate mehr
+    expect(relicGateEligible(r, 60)).toBe(true);
     expect(relicGateEligible(r, Number.NaN)).toBe(false);
   });
 
@@ -69,10 +70,9 @@ describe('relics — die Drop-Regel', () => {
     expect(again.relics).toBe(r);
     expect(again.relic).toBeNull();
     // Und auch jedes FLACHERE Gate ist damit erledigt (Rückweg nach Reset).
-    expect(gateRelicRoll(r, 55, rng()).relics).toBe(r);
     expect(gateRelicRoll(r, 50, rng()).relics).toBe(r);
     // Erst tiefer geht es weiter.
-    expect(relicGateEligible(r, 65)).toBe(true);
+    expect(relicGateEligible(r, 70)).toBe(true);
   });
 
   it('das Pity garantiert spätestens am RELIC_PITY-ten Gate', () => {
@@ -87,7 +87,7 @@ describe('relics — die Drop-Regel', () => {
     const stream = rng(12345);
     let sinceDrop = 0;
     let drops = 0;
-    for (let zone = RELIC_MIN_ZONE; zone <= 400; zone += 5) {
+    for (let zone = RELIC_MIN_ZONE; zone <= 400; zone += 10) {
       const res = gateRelicRoll(r, zone, stream);
       r = res.relics;
       if (res.relic) {
@@ -98,9 +98,9 @@ describe('relics — die Drop-Regel', () => {
         expect(sinceDrop).toBeLessThan(RELIC_PITY);
       }
     }
-    // 71 Gates ⇒ die Erwartung liegt bei ~26 Relikten (ein Relikt je ~2,7 Gates).
-    expect(drops).toBeGreaterThan(20);
-    expect(drops).toBeLessThan(45);
+    // 36 Gates ⇒ die Erwartung liegt bei ~24 Relikten (ein Relikt je 1,5 Gates).
+    expect(drops).toBeGreaterThan(17);
+    expect(drops).toBeLessThanOrEqual(36);
     expect(r.deepestGate).toBe(400);
   });
 

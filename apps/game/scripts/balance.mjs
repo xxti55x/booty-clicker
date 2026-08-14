@@ -40,6 +40,7 @@ const tmp = mkdtempSync(join(tmpdir(), 'bc-balance-'));
 await build({
   entryPoints: [
     join(GAME, 'src/game/sim.ts'),
+    join(GAME, 'src/game/combat.ts'),
     join(GAME, 'src/game/weekly.ts'),
     join(GAME, 'src/game/mastery.ts'),
     join(GAME, 'src/game/gear.ts'),
@@ -61,6 +62,7 @@ await build({
   logLevel: 'warning',
 });
 const sim = await import(pathToFileURL(join(tmp, 'sim.js')).href);
+const combat = await import(pathToFileURL(join(tmp, 'combat.js')).href);
 const weekly = await import(pathToFileURL(join(tmp, 'weekly.js')).href);
 const mastery = await import(pathToFileURL(join(tmp, 'mastery.js')).href);
 const gear = await import(pathToFileURL(join(tmp, 'gear.js')).href);
@@ -132,23 +134,25 @@ const pacing = SEEDS.map((seed) => {
     t10: r.timeToZone.get(10),
     t20: r.timeToZone.get(20),
     t25: r.timeToZone.get(25),
-    t30: r.timeToZone.get(30),
+    t31: r.timeToZone.get(31),
     wall: r.bestZone,
   };
 });
 table(
-  ['Seed', 't10 [min]', 't20 [min]', 't25 [min]', 't30 [min]', 'Wand-Bühne'],
+  ['Seed', 't10 [min]', 't20 [min]', 't25 [min]', 't31 [min]', 'Wand-Bühne'],
   pacing.map((p) => [
     p.seed,
     min(p.t10),
     min(p.t20),
     min(p.t25),
-    p.t30 === undefined ? 'n. e.' : min(p.t30),
+    p.t31 === undefined ? 'n. e.' : min(p.t31),
     p.wall,
   ]),
 );
 console.log(
-  `   Anker: t10 ~1.75 min ±25 % · t25 ~30 min ±25 % (+5) · Bühne 30 NICHT im ersten Sitting` +
+  // Boss-Umbau: „Bühne 30" ist die Arena selbst (Ankunft zählt), die Wand ist
+  // das GATE — gemessen wird Bühne 31 dahinter.
+  `   Anker: t10 ~1.75 min ±25 % · t25 ~30 min ±25 % (+5) · Bühne 31 NICHT im ersten Sitting` +
     `\n   Mittel: t10 ${n1(mean(pacing.map((p) => p.t10)) / 60)} min · t25 ${n1(mean(pacing.map((p) => p.t25)) / 60)} min` +
     ` · Wand ⌀ Bühne ${n1(mean(pacing.map((p) => p.wall)))}`,
 );
@@ -220,12 +224,15 @@ const e2 = SEEDS.map((seed) => {
     { ...SIM_ACTIVE_CAL, seed },
     { stallSeconds: 1500, maxSeconds: 400_000, plateauAscensions: 4, fullPrestige: true },
   );
-  const zones = [...c.timeToLifetime.keys()].sort((a, b) => a - b).filter((z) => z % 5 === 0);
+  // Boss-Umbau: gemessen in GATE-Schritten (+10) — dieselbe Lesart wie der
+  // Anker-Test (ein +5-Raster verglich seit dem Umbau abwechselnd billige
+  // Arena-Ankünfte mit teuren Gate-Durchbrüchen, ein struktureller Sägezahn).
+  const zones = [...c.timeToLifetime.keys()].sort((a, b) => a - b).filter((z) => z % 10 === 0);
   const times = zones.map((z) => c.timeToLifetime.get(z));
   const gaps = [];
   for (let i = 1; i < times.length; i++) gaps.push(times[i] - times[i - 1]);
-  // Dieselbe Lesart wie der Anker: die strikte ×2-Schranke gilt ab Lücke 5.
-  const WARMUP = 4;
+  // Dieselbe Lesart wie der Anker: die strikte ×2-Schranke gilt ab Lücke 3.
+  const WARMUP = 2;
   let runMax = Math.max(...gaps.slice(0, WARMUP + 1), 0);
   let worstRatio = 0;
   for (let i = WARMUP + 1; i < gaps.length; i++) {
@@ -246,7 +253,7 @@ const e2 = SEEDS.map((seed) => {
 table(
   [
     'Seed',
-    '+5-Stufen',
+    '+10-Arenen',
     'schlimmstes Verhältnis',
     'Aszensionen',
     'Himmelfahrten',
@@ -256,7 +263,7 @@ table(
   ],
   e2.map((e) => [e.seed, e.steps, n2(e.ratio), e.asc, e.hf, e.hpf, e.tree, e.best]),
 );
-console.log('   Anker: ≥ 14 Stufen · Verhältnis ≤ 2.00 · ≥ 1 Himmelfahrt über ≥ 8 Aszensionen');
+console.log('   Anker: ≥ 8 Arenen · Verhältnis ≤ 2.00 · ≥ 1 Himmelfahrt über ≥ 8 Aszensionen');
 
 // ---------------------------------------------------------------------------
 // 5 · E3 + E4 — Lebendigkeit und die Klick-Invariante
@@ -348,11 +355,12 @@ console.log(
 // Zwei Quellen, beide echt: Die Sim-Ökonomie bankt die 🧩 aus TRUHEN (`econ.shards`),
 // und das Spiel zahlt zusätzlich pro Boss-Kill `bossShardReward` — der Bot modelliert
 // diesen zweiten Faucet nicht, also wird er hier aus der GEMESSENEN Bühnen-Kurve
-// rekonstruiert (jeder Lauf clert die Boss-Bühnen 5, 10, … bis zu seiner Wand).
+// rekonstruiert (jeder Lauf clert die Boss-Arenen 10, 20, … bis zu seiner Wand —
+// Boss-Umbau: Gates alle 10, jede Arena zahlt doppelt).
 console.log('\n── 7 · Splitter-Einkommen · Bot 3 cps + Juice, MIT Loot (Truhen + Boss-Faucet)');
 const bossShardsUpTo = (bestZone) => {
   let s = 0;
-  for (let z = 5; z <= bestZone; z += 5) s += gear.bossShardReward(z);
+  for (let z = 10; z <= bestZone; z += 10) s += gear.bossShardReward(z);
   return s;
 };
 const shardRows = [];
@@ -605,7 +613,7 @@ for (let k = 1; k < rel.RELIC_PITY; k++) expGates += k * p * Math.pow(1 - p, k -
 expGates += rel.RELIC_PITY * Math.pow(1 - p, rel.RELIC_PITY - 1);
 console.log(
   `   Regel: ab Bühne ${rel.RELIC_MIN_ZONE} · ${(p * 100).toFixed(0)} % je NEUEM Gate · Garantie am ${rel.RELIC_PITY}.` +
-    ` ⇒ Erwartung ${expGates.toFixed(2)} Gates je Relikt (= ${(expGates * 5).toFixed(0)} Bühnen Vorstoß)` +
+    ` ⇒ Erwartung ${expGates.toFixed(2)} Gates je Relikt (= ${(expGates * combat.BOSS_EVERY).toFixed(0)} Bühnen Vorstoß)` +
     `\n   Ein Gate würfelt genau EINMAL im Leben (Highwater überlebt alle drei Resets) — Farmen zahlt keine Relikte.`,
 );
 

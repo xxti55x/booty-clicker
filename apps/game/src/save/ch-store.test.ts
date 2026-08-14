@@ -1291,21 +1291,21 @@ describe('ch-store — v11 migration & repair (Bühnen-Sterne, P1)', () => {
   it('round-trips a star collection and masks impossible bits away', () => {
     const s: ChState = {
       ...createChState(),
-      stageStars: { '5': 7, '7': 5 },
+      stageStars: { '10': 7, '7': 5 },
       starsAwarded: 15,
       bossFoulZone: 10,
     };
     const round = deserializeCh(serializeCh(s, 1000));
-    expect(round!.stageStars).toEqual({ '5': 7, '7': 5 });
+    expect(round!.stageStars).toEqual({ '10': 7, '7': 5 });
     expect(round!.starsAwarded).toBe(15);
     expect(round!.bossFoulZone).toBe(10);
 
     // Gebastelter Save: der Timeout-Stern auf einer Nicht-Boss-Bühne (Bit 2) und
     // ein erfundenes viertes Bit werden weggestutzt, echte Sterne bleiben.
     const raw = JSON.parse(serializeCh(s, 1000)) as Record<string, unknown>;
-    raw.stageStars = { '5': 255, '7': 7, '11': 2, junk: 7 };
+    raw.stageStars = { '10': 255, '7': 7, '11': 2, junk: 7 };
     const repaired = deserializeCh(JSON.stringify(raw));
-    expect(repaired!.stageStars).toEqual({ '5': 7, '7': 5 });
+    expect(repaired!.stageStars).toEqual({ '10': 7, '7': 5 });
   });
 
   it('repairs a wholly corrupt star slice without touching other progress', () => {
@@ -1542,8 +1542,8 @@ describe('ch-store — v15 migration & repair (Legenden-Konstellation, 2a)', () 
     raw.zone = 1;
     raw.gear = { ...createGear(), zoneEver: 80 };
     const s = deserializeCh(JSON.stringify(raw));
-    // Bühne 80 ⇒ die Gates 25 … 75 sind gefallen (11 Stück) ⇒ 22 💫.
-    expect(s!.constellation.earned).toBe(22);
+    // Bühne 80 ⇒ die Gates 30 … 70 sind gefallen (5 Stück à 4 💫) ⇒ 20 💫.
+    expect(s!.constellation.earned).toBe(20);
   });
 
   it('startet einen ganz frischen Spielstand bei null (nichts verdient, nichts geschenkt)', () => {
@@ -1677,7 +1677,7 @@ describe('ch-store — v16 migration & repair (Gebietsherrschaft, 1b)', () => {
     expect(after.territory).toEqual(s.territory);
     expect(deserializeCh(serializeCh(after, 1000))!.territory).toEqual(s.territory);
     // Und die Wirkung steht danach unverändert da: Space voll, Club auf Stufe 5.
-    expect(territoryGoldMult(after.territory, 18)).toBeCloseTo(1.15, 10);
+    expect(territoryGoldMult(after.territory, 35)).toBeCloseTo(1.15, 10);
     expect(territoryGoldMult(after.territory, 3)).toBeCloseTo(1.075, 10);
   });
 });
@@ -1690,7 +1690,7 @@ describe('ch-store — v17 migration & repair (Relikte 1c + Skin-Schmiede 3a)', 
     delete raw.forge;
     // Ein gestandener Spielstand auf Bühne 203: die Gates 50…200 sind längst
     // gefallen. Ohne die Saat bekäme er sie beim nächsten Rückweg ALLE noch
-    // einmal ausgezahlt — dreißig Würfe für Arbeit von vor dem Update.
+    // einmal ausgezahlt — sechzehn Würfe für Arbeit von vor dem Update.
     raw.lifetimeMaxZone = 203;
     raw.runMaxZone = 203;
     raw.zone = 203;
@@ -1703,7 +1703,7 @@ describe('ch-store — v17 migration & repair (Relikte 1c + Skin-Schmiede 3a)', 
     // … der HIGHWATER dagegen steht auf dem tiefsten geclerten Gate (200).
     expect(s!.relics.deepestGate).toBe(200);
     expect(relicGateEligible(s!.relics, 200)).toBe(false);
-    expect(relicGateEligible(s!.relics, 205)).toBe(true);
+    expect(relicGateEligible(s!.relics, 210)).toBe(true);
   });
 
   it('liest die Tiefe auch aus dem Himmelfahrt-festen `zoneEver`-Latch', () => {
@@ -1718,7 +1718,7 @@ describe('ch-store — v17 migration & repair (Relikte 1c + Skin-Schmiede 3a)', 
     raw.zone = 1;
     raw.gear = { ...createGear(), zoneEver: 140 };
     const s = deserializeCh(JSON.stringify(raw));
-    expect(s!.relics.deepestGate).toBe(135); // Gate 140 ist noch NICHT geclert
+    expect(s!.relics.deepestGate).toBe(130); // Gate 140 ist noch NICHT geclert
   });
 
   it('ein flacher Alt-Save wird gar nicht erst gesperrt', () => {

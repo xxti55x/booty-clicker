@@ -86,6 +86,8 @@ import {
   CHEST_TIERS,
   type ChestTier,
   type Reward,
+  BOSS_CHESTS_PER_GATE,
+  BOSS_KEYS_BASE,
   KEY_COST,
   addToken,
   chestTierForBoss,
@@ -172,11 +174,11 @@ import {
   rollNextGoblinAt,
 } from './game/goblin';
 import {
-  challengeBoss,
   type CombatState,
   goldFor,
   hit,
   hpFraction,
+  isBossZone,
   monsterHp,
   spawnFor,
   tickBoss,
@@ -329,9 +331,10 @@ import { ISLAND_C } from './world/island';
 
 /**
  * Booty Clicker — endless (Clicker-Heroes-style) bootstrap.
- * Twerk (click) to damage the current rival; your Crew adds idle DPS; every 5th
- * zone is a timed boss; ascend for Ruhm-Seelen (permanent damage). Pure logic
- * lives in game/*; this file is the DOM/Three/Audio glue + the render loop.
+ * Twerk (click) to damage the current rival; your Crew adds idle DPS; every
+ * 10th zone is its own timed boss ARENA (the boss dances the moment you set
+ * foot on it); ascend for Ruhm-Seelen (permanent damage). Pure logic lives in
+ * game/*; this file is the DOM/Three/Audio glue + the render loop.
  */
 
 // ---------- click-juice tuning ----------
@@ -339,16 +342,17 @@ import { ISLAND_C } from './world/island';
 // choreography cadence stays here as glue.
 const MOVE_SWITCH_CLICKS = 18;
 
-// Bühnen-Auto-Rotation (Goal): Das Theme wechselt ALLE 5 Bühnen — und weil jede
-// 5. Bühne ein Boss-Gate ist (BOSS_EVERY), liegt jeder Theme-Wechsel exakt
-// HINTER einem Bosskampf (5→6, 10→11, …). Manuelles Wählen gibt es nicht mehr.
+// Bühnen-Auto-Rotation (Goal): Das Theme wechselt ALLE 10 Bühnen — und weil
+// jede 10. Bühne die Boss-Arena ihres Themes ist (BOSS_EVERY), liegt jeder
+// Theme-Wechsel exakt HINTER einem Bosskampf (10→11, 20→21, …). Manuelles
+// Wählen gibt es nicht mehr.
 // Die Rotation selbst lebt als EINE Quelle in `game/boss-gimmicks.themeForZone`
 // (Kulisse, Zonen-Strip und Boss-Gimmick müssen dasselbe Theme sehen).
 const bgForZone = themeForZone;
 // Wave 3: scenery recolour lap — hue-shifts each stage's palette every full
-// 20-zone tour (4 Themes × 5 Bühnen), in step with the rival's entityVariant,
+// 40-zone tour (4 Themes × 10 Bühnen), in step with the rival's entityVariant,
 // so endless laps 2, 3, … never look identical. Purely visual.
-const bgVariant = (zone: number): number => Math.floor(Math.max(0, zone - 1) / 20);
+const bgVariant = (zone: number): number => Math.floor(Math.max(0, zone - 1) / 40);
 
 // ---------- scene / engine ----------
 const canvas = document.getElementById('app') as HTMLCanvasElement;
@@ -1882,14 +1886,23 @@ function travelToZone(z: number): boolean {
   if (!Number.isFinite(z) || z === combat.zone || z > combat.maxZone || z < 1) return false;
   const back = z < combat.zone;
   combat = travelTo(combat, z);
+  // Boss-Umbau: eine Gate-Bühne IST die Boss-Arena — schon die Anreise spawnt
+  // den Boss. Er bekommt dieselbe verlängerte Uhr wie ein regulär gespawnter
+  // (Chronilla + Gear + „Gate-Crasher") und denselben G2-Auftritt.
+  if (combat.boss) combat = withBossTimerBonus(combat);
   updateBackground();
   syncEntity();
   hud.update(state, combat, dps, clickDmg);
-  toasts.show(
-    '🗺',
-    `Bühne ${combat.zone}`,
-    back ? 'Farm-Modus — vorwärts geht’s jederzeit wieder.' : 'Zurück an der Front!',
-  );
+  if (combat.boss) {
+    toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
+    bossEntrance();
+  } else {
+    toasts.show(
+      '🗺',
+      `Bühne ${combat.zone}`,
+      back ? 'Farm-Modus — vorwärts geht’s jederzeit wieder.' : 'Zurück an der Front!',
+    );
+  }
   return true;
 }
 document.getElementById('zoneStrip')?.addEventListener('click', (e) => {
@@ -1897,17 +1910,11 @@ document.getElementById('zoneStrip')?.addEventListener('click', (e) => {
   if (!el) return;
   travelToZone(Number(el.dataset.z));
 });
+// Boss-Umbau: der Button reist zurück zur offenen Frontier-Arena (der Boss
+// steht dort sofort — `travelToZone` übernimmt Timer-Bonus und Auftritt).
 document.getElementById('bossChallenge')?.addEventListener('click', () => {
-  const next = challengeBoss(combat);
-  if (next === combat) return;
-  // P4: Der Retry-Boss bekommt dieselbe verlängerte Uhr wie ein regulär
-  // gespawnter (Chronilla + Gear + „Gate-Crasher") — vorher fiel der Bonus beim
-  // „Boss herausfordern"-Weg still unter den Tisch.
-  combat = withBossTimerBonus(next);
-  syncEntity();
-  hud.update(state, combat, dps, clickDmg);
-  toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
-  bossEntrance(); // G2: derselbe Auftritt wie beim 25/25-Spawn
+  if (combat.boss || !isBossZone(combat.maxZone)) return;
+  travelToZone(combat.maxZone);
 });
 
 // ---------- combat glue ----------
@@ -2109,8 +2116,9 @@ function onKillProgress(
     }
     if (combat.zone > state.runMaxZone) state.runMaxZone = combat.zone;
     if (fromClick && x !== undefined) pops.gold(gold, x, y ?? 0);
-    // was the kill a boss? (advanced from a boss target)
-    if (combat.zone % 5 === 1 && combat.zone > 1) {
+    // was the kill a boss? (advanced from a boss target — the reducer always
+    // advances on a boss kill, so `wasBoss` alone identifies the gate clear)
+    if (wasBoss && r.advancedZone) {
       const bossZone = combat.zone - 1;
       // P1-Stern 2 („ohne Timeout"): das Gate fiel, ohne dass seit dem ersten
       // Boss-Spawn DIESES Anlaufs die Uhr abgelaufen ist. `bossFoulZone` trägt
@@ -2121,10 +2129,10 @@ function onKillProgress(
       // §6.1: a boss kill guarantees 1 🔑 (whole part guaranteed, the Truhen-Magnet/
       // gear key-drop bonus adds a seeded probabilistic extra) + a tier-appropriate
       // chest (§6.2) into the inventory.
-      const keys = keyDropAmount(1, keyDropMult(state), rng.next());
+      const keys = keyDropAmount(BOSS_KEYS_BASE, keyDropMult(state), rng.next());
       earnKeys(keys);
       const tier = chestTierForBoss(bossZone);
-      state.chests.inventory[tier] += 1;
+      state.chests.inventory[tier] += BOSS_CHESTS_PER_GATE;
       // Provisional pre-M12 🧩 faucet (§5.4): a boss kill still grants a few Splitter,
       // scaling gently with the cleared boss zone. M12's Truhen are the real 🧩 source
       // (opened chests); the direct trickle stays as a gentle early-game bridge.
@@ -2138,8 +2146,8 @@ function onKillProgress(
       // IDEEN-GAMEPLAY 1c: Ab Bühne 50 würfelt JEDES Gate genau EINMAL im Leben
       // auf ein Relikt (`relics.deepestGate` gattert das selbst — deshalb steht
       // hier keine zusätzliche Frontier-Prüfung, und Wiederholungen per
-      // `travelTo`/`challengeBoss` zahlen nichts). Dieselbe eine Funktion, die
-      // auch der Bot fährt.
+      // `travelTo` zurück in die Arena zahlen nichts). Dieselbe eine Funktion,
+      // die auch der Bot fährt.
       awardRelic(bossZone);
       audio.bossWin();
       victoryDance = true; // A4: der Sieges-Move, einmalig (siehe `syncChoreoSet`)
@@ -3439,6 +3447,8 @@ function loop(nowMs: number): void {
   // (`intensityFor` gibt bei Tier 4 ebenfalls 3 zurück), das Fenster soll aber
   // seinen eigenen Klang haben.
   audio.setEkstase(frenzy);
+  // Boss-Bühne ⇒ der Hardcore-Track übernimmt (Techno-Umbau).
+  audio.setBossMode(combat.boss);
   // Lounge-Eskalation: das Publikum springt auf, solange das Fenster offen ist.
   world.setHype(frenzy);
   abilityBar.update(state.ability, epochMs, ekstaseChargeMax());

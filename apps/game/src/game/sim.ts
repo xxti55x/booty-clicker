@@ -93,6 +93,8 @@ import {
   type PermTokens,
   type PityState,
   type Reward,
+  BOSS_CHESTS_PER_GATE,
+  BOSS_KEYS_BASE,
   KEY_COST,
   addToken,
   chestTierForBoss,
@@ -132,7 +134,6 @@ import {
   type CombatState,
   MONSTERS_PER_ZONE,
   bossHp,
-  challengeBoss,
   goldFor,
   hit,
   hpFraction,
@@ -519,9 +520,6 @@ interface Sim {
   shards: number;
   /** Epoch-ms until which the Golden-Peach ×3 income boost runs (§6.1). */
   boostUntilMs: number;
-  /** Boss-Bühne eines gescheiterten Gates (0 = keins): der Bot nutzt dort den
-   * „Boss herausfordern"-Button statt die Rivalen-Welle neu zu clearen. */
-  retryBossZone: number;
   /** A2: Laufzeit-Zustand des AKTUELLEN Boss-Kampfes (Spotlight-Phasen, Wellen-Timer). */
   gimmick: GimmickRuntime;
   /** Boss-Bühne, zu der `gimmick` gehört (0 = gerade kein Boss) — erkennt den Kampf-Wechsel. */
@@ -680,7 +678,6 @@ function newSim(
     pity: createPity(),
     shards: 0,
     boostUntilMs: 0,
-    retryBossZone: 0,
     gimmick: createGimmickRuntime(),
     gimmickZone: 0,
     nextPeachAtMs: 0,
@@ -1329,7 +1326,6 @@ function stepSecond(
       // Bühne. Dieselbe Buchung wie in der Glue (`main.ts:onKillProgress`).
       sim.territory = addRep(sim.territory, themeForZone(killZone), repForKill(wasBoss));
       combat = r.state;
-      if (wasBoss && r.advancedZone) sim.retryBossZone = 0; // Gate besiegt
       let onFrontier = false;
       if (r.advancedZone && combat.zone > sim.lifetimeMaxZone) {
         const cleared = combat.zone - 1;
@@ -1347,10 +1343,10 @@ function stepSecond(
       // the game's honest ~1-chest-per-new-boss rate.
       if (dropLoot && onFrontier) {
         if (wasBoss) {
-          const dropped = keyDropAmount(1, keyMult, sim.rng.next());
+          const dropped = keyDropAmount(BOSS_KEYS_BASE, keyMult, sim.rng.next());
           sim.keys += dropped;
           sim.keysEarned += dropped;
-          sim.chestInv[chestTierForBoss(bossZone)] += 1;
+          sim.chestInv[chestTierForBoss(bossZone)] += BOSS_CHESTS_PER_GATE;
         } else if (
           sim.rng.next() <
           rivalChestChance(luck) * (stage?.f.chest ?? 1) * truhenFokusChestMult(sim.heaven)
@@ -1366,23 +1362,14 @@ function stepSecond(
     }
   }
   if (combat.boss) {
-    const bossZone = combat.zone;
     // 2a ★ „Zweiter Wind" wird hier BEWUSST NICHT gefaltet (`refundKills` bleibt 0) —
     // die ausführliche Begründung samt Messung steht im Modul-Kopf unter den
-    // Ausschlüssen. Kurz: Der Bot fordert den Boss nach einem Fail SOFORT wieder
-    // heraus (`challengeBoss`, zwei Zeilen tiefer) und überspringt dabei die
-    // Rivalen-Welle der Boss-Bühne; drei erstattete Kills auf der Rückfall-Bühne
-    // werden für ihn deshalb zu 30 % weniger Farm je Anlauf statt zu einem
-    // Vorsprung. Das ist eine Eigenschaft seiner Retry-Strategie, nicht des Knotens.
-    const bt = tickBoss(combat, 1);
-    if (bt.failed) sim.retryBossZone = bossZone; // Fallback auf die Vor-Bühne (Kern)
-    combat = bt.state;
-  }
-  // Retry wie ein Spieler: nach einem Fail zurück an der Boss-Bühne angekommen,
-  // den Boss per `challengeBoss` direkt herausfordern (Welle überspringen).
-  if (sim.retryBossZone === combat.zone && !combat.boss) {
-    combat = challengeBoss(combat);
-    if (combat.boss) sim.retryBossZone = 0;
+    // Ausschlüssen. Kurz: Der Retry ist seit dem Boss-Umbau die Welle der
+    // Rückfall-Bühne SELBST — ihr Clear schiebt den Bot zurück in die Arena, wo
+    // der Boss sofort steht. Erstattete Kills würden diese Welle (und damit die
+    // Farm je Anlauf) nur verkürzen, nicht den Boss schneller legen; der Effekt
+    // des Knotens ist eine Pacing-, keine Macht-Änderung.
+    combat = tickBoss(combat, 1).state;
   }
   return combat;
 }

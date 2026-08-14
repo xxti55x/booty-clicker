@@ -194,11 +194,21 @@ const CREW_RETRAIN = { boss: { '2': 'idle' }, hype: { '3': 'gold' } };
 const RETRAIN_ROLLS = { boss: 2 };
 
 /**
- * v11 (P1): Bühnen-Sterne. Bühne 5 voll (Boss-Gate: geclert + ohne Timeout +
- * Combo), Bühne 10 halb, Bühne 7 als Nicht-Boss-Bühne mit ihren zwei möglichen
- * Sternen — Summe 3 + 2 + 2 = 7, also noch kein Meilenstein (15) fällig.
+ * v11 (P1): Bühnen-Sterne. So hat der ALT-Save sie geschrieben: Bühne 5 voll —
+ * sie WAR in seiner Ära ein Boss-Gate (geclert + ohne Timeout + Combo) —,
+ * Bühne 10 halb, Bühne 7 als Nicht-Boss-Bühne mit ihren zwei möglichen Sternen.
  */
 const STAGE_STARS = { '5': 7, '7': 5, '10': 3 };
+/**
+ * …und so kommt die Sammlung seit dem Boss-Umbau aus der Ladekette: Bühne 5 ist
+ * KEIN Gate mehr, also existiert ihr Timeout-Stern nicht mehr — die Reparatur
+ * maskiert das Bit weg (7 → 5). Das ist eine BEWUSSTE, dokumentierte
+ * Datenkonsequenz der Regel-Änderung, kein Verlust-Bug: `starBitsFor` ist die
+ * eine Quelle dafür, welche Sterne eine Bühne überhaupt tragen kann, und ein
+ * Stern für „Boss ohne Timeout" auf einer Bühne ohne Boss wäre eine Leiche im
+ * Save. Summe neu: 2 + 2 + 2 = 6 — weiterhin kein 15er-Meilenstein fällig.
+ */
+const STAGE_STARS_LOADED = { '5': 5, '7': 5, '10': 3 };
 const STARS_AWARDED = 0;
 /** Run-Zustand: an Bühne 10 lief eben die Uhr ab (der Timeout-Stern bleibt zu). */
 const BOSS_FOUL_ZONE = 10;
@@ -311,7 +321,7 @@ const RELICS_PRE_V17 = { owned: [], slots: [0, 0, 0], nextId: 1, pity: 0, deepes
 function constellationPreV15(v: SchemaVersion): { earned: number; spent: number; nodes: object } {
   return {
     earned: dustEntitlement({
-      stars: v >= 11 ? 7 : 0, // STAGE_STARS: 3 + 2 + 2, noch kein 15er-Meilenstein
+      stars: v >= 11 ? 6 : 0, // STAGE_STARS_LOADED: 2 + 2 + 2, kein 15er-Meilenstein
       achievements: v >= 8 ? ACHIEVEMENTS.length : 0,
       deepestZone: CORE.lifetimeMaxZone,
     }),
@@ -478,7 +488,9 @@ function expectSlices(s: ChState, v: SchemaVersion): void {
   // v11 — Bühnen-Sterne (P1). Ältere Ären starten die Sammlung bewusst leer:
   // „geclert" wäre aus `lifetimeMaxZone` zwar ableitbar, „ohne Timeout"/„Combo"
   // nicht — eine halb gefüllte Sammlung wäre irreführender als eine frische.
-  expect(s.stageStars).toEqual(v >= 11 ? STAGE_STARS : {});
+  // Boss-Umbau: geladen wird die REPARIERTE Sammlung (Bühne 5 ist kein Gate
+  // mehr, ihr Timeout-Stern fällt weg — siehe `STAGE_STARS_LOADED`).
+  expect(s.stageStars).toEqual(v >= 11 ? STAGE_STARS_LOADED : {});
   expect(s.starsAwarded).toBe(v >= 11 ? STARS_AWARDED : 0);
   expect(s.bossFoulZone).toBe(v >= 11 ? BOSS_FOUL_ZONE : 0);
   // v13 — Crew-Meisterschaft (1a). Ältere Ären starten NICHT bei 0, sondern beim
@@ -727,7 +739,7 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
     what: 'Sterne mit unmöglichen Bits, Müll-Keys und krummem Meilenstein-Highwater',
     damage: (raw) => {
       raw.stageStars = {
-        '5': 15, // Bit 8 existiert nicht ⇒ auf die Vollmaske 7 gestutzt
+        '10': 15, // Bit 8 existiert nicht ⇒ auf die Vollmaske 7 gestutzt (Gate)
         '7': 7, // Nicht-Boss-Bühne: der Timeout-Stern fällt weg ⇒ 5
         '9': 0, // leer ⇒ gar nicht erst aufnehmen
         '12': -4, // negativ ⇒ raus
@@ -739,7 +751,7 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
       raw.bossFoulZone = 'x';
     },
     check: (s) => {
-      expect(s.stageStars).toEqual({ '5': 7, '7': 5 });
+      expect(s.stageStars).toEqual({ '10': 7, '7': 5 });
       expect(s.starsAwarded).toBe(15);
       expect(s.bossFoulZone).toBe(0);
     },

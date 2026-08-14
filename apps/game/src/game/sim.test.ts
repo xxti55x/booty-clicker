@@ -203,7 +203,7 @@ describe('simulateEndless — pacing baseline (M9-AC4)', () => {
 describe('simulateEndless — v12 pacing target table (±25 %)', () => {
   const TOL = 0.25;
   for (const seed of [1, 7]) {
-    it(`seed ${seed}: Bühne 10 ~1.75 min, Bühne 25 ~30 min, Bühne 30 NICHT im ersten Sitting`, () => {
+    it(`seed ${seed}: Bühne 10 ~1.75 min, Bühne 25 ~30 min, Gate 30 hält das erste Sitting`, () => {
       const r = simulateSingleRun({ ...ACTIVE_CAL, seed }, RUN_S);
       const t10 = r.timeToZone.get(10);
       const t20 = r.timeToZone.get(20);
@@ -213,17 +213,21 @@ describe('simulateEndless — v12 pacing target table (±25 %)', () => {
       expect(t25).toBeDefined();
       // v12 (Goal-Nerf): gedrosseltes Einkommen (GOLD_DIVISOR 20), DPS_TUNE 1.5,
       // steilere Leitern (1.075), Fähigkeiten ×9 und Combo ×1.2 statt ×2 — die
-      // erste Wand rückt von ~Bühne 30–39 auf ~Bühne 25 vor, Bühne 30 ist im
-      // ersten 45-min-Sitting bewusst NICHT mehr erreichbar (erst via Aszension).
+      // erste Wand rückt von ~Bühne 30–39 auf ~Bühne 25 vor.
       // Measured: t10 1.75 min, t20 12.7 min, t25 31.1/31.3 min (seeds 1/7).
-      // A2 (Boss-Gimmicks + Ausdauer-Ausgleich): t25 33.9/34.1 min — der
-      // gemischte Bot (57–81 % Klick-Anteil an den Gates) profitiert leicht vom
-      // Ausgleich, die Wand steht unverändert vor Bühne 30. Anker unberührt.
+      // A2 (Boss-Gimmicks + Ausdauer-Ausgleich): t25 33.9/34.1 min.
+      // Boss-Umbau (NEU vermessen): Gates alle 10 statt alle 5, die Gate-Bühne
+      // ist eine eigene Arena — t10 1.7 min, t25 35.5/34.7 min (seeds 1/7): der
+      // Marsch ist praktisch unverändert (das weggefallene Gate 5 und die
+      // sofortige Arena heben sich gegen die unveränderte Wellen-Arbeit auf).
+      // Die erste Wand ist jetzt das GATE 30: „Bühne 30 erreicht" heißt seit dem
+      // Umbau nur „in der Arena angekommen" (Seed 1 schafft das bei ~44 min),
+      // die Wand misst sich an Bühne 31 — HINTER dem Gate.
       expect(t10! / 60).toBeGreaterThanOrEqual(1.75 * (1 - TOL)); // 1.3 min
       expect(t10! / 60).toBeLessThanOrEqual(1.75 * (1 + TOL)); // 2.2 min
       expect(t25! / 60).toBeGreaterThanOrEqual(30 * (1 - TOL)); // 22.5 min
       expect(t25! / 60).toBeLessThanOrEqual(30 * (1 + TOL) + 5); // 42.5 min
-      expect(r.timeToZone.get(30)).toBeUndefined(); // die neue erste Wand hält
+      expect(r.timeToZone.get(31)).toBeUndefined(); // die erste Gate-Wand hält
     });
 
     it(`seed ${seed}: Bühne 75 kumuliert in ~4–6 h (realistischer Spieler MIT Economy)`, () => {
@@ -300,14 +304,20 @@ describe('simulateEndless — E2 (bounded soft wall, full v2 prestige stack)', (
         { ...ACTIVE_CAL, seed },
         { stallSeconds: 1500, maxSeconds: 400_000, plateauAscensions: 4, fullPrestige: true },
       );
-      const zones = [...c.timeToLifetime.keys()].sort((a, b) => a - b).filter((z) => z % 5 === 0);
+      // Boss-Umbau: gemessen wird in GATE-Schritten (+10). Die alte +5-Rasterung
+      // hätte seit dem Umbau abwechselnd „Arena-Ankunft" (billig) und „Gate
+      // gefallen + halbe Welle" (teuer) verglichen — ein Sägezahn, den die
+      // ×2-Schranke strukturell nicht überlebt, ohne dass die Wand härter wäre.
+      // Ein +10-Schritt ist seit dem Umbau genau EINE Verbesserung: Gate
+      // schlagen, neun Wellen, nächste Arena.
+      const zones = [...c.timeToLifetime.keys()].sort((a, b) => a - b).filter((z) => z % 10 === 0);
       const times = zones.map((z) => c.timeToLifetime.get(z)!);
       const gaps: number[] = [];
       for (let i = 1; i < times.length; i++) gaps.push(times[i] - times[i - 1]);
 
       // Deep, productive climb: the full v2 stack reliably reaches the z75 wall
-      // (v12: 16 → 14 improvements — the deliberately slower pacing walls at 75).
-      expect(zones.length).toBeGreaterThanOrEqual(14);
+      // (Boss-Umbau: 14 +5-Schritte ⇒ 8 +10-Arenen, dieselbe Tiefe z80).
+      expect(zones.length).toBeGreaterThanOrEqual(8);
       // The full v2 prestige stack is genuinely exercised — Ancients bought each
       // ascension, and at least one real Himmelfahrt banked HPF + reset the L1 stack.
       expect(c.himmelfahrten).toBeGreaterThanOrEqual(1);
@@ -322,12 +332,14 @@ describe('simulateEndless — E2 (bounded soft wall, full v2 prestige stack)', (
       expect(c.hpfHeld).toBeGreaterThanOrEqual(1);
       expect(c.treeLevels).toBe(0);
 
-      // v10: the strict ×2 bound starts AFTER a 4-gap warm-up. The snappy click-line
-      // start makes the pre-first-ascension consolidation at ~z30 look explosive
-      // relative to the tiny opening gaps (observed spike ratio ≈ 2.9–3.0 exactly
-      // there) — that wall is the DESIGN (buy abilities, then ascend), not wall
-      // growth. From gap 5 on the soft-wall bound stays the strict ×2 of old.
-      const WARMUP = 4;
+      // v10: the strict ×2 bound starts AFTER a warm-up. The snappy click-line
+      // start makes the pre-first-ascension consolidation (Boss-Umbau: die
+      // Arenen 30/40) look explosive relative to the tiny opening gaps
+      // (observed spike ratio ≈ 2.4–3.9 exactly there) — that wall is the
+      // DESIGN (buy abilities, then ascend), not wall growth. In +10 units the
+      // consolidation is covered by the first three gaps (10→20→30→40), so the
+      // strict ×2 bound starts at gap 3 (gemessen: seeds 1/7/12345 halten es).
+      const WARMUP = 2;
       let runMax = Math.max(...gaps.slice(0, WARMUP + 1));
       for (let i = WARMUP + 1; i < gaps.length; i++) {
         expect(gaps[i]).toBeLessThanOrEqual(2 * runMax);
@@ -578,20 +590,24 @@ describe('simulateEndless — float-guard to zone 300 (M14-AC4, §9.3)', () => {
 // ROADMAP-V2 A2: the bot RUNS the theme gimmicks inside `stepSecond` (Spotlight
 // pauses its idle term, the Schild filters both terms, the Welle heals the boss back,
 // Gravitation lifts its combo share). The guard that matters at the sim boundary is
-// that no gimmick can soft-lock a gate: one 45-min run must walk through all four
-// themes' gates (5 club, 10 synth, 15 beach, 20 space). A future parameter tweak that
-// makes one theme unbeatable fails here instead of silently stalling the frontier.
+// that no gimmick can soft-lock a gate. Boss-Umbau: die vier Theme-Gates liegen
+// jetzt auf 10/20/30/40 — Gate 40 fällt naturgemäß nicht mehr in EIN Sitting
+// (die erste Wand ist Gate 30, siehe Pacing-Tabelle), also läuft der Guard über
+// eine kurze Ketten-Messung: binnen sechs Läufen müssen alle vier Gates gefallen
+// sein (gemessen: Bühne 41 nach ~48 min, früh im zweiten Lauf). A future
+// parameter tweak that makes one theme unbeatable fails here instead of silently
+// stalling the frontier.
 describe('simulateEndless — A2 Boss-Gimmicks (kein Gate sperrt)', () => {
   for (const seed of SEEDS_HEAVY) {
-    it(`seed ${seed}: the bot beats all four themed gates in one 45-min run`, () => {
-      const r = simulateSingleRun({ ...ACTIVE, seed }, RUN_S);
+    it(`seed ${seed}: the bot beats all four themed gates within six runs`, () => {
+      const c = simulateRunChain({ ...ACTIVE, seed }, 6, RUN_S);
       const seen = new Set<string>();
-      for (const gate of [5, 10, 15, 20]) {
+      for (const gate of [10, 20, 30, 40]) {
         const g = gimmickForZone(gate);
         expect(g).not.toBeNull();
         seen.add(g!.id);
         // Die Bühne HINTER dem Gate wurde erreicht ⇒ der Boss ist gefallen.
-        expect(r.timeToZone.get(gate + 1)).toBeDefined();
+        expect(c.timeToLifetime.get(gate + 1)).toBeDefined();
       }
       expect(seen.size).toBe(4); // je Theme genau ein eigener Twist
     });
@@ -788,12 +804,12 @@ describe('simulateEndless — Splitter-Einkommen trägt die Umschul-Leiter (3b)'
    * Truhen-🧩 der Sim-Ökonomie (`econ.shards`) und der Boss-Faucet
    * `bossShardReward`, den das Spiel pro Boss-Kill zahlt — den modelliert der Bot
    * NICHT (er bankt nur Truhen), also wird er hier aus der gemessenen
-   * Bühnen-Kurve rekonstruiert: Jeder Lauf clert die Boss-Bühnen 5, 10, … bis zu
-   * seiner Wand.
+   * Bühnen-Kurve rekonstruiert: Jeder Lauf clert die Boss-Arenen 10, 20, … bis
+   * zu seiner Wand (Boss-Umbau: Gates alle 10, jede Arena zahlt doppelt).
    */
   const bossShardsUpTo = (bestZone: number): number => {
     let s = 0;
-    for (let z = 5; z <= bestZone; z += 5) s += bossShardReward(z);
+    for (let z = 10; z <= bestZone; z += 10) s += bossShardReward(z);
     return s;
   };
   const shardsAfter = (seed: number, runs: number): number => {
@@ -804,7 +820,8 @@ describe('simulateEndless — Splitter-Einkommen trägt die Umschul-Leiter (3b)'
   it('zahlt die ERSTE Umschulung im ersten Sitting, aber nicht mehr als eine Handvoll', () => {
     for (const seed of SIM_SEEDS_HEAVY) {
       const s = shardsAfter(seed, 1);
-      // Slot 1 kostet 40 🧩 — in 45 min drin (gemessen ⌀ 48) …
+      // Slot 1 kostet 40 🧩 — in 45 min drin (Boss-Umbau neu gemessen: 47;
+      // vor dem Umbau ⌀ 48 — die verdoppelten Arena-Sätze halten die Kurve) …
       expect(s).toBeGreaterThanOrEqual(retrainCost(1, 0));
       // … aber die Leiter bleibt ein Sparziel: kein Slot-3-Roll (160) am ersten Abend.
       expect(s).toBeLessThan(retrainCost(3, 0));
@@ -815,8 +832,9 @@ describe('simulateEndless — Splitter-Einkommen trägt die Umschul-Leiter (3b)'
     // ~3 h: Slot 4 (320) ist bezahlbar, aber nicht die ganze Crew auf einmal.
     const s3h = shardsAfter(1, 4);
     expect(s3h).toBeGreaterThan(retrainCost(4, 0));
-    // 24 h: Der Beharrungszustand liegt bei rund 140 🧩/h (gemessen 141) — die
-    // Eskalation (×2 je weiterem Roll) bremst also spürbar, ohne zu blockieren.
+    // 24 h: Der Beharrungszustand liegt bei rund 160 🧩/h (Boss-Umbau neu
+    // gemessen: 159; vorher 141) — die Eskalation (×2 je weiterem Roll) bremst
+    // also weiterhin spürbar, ohne zu blockieren.
     const s24h = shardsAfter(1, 32);
     expect(s24h / 24).toBeGreaterThan(100);
     expect(s24h / 24).toBeLessThan(200);

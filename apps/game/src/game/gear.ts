@@ -411,15 +411,17 @@ export const BOSS_SHARD_BASE = 3;
 
 /**
  * PROVISIONAL pre-M12 Pfirsich-Splitter (🧩) faucet: a boss kill grants
- * `BOSS_SHARD_BASE + ⌊zone / 10⌋` shards (zone = the cleared boss zone), scaling
- * gently so deeper bosses pay a little more (boss@10 ⇒ 4, boss@50 ⇒ 8). This exists
- * only so the level economy (`shardCost`) is playable before M12's Pfirsich-Truhen
- * supply the real 🧩 source (§6.1: guaranteed chest per boss kill); M12 replaces it.
+ * `(BOSS_SHARD_BASE + ⌊zone / 10⌋) × 2` shards (zone = the cleared boss zone),
+ * scaling gently so deeper bosses pay a little more (boss@10 ⇒ 8, boss@50 ⇒ 16).
+ * The ×2 is the Boss-Umbau („jede Arena zahlt doppelt", see `chests.ts`): gates
+ * are twice as far apart, the doubled reward keeps the 🧩 income per zone of
+ * depth. This exists only so the level economy (`shardCost`) is playable before
+ * M12's Pfirsich-Truhen supply the real 🧩 source (§6.1); M12 replaces it.
  * Pure & clamped (a non-positive zone yields 0).
  */
 export function bossShardReward(zone: number): number {
   if (!(zone > 0)) return 0;
-  return BOSS_SHARD_BASE + Math.floor(zone / 10);
+  return (BOSS_SHARD_BASE + Math.floor(zone / 10)) * 2;
 }
 
 // ---------------------------------------------------------------------------

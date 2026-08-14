@@ -39,33 +39,34 @@ import { COMBO_WINDOW_S, comboStep, createCombo, decay } from './combo';
 // ---------------------------------------------------------------------------
 
 describe('boss-gimmicks — Katalog & Theme-Rotation', () => {
-  it('mirrors the one true 5-Bühnen-Rotation (club → synth → beach → space)', () => {
+  it('mirrors the one true 10-Bühnen-Rotation (club → synth → beach → space)', () => {
     // Der lokale `ZONES_PER_THEME` MUSS `BOSS_EVERY` sein (er steht nur deshalb
-    // lokal, damit `combat.ts` dieses Modul zyklusfrei importieren kann).
+    // lokal, damit `combat.ts` dieses Modul zyklusfrei importieren kann). Seit
+    // dem Boss-Umbau ist die LETZTE Bühne eines Themes seine eigene Boss-Arena.
     expect(ZONES_PER_THEME).toBe(BOSS_EVERY);
     expect([...ZONE_THEMES]).toEqual(['club', 'synth', 'beach', 'space']);
     expect(themeForZone(1)).toBe('club');
-    expect(themeForZone(5)).toBe('club');
-    expect(themeForZone(6)).toBe('synth');
-    expect(themeForZone(10)).toBe('synth');
-    expect(themeForZone(15)).toBe('beach');
-    expect(themeForZone(20)).toBe('space');
-    expect(themeForZone(21)).toBe('club'); // Runde 2
+    expect(themeForZone(10)).toBe('club'); // die Club-Arena gehört noch zum Club
+    expect(themeForZone(11)).toBe('synth');
+    expect(themeForZone(20)).toBe('synth');
+    expect(themeForZone(25)).toBe('beach');
+    expect(themeForZone(40)).toBe('space');
+    expect(themeForZone(41)).toBe('club'); // Runde 2
     expect(themeForZone(0)).toBe('club'); // defensiv geklemmt
   });
 
   it('gives exactly one gimmick per theme, only on boss gates', () => {
-    expect(gimmickForZone(5)?.id).toBe('spotlight');
-    expect(gimmickForZone(10)?.id).toBe('shield');
-    expect(gimmickForZone(15)?.id).toBe('wave');
-    expect(gimmickForZone(20)?.id).toBe('gravity');
-    expect(gimmickForZone(25)?.id).toBe('spotlight'); // Rotation läuft weiter
-    for (const z of [1, 2, 4, 6, 9, 11, 14, 19, 24]) {
+    expect(gimmickForZone(10)?.id).toBe('spotlight');
+    expect(gimmickForZone(20)?.id).toBe('shield');
+    expect(gimmickForZone(30)?.id).toBe('wave');
+    expect(gimmickForZone(40)?.id).toBe('gravity');
+    expect(gimmickForZone(50)?.id).toBe('spotlight'); // Rotation läuft weiter
+    for (const z of [1, 2, 4, 5, 6, 9, 11, 15, 19, 25, 39]) {
       expect(isBossZone(z)).toBe(false);
       expect(gimmickForZone(z)).toBeNull();
     }
     expect(gimmickForZone(0)).toBeNull();
-    expect(gimmickForZone(-5)).toBeNull();
+    expect(gimmickForZone(-10)).toBeNull();
     expect(gimmickForZone(Number.NaN)).toBeNull();
   });
 
@@ -88,20 +89,21 @@ describe('boss-gimmicks — Katalog & Theme-Rotation', () => {
 
 describe('boss-gimmicks — Ausdauer-Ausgleich', () => {
   it('scales boss HP per gimmick and leaves non-boss zones untouched', () => {
-    expect(bossHpScale(5)).toBe(GIMMICK_HP_SCALE.spotlight);
-    expect(bossHpScale(10)).toBe(GIMMICK_HP_SCALE.shield);
-    expect(bossHpScale(15)).toBe(GIMMICK_HP_SCALE.wave);
-    expect(bossHpScale(20)).toBe(GIMMICK_HP_SCALE.gravity);
+    expect(bossHpScale(10)).toBe(GIMMICK_HP_SCALE.spotlight);
+    expect(bossHpScale(20)).toBe(GIMMICK_HP_SCALE.shield);
+    expect(bossHpScale(30)).toBe(GIMMICK_HP_SCALE.wave);
+    expect(bossHpScale(40)).toBe(GIMMICK_HP_SCALE.gravity);
     expect(bossHpScale(7)).toBe(1);
+    expect(bossHpScale(5)).toBe(1); // die alten Halb-Gates sind normale Bühnen
     expect(bossHp(1)).toBe(monsterHp(1) * 10); // keine Boss-Bühne ⇒ rohe Kurve
   });
 
   it('feeds through to the real spawned boss', () => {
-    const club = spawnFor(5, 10, 5);
+    const club = spawnFor(10, 0, 10);
     expect(club.boss).toBe(true);
-    expect(club.hpMax).toBeCloseTo(monsterHp(5) * 10 * GIMMICK_HP_SCALE.spotlight, 9);
-    const synth = spawnFor(10, 10, 10);
-    expect(synth.hpMax).toBeCloseTo(monsterHp(10) * 10 * GIMMICK_HP_SCALE.shield, 9);
+    expect(club.hpMax).toBeCloseTo(monsterHp(10) * 10 * GIMMICK_HP_SCALE.spotlight, 9);
+    const synth = spawnFor(20, 0, 20);
+    expect(synth.hpMax).toBeCloseTo(monsterHp(20) * 10 * GIMMICK_HP_SCALE.shield, 9);
   });
 
   it('keeps every scale in a sane band (a gimmick pays for itself, it never trivialises)', () => {
@@ -134,7 +136,7 @@ describe('boss-gimmicks — Club „Spotlight-Phasen"', () => {
   });
 
   it('fires twice per fight, each for SPOTLIGHT_S seconds, and never a third time', () => {
-    const g = gimmickForZone(5)!;
+    const g = gimmickForZone(10)!;
     let s = createGimmickRuntime();
     expect(spotlightActive(s)).toBe(false);
 
@@ -177,7 +179,7 @@ describe('boss-gimmicks — Club „Spotlight-Phasen"', () => {
   });
 
   it('reports a partial share for a sub-second frame (the 60-fps path)', () => {
-    const g = gimmickForZone(5)!;
+    const g = gimmickForZone(10)!;
     // Phase mit 0.1 s Rest, Frame von 0.4 s ⇒ ein Viertel des Frames im Licht.
     const s = { phases: 2, spotlightT: 0.1, healT: WAVE_PERIOD_S };
     const t = tickGimmick(s, g, 0.2, 0.4);
@@ -186,7 +188,7 @@ describe('boss-gimmicks — Club „Spotlight-Phasen"', () => {
   });
 
   it('pauses ONLY the idle term while lit', () => {
-    const g = gimmickForZone(5)!;
+    const g = gimmickForZone(10)!;
     expect(gimmickBossDamage(g, { click: 30, idle: 70, spotlightShare: 1 })).toBe(30);
     expect(gimmickBossDamage(g, { click: 30, idle: 70, spotlightShare: 0 })).toBe(100);
     expect(gimmickBossDamage(g, { click: 30, idle: 70, spotlightShare: 0.5 })).toBe(65);
@@ -232,7 +234,7 @@ describe('boss-gimmicks — Synth „Schild-Takte"', () => {
   });
 
   it('filters click AND idle with the same factor (build-independent)', () => {
-    const g = gimmickForZone(10)!;
+    const g = gimmickForZone(20)!;
     expect(gimmickBossDamage(g, { click: 60, idle: 40 })).toBeCloseTo(100 * SYNTH_IDLE_FACTOR, 9);
     expect(gimmickBossDamage(g, { click: 10, idle: 90 })).toBeCloseTo(100 * SYNTH_IDLE_FACTOR, 9);
   });
@@ -260,7 +262,7 @@ describe('boss-gimmicks — Beach „Wellen-Heilung"', () => {
   });
 
   it('rolls exactly one wave per WAVE_PERIOD_S and keeps the phase', () => {
-    const g = gimmickForZone(15)!;
+    const g = gimmickForZone(30)!;
     let s = createGimmickRuntime();
     let heals = 0;
     for (let t = 0; t < WAVE_PERIOD_S * 3; t++) {
@@ -276,7 +278,7 @@ describe('boss-gimmicks — Beach „Wellen-Heilung"', () => {
   });
 
   it('does not touch the damage formula (the wave is HP-regen, not a filter)', () => {
-    const g = gimmickForZone(15)!;
+    const g = gimmickForZone(30)!;
     expect(gimmickBossDamage(g, { click: 30, idle: 70 })).toBe(100);
   });
 });
@@ -317,7 +319,7 @@ describe('boss-gimmicks — Space „Gravitations-Combo"', () => {
   });
 
   it('raises only the click term in the bot formula', () => {
-    const g = gimmickForZone(20)!;
+    const g = gimmickForZone(40)!;
     const cm = comboMult(COMBO_CAP);
     const out = gimmickBossDamage(g, { click: 60, idle: 40, comboMult: cm });
     expect(out).toBeCloseTo(60 * (spaceComboBonus(cm) / cm) + 40, 9);
@@ -344,7 +346,7 @@ describe('boss-gimmicks — Laufzeit-Zustand & Sekunden-Formel', () => {
     expect(none.state).toBe(s);
     expect(none.heals).toBe(0);
     expect(none.spotlightShare).toBe(0);
-    const still = tickGimmick(s, gimmickForZone(15), 0.2, 0);
+    const still = tickGimmick(s, gimmickForZone(30), 0.2, 0);
     expect(still.state).toBe(s);
     expect(still.heals).toBe(0);
   });
@@ -356,12 +358,12 @@ describe('boss-gimmicks — Laufzeit-Zustand & Sekunden-Formel', () => {
 
   it('shield/spotlight can only ever REDUCE, gravity only ever RAISE', () => {
     const raw = 100;
-    for (const zone of [5, 10, 15]) {
+    for (const zone of [10, 20, 30]) {
       const g = gimmickForZone(zone)!;
       const out = gimmickBossDamage(g, { click: 45, idle: 55, spotlightShare: 1, comboMult: 1.2 });
       expect(out).toBeLessThanOrEqual(raw);
     }
-    const grav = gimmickForZone(20)!;
+    const grav = gimmickForZone(40)!;
     expect(gimmickBossDamage(grav, { click: 45, idle: 55, comboMult: 1.2 })).toBeGreaterThanOrEqual(
       raw,
     );

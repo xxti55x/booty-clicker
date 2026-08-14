@@ -8,7 +8,14 @@ import {
 } from '../game/advisor';
 import { gimmickForZone, themeForZone } from '../game/boss-gimmicks';
 import type { ChState } from '../game/ch-state';
-import { type CombatState, bossHp, bossTimeFraction, hpFraction, isBossZone } from '../game/combat';
+import {
+  type CombatState,
+  BOSS_EVERY,
+  bossHp,
+  bossTimeFraction,
+  hpFraction,
+  isBossZone,
+} from '../game/combat';
 import { MONSTERS_PER_ZONE } from '../game/combat';
 import { comboTierName } from '../game/combo';
 import { soulBonusEff } from '../game/heaven';
@@ -47,7 +54,7 @@ const BOSSES = [
  * Banner nie auseinanderlaufen (eine Quelle, keine Kopie).
  */
 export function rivalName(zone: number, boss: boolean): string {
-  if (boss) return '👑 ' + BOSSES[Math.floor(zone / 5) % BOSSES.length];
+  if (boss) return '👑 ' + BOSSES[Math.floor(zone / BOSS_EVERY) % BOSSES.length];
   const pool = RIVALS[stripTheme(zone)];
   return pool[zone % pool.length];
 }
@@ -115,12 +122,15 @@ function starPips(zone: number, stars: StageStars): string {
 }
 
 /**
- * Steht der Spieler an der Frontier-Boss-Bühne, deren Gate noch offen ist (und
- * der Boss tanzt noch nicht)? Die gemeinsame Bedingung von „Boss herausfordern"
- * und der P3-Telemetrie-Zeile — EINE Quelle, damit beide nie auseinanderlaufen.
+ * Ist die Frontier ein noch OFFENES Boss-Gate, in dessen Arena der Spieler
+ * gerade NICHT steht? Seit dem Boss-Umbau steht der Boss sofort, sobald man die
+ * Gate-Bühne betritt — `maxZone` bleibt also genau so lange ein Vielfaches von
+ * `BOSS_EVERY`, bis sein Boss fällt. Solange das gilt und man woanders farmt,
+ * zeigen Button („zurück in die Arena reisen") und P3-Telemetrie-Zeile auf
+ * dieses Gate — EINE Quelle, damit beide nie auseinanderlaufen.
  */
 function atFrontierGate(combat: CombatState): boolean {
-  return isBossZone(combat.zone) && !combat.boss && combat.zone === combat.maxZone;
+  return isBossZone(combat.maxZone) && !combat.boss;
 }
 
 export class ChHud {
@@ -182,7 +192,9 @@ export class ChHud {
   update(state: ChState, combat: CombatState, dps: number, clickDmg: number): void {
     this.cZone = this.setText(this.zone, String(combat.zone), this.cZone);
     // Rendered as a stamped gold chip (`.zone-kind`), so plain text reads best.
-    const kind = combat.boss ? 'BOSS' : isBossZone(combat.zone) ? 'VS' : '';
+    // Boss-Umbau: auf einer Gate-Bühne tanzt IMMER der Boss — ein „VS"-Zwischen-
+    // zustand (Welle vor dem Boss) existiert nicht mehr.
+    const kind = combat.boss ? 'BOSS' : '';
     this.cKind = this.setText(this.zoneKind, kind, this.cKind);
     this.setGold(state.gold);
     this.cStats = this.setText(this.stats, `DPS ${fmt(dps)} · Klick ${fmt(clickDmg)}`, this.cStats);
@@ -306,7 +318,9 @@ export class ChHud {
       this.setHint('');
       return;
     }
-    const gap = bossGap(state, combat, dps, clickDmg);
+    // Der Boss, um den es geht, steht an der FRONTIER-Arena — nicht auf der
+    // Bühne, auf der gerade gefarmt wird (Boss-Umbau).
+    const gap = bossGap(state, { zone: combat.maxZone }, dps, clickDmg);
     if (!(gap < HINT_GAP_MAX)) {
       this.setHint(''); // Lücke zu (oder unbekannt) ⇒ kein ungefragter Ratschlag
       return;
@@ -317,7 +331,7 @@ export class ChHud {
       this.hintBuy = bestPurchaseHint(state);
     }
     const burst = fmt(burstEstimate(state, dps, clickDmg));
-    const boss = fmt(bossHp(combat.zone));
+    const boss = fmt(bossHp(combat.maxZone));
     const tip = this.hintBuy
       ? ` — Tipp: <b>${this.hintBuy.label}</b> · ${fmt(this.hintBuy.cost)} BP${
           this.hintBuy.affordable ? '' : ' (sparen)'
@@ -337,7 +351,7 @@ export class ChHud {
   /**
    * Bühnen-Bildleiste (Goal-Umbau: reine ANZEIGE, nicht klickbar — die Bühnen
    * wählt das Spiel selbst): fünf Insel-Thumbnails um die aktuelle Zone, die
-   * aktive markiert, Boss-Gates (×5) mit Gold-Rand, kommende Zonen gedimmt.
+   * aktive markiert, Boss-Gates (alle `BOSS_EVERY`) mit Gold-Rand, kommende Zonen gedimmt.
    * Unter jeder Nummer die P1-Stern-Pips der Bühne.
    */
   private updateZoneStrip(
@@ -364,12 +378,12 @@ export class ChHud {
       const cls = [
         'zs',
         z === zone ? 'active' : 'go',
-        z % 5 === 0 ? 'boss' : '',
+        isBossZone(z) ? 'boss' : '',
         weekly ? 'wk' : '',
       ]
         .filter(Boolean)
         .join(' ');
-      const label = z % 5 === 0 ? `Boss-Bühne ${z}` : `Bühne ${z}`;
+      const label = isBossZone(z) ? `Boss-Bühne ${z}` : `Bühne ${z}`;
       const mods = stageModsFor(z, remix, week);
       // Die Regeln gehören in den Tooltip: so wählt man die Farm-Bühne schon im
       // Strip, ohne erst hinreisen zu müssen — auf der Wochen-Bühne beide.

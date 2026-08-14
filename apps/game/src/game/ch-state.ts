@@ -8,6 +8,7 @@
  */
 import { type AbilityState, createAbility } from './ability';
 import { applyAscension, soulMult } from './ascension';
+import { BOSS_EVERY } from './combat';
 import {
   type AncientLevels,
   ancientChestLuckBonus,
@@ -687,18 +688,18 @@ function unlockZone(state: Pick<ChState, 'lifetimeMaxZone'> & { gear?: GearState
 
 /**
  * Boss zones whose boss has been first-killed, for the gear unlock context (§5.3).
- * Normal play: a boss zone Z (multiple of 5) is first-killed ⇔ the deepest zone
- * ever reached (`lifetimeMaxZone`, floored by the Himmelfahrt-surviving
- * `gear.zoneEver`) is > Z (advancing past it as a new record). The legacy Tyrann
- * claim (§9.2.3) is unioned in as zone 10 so a `bossDefeated` old-save unlocks
- * Tyrann even at a shallow CH zone.
+ * Normal play: a boss zone Z (multiple of `BOSS_EVERY`) is first-killed ⇔ the
+ * deepest zone ever reached (`lifetimeMaxZone`, floored by the Himmelfahrt-
+ * surviving `gear.zoneEver`) is > Z (advancing past it as a new record). The
+ * legacy Tyrann claim (§9.2.3) is unioned in as zone 10 so a `bossDefeated`
+ * old-save unlocks Tyrann even at a shallow CH zone.
  */
 export function bossFirstKillZones(
   state: Pick<ChState, 'lifetimeMaxZone' | 'legacyTyrann'> & { gear?: GearState },
 ): Set<number> {
   const zones = new Set<number>();
   const deepest = unlockZone(state);
-  for (let z = 5; z < deepest; z += 5) zones.add(z);
+  for (let z = BOSS_EVERY; z < deepest; z += BOSS_EVERY) zones.add(z);
   if (state.legacyTyrann) zones.add(10);
   return zones;
 }
