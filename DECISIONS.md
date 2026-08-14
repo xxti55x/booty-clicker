@@ -3,6 +3,31 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Gemalte Fernkulissen: Canvas-Panoramen statt 3D (User-Auftrag)
+
+- **Der Trick:** Die Diorama-Kamera ist FIX — aus einem festen Blickwinkel ist
+  eine bemalte Fläche von Geometrie nicht zu unterscheiden. `world/paintings.ts`
+  malt pro Theme EIN 1024er-Canvas-Panorama (einmal beim Bau) und hängt es als
+  Cutout-Billboard (transparenter Himmel, weiche `fadeEdges`-Ränder,
+  `depthWrite` aus) in die Kulisse: Club = Nachtstadt mit drei Skyline-Reihen,
+  hunderten gemischten Fenstern, Neon-Schildern + Riesenrad; Synth =
+  facettiertes Chrom-Gebirge mit Neon-Graten + Palmen-Silhouetten; Beach =
+  Bucht mit Glitzer-See, Inselketten, drei Segelbooten, Wolken mit Sonnenrand,
+  Möwen; Space = Ringplanet mit Cel-Banden/Terminator, Krater-Mond, Nebel,
+  Spiralgalaxie, Komet. Detailtiefe, die als Mesh das G3-Budget sprengen
+  würde — für EINEN Draw-Call je Theme. Ink-Konturen halten den Toon-Look.
+- **Platzierung ist GEMESSEN, nicht geraten:** eine Projektions-Probe
+  (`window.__cam`, manuelle Matrix-Projektion zu NDC) ergab (a) Welt-+x =
+  Screen-LINKS, (b) das sichtbare Band je Tiefe, und (c) den Grund, warum die
+  ersten Plätze leer blieben: Synth-Grid (y −7.4) und Beach-See sind große
+  OPAKE Flächen — sie verdecken das gesamte Fernfeld dahinter, und das Fenster
+  oberhalb ihrer Oberfläche liegt bei z ≥ 50 außerhalb des Frames. Club/Space
+  schweben im Leeren ⇒ Fern-Panorama (z 50/60); Synth/Beach stehen NAH davor
+  (z 11/16), als Collage vor Grid bzw. See. Synth-Palette einmal aufgehellt
+  (dark-on-dark soff ab, per Screenshot abgenommen — alle vier Themes).
+- Der Recolour-Lap läuft über den `css(hue)`-Callback in die Malfarben, der
+  Textur-Cache hängt deshalb an (Maler, Lap).
+
 ## Boss-Umbau: eigene Boss-Arenen, alle 10 Bühnen (User-Auftrag)
 
 - **Struktur:** `BOSS_EVERY` 5 → 10, und eine Gate-Bühne IST jetzt die
