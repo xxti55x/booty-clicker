@@ -3,6 +3,107 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Gemalte Fernkulissen: Canvas-Panoramen statt 3D (User-Auftrag)
+
+- **Der Trick:** Die Diorama-Kamera ist FIX — aus einem festen Blickwinkel ist
+  eine bemalte Fläche von Geometrie nicht zu unterscheiden. `world/paintings.ts`
+  malt pro Theme EIN 1024er-Canvas-Panorama (einmal beim Bau) und hängt es als
+  Cutout-Billboard (transparenter Himmel, weiche `fadeEdges`-Ränder,
+  `depthWrite` aus) in die Kulisse: Club = Nachtstadt mit drei Skyline-Reihen,
+  hunderten gemischten Fenstern, Neon-Schildern + Riesenrad; Synth =
+  facettiertes Chrom-Gebirge mit Neon-Graten + Palmen-Silhouetten; Beach =
+  Bucht mit Glitzer-See, Inselketten, drei Segelbooten, Wolken mit Sonnenrand,
+  Möwen; Space = Ringplanet mit Cel-Banden/Terminator, Krater-Mond, Nebel,
+  Spiralgalaxie, Komet. Detailtiefe, die als Mesh das G3-Budget sprengen
+  würde — für EINEN Draw-Call je Theme. Ink-Konturen halten den Toon-Look.
+- **Platzierung ist GEMESSEN, nicht geraten:** eine Projektions-Probe
+  (`window.__cam`, manuelle Matrix-Projektion zu NDC) ergab (a) Welt-+x =
+  Screen-LINKS, (b) das sichtbare Band je Tiefe, und (c) den Grund, warum die
+  ersten Plätze leer blieben: Synth-Grid (y −7.4) und Beach-See sind große
+  OPAKE Flächen — sie verdecken das gesamte Fernfeld dahinter, und das Fenster
+  oberhalb ihrer Oberfläche liegt bei z ≥ 50 außerhalb des Frames. Club/Space
+  schweben im Leeren ⇒ Fern-Panorama (z 50/60); Synth/Beach stehen NAH davor
+  (z 11/16), als Collage vor Grid bzw. See. Synth-Palette einmal aufgehellt
+  (dark-on-dark soff ab, per Screenshot abgenommen — alle vier Themes).
+- Der Recolour-Lap läuft über den `css(hue)`-Callback in die Malfarben, der
+  Textur-Cache hängt deshalb an (Maler, Lap).
+
+## Boss-Umbau: eigene Boss-Arenen, alle 10 Bühnen (User-Auftrag)
+
+- **Struktur:** `BOSS_EVERY` 5 → 10, und eine Gate-Bühne IST jetzt die
+  Boss-Arena — `spawnFor` spawnt auf jedem Vielfachen von 10 SOFORT den Boss
+  (kein Rivalen-Vorlauf mehr), egal ob man vorstößt, hinreist (`travelTo`)
+  oder einen Save dort lädt. `challengeBoss` ist ersatzlos entfernt: Der
+  „Boss"-Button reist nur noch zurück zur offenen Frontier-Arena
+  (`travelToZone(maxZone)`), Timer-Bonus + G2-Auftritt übernimmt die
+  Reise-Funktion für JEDEN Weg in eine Arena. Der „VS"-Zwischenzustand der
+  HUD-Chips ist tot (auf einer Gate-Bühne tanzt immer der Boss).
+- **Theme-Rotation folgt:** `ZONES_PER_THEME` 5 → 10 — die LETZTE Bühne eines
+  Themes ist seine eigene Arena (10 = Club-Boss, 20 = Synth, 30 = Beach,
+  40 = Space), damit alle vier A2-Gimmicks in der Rotation bleiben (bei
+  5er-Themes unter 10er-Gates hätten nur Synth/Space je ein Gate gehabt).
+  Recolour-Lap (bgVariant/entityVariant) 20 → 40 Bühnen: ein Lap bleibt „eine
+  volle Tour". `weeklyZoneFor`/`stage-mods` folgen der Konstante von selbst.
+- **„Jede Arena zahlt doppelt":** Gates liegen doppelt so weit auseinander —
+  ALLE Pro-Gate-Faucets sind verdoppelt, damit der Zufluss PRO BÜHNE VORSTOSS
+  steht: 2 🔑 + 2 Truhen je Arena (`BOSS_KEYS_BASE`/`BOSS_CHESTS_PER_GATE`),
+  `bossShardReward` ×2, `REP_PER_BOSS` 10 → 20, Pfad-Gegenwert `BOSS_SECONDS`
+  180 → 360, Sternenstaub `DUST_PER_GATE` 2 → 4 (ab Gate 30 statt 25 — 25 ist
+  kein Gate mehr, und die Formel braucht ein Vielfaches von `GATE_EVERY`),
+  Relikte 25 %/Pity 4 → **50 %/Pity 2** (EV 1,5 Gates ≈ 15 Bühnen je Relikt,
+  vorher 13,7 — die Drop-Kurve pro Tiefe steht). Gemessen: 🧩 im ersten
+  Sitting 47 (vorher ⌀ 48), Beharrung 159/h (vorher 141), Ruf-Stufe 1 im
+  ersten Sitting — alle Ökonomie-Anker halten in ihren Bändern.
+- **Neu vermessen (Kalibrier-Bot 3 cps):** t10 1,7 min · t25 35,5/34,7 min —
+  praktisch unverändert (das weggefallene Gate 5 hebt sich gegen die
+  unveränderte Wellen-Arbeit auf). Die erste Wand ist jetzt das GATE 30:
+  „Bühne 30" heißt nur noch „in der Arena angekommen", die Wand misst sich an
+  Bühne 31 (Anker + Balance-Ritual umgestellt). Erste Himmelfahrt 12,5 h —
+  mitten im [11,6 h, 19,4 h]-Fenster. E2 misst jetzt in GATE-Schritten (+10):
+  das alte +5-Raster verglich seit dem Umbau abwechselnd billige
+  Arena-Ankünfte mit teuren Durchbrüchen (struktureller Sägezahn); im
+  10er-Raster liegt das schlimmste Verhältnis bei 0,89–1,03 — die Wand ist
+  weicher als je. BEWUSST HINGENOMMEN: der 1-cps-Casual-Marsch auf Bühne 75
+  beschleunigt von ⌀ 4,6 h auf ⌀ 2,9 h (halb so viele 30-s-Zeitschranken für
+  schwache Klicker) — das Anker-Band [3 h, 7,5 h] hält für die gepinnten
+  Seeds, die Tiefen-Struktur (z80-Wand, Seelen-Bank 2074) ist bit-gleich.
+- **Bewusste Datenkonsequenz:** Bühne 5/15/25/… sind keine Gates mehr — die
+  Sterne-Reparatur maskiert dort den Timeout-Stern weg (Alt-Save `'5': 7`
+  lädt als `'5': 5`); ein Stern für „Boss ohne Timeout" auf einer Bühne ohne
+  Boss wäre eine Leiche im Save. Der Relikt-Highwater-Seed der v17-Migration
+  rechnet im 10er-Raster (`clearedGateFor`). Matrix-Fixtures dokumentieren
+  beides explizit (`STAGE_STARS` vs. `STAGE_STARS_LOADED`).
+- **Sim-Retry vereinfacht:** `retryBossZone` ist raus — nach einem Timeout
+  fällt der Bot auf Bühne G−1, und das CLEAREN dieser Welle IST der Retry
+  (der Vorstoß spawnt den Boss ja sofort wieder). „Zweiter Wind" bleibt im
+  Bot ungefaltet: erstattete Kills verkürzen nur die Rückfall-Welle
+  (Pacing), sie legen den Boss nicht schneller.
+- **Headless bewiesen:** Save auf Gate 10 geladen ⇒ BOSS-Chip, 👑 Bass-Baron,
+  ⏱ 30 s, Gimmick „🔦 Nur Klicks!" (Club-Arena!); Rückreise auf 9 ⇒ Button
+  „👑 Zum Boss reisen"; Klick ⇒ Arena, Banner, Boss tanzt (Screenshots).
+
+## Techno-Soundtrack: ein Subgenre je Bühne + Hardcore-Boss (User-Auftrag)
+
+- **Genre-Feld statt neuer Tracks:** `TrackConfig.genre` steuert in
+  `scheduleStep` Kick-Muster, Bass-Verhalten und Hat-Dichte; Skala/Arp/Wave
+  bleiben Theme-eigen. Club = **Bounce** (128 BPM, Offbeat-„Donk"), Synth =
+  **Trance** (138, rollender Achtel-Bass), Beach = **Sunset-House** (122,
+  offene Hats), Space = **Dark Hardtechno** (145, Doppel-Kick + Drone).
+- **Boss = Hardcore (160 BPM):** `BOSS_TRACK` mit Halbton-Pendel-Skala in
+  tiefem Moll läuft auf JEDER Boss-Bühne statt des Theme-Tracks —
+  `setBossMode(on)` zündet beim Öffnen den Drop-Impact und `activeTrack()`
+  tauscht die Quelle, ohne den Sequencer neu zu bauen. `kick(time, hard)`
+  bekommt eine Square-Verzerr-Transiente, `hat(time, dur)` offene Hats.
+  Glue: `audio.setBossMode(combat.boss)` neben `setEkstase` — EIN Leser.
+
+## Skin-Wechsel-Bug: Duplikat-Körper auf der Bühne (User-Bug)
+
+- `buildCharacter` entfernte den Vorgänger mit `scene.remove(root)` — aber
+  `main.ts` hängt den Rig nach dem Bau in die Show-Spin-Gruppe um, also war
+  das ein No-op und jeder Wechsel leakte einen kompletten Körper. Fix: vom
+  ECHTEN Parent lösen (`root.parent?.remove(root)`, Cheeks analog). Headless
+  bewiesen: drei Wechsel, exakt ein Charakter im Bild.
+
 ## Lounge-Publikum + Ekstase-Drop + Bühnen-Kinetik (User-Auftrag)
 
 - **Lounge statt Schatten:** Die flachen Silhouetten-Instanzen sind ersetzt

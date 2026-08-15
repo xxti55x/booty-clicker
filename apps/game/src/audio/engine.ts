@@ -1,6 +1,6 @@
 import type { BackgroundKey } from '../types';
 import { loadAudioPrefs, saveAudioPrefs, type AudioPrefs, type PrefsStorage } from './prefs';
-import { MUSIC_TRACKS, type TrackConfig } from './tracks';
+import { BOSS_TRACK, MUSIC_TRACKS, type TrackConfig } from './tracks';
 
 function ctxStorage(): PrefsStorage | null {
   try {
@@ -21,6 +21,8 @@ class MusicPlayer {
   private intensity = 0;
   /** ROADMAP-V2 X5: läuft gerade das Ekstase-Fenster? (Theme-Zusatzstimme) */
   private ekstase = false;
+  /** Boss-Bühne aktiv? ⇒ der Hardcore-Track übernimmt den ganzen Loop. */
+  private bossMode = false;
 
   constructor(
     private readonly ctx: AudioContext,
@@ -46,6 +48,17 @@ class MusicPlayer {
   setEkstase(on: boolean): void {
     if (on && !this.ekstase) this.dropImpact(this.ctx.currentTime);
     this.ekstase = on;
+  }
+
+  /** Boss-Bühne auf/zu — Öffnen schlägt denselben Impact wie der Ekstase-Drop. */
+  setBossMode(on: boolean): void {
+    if (on && !this.bossMode) this.dropImpact(this.ctx.currentTime);
+    this.bossMode = on;
+  }
+
+  /** Der Track, der JETZT gilt: Boss-Bühnen spielen den Hardcore-Track. */
+  private activeTrack(): TrackConfig {
+    return this.bossMode ? BOSS_TRACK : this.track;
   }
 
   /** Der eine große Schlag, wenn das Fenster aufgeht: Sub-Kick + Crash. */
@@ -96,7 +109,7 @@ class MusicPlayer {
     if (!this.playing) return;
     // Ekstase schaltet den Gang hoch: +22 % Tempo — genug für „fetzig",
     // wenig genug, dass der On-Beat-Tap dem Takt noch folgen kann.
-    const secPerStep = (60 / this.track.bpm / 2) * (this.ekstase ? 0.82 : 1);
+    const secPerStep = (60 / this.activeTrack().bpm / 2) * (this.ekstase ? 0.82 : 1);
     while (this.nextNoteTime < this.ctx.currentTime + 0.2) {
       this.scheduleStep(this.step, this.nextNoteTime);
       this.nextNoteTime += secPerStep;
@@ -106,7 +119,7 @@ class MusicPlayer {
   };
 
   private scheduleStep(step: number, time: number): void {
-    const { rootHz, scale, wave } = this.track;
+    const { rootHz, scale, wave, genre } = this.activeTrack();
     const deg = scale[step % scale.length]!;
     const oct = step % 8 >= 4 ? 2 : 1; // lift the arp an octave in the 2nd half
     if (this.ekstase) {
@@ -118,8 +131,47 @@ class MusicPlayer {
       const bSemi = step % 4 < 2 ? 0 : 7;
       this.voice((rootHz / 2) * Math.pow(2, bSemi / 12), time, 0.2, wave, 0.16);
     } else {
-      if (step % 4 === 0) this.voice(rootHz / 2, time, 0.32, wave, 0.14); // bass
-      if (step % 2 === 1) this.hat(time);
+      // Techno-Grundgroove je Subgenre (Melodie-Seite bleibt Theme-eigen).
+      switch (genre) {
+        case 'bounce':
+          // Four-on-the-floor + der „Donk" hüpft auf den Offbeats.
+          if (step % 4 === 0) this.kick(time);
+          if (step % 4 === 2) this.voice(rootHz, time, 0.11, 'square', 0.12);
+          if (step % 2 === 1) this.hat(time);
+          break;
+        case 'trance':
+          // Rollender Achtel-Bass unterm Kick — der Motor jeder Trance-Nacht.
+          if (step % 4 === 0) this.kick(time);
+          this.voice(rootHz / 2, time, 0.14, wave, step % 4 === 0 ? 0.08 : 0.12);
+          if (step % 2 === 1) this.hat(time);
+          break;
+        case 'house':
+          // Four-on-the-floor + OFFENE Hats auf den Offbeats (längerer Ausklang).
+          if (step % 4 === 0) this.kick(time);
+          if (step % 4 === 0) this.voice(rootHz / 2, time, 0.3, wave, 0.12);
+          if (step % 4 === 2) this.hat(time, 0.16);
+          else if (step % 2 === 1) this.hat(time);
+          break;
+        case 'hardtechno':
+          // Treibende Doppel-Kick, dunkler Drone, Hats auf jedem Achtel.
+          if (step % 2 === 0) this.kick(time);
+          if (step % 4 === 1) this.voice(rootHz / 2, time, 0.22, wave, 0.13);
+          this.hat(time);
+          break;
+        case 'hardcore':
+          // Boss: die Kick-Wand — jeder Achtel, mit Verzerr-Transiente, Bass
+          // pendelt im Halbton (bedrohlich), Hats doppelt.
+          this.kick(time, true);
+          this.hat(time);
+          this.voice(
+            (rootHz / 2) * Math.pow(2, (step % 4 < 2 ? 0 : 1) / 12),
+            time,
+            0.16,
+            wave,
+            0.15,
+          );
+          break;
+      }
     }
     this.voice(rootHz * oct * Math.pow(2, deg / 12), time, 0.16, wave, 0.06); // arp
 
@@ -194,19 +246,35 @@ class MusicPlayer {
     osc.stop(time + dur + 0.05);
   }
 
-  /** A short pitched kick for the Tier-2 percussion layer. */
-  private kick(time: number): void {
+  /**
+   * A short pitched kick — `hard` (Boss-Hardcore) schlägt höher an, fällt
+   * tiefer und legt eine Square-Transiente obendrauf (der „verzerrte" Biss,
+   * ohne einen WaveShaper im Renderpfad zu bezahlen).
+   */
+  private kick(time: number, hard = false): void {
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(150, time);
-    osc.frequency.exponentialRampToValueAtTime(50, time + 0.14);
-    g.gain.setValueAtTime(0.16, time);
+    osc.frequency.setValueAtTime(hard ? 210 : 150, time);
+    osc.frequency.exponentialRampToValueAtTime(hard ? 38 : 50, time + (hard ? 0.16 : 0.14));
+    g.gain.setValueAtTime(hard ? 0.24 : 0.16, time);
     g.gain.exponentialRampToValueAtTime(0.0001, time + 0.18);
     osc.connect(g);
     g.connect(this.out);
     osc.start(time);
     osc.stop(time + 0.2);
+    if (hard) {
+      const tr = this.ctx.createOscillator();
+      const tg = this.ctx.createGain();
+      tr.type = 'square';
+      tr.frequency.setValueAtTime(96, time);
+      tg.gain.setValueAtTime(0.07, time);
+      tg.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
+      tr.connect(tg);
+      tg.connect(this.out);
+      tr.start(time);
+      tr.stop(time + 0.05);
+    }
   }
 
   /** A rising filter-sweep accent for the Ekstase layer. */
@@ -241,7 +309,8 @@ class MusicPlayer {
     osc.stop(time + dur + 0.02);
   }
 
-  private hat(time: number): void {
+  /** Geschlossene Hat; `dur` > 0.04 macht sie zur OFFENEN (House-Offbeat). */
+  private hat(time: number, dur = 0.04): void {
     const src = this.ctx.createBufferSource();
     src.buffer = getNoiseBuffer(this.ctx);
     const hp = this.ctx.createBiquadFilter();
@@ -249,7 +318,7 @@ class MusicPlayer {
     hp.frequency.value = 7000;
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.05, time);
-    g.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
     src.connect(hp);
     hp.connect(g);
     g.connect(this.out);
@@ -349,6 +418,11 @@ export class AudioEngine {
    */
   setEkstase(on: boolean): void {
     this.music?.setEkstase(on);
+  }
+
+  /** Boss-Bühne: der Hardcore-Track übernimmt (User-Auftrag „extra hard"). */
+  setBossMode(on: boolean): void {
+    this.music?.setBossMode(on);
   }
 
   /**

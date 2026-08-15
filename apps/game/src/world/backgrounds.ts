@@ -17,6 +17,14 @@ import {
   strataTex,
 } from '../engine/textures';
 import { bake, buildIsland, ISLAND_C, ISLAND_R, TOP_Y } from './island';
+import {
+  PANO_CAM,
+  paintBeachBay,
+  paintClubCity,
+  paintSpaceVista,
+  paintSynthRange,
+  paintingMesh,
+} from './paintings';
 import type { BackgroundKey, WorldAnim } from '../types';
 
 /**
@@ -863,6 +871,35 @@ function lcg(seed: number): () => number {
 
 function horizonLayer(ctx: BuildCtx, theme: BackgroundKey): void {
   const { propGroup, glowSprite, anims, hue } = ctx;
+  // Gemaltes Fern-Panorama (paintings.ts): EIN Cutout-Billboard je Theme,
+  // HINTER den 3D-Mittelgrund-Props — die Kamera ist fix, also ist die Fläche
+  // von Geometrie nicht zu unterscheiden, trägt aber Detail (hunderte Fenster,
+  // Grate, Boote, Sterne), das als Mesh das G3-Budget sprengen würde. Die
+  // Platzierung folgt dem kalibrierten Sicht-Band (Modulkopf): Basis tief
+  // unter der Insel, Oberkante ragt ins Band.
+  {
+    const css = (hex: number): string => '#' + hue(hex).getHexString();
+    // Anker-Empirie: die Retro-Sonne (20, −19, 55) landet oben rechts im
+    // sichtbaren Keil — die Panorama-Zentren sind daran ausgerichtet.
+    const pano = {
+      club: { tex: () => paintClubCity(css, ctx.variant), w: 80, x: 14, z: 50, y: -24 },
+      // Synth/Beach tragen große OPAKE Flächen (Grid-Boden y −7.4 / See): per
+      // Projektions-Probe gemessen verdecken die ALLES dahinter, und das
+      // Fenster oberhalb ihrer Oberfläche liegt bei z ≥ 50 außerhalb des
+      // Frames. Ihre Panoramen stehen deshalb NAH — vor Grid/See, hinter der
+      // Insel — im gemessenen Sichtfenster (z 11: y −6…+7 · z 16: y −9…+5).
+      synth: { tex: () => paintSynthRange(css, ctx.variant), w: 40, x: 2, z: 11, y: 1.5 },
+      beach: { tex: () => paintBeachBay(css, ctx.variant), w: 44, x: 12, z: 16, y: -3 },
+      space: { tex: () => paintSpaceVista(css, ctx.variant), w: 110, x: -6, z: 60, y: -16 },
+    }[theme];
+    const tex = pano.tex();
+    const img = tex.image as HTMLCanvasElement;
+    const h = pano.w * (img.height / img.width);
+    const m = paintingMesh(tex, pano.w, h);
+    m.position.set(pano.x, pano.y, pano.z);
+    m.lookAt(PANO_CAM); // die Kamera bewegt sich nie — einmal ausrichten reicht
+    propGroup.add(m);
+  }
   if (theme === 'club') {
     // Zwei Tiefenreihen dunkler Türme; die Fenster glühen als Emissive-Punkte.
     // Hintere Reihe dunkler + schwächer — der Nebel staffelt den Rest.

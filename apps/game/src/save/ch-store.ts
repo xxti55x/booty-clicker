@@ -12,7 +12,7 @@ import {
   createPermTokens,
   normalizePity,
 } from '../game/chests';
-import { goldFor, monsterHp } from '../game/combat';
+import { BOSS_EVERY, goldFor, monsterHp } from '../game/combat';
 import {
   type ChStats,
   type ChState,
@@ -1215,7 +1215,7 @@ function clearedGateFor(raw: Record<string, unknown>): number {
     isFiniteNumber(raw.zone) ? raw.zone : 1,
     isFiniteNumber(gear.zoneEver) ? gear.zoneEver : 1,
   );
-  const gate = Math.floor((deepest - 1) / 5) * 5;
+  const gate = Math.floor((deepest - 1) / BOSS_EVERY) * BOSS_EVERY;
   return gate >= RELIC_MIN_ZONE ? gate : 0;
 }
 

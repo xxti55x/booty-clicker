@@ -123,14 +123,14 @@ describe('constellation — der Katalog', () => {
 });
 
 describe('constellation — Sternenstaub (endliche Währung, reiner Highwater)', () => {
-  it('zählt Boss-Gates ab Bühne 25 und erst NACH ihrem Fall', () => {
+  it('zählt Boss-Gates ab Bühne 30 und erst NACH ihrem Fall', () => {
     expect(gatesCleared(1)).toBe(0);
-    expect(gatesCleared(DUST_GATE_MIN_ZONE)).toBe(0); // Gate 25 steht noch
-    expect(gatesCleared(DUST_GATE_MIN_ZONE + 1)).toBe(1); // Bühne 26 ⇒ Gate 25 fiel
-    expect(gatesCleared(30)).toBe(1); // Gate 30 steht noch
-    expect(gatesCleared(31)).toBe(2);
-    expect(gatesCleared(100)).toBe(15); // Gates 25 … 95
-    expect(gatesCleared(200)).toBe(35); // Gates 25 … 195
+    expect(gatesCleared(DUST_GATE_MIN_ZONE)).toBe(0); // Gate 30 steht noch
+    expect(gatesCleared(DUST_GATE_MIN_ZONE + 1)).toBe(1); // Bühne 31 ⇒ Gate 30 fiel
+    expect(gatesCleared(40)).toBe(1); // Gate 40 steht noch
+    expect(gatesCleared(41)).toBe(2);
+    expect(gatesCleared(100)).toBe(7); // Gates 30 … 90
+    expect(gatesCleared(200)).toBe(17); // Gates 30 … 190
     // Müll liest als „ganz am Anfang".
     expect(gatesCleared(Number.NaN)).toBe(0);
     expect(gatesCleared(-40)).toBe(0);
@@ -149,11 +149,11 @@ describe('constellation — Sternenstaub (endliche Währung, reiner Highwater)',
     expect(dustEntitlement({ stars: 0, achievements: 9, deepestZone: 1 })).toBe(
       9 * DUST_PER_ACHIEVEMENT,
     );
-    expect(dustEntitlement({ stars: 0, achievements: 0, deepestZone: 31 })).toBe(2 * DUST_PER_GATE);
+    expect(dustEntitlement({ stars: 0, achievements: 0, deepestZone: 41 })).toBe(2 * DUST_PER_GATE);
     // Und alles zusammen ist genau die Summe.
-    // Bühne 51 ⇒ die Gates 25/30/35/40/45/50 sind gefallen (6 Stück).
+    // Bühne 51 ⇒ die Gates 30/40/50 sind gefallen (3 Stück).
     expect(dustEntitlement({ stars: 30, achievements: 4, deepestZone: 51 })).toBe(
-      2 * DUST_PER_STAR_MILESTONE + 4 * DUST_PER_ACHIEVEMENT + 6 * DUST_PER_GATE,
+      2 * DUST_PER_STAR_MILESTONE + 4 * DUST_PER_ACHIEVEMENT + 3 * DUST_PER_GATE,
     );
   });
 
@@ -290,20 +290,20 @@ describe('constellation — die Wirkung der Sterne', () => {
   });
 
   it('★ Zweiter Wind: der Boss-Rückwurf startet bei 3/10 statt 0/10', () => {
-    // Boss-Gate auf Bühne 25, Uhr abgelaufen ⇒ Rückwurf auf Bühne 24.
-    const boss = spawnFor(25, MONSTERS_PER_ZONE, 25);
+    // Boss-Arena auf Bühne 30, Uhr abgelaufen ⇒ Rückwurf auf Bühne 29.
+    const boss = spawnFor(30, 0, 30);
     expect(boss.boss).toBe(true);
     const ohne = tickBoss(boss, 999);
     expect(ohne.failed).toBe(true);
-    expect(ohne.state.zone).toBe(24);
+    expect(ohne.state.zone).toBe(29);
     expect(ohne.state.killsThisZone).toBe(0);
 
     const mit = tickBoss(boss, 999, secondWindKills(CONSTELLATION_FULL));
     expect(mit.failed).toBe(true);
-    expect(mit.state.zone).toBe(24);
+    expect(mit.state.zone).toBe(29);
     expect(mit.state.killsThisZone).toBe(SECOND_WIND_KILLS);
-    // Die Frontier bleibt unangetastet — das Gate ist weiter erreichbar.
-    expect(mit.state.maxZone).toBe(25);
+    // Die Frontier bleibt unangetastet — die Arena ist weiter erreichbar.
+    expect(mit.state.maxZone).toBe(30);
     // Und ein absurder Aufrufer kann die Welle nie überspringen (kein Gratis-Boss).
     expect(tickBoss(boss, 999, 999).state.killsThisZone).toBe(MONSTERS_PER_ZONE - 1);
     expect(tickBoss(boss, 999, Number.NaN).state.killsThisZone).toBe(0);

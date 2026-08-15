@@ -291,10 +291,11 @@ describe('gear — sugar faucet (accrueSugar, injected clock)', () => {
 });
 
 describe('gear — shard faucet (provisional pre-M12)', () => {
-  it('grants BOSS_SHARD_BASE + ⌊zone/10⌋ per boss kill, clamped', () => {
-    expect(bossShardReward(10)).toBe(BOSS_SHARD_BASE + 1); // 4
-    expect(bossShardReward(50)).toBe(BOSS_SHARD_BASE + 5); // 8
-    expect(bossShardReward(5)).toBe(BOSS_SHARD_BASE); // 3
+  it('grants (BOSS_SHARD_BASE + ⌊zone/10⌋) × 2 per boss kill, clamped', () => {
+    // Boss-Umbau: Gates doppelt so selten ⇒ jede Arena zahlt doppelt.
+    expect(bossShardReward(10)).toBe((BOSS_SHARD_BASE + 1) * 2); // 8
+    expect(bossShardReward(50)).toBe((BOSS_SHARD_BASE + 5) * 2); // 16
+    expect(bossShardReward(5)).toBe(BOSS_SHARD_BASE * 2); // 6
     expect(bossShardReward(0)).toBe(0);
     expect(bossShardReward(-5)).toBe(0);
     // Monotonic non-decreasing in the boss zone.

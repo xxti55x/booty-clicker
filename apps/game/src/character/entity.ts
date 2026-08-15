@@ -10,7 +10,7 @@ import type { BackgroundKey } from '../types';
  * Purely visual: it is the body of the EXISTING combat rival (HP/damage stay in
  * `game/combat.ts`), staged across the dance floor facing the player so the
  * twerk battle is finally visible. One charming species per stage tier
- * (club/synth/beach/space), a bigger & meaner boss variant on every 5th zone,
+ * (club/synth/beach/space), a bigger & meaner boss variant on every boss arena,
  * and a recolour lap every 40 zones so endless runs never look static.
  *
  * Independent of the player rig: `update(t, beatV, drive)` runs its own
@@ -92,10 +92,10 @@ export const ENTITY_THEMES: Record<BackgroundKey, EntityThemeConfig> = {
   },
 };
 
-/** Recolour-lap index for endless depth: zones 1–20 lap 0, 21–40 lap 1, … (one
- * full 4-Theme × 5-Bühnen tour per lap, in lockstep with main's `bgVariant`). */
+/** Recolour-lap index for endless depth: zones 1–40 lap 0, 41–80 lap 1, … (one
+ * full 4-Theme × 10-Bühnen tour per lap, in lockstep with main's `bgVariant`). */
 export function entityVariant(zone: number): number {
-  return Math.floor(Math.max(0, zone - 1) / 20);
+  return Math.floor(Math.max(0, zone - 1) / 40);
 }
 
 export interface EntityBuildOpts {

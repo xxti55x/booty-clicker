@@ -137,19 +137,22 @@ describe('stage-mods — Determinismus', () => {
 describe('stage-mods — Verdrahtung in die echten Terme', () => {
   it('die Ausdauer der Rivalen folgt dem hp-Faktor, Bosse bleiben unberührt', () => {
     for (let z = 11; z < 60; z++) {
+      if (z % BOSS_EVERY === 0) continue; // Gate-Bühnen spawnen den Boss, s. u.
       const c = spawnFor(z, 0, z, SEED);
       expect(c.hpMax).toBeCloseTo(monsterHp(z) * stageHpScale(z, SEED), 6);
       expect(c.remix).toBe(SEED);
     }
-    // Boss-Bühne: `spawnFor` mit vollem Kill-Zähler ⇒ Boss, HP exakt wie ohne Remix.
-    const bossWith = spawnFor(15, 10, 15, SEED);
-    const bossWithout = spawnFor(15, 10, 15);
+    // Boss-Bühne (Boss-Umbau): schon das Betreten spawnt den Boss — seine HP
+    // ist exakt die remix-freie Kurve (Gate-Bühnen tragen keinen Modifikator).
+    const bossWith = spawnFor(20, 0, 20, SEED);
+    const bossWithout = spawnFor(20, 0, 20);
     expect(bossWith.boss).toBe(true);
     expect(bossWith.hpMax).toBe(bossWithout.hpMax);
   });
 
   it('ohne Remix ist die Ausdauer byte-gleich zur Kurve von vorher', () => {
     for (let z = 1; z < 60; z++) {
+      if (z % BOSS_EVERY === 0) continue; // Gate-Bühnen sind jetzt Boss-Arenen
       expect(spawnFor(z, 0, z).hpMax).toBe(monsterHp(z));
       expect(stageHpScale(z, REMIX_OFF)).toBe(1);
     }

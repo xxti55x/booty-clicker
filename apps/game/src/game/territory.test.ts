@@ -54,10 +54,11 @@ describe('territory — der Katalog (1b)', () => {
 });
 
 describe('territory — Ruf entsteht nur aus Kills', () => {
-  it('bucht Rivalen und Bosse in ihrem Verhältnis (1 : 10)', () => {
+  it('bucht Rivalen und Bosse in ihrem Verhältnis (1 : 20)', () => {
     expect(repForKill(false)).toBe(REP_PER_RIVAL);
     expect(repForKill(true)).toBe(REP_PER_BOSS);
-    expect(REP_PER_BOSS).toBe(10 * REP_PER_RIVAL);
+    // Boss-Umbau: 10 Rivalen wert × 2 („jede Arena zahlt doppelt“).
+    expect(REP_PER_BOSS).toBe(20 * REP_PER_RIVAL);
   });
 
   it('ist rein und monoton — nichts kann Ruf verringern', () => {
@@ -119,12 +120,12 @@ describe('territory — die Kurve ist logarithmisch', () => {
 describe('territory — die Wirkung bleibt theme-gebunden (kein Global-Creep)', () => {
   it('zahlt +1,5 % BP je Stufe, aber NUR auf Bühnen des eigenen Themes', () => {
     const t = { club: repForRank(10) }; // Club voll ausgebaut
-    expect(territoryGoldMult(t, 1)).toBeCloseTo(1.15, 10); // Bühne 1–5: Club
-    expect(territoryGoldMult(t, 5)).toBeCloseTo(1.15, 10);
-    expect(territoryGoldMult(t, 6)).toBe(1); // Synth
-    expect(territoryGoldMult(t, 12)).toBe(1); // Beach
-    expect(territoryGoldMult(t, 18)).toBe(1); // Space
-    expect(territoryGoldMult(t, 21)).toBeCloseTo(1.15, 10); // zweite Club-Runde
+    expect(territoryGoldMult(t, 1)).toBeCloseTo(1.15, 10); // Bühne 1–10: Club
+    expect(territoryGoldMult(t, 10)).toBeCloseTo(1.15, 10);
+    expect(territoryGoldMult(t, 11)).toBe(1); // Synth
+    expect(territoryGoldMult(t, 25)).toBe(1); // Beach
+    expect(territoryGoldMult(t, 35)).toBe(1); // Space
+    expect(territoryGoldMult(t, 41)).toBeCloseTo(1.15, 10); // zweite Club-Runde
   });
 
   it('friert das Budget ein: ×1.15 auf einer Theme-Bühne, auch bei VOLL-Ausbau aller vier', () => {

@@ -62,6 +62,19 @@ export function chestTierForBoss(zone: number): ChestTier {
   return 'gold';
 }
 
+/**
+ * Boss-Umbau („jede Arena zahlt doppelt"): Gates liegen seit dem Umbau doppelt
+ * so weit auseinander (alle 10 statt alle 5 Bühnen). Mit den alten Sätzen — 1 🔑
+ * und 1 Truhe je Gate — hätte sich der ganze Schlüssel-/Truhen-Zufluss PRO
+ * BÜHNE Vorstoß halbiert und die komplette Loot-Ökonomie (Pity, Token, 🧩 aus
+ * Truhen) daruntergehängt. Die verdoppelten Sätze halten den Zufluss pro Tiefe
+ * und machen jeden Arena-Sieg als das fühlbar, was er jetzt ist: das Finale
+ * seines Themes. Gemessen statt geraten: `npm run balance`, Abschnitt 8.
+ */
+export const BOSS_KEYS_BASE = 2;
+/** Truhen je Arena-Sieg (Tier aus {@link chestTierForBoss}) — s. o. */
+export const BOSS_CHESTS_PER_GATE = 2;
+
 // ---------------------------------------------------------------------------
 // Permanent tokens (spec §6.2/§6) — the extended diamond pool
 // ---------------------------------------------------------------------------

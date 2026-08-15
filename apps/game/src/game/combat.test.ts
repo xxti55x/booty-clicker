@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { bossHpScale } from './boss-gimmicks';
 import {
+  BOSS_EVERY,
   BOSS_TIME_S,
   bossHp,
   bossTimeFraction,
-  challengeBoss,
   createCombat,
   goldFor,
   hit,
@@ -36,20 +36,22 @@ describe('combat — zones & HP scaling', () => {
   // Ausdauer (`GIMMICK_HP_SCALE`) — die Kurve bleibt exponentiell, aber jedes
   // Theme sitzt an seiner eigenen Stufe. Der Faktor kommt aus der EINEN Quelle.
   it('a gated boss carries its gimmick’s Ausdauer scale', () => {
-    for (const zone of [5, 10, 15, 20, 25]) {
+    for (const zone of [10, 20, 30, 40, 50]) {
       expect(bossHp(zone)).toBeCloseTo(monsterHp(zone) * 10 * bossHpScale(zone), 9);
     }
-    expect(bossHpScale(5)).toBeLessThan(1); // Spotlight kostet den Boss Ausdauer
-    expect(bossHpScale(20)).toBe(1); // Gravitation hilft dem Spieler ⇒ kein Rabatt
-    expect(bossHp(10)).toBeGreaterThan(bossHp(5)); // Kurve bleibt monoton …
-    expect(bossHp(15)).toBeGreaterThan(bossHp(10));
-    expect(bossHp(20)).toBeGreaterThan(bossHp(15));
+    expect(bossHpScale(10)).toBeLessThan(1); // Spotlight kostet den Boss Ausdauer
+    expect(bossHpScale(40)).toBe(1); // Gravitation hilft dem Spieler ⇒ kein Rabatt
+    expect(bossHp(20)).toBeGreaterThan(bossHp(10)); // Kurve bleibt monoton …
+    expect(bossHp(30)).toBeGreaterThan(bossHp(20));
+    expect(bossHp(40)).toBeGreaterThan(bossHp(30));
   });
 
-  it('marks every 5th zone as a boss zone', () => {
-    expect(isBossZone(5)).toBe(true);
+  it(`marks every ${BOSS_EVERY}th zone as a boss zone`, () => {
+    expect(BOSS_EVERY).toBe(10); // Boss-Umbau: alle 10 Bühnen, nicht mehr alle 5
     expect(isBossZone(10)).toBe(true);
-    expect(isBossZone(4)).toBe(false);
+    expect(isBossZone(20)).toBe(true);
+    expect(isBossZone(5)).toBe(false); // die alten Halb-Gates sind normale Bühnen
+    expect(isBossZone(9)).toBe(false);
     expect(isBossZone(1)).toBe(false);
   });
 
@@ -63,8 +65,26 @@ describe('combat — zones & HP scaling', () => {
     expect(hpFraction(s)).toBe(1);
     expect(hpFraction({ ...s, hp: -5 })).toBe(0);
     expect(bossTimeFraction(s)).toBe(0); // not a boss
-    const boss = spawnFor(5, MONSTERS_PER_ZONE, 5);
+    const boss = spawnFor(10, 0, 10);
     expect(bossTimeFraction(boss)).toBe(1);
+  });
+});
+
+describe('combat — Boss-Arena (Boss-Umbau)', () => {
+  it('spawning ON a gate stage IS the boss fight — no rival wave first', () => {
+    const s = spawnFor(10, 0, 10);
+    expect(s.boss).toBe(true);
+    expect(s.hpMax).toBe(bossHp(10));
+    expect(s.bossTimer).toBe(BOSS_TIME_S);
+  });
+
+  it('travelling to a cleared gate stage respawns its boss immediately', () => {
+    const farming = spawnFor(13, 2, 13);
+    const back = travelTo(farming, 10);
+    expect(back.boss).toBe(true);
+    expect(back.zone).toBe(10);
+    expect(back.hpMax).toBe(bossHp(10));
+    expect(back.bossTimer).toBe(BOSS_TIME_S);
   });
 });
 
@@ -98,28 +118,30 @@ describe('combat — progression reducer', () => {
     expect(r.state.maxZone).toBe(2);
   });
 
-  it('a boss spawns after clearing the rivals on a boss zone, then gates the next zone', () => {
-    // jump to zone 5 with 9 kills already done
-    let s = spawnFor(5, MONSTERS_PER_ZONE - 1, 5);
-    const spawn = oneShot(s); // 10th kill on a boss zone → boss appears
-    expect(spawn.bossSpawned).toBe(true);
-    expect(spawn.advancedZone).toBe(false);
+  it('advancing onto a gate stage spawns its boss at once, then gates the next zone', () => {
+    // Bühne 9 mit 9 erledigten Rivalen — der nächste Kill stößt auf das Gate vor.
+    let s = spawnFor(9, MONSTERS_PER_ZONE - 1, 9);
+    const spawn = oneShot(s); // 10th kill on zone 9 → advance INTO the arena
+    expect(spawn.advancedZone).toBe(true);
+    expect(spawn.bossSpawned).toBe(true); // der Betreten-Moment (Banner/Stinger)
+    expect(spawn.state.zone).toBe(10);
     expect(spawn.state.boss).toBe(true);
-    expect(spawn.state.hpMax).toBe(bossHp(5));
+    expect(spawn.state.hpMax).toBe(bossHp(10));
     expect(spawn.state.bossTimer).toBe(BOSS_TIME_S);
 
     s = spawn.state;
     const kill = oneShot(s); // boss down → advance
     expect(kill.advancedZone).toBe(true);
-    expect(kill.gold).toBe(goldFor(5, true));
-    expect(kill.state.zone).toBe(6);
+    expect(kill.gold).toBe(goldFor(10, true));
+    expect(kill.state.zone).toBe(11);
     expect(kill.state.boss).toBe(false);
+    expect(kill.bossSpawned).toBe(false); // Bühne 11 ist kein Gate
   });
 });
 
 describe('combat — boss timer', () => {
   it('counts down and expires, bouncing back to the PREVIOUS stage to farm', () => {
-    const boss = spawnFor(5, MONSTERS_PER_ZONE, 5);
+    const boss = spawnFor(10, 0, 10);
     const mid = tickBoss(boss, 10);
     expect(mid.failed).toBe(false);
     expect(mid.state.bossTimer).toBeCloseTo(BOSS_TIME_S - 10, 6);
@@ -127,8 +149,8 @@ describe('combat — boss timer', () => {
     const dead = tickBoss(boss, BOSS_TIME_S + 1);
     expect(dead.failed).toBe(true);
     expect(dead.state.boss).toBe(false);
-    expect(dead.state.zone).toBe(4); // one stage back — farm & upgrade
-    expect(dead.state.maxZone).toBe(5); // frontier kept: boss stays reachable
+    expect(dead.state.zone).toBe(9); // one stage back — farm & upgrade
+    expect(dead.state.maxZone).toBe(10); // frontier kept: boss stays reachable
     expect(dead.state.killsThisZone).toBe(0);
   });
 
@@ -136,23 +158,6 @@ describe('combat — boss timer', () => {
     const s = createCombat();
     expect(tickBoss(s, 5).failed).toBe(false);
     expect(tickBoss(s, 5).state).toEqual(s);
-  });
-});
-
-describe('combat — challengeBoss', () => {
-  it('spawns the frontier boss directly, skipping the rival wave', () => {
-    const s = spawnFor(5, 2, 5); // frontier boss stage, wave not cleared
-    const c = challengeBoss(s);
-    expect(c.boss).toBe(true);
-    expect(c.zone).toBe(5);
-    expect(c.hpMax).toBe(bossHp(5));
-  });
-
-  it('is a no-op off the frontier, on non-boss stages and mid-fight', () => {
-    expect(challengeBoss(spawnFor(5, 2, 10))).toEqual(spawnFor(5, 2, 10)); // old boss stage
-    expect(challengeBoss(spawnFor(4, 2, 4))).toEqual(spawnFor(4, 2, 4)); // no boss gate
-    const fighting = spawnFor(5, MONSTERS_PER_ZONE, 5);
-    expect(challengeBoss(fighting)).toEqual(fighting); // already the boss
   });
 });
 

@@ -13,9 +13,10 @@
  * das je gewürfelt hat** ({@link RelicsState.deepestGate}). Drei Gründe:
  *
  *  1. **Gegen den Farm-Exploit.** Das Spiel erlaubt `travelTo` auf jede
- *     geclerte Bühne und `challengeBoss` direkt am Gate. Ohne den Highwater
- *     könnte man Bühne 50 endlos wiederholen und alle 30 Sekunden würfeln —
- *     die Drop-Rate wäre dann nicht „selten", sondern „so oft du willst".
+ *     geclerte Bühne — auch zurück auf eine Gate-Bühne, wo der Boss sofort
+ *     wieder tanzt (Boss-Umbau). Ohne den Highwater könnte man Bühne 50 endlos
+ *     wiederholen und alle 30 Sekunden würfeln — die Drop-Rate wäre dann nicht
+ *     „selten", sondern „so oft du willst".
  *  2. **Gegen die Prestige-Wäsche.** Der Zähler ist ein Lebenszeit-Highwater
  *     wie `gear.zoneEver` und fällt bei KEINEM der drei Resets. Eine
  *     Transzendenz würde sonst die ganze Leiter 50…∞ neu auszahlen.
@@ -30,17 +31,21 @@
  *
  * ## Rate + Pity (gemessen, siehe `npm run balance` Abschnitt 11)
  *
- * {@link RELIC_DROP_CHANCE} = 25 % je neuem Gate, garantiert spätestens am
- * {@link RELIC_PITY}. Erwartungswert daraus: **ein Relikt je ~2,73 neue Gates**,
- * also je ~14 Bühnen Vorstoß. Weil ein Gate nur EINMAL im Leben würfelt, ist das
- * zugleich die Obergrenze — die Kurve hängt an der TIEFE, nicht an der Spielzeit:
+ * {@link RELIC_DROP_CHANCE} = 50 % je neuem Gate, garantiert spätestens am
+ * {@link RELIC_PITY}. Erwartungswert daraus: **ein Relikt je 1,5 neue Gates**,
+ * also je ~15 Bühnen Vorstoß. Die Zahlen sind mit dem Boss-Umbau NEU gesetzt:
+ * Gates liegen jetzt doppelt so weit auseinander (alle 10 statt alle 5), mit
+ * den alten 25 %/Pity-4 hätte sich die Relikt-Kurve pro Tiefe halbiert — die
+ * verdoppelte Gate-Chance hält die Kurve pro BÜHNE Vorstoß, und weil ein Gate
+ * nur EINMAL im Leben würfelt, bleibt sie die Obergrenze (Tiefe, nicht
+ * Spielzeit):
  *
  * | tiefste Bühne | Gates ≥ 50 | ⇒ Relikte |
  * | ------------- | ---------- | --------- |
- * | 80 (E2-Wand)  | 6          | ~2        |
- * | 100           | 10         | ~4        |
- * | 150           | 20         | ~7        |
- * | 300           | 50         | ~18       |
+ * | 80 (E2-Wand)  | 3          | ~2        |
+ * | 100           | 5          | ~3        |
+ * | 150           | 10         | ~7        |
+ * | 300           | 25         | ~17       |
  *
  * Die drei Trage-Slots sind damit um Bühne ~90 gefüllt, und alles danach ist
  * Verbesserung statt Erstausstattung. Genau das meint „Endgame-Loot oberhalb
@@ -57,6 +62,7 @@ import {
   isAffixId,
   rollAffix,
 } from './affixes';
+import { BOSS_EVERY } from './combat';
 
 // ---------------------------------------------------------------------------
 // Der Zustand
@@ -106,23 +112,24 @@ export function createRelics(): RelicsState {
 
 /** Ab dieser Bühne würfeln Boss-Gates überhaupt auf Relikte. */
 export const RELIC_MIN_ZONE = 50;
-/** Basis-Chance je NEUEM Gate. */
-export const RELIC_DROP_CHANCE = 0.25;
+/** Basis-Chance je NEUEM Gate (Boss-Umbau: 25 % → 50 %, siehe Modul-Kopf). */
+export const RELIC_DROP_CHANCE = 0.5;
 /**
  * Spätestens das `RELIC_PITY`-te berechtigte Gate liefert garantiert ein Relikt.
- * Bewusst dieselbe Zahl wie `chests.PITY_DIAMOND` — beide schützen einen
- * SELTENEN Zug, und ein Spieler, der die Truhen-Garantie schon kennt, muss die
- * Relikt-Garantie nicht neu lernen.
+ * Mit dem Boss-Umbau von 4 auf 2 gesenkt: Gates sind doppelt so selten und
+ * jedes ist eine eigene Arena — vier trockene Gates wären 40 Bühnen Vorstoß
+ * ohne Drop, das bestraft genau das Verhalten (Vorstoß), das Relikte belohnen
+ * sollen. „Spätestens jedes zweite neue Gate" hält die Kurve pro Bühne.
  */
-export const RELIC_PITY = 4;
+export const RELIC_PITY = 2;
 
 /**
- * Ist `zone` ein Gate, das jetzt würfeln darf? Boss-Bühne (Vielfaches von 5),
- * mindestens {@link RELIC_MIN_ZONE}, und tiefer als alles, was schon gewürfelt
- * hat. Rein und nie werfend.
+ * Ist `zone` ein Gate, das jetzt würfeln darf? Boss-Bühne (Vielfaches von
+ * `BOSS_EVERY`), mindestens {@link RELIC_MIN_ZONE}, und tiefer als alles, was
+ * schon gewürfelt hat. Rein und nie werfend.
  */
 export function relicGateEligible(r: RelicsState, zone: number): boolean {
-  if (!Number.isFinite(zone) || zone < RELIC_MIN_ZONE || zone % 5 !== 0) return false;
+  if (!Number.isFinite(zone) || zone < RELIC_MIN_ZONE || zone % BOSS_EVERY !== 0) return false;
   return zone > relicDeepestGate(r);
 }
 

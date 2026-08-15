@@ -323,9 +323,9 @@ describe('ch-state — loot threading (§6)', () => {
 
 describe('ch-state — gear unlock context (§5.3)', () => {
   it('derives boss-first-kills from lifetimeMaxZone (boss Z killed ⇔ zone > Z)', () => {
-    // lifetimeMaxZone 11 ⇒ bosses 5 and 10 cleared (advanced past), not 15.
-    expect(bossFirstKillZones({ lifetimeMaxZone: 11, legacyTyrann: false })).toEqual(
-      new Set([5, 10]),
+    // lifetimeMaxZone 21 ⇒ bosses 10 and 20 cleared (advanced past), not 30.
+    expect(bossFirstKillZones({ lifetimeMaxZone: 21, legacyTyrann: false })).toEqual(
+      new Set([10, 20]),
     );
     // Exactly at a boss zone is NOT yet a first-kill (need to advance past it).
     expect(bossFirstKillZones({ lifetimeMaxZone: 50, legacyTyrann: false })).not.toContain(50);
