@@ -93,7 +93,7 @@
         <circle cx="12" cy="4.6" r="2.1" />
         <path d="M12 7.4v5.2M12 12.6 8.6 19M12 12.6 15.4 19M11.9 9.6 7.4 6.9M12.1 9.6l4.5-2.7" />
       </svg>
-      <span>Crew</span>
+      <span id="toggleShopLb">Crew</span>
     </button>
     <button class="muteBtn" id="muteBtn" title="Ton an/aus">
       <svg class="ui-ic" viewBox="0 0 24 24" aria-hidden="true">
@@ -215,6 +215,10 @@
     </div>
 
     <div class="shop" id="shop">
+      <!-- M-01(2): Sheet-Griff (nur Telefon) — schaltet Peek-/Voll-Höhe. -->
+      <button class="sheet-grab" id="sheetGrab" type="button" aria-label="Panel-Höhe umschalten">
+        <i></i>
+      </button>
       <!-- One hand-drawn stroke-icon set (24px grid, currentColor) — no emoji. -->
       <div class="tabs">
         <div class="tab active" data-t="crew" title="Crew">
@@ -262,6 +266,7 @@
           <span class="tab-lb">Trans.</span>
         </div>
         <div class="tab" data-t="chest" title="Truhen">
+          <i class="tab-badge hidden" id="chestBadge"></i>
           <svg class="tab-ic" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M4 11.4a8 6.6 0 0 1 16 0V19H4ZM4 11.4h16M12 11.4v3.4" />
           </svg>

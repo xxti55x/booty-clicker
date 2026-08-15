@@ -172,6 +172,8 @@ export class ChHud {
   private hintBuy: PurchaseHint | null = null;
   // A1: zuletzt geschriebener Bühnen-Modifikator (Icon + Name).
   private cMod = '';
+  // M-01(4): Timer, der die Bühnen-Regel-Karte nach 4 s zum Icon-Chip einklappt.
+  private modMiniT: ReturnType<typeof setTimeout> | null = null;
   // A2: zuletzt geschriebenes Gimmick-Label + Spotlight-Look der HP-Bar.
   private cGimmick = '';
   private cSpotlight: boolean | null = null;
@@ -182,6 +184,26 @@ export class ChHud {
   private goldFrom = 0;
   private goldAt = 0;
   private goldRaf = 0;
+
+  constructor() {
+    // M-01(4): Tap auf den eingeklappten Regel-Chip öffnet die volle Karte
+    // wieder — und sie klappt danach erneut von selbst ein.
+    this.stageModEl.addEventListener('click', () => {
+      if (!this.stageModEl.classList.contains('mini')) return;
+      this.stageModEl.classList.remove('mini');
+      this.armModMini();
+    });
+  }
+
+  /** Karte in 4 s zum Icon-Chip einklappen (laufenden Timer ersetzen). */
+  private armModMini(): void {
+    this.stageModEl.classList.remove('mini');
+    if (this.modMiniT !== null) clearTimeout(this.modMiniT);
+    this.modMiniT = setTimeout(() => {
+      this.stageModEl.classList.add('mini');
+      this.modMiniT = null;
+    }, 4000);
+  }
 
   private setText(el: HTMLElement, next: string, cache: string): string {
     if (next !== cache) el.textContent = next;
@@ -248,6 +270,10 @@ export class ChHud {
           head +
           mods.map((m) => `<b>${m.icon} ${m.name}</b><span>${m.description}</span>`).join('');
         this.stageModEl.title = mods.map((m) => m.description).join(' · ');
+        // M-01(4): Die Regel sagt sich einmal in voller Länge an und klappt
+        // dann zum Icon-Chip ein — die Karte gehört sonst dauerhaft der Bühne
+        // vorm Gesicht. Tap/Klick öffnet sie wieder (Listener im Konstruktor).
+        this.armModMini();
       }
     }
     // „Boss herausfordern": nur an der Frontier-Boss-Bühne, solange ihr Gate

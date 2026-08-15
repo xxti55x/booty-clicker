@@ -333,13 +333,14 @@ export function paintSynthRange(css: CssHue, variant: number): THREE.CanvasTextu
     };
     // Hintere Kette: kühl, Cyan-Grat — bewusst heller als der Grid-Untergrund,
     // damit die Silhouetten sich VOR dem dunklen Backdrop absetzen (gemessen:
-    // die erste Palette soff dark-on-dark ab).
+    // die erste Palette soff dark-on-dark ab). M-18: NUR die Grat-Strokes
+    // ~20 % heller — die Flächen bleiben, sonst kippt die Collage ins Grelle.
     for (let mx = 30; mx < 1060; mx += 120 + r() * 90) {
-      mount(mx, 200 + r() * 120, 90 + r() * 60, css(0x2c2254), css(0x3a2d6e), css(0x3adfc0));
+      mount(mx, 200 + r() * 120, 90 + r() * 60, css(0x2c2254), css(0x3a2d6e), css(0x6ff0da));
     }
     // Vordere Kette: satter, Magenta-Grat, höher.
     for (let mx = -20; mx < 1080; mx += 170 + r() * 120) {
-      mount(mx, 240 + r() * 140, 130 + r() * 80, css(0x38296a), css(0x4c3a8e), css(0xff3fa4));
+      mount(mx, 240 + r() * 140, 130 + r() * 80, css(0x38296a), css(0x4c3a8e), css(0xff77c2));
     }
     // Palmen-Silhouetten am Fuß: gebogener Stamm + Wedel-Fächer.
     x.fillStyle = INK_CSS;

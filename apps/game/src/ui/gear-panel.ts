@@ -268,23 +268,27 @@ export class Gear {
     const slots = forgeSlotsOf(state.forge, id);
     const next = nextForgeUnlock(level);
     const chips: string[] = [];
-    for (let i = 0; i < FORGE_SLOTS; i++) {
-      if (i >= open) {
-        const at = FORGE_UNLOCK_LEVELS_TEXT[i];
-        chips.push(`<span class="fs off" title="Öffnet bei Skin-Level ${at}">🔒 Lv ${at}</span>`);
-        continue;
-      }
+    for (let i = 0; i < open && i < FORGE_SLOTS; i++) {
       const a = slots[i].affix;
       chips.push(
         `<button class="fs ${a ? `q${a.q}` : 'empty'}" data-act="forge" data-slot="${i}" type="button"` +
           ` ${unlocked ? '' : 'disabled'} title="Schmiede-Slot ${i + 1}">${forgeChip(a)}</button>`,
       );
     }
+    // M-06(2): Gesperrte Slots als EINE verdichtete Zeile statt bis zu drei
+    // fast identischer 🔒-Chips — die nächste Schwelle ist die Information,
+    // die volle Leiter steht im Tooltip.
+    if (open < FORGE_SLOTS && next !== null) {
+      const all = FORGE_UNLOCK_LEVELS_TEXT.slice(open).join(' / ');
+      chips.push(
+        `<span class="fs off" title="Weitere Slots öffnen bei Skin-Level ${all}">🔒 nächster Slot ab Lv ${next}</span>`,
+      );
+    }
     const hint =
-      open === 0 && next !== null
-        ? `<span class="sc-fh dim">Schmiede ab Lv ${next}</span>`
-        : `<span class="sc-fh dim">🔥 ${fmtInt(emberHeld(state.forge))}</span>`;
-    return `<div class="sc-forge">${hint}${chips.join('')}</div>`;
+      open === 0 ? '' : `<span class="sc-fh dim">🔥 ${fmtInt(emberHeld(state.forge))}</span>`;
+    // M-06(1): beschrifteter Block mit Trennlinie — Schmiede und Pfad sind
+    // eigene Fortschritts-Systeme, keine anonyme Chip-Suppe.
+    return `<div class="sc-block sc-forge"><span class="sc-bl">🔨 Schmiede</span><div class="fs-row">${hint}${chips.join('')}</div></div>`;
   }
 
   /**
@@ -327,7 +331,8 @@ export class Gear {
     const src = `${Math.floor(p.wear / 60)} min getragen · ${fmtInt(p.bosses)} Boss${p.bosses === 1 ? '' : 'e'}`;
     const done = p.nodes >= PATH_NODES ? ` · Move „${SIGNATURE_MOVES[id]}"` : '';
     return (
-      `<div class="sc-path" title="Meisterschafts-Pfad: Tragezeit + Boss-Kills in diesem Skin">` +
+      `<div class="sc-block sc-path" title="Meisterschafts-Pfad: Tragezeit + Boss-Kills in diesem Skin">` +
+      `<span class="sc-bl">💃 Pfad</span>` +
       `<div class="sp-dots">${dots.join('')}</div>${bar}` +
       `<div class="sp-t dim">${now} · ${src}${done}</div></div>`
     );
@@ -389,7 +394,7 @@ export class Gear {
     // `models/renders/character-*.jpg` erzeugte 96×120-Büsten (~2 KB je Bild).
     return `<div class="skincard rarity-${cfg.rarity} ${equipped ? 'active' : ''} ${unlocked ? '' : 'locked'}" data-id="${id}">
       <div class="sc-head">
-        <img class="sc-av" src="./avatars/skin-${id}.jpg" width="48" height="60" alt="" aria-hidden="true" loading="lazy" decoding="async">
+        <img class="sc-av" src="./avatars/skin-${id}.jpg" width="50" height="64" alt="" aria-hidden="true" loading="lazy" decoding="async">
         <span class="sc-hmeta">
           <span class="sc-icon">${cfg.icon}</span>
           <span class="sc-rarity">${RARITY_LABEL[cfg.rarity]}</span>
