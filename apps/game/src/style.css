@@ -3444,6 +3444,23 @@ body {
     animation: none;
   }
 }
+/* PLAYTEST G-06: Metronom-Blitz des Schild-Bosses (Synth). Solange das
+   Beat-Fenster OFFEN ist, springen Plakette und HP-Balken in ein kaltes
+   Neon-Cyan: JETZT klicken. Bewusst KEIN Keyframe-Loop — main.ts schaltet die
+   Klasse im echten Takt (dieselbe Rechnung wie der Abpraller), das Licht IST
+   also das Fenster. Harte Kanten sind hier Absicht: ein Metronom blinkt. */
+.boss-gimmick.beat-open {
+  color: #02121a;
+  background: linear-gradient(180deg, #d9fbff 0%, #7ce9ff 60%, #3ec2e8 100%);
+  border-color: #eaffff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 0 16px rgba(110, 230, 255, 0.95);
+  transform: scale(1.07);
+}
+.rival-hpfill.beat-open {
+  filter: brightness(1.55) saturate(1.15);
+}
 
 /* ---- ROADMAP-V2 G2: Boss-Auftritts-Banner ---- */
 /* Sitzt als letzte Zeile in der `.topui`-Spalte (unter der Rivalen-Karte), also

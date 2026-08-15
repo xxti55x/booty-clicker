@@ -3,6 +3,50 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Playtest umgesetzt: 3 Bugfixes + 6 Gameplay-Punkte (PLAYTEST-REVIEW.md, BUGS.md)
+
+- **B-01 (Shader):** Der Ink-Hull-Ersatz für `project_vertex` deklariert
+  `mvPosition` wieder selbst — nachfolgende three-Chunks (fog_vertex) bauen
+  auf den Chunk-Vertrag. Merksatz: Wer einen three-Chunk ERSETZT, erbt seine
+  Ausgabe-Variablen als Pflicht.
+- **B-02 (Spieluhr):** `dt` (Klemme 0.05) bleibt für Optik/Physik, neues
+  `simDt` (Klemme 1 s) treibt die Spielzeit (Boss-Uhr, Idle-/Coach-Schaden,
+  Combo-Verfall, Gimmick-Wellen, Tragezeit, UI-Tick). Bewusst KEIN
+  Fixed-Timestep-Umbau: die Anker (Physik-Kontrakt) bleiben unangetastet,
+  und ab 20 fps sind `dt` und `simDt` identisch. Headless (1.7 fps):
+  15 s Wanduhr = 15 s Boss-Uhr, vorher ≈ ⅛ davon.
+- **B-03 (Set-Crash):** `bossFirstKillZones` deckelt bei Bühne 1000 statt
+  `unlockZone` roh zu iterieren — das Set dient NUR der Gear-Unlock-Prüfung
+  (tiefste Regel: 50), ein 1e9-Save baute 10⁸ Einträge und riss beim
+  `Set maximum size exceeded` den ganzen Save mit.
+- **G-02/B-04 (Combo-Anzeige):** Display-Klemme bei `COMBO_CAP` + „MAX"-Suffix
+  in `ch-hud.setCombo`. Die internen Stacks laufen weiter (Gravitations-Combo
+  u. a. lesen sie) — gedeckelt wird nur die Behauptung, nicht der Zustand.
+- **G-04 (Ruhm-Ziel):** Neuer purer Helfer `nextSoulZone(deepest, rsLifetime)`
+  in `ascension.ts` (bounded: der 1.1^z-Term überholt jeden endlichen
+  rsLifetime lange vor dem 20 000er-Deckel) — der gesperrte Ruhm-Knopf nennt
+  jetzt die konkrete Zielbühne („neue Seelen ab Bühne 30") statt „stoß tiefer
+  vor". Mit Unit-Tests auf Minimalität und Terminierung.
+- **G-05 (Alte-Arena-Toast) — Review-Annahme korrigiert:** Das Review nahm an,
+  Re-Kills alter Gates zahlten keine Truhen. Stimmt nicht: Schlüssel/Truhen/
+  Splitter zahlen JEDEN Gate-Kill (in `sim.ts` als bewusst kleiner Zweit-Hahn
+  dokumentiert; nur der Bot frontier-gattert sie als Modell-Artefakt-Schutz);
+  einmalig sind Relikte (`relics.deepestGate`) und Vergoldung
+  (`lifetimeMaxZone`). Entscheidung: Ökonomie NICHT angefasst, stattdessen
+  sagt die Anreise in ein besiegtes Gate (`zone < maxZone`) jetzt ehrlich an,
+  was ein Re-Kill zahlt.
+- **G-06 (Schild-Metronom):** Der Frame-Pfad rechnet dasselbe
+  `isOnBeat(phase, pps, shieldWindowMs(…))` wie der Abprall-Check in `doShake`
+  (Fenster-Weitungen als geteilter Helfer `beatWindowBonusMsNow` extrahiert)
+  und schaltet `beat-open` auf HP-Bar + Gimmick-Pille. Bewusst KEIN
+  CSS-Keyframe-Loop: das Licht IST das Fenster — es kann nie gegen die
+  tatsächliche Trefferlogik driften. Eigene Klasse statt Spotlight-`on`,
+  damit sich die Gimmick-Zustände nie gegenseitig löschen.
+- **G-01/G-03 (stumme UI):** Ekstase-Label trägt die Ladung in Prozent
+  (ganzzahlig — das Label soll atmen, nicht flackern) + dreistufiger Tooltip;
+  gesperrte Level-/Stern-/Craft-Knöpfe im Skin-Schrank sagen per Tooltip, WAS
+  fehlt und WOHER es kommt.
+
 ## Design-Review umgesetzt: 15 der 18 Befunde (DESIGN-REVIEW.md)
 
 - **Umfang:** Alle 10 ✅-Punkte plus die akzeptierten Kerne der 5 ⚠️-Punkte;

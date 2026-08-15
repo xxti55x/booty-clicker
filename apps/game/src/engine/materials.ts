@@ -202,10 +202,15 @@ export function outlineMaterial(
     shader.vertexShader = shader.vertexShader.replace(
       '#include <project_vertex>',
       [
-        'vec4 inkMv = modelViewMatrix * vec4( transformed, 1.0 );',
+        // BUGS B-01: Der Ersatz-Chunk MUSS `mvPosition` weiterhin deklarieren —
+        // nachfolgende three-Chunks (fog_vertex: `vFogDepth = -mvPosition.z`)
+        // verlassen sich auf den project_vertex-Vertrag; ohne die Variable
+        // kompilierte jede Ink-Hülle auf einem Material MIT Nebel nicht
+        // (Konsolen-Flut + fehlende Konturen, im Playtest gefunden).
+        'vec4 mvPosition = modelViewMatrix * vec4( transformed, 1.0 );',
         'vec3 inkN = normalize( normalMatrix * normal );',
-        `inkMv.xyz += inkN * ${thickness.toFixed(5)} * clamp( -inkMv.z / 45.0, 0.6, 1.6 );`,
-        'gl_Position = projectionMatrix * inkMv;',
+        `mvPosition.xyz += inkN * ${thickness.toFixed(5)} * clamp( -mvPosition.z / 45.0, 0.6, 1.6 );`,
+        'gl_Position = projectionMatrix * mvPosition;',
       ].join('\n\t'),
     );
   };

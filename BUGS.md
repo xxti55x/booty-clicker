@@ -15,6 +15,10 @@ P3 = kosmetisch/irreführend.
 
 ## B-01 · Ink-Outline-Shader kompiliert nicht auf Materialien mit Nebel (P1)
 
+**Status: ✅ gefixt** — der project_vertex-Ersatz in `materials.ts` deklariert
+die Vertragsvariable `mvPosition` wieder selbst; headless verifiziert: 0
+Konsolen-Fehler über zwei volle Sitzungen (vorher Flut ab Frame 1).
+
 **Symptom:** Ab dem ersten Frame flutet die Konsole mit
 `THREE.WebGLProgram: Shader Error … 'mvPosition': undeclared identifier` in
 `vFogDepth = -mvPosition.z` (MeshBasicMaterial, `USE_FOG`). Die betroffenen
@@ -34,6 +38,11 @@ Variable gleich `mvPosition` nennen) — eine Zeile, stellt die Chunk-Verträge
 von three.js wieder her.
 
 ## B-02 · Spieluhr verliert Zeit unter 20 fps (dt-Klemme ohne Aufholen) (P2)
+
+**Status: ✅ gefixt** — `main.ts` trennt Optik-`dt` (Klemme 0.05) von `simDt`
+(Klemme 1 s) für alle Spielzeit-Verbraucher (Boss-Uhr, Idle/Coach-Schaden,
+Combo-Verfall, Gimmick-Wellen, Tragezeit). Headless nachgemessen: 15 s
+Wanduhr = 15 s Boss-Uhr (vorher: 32 s Wanduhr ≈ 4 s Boss-Uhr).
 
 **Symptom:** Auf einem langsamen Gerät (gemessen headless mit Software-GPU,
 ~2 fps) vergehen für 32 reale Sekunden nur ~4 Sekunden Boss-Uhr; Ekstase-Ladung,
@@ -55,6 +64,11 @@ Ability-Timer; alternativ diese beiden auf Wanduhr-Basis rechnen.
 
 ## B-03 · Absurde Bühnen-Tiefe im Save wirft eine unbehandelte Exception (P2)
 
+**Status: ✅ gefixt** — `bossFirstKillZones` deckelt die Schleife bei Bühne
+1000 (`BOSS_KILL_SET_MAX_ZONE`; tiefste Unlock-Regel liegt bei 50). Der
+1e9-Fuzzing-Save lädt jetzt, statt per `Set maximum size exceeded` den
+ganzen Save zu verwerfen.
+
 **Symptom:** Ein Save mit `zone/runMaxZone/lifetimeMaxZone = 1e9` erzeugt beim
 Laden `Uncaught RangeError: Set maximum size exceeded`; das Spiel fällt danach
 auf einen kompletten Frischstart zurück (Bühne 1, Gold 0) — der Save wird
@@ -70,6 +84,10 @@ Boss-Unlock-Zonen aus `SKIN_UNLOCKS` sind endlich: 10 und 50) — oder die Tiefe
 in der Save-Reparatur auf ein sinnvolles Maximum klemmen.
 
 ## B-04 · Combo-Anzeige zählt weit über den wirksamen Deckel hinaus (P3)
+
+**Status: ✅ gefixt** — die HUD-Anzeige klemmt bei `COMBO_CAP` und sagt es
+ehrlich: „Combo ×50 MAX · Inferno" (headless mit 60 Schnell-Twerks belegt).
+Die internen Stacks bleiben unangetastet (Physik-/Klick-Kontrakt).
 
 **Symptom:** Nach dem Klick-Sturm stand „Combo ×897 · Inferno" im HUD — der
 Schadens-Multiplikator ist aber weit vorher gedeckelt. Die Zahl suggeriert

@@ -1910,7 +1910,19 @@ function travelToZone(z: number): boolean {
   syncEntity();
   hud.update(state, combat, dps, clickDmg);
   if (combat.boss) {
-    toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
+    // PLAYTEST G-05: Was ein Re-Kill zahlt, war nur durch Ausprobieren zu
+    // lernen. Ein bereits geschlagenes Gate (Frontier liegt dahinter) sagt es
+    // jetzt beim Betreten: Ruf, Skin-Pfad & Truhen zahlen jedes Mal — Relikte
+    // und Vergoldung würfeln nur einmal (Highwater in `relics`/`gilds`).
+    if (combat.zone < combat.maxZone) {
+      toasts.show(
+        '👑',
+        'Boss-Arena (besiegt)',
+        'Re-Kill zahlt Ruf, Pfad & Truhen — Relikte nur an neuen Gates.',
+      );
+    } else {
+      toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
+    }
     bossEntrance();
   } else {
     toasts.show(
@@ -2253,6 +2265,23 @@ function syncChestBadge(): void {
 /** M-02: Nach dem ersten echten Twerk hat die Hotkey-Zeile ihren Job getan. */
 let hintDone = false;
 
+/**
+ * Die EINE Summe aller Beat-Fenster-Weitungen: Combo-Tier + Beatrix (§4.6) +
+ * Neon/Synth-Gear (§5) + DJ/KI-Cluster-`beat`-Specials (v11) + P4 „Beat-Gefühl".
+ * Sie weitet On-Beat-Klicks UND das A2-Schild-Fenster — und seit PLAYTEST G-06
+ * liest auch der Metronom-Blitz an der Boss-HP-Bar exakt diese Rechnung, damit
+ * das angezeigte Fenster nie vom tatsächlich getroffenen abweicht.
+ */
+function beatWindowBonusMsNow(): number {
+  return (
+    tierBeatWindowBonusMs(comboTier(comboState.stacks)) +
+    ancientBeatWindowBonusMs(state.ancients) +
+    beatWindowBonus(state.gear) +
+    crewSpec.beatWindowMs +
+    beatGefuhlWindowMs(state.heaven)
+  );
+}
+
 function doShake(x?: number, y?: number): void {
   // G1: Während die Bühne aus- und einfährt zählt kein Klick. Bewusst
   // IGNORIEREN statt puffern — der Wechsel dauert 1.2 s, ein nachgeholter
@@ -2269,18 +2298,7 @@ function doShake(x?: number, y?: number): void {
 
   // On-beat is judged against the CURRENT tier's (possibly widened) window,
   // before this click bumps the combo.
-  const curTier = comboTier(comboState.stacks);
-  // Beatrix (§4.6) + Neon/Synth gear (§5) + DJ/KI-Cluster `beat`-specials (v11)
-  // widen the on-beat window on top of the tier bonus — dieselbe Summe weitet
-  // auch das A2-Schild-Fenster (genau der Hebel, mit dem man sich rüstet).
-  const beatBonusMs =
-    tierBeatWindowBonusMs(curTier) +
-    ancientBeatWindowBonusMs(state.ancients) +
-    beatWindowBonus(state.gear) +
-    crewSpec.beatWindowMs +
-    // ROADMAP-V2 P4 „Beat-Gefühl" (Ritual-Ast): +40 ms im GLEICHEN Term — er
-    // weitet damit auch das A2-Schild-Fenster, genau wie Beatrix und das Gear.
-    beatGefuhlWindowMs(state.heaven);
+  const beatBonusMs = beatWindowBonusMsNow();
   const pps = phaseVelocity(drive);
   const onBeat = isOnBeat(choreo.phase, pps, beatWindowMs(beatBonusMs));
   // A2 Synth „Schild-Takte": eigenes, drive-invariantes Fenster (siehe
@@ -3388,13 +3406,24 @@ function loop(nowMs: number): void {
       );
     }
   }
-  const dt = Math.min(clock.getDelta(), 0.05);
+  // BUGS B-02: ZWEI Zeitbegriffe. `dt` (0.05-Klemme) taktet Optik/Physik —
+  // ein 500-ms-Ruckler darf keine Riesen-Animationsschritte werfen. Die
+  // SPIELUHR (Boss-Timer, Idle-/Coach-Schaden, Combo-Verfall, Gimmick-Wellen,
+  // Tragezeit, UI-Tick) läuft dagegen auf `simDt` und darf pro Frame bis zu
+  // 1 s Wanduhr nachziehen: vorher verfiel bei < 20 fps die Restzeit ersatzlos
+  // (gemessen: 32 s real = ~4 s Boss-Uhr) — die 30-s-Schranke war auf
+  // Low-End-Geräten real länger und das Idle-Einkommen entsprechend kleiner,
+  // beides inkonsistent zur Offline-Rechnung nach Wanduhr. Ab 20 fps sind
+  // beide Werte identisch, an den Ankern ändert sich nichts.
+  const rawDt = clock.getDelta();
+  const dt = Math.min(rawDt, 0.05);
+  const simDt = Math.min(rawDt, 1);
   t0 += dt;
   state.stats.playTimeS += dt;
   // 2b: Tragezeit. Sie hängt am selben Tick wie die Spielzeit — wer die Bühne
   // offen hat, trägt seinen Skin, ob er klickt oder nicht. Offline-Zeit zählt
   // bewusst NICHT (der Skin steht dann in keiner Show).
-  state.skinPath = addWear(state.skinPath, state.gear.skin, dt);
+  state.skinPath = addWear(state.skinPath, state.gear.skin, simDt);
   notePathNodes();
 
   // G1: Der Bühnen-Wechsel friert den Kampf für seine 1.2 s ein — sonst würde
@@ -3406,7 +3435,7 @@ function loop(nowMs: number): void {
   // die Crew schlüge noch einmal durch.
   const gimmickNow = combat.boss && !swapping ? gimmickForZone(combat.zone) : null;
   if (combat.boss && !swapping) {
-    const g = tickGimmick(bossGimmick, gimmickNow, hpFraction(combat), dt);
+    const g = tickGimmick(bossGimmick, gimmickNow, hpFraction(combat), simDt);
     bossGimmick = g.state;
     spotlightOn = g.spotlight;
     if (g.started) {
@@ -3423,18 +3452,28 @@ function loop(nowMs: number): void {
     spotlightOn = false;
   }
   hud.setSpotlight(spotlightOn);
+  // PLAYTEST G-06: Der Schild-Boss verlangte getaktete Treffer, gab aber im
+  // Kampf kein sichtbares Taktsignal — das Fenster fühlte sich wie Glückssache
+  // an. Der Metronom-Blitz an der HP-Bar zeigt jetzt das OFFENE Fenster, mit
+  // exakt der Rechnung, mit der `doShake` den Abpraller entscheidet (gleiche
+  // Phase, gleiche Drive-Geschwindigkeit, gleiche Fenster-Weitungen).
+  const beatPps = phaseVelocity(drive);
+  hud.setShieldOpen(
+    gimmickNow?.id === 'shield' &&
+      isOnBeat(choreo.phase, beatPps, shieldWindowMs(beatPps, beatWindowBonusMsNow())),
+  );
   // Idle DPS chips away at the current target; the Twerk-Coach auto-clicks at
   // 25 % of the click value (no crit/beat, §4.3.5) — Robo gear stars add cps (§5),
   // the same sum the offline accrual uses; boss timer ticks down.
-  if (dps > 0 && !swapping) applyHit(dps * dt, false);
+  if (dps > 0 && !swapping) applyHit(dps * simDt, false);
   const cps =
     coachCps(state.heaven) + coachCpsBonus(state.gear) + pathB().coachCps + loadout().coachCps;
-  if (cps > 0 && !swapping) applyHit(coachDps(clickDmg, cps) * dt, false);
+  if (cps > 0 && !swapping) applyHit(coachDps(clickDmg, cps) * simDt, false);
   if (combat.boss && !swapping) {
     const gateZone = combat.zone; // vor dem möglichen Rückwurf festhalten (P1)
     // 2a ★ „Zweiter Wind": Der Rückwurf erstattet 3 von 10 Rivalen der
     // Rückfall-Bühne — die Bühne startet dann sichtbar bei 3/10 statt 0/10.
-    const bt = tickBoss(combat, dt, secondWindKills(state.constellation));
+    const bt = tickBoss(combat, simDt, secondWindKills(state.constellation));
     combat = bt.state;
     if (bt.failed) {
       state.stats.bossTimeouts += 1;
@@ -3467,8 +3506,8 @@ function loop(nowMs: number): void {
     comboDecayReduction(state.gear) + pathB().comboDecay + comboGedachtnisReduction(state.heaven);
   comboState =
     gimmickNow?.id === 'gravity'
-      ? spaceComboStep(comboState, dt, comboRed)
-      : stageComboStep(comboState, dt, comboRed, stageFactors().comboDecay);
+      ? spaceComboStep(comboState, simDt, comboRed)
+      : stageComboStep(comboState, simDt, comboRed, stageFactors().comboDecay);
   const epochMs = Date.now();
   // Golden-Peach schedule (§6.1): despawn/reschedule the event, then sync the
   // on-screen 🍑 button + ×2-boost badge (clamped/despawned per B13c).
@@ -3557,7 +3596,7 @@ function loop(nowMs: number): void {
   // the full text HUD only rebuilds on the 0.25 s tick (or discrete events).
   hud.frame(combat);
 
-  uiTimer -= dt;
+  uiTimer -= simDt;
   if (uiTimer <= 0) {
     uiTimer = 0.25;
     // 🍬 faucet (§5.4): fold any ripened Zuckerpfirsiche into the gear slice (one per
