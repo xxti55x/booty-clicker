@@ -1536,11 +1536,16 @@ function renderActiveTab(key: string): void {
     constellationPanel.refresh(); // 2a: die Karte lebt im Ziele-Tab
   } else if (key === 'set') chSettings.render();
 }
+// M-14: Der Panel-Toggle oben rechts sagt IMMER, was er öffnet — er trägt das
+// Label des aktiven Tabs statt eines festen „Crew".
+const toggleShopLb = document.getElementById('toggleShopLb');
 for (const tab of Array.from(document.querySelectorAll<HTMLElement>('.tab'))) {
   tab.addEventListener('click', () => {
     const key = tab.dataset.t!;
     for (const t of Array.from(document.querySelectorAll('.tab'))) t.classList.remove('active');
     tab.classList.add('active');
+    if (toggleShopLb)
+      toggleShopLb.textContent = tab.querySelector('.tab-lb')?.textContent ?? tab.title;
     let shown: HTMLElement | null = null;
     for (const [k, id] of Object.entries(tabBodies)) {
       const el = document.getElementById(id) as HTMLElement;
@@ -1642,6 +1647,17 @@ const shop = document.getElementById('shop') as HTMLElement;
 document.getElementById('toggleShop')?.addEventListener('click', () => {
   shop.classList.toggle('hidden');
   if (!shop.classList.contains('hidden')) syncTabVisibility(); // reflect fresh unlocks on open
+});
+// M-01(2): Sheet-Griff (nur Telefon sichtbar) — Peek- vs. Voll-Höhe. Die
+// Body-Klasse spiegelt den Zustand für die Kampf-Karten-Verankerung.
+document.getElementById('sheetGrab')?.addEventListener('click', () => {
+  const tall = shop.classList.toggle('tall');
+  document.body.classList.toggle('sheet-tall', tall);
+});
+// M-01(1): Die kompakte Mobile-HUD-Karte öffnet ihre Detailzeilen auf Tap
+// (Desktop ignoriert die Klasse — dort ist immer alles sichtbar).
+document.querySelector('.hud-card')?.addEventListener('click', (e) => {
+  (e.currentTarget as HTMLElement).classList.toggle('open');
 });
 
 // The speaker icon is inline SVG; `.muted` swaps its wave arcs for a strike-cross.
@@ -2218,12 +2234,35 @@ let downX = 0;
 let downY = 0;
 let downT = 0;
 
+/**
+ * M-15: Zähler-Abzeichen am Truhen-Tab — sichtbar, solange ungeöffnete Truhen
+ * im Inventar liegen. Change-detected, hängt gefahrlos im 0.25-s-Tick.
+ */
+let chestBadgeShown = -1;
+function syncChestBadge(): void {
+  const el = document.getElementById('chestBadge');
+  if (!el) return;
+  const inv = state.chests.inventory;
+  const n = inv.wood + inv.gold + inv.diamond + inv.mythic;
+  if (n === chestBadgeShown) return;
+  chestBadgeShown = n;
+  el.classList.toggle('hidden', n <= 0);
+  if (n > 0) el.textContent = n > 99 ? '99+' : String(n);
+}
+
+/** M-02: Nach dem ersten echten Twerk hat die Hotkey-Zeile ihren Job getan. */
+let hintDone = false;
+
 function doShake(x?: number, y?: number): void {
   // G1: Während die Bühne aus- und einfährt zählt kein Klick. Bewusst
   // IGNORIEREN statt puffern — der Wechsel dauert 1.2 s, ein nachgeholter
   // Klick-Schwall würde Combo-Fenster, On-Beat-Wertung und Ekstase-Ladung
   // verfälschen; und der Rivale, den man träfe, steht gar nicht auf der Bühne.
   if (world.transitioning) return;
+  if (!hintDone) {
+    hintDone = true;
+    document.querySelector('.hintbar')?.classList.add('done');
+  }
   state.totalClicks += 1;
   state.meta = advanceMeta(state.meta, 'clicks'); // §7.2 „Shakes" quest (no-op if inactive)
   const now = Date.now();
@@ -3547,6 +3586,7 @@ function loop(nowMs: number): void {
     // hier im 0.25-s-Tick — die Kauf-Rangfolge scannt die Crew und hat im
     // Klick-Pfad nichts verloren; das Ausblenden im Kampf erledigt `hud.update`.
     hud.advise(state, combat, dps, clickDmg);
+    syncChestBadge(); // M-15: ungeöffnete Truhen als Zähler am Truhen-Tab
     syncTabVisibility(); // reveal a tab the instant its layer becomes reachable
     // keep the open shop tab's affordability/previews fresh while idling
     const active = document.querySelector('.tab.active') as HTMLElement | null;

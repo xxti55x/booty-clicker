@@ -975,10 +975,13 @@ function horizonLayer(ctx: BuildCtx, theme: BackgroundKey): void {
     // Gestaffelte Inselchen: die eine Mini-Insel wirkte wie vergessen — drei
     // Größen in drei Tiefen erzählen einen Archipel.
     const rnd = lcg(2024);
+    // M-16: 1.5–2 Einheiten tiefer als vor dem Panorama-Pass — die Basen
+    // berühren die GEMALTE Wasserlinie, statt davor in der Luft zu hängen
+    // (die Inseln stammen aus der Zeit vor dem Wasserband).
     for (const [x, y, z, s] of [
-      [6, -7.5, 24, 1],
-      [16, -11, 32, 1.6],
-      [24, -15, 42, 2.2],
+      [6, -9, 24, 1],
+      [16, -12.5, 32, 1.6],
+      [24, -17, 42, 2.2],
     ] as const) {
       const isle = new THREE.Group();
       const rock = new THREE.Mesh(

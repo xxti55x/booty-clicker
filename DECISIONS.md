@@ -3,6 +3,54 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Design-Review umgesetzt: 15 der 18 Befunde (DESIGN-REVIEW.md)
+
+- **Umfang:** Alle 10 ✅-Punkte plus die akzeptierten Kerne der 5 ⚠️-Punkte;
+  die 2 ❌ (Panel-Leerraum, Lautsprecher-Anschnitt) bleiben unangetastet.
+  Reines CSS/Markup/Panel-Renderer-Paket plus zwei Szenen-Konstanten — keine
+  Spiellogik, kein Save, kein Physik-Kontrakt.
+- **M-01 Mobile-P0:** HUD-Karte kompakt (nur Bühne + BP; Tap öffnet Details),
+  Shop-Sheet mit Peek-Höhe 42 vh + `.sheet-grab`-Griff (76 vh), Kampf-Karte
+  als Pill, Bühnen-Regel-Karte klappt nach 4 s zum Icon-Chip (Tap öffnet).
+  Vorher/Nachher-Screenshots: die Bühne dominiert jetzt das Telefon-Bild.
+- **M-02/M-03 Stapel-Ecke:** Hintbar links unten (einzeilig, `done` nach dem
+  ersten Twerk), Coach links unten über den leeren Panel-Fuß, Toasts oben
+  rechts unter dem Panel-Toggle. Der Coach ist `pointer-events: none` (nur
+  sein Knopf klickt) — der gemessene Input-Block ist weg (elementFromPoint
+  durch den Coach trifft wieder Canvas/Panel). DIE Falle dabei: die
+  50/50-Overlay-Spalte (`left: 75%`) überschrieb die neuen Anker per
+  SPÄTEREM Media-Block gleicher Spezifität — Coach/Hintbar/Toasts sind aus
+  dieser Sammelliste entfernt, nicht per !important übertönt. Dieselbe
+  Kaskaden-Falle nochmal beim Sheet-Griff (display:none-Basis NACH dem
+  media-display:flex) — Basis vor den Schalter gezogen.
+- **M-11 Kontrast als EIN Token:** `.dim` war kühles Grau #6d6d80 (~2.4:1 auf
+  dunklem Holz) und hing an Set-Boni, Schmiede-Hinweisen, Pfad-Zeilen,
+  Territory-Subtexten, Statistik-Labels. Jetzt `--txt-soft` #cdbb96 (≥ 4.5:1
+  auf dem dunkelsten Karten-Braun) — eine Variable, alle Stellen (M-12/M-13
+  hängen im selben Pass: Disabled-Opacity 0.4 → 0.65, Tracks als dunkle
+  Fassung mit Innenkante).
+- **M-05:** ×1/×10/Max als flache Segmented Control in dunkler Fassung —
+  vorher drei volle Gold-CTAs, schwerer als die eigentlichen Kauf-Knöpfe.
+- **M-06/M-07 Skins-Karten:** Schmiede + Pfad als beschriftete `.sc-block`s
+  mit Trennlinie; die bis zu drei 🔒-Chips zu EINER Zeile („nächster Slot ab
+  Lv X", volle Leiter im Tooltip); Thumbnails 42×53 → 50×64 mit
+  Rarity-Spotlight-Gradient. KEIN Disclosure (Verdikt: Idle lebt von
+  sichtbaren Zielen).
+- **M-08:** Der gesperrte Aszensions-Knopf trägt neutrales Holz statt
+  Signal-Rot (rot bleibt scharf/armed) und nennt den WEG: vor Bühne 10 die
+  Schwelle samt eigenem Stand, danach „stoß tiefer vor als je zuvor".
+- **M-14/M-15:** Panel-Toggle trägt das Label des aktiven Tabs (kein
+  statisches „Crew"); Truhen-Tab bekommt ein Zähler-Badge für ungeöffnete
+  Truhen (change-detected im 0.25-s-Tick). M-15-Korrektur zur Befund-Lage:
+  Truhen liegen NICHT unter „Mehr" — der Tab erscheint progressiv; das Badge
+  löst das eigentliche Problem (Anlass-Auffindbarkeit).
+- **M-09/M-10:** Ruf-Segmente bleiben 10 (= Stufen), aber 12 px hoch mit
+  Kontur; Strip-Sterne 8 → 10.5 px, Leer-Zustand 0.22 → 0.42 Alpha.
+- **M-16/M-18 Szene:** Beach-Mini-Inseln 1.5–2 Einheiten tiefer (Basis auf
+  der gemalten Wasserlinie); Synth-Panorama NUR Grat-Strokes aufgehellt
+  (Cyan 0x3adfc0 → 0x6ff0da, Magenta 0xff3fa4 → 0xff77c2), Flächen
+  unverändert — per A/B-Screenshot abgenommen.
+
 ## Gemalte Fernkulissen: Canvas-Panoramen statt 3D (User-Auftrag)
 
 - **Der Trick:** Die Diorama-Kamera ist FIX — aus einem festen Blickwinkel ist

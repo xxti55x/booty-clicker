@@ -106,7 +106,13 @@ export class Prestige {
       const btn = byId('ascendBtn') as HTMLButtonElement;
       const ok = canAscend(runMax, state.lifetimeMaxZone, state.rsLifetime);
       btn.disabled = !ok;
-      btn.textContent = ok ? `Ruhm einheimsen (+${fmt(pending)} ✨)` : 'Noch kein neuer Ruhm';
+      // M-08: Der gesperrte Zustand nennt den WEG statt nur das Nein — vor
+      // Bühne 10 die Schwelle samt eigenem Stand, danach die Richtung.
+      btn.textContent = ok
+        ? `Ruhm einheimsen (+${fmt(pending)} ✨)`
+        : runMax < ASCEND_MIN_ZONE
+          ? `Ruhm ab Bühne ${ASCEND_MIN_ZONE} — du: Bühne ${fmt(runMax)}`
+          : 'Noch kein neuer Ruhm — stoß tiefer vor als je zuvor';
     }
 
     byId('prStats').innerHTML = [

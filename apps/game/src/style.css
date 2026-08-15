@@ -36,6 +36,10 @@
   --parch-line: #b98d4e;
   --parch-ink: #432e12;
   --parch-soft: #6b4a26;
+  /* DESIGN-REVIEW M-11: DER Sekundärtext-Ton auf dunklem Holz — vorher ein
+     kühles Grau (#6d6d80, ~2.4:1 auf --wood-deep), jetzt warm und ≥ 4.5:1
+     auf dem dunkelsten Karten-Braun. EIN Token, alle Stellen. */
+  --txt-soft: #cdbb96;
   --teal: #2fa9b8;
   --teal-deep: #1c7484;
   /* Wiederkehrende Bau-Steine */
@@ -226,6 +230,32 @@ body {
   overflow-x: auto;
   scrollbar-width: none;
 }
+/* M-15: Zähler-Abzeichen am Truhen-Tab, solange ungeöffnete Truhen liegen —
+   Auffindbarkeit bei Anlass, ohne die Tab-Ordnung zu kippen. */
+.tab {
+  position: relative;
+}
+.tab-badge {
+  position: absolute;
+  top: 3px;
+  right: 6px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--gold);
+  color: var(--ink);
+  font-family: var(--display);
+  font-style: normal;
+  font-size: 9.5px;
+  font-weight: 800;
+  line-height: 15px;
+  text-align: center;
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.4);
+}
+.tab-badge.hidden {
+  display: none;
+}
 .tabs::-webkit-scrollbar {
   display: none;
 }
@@ -411,15 +441,27 @@ body {
   bottom: 16px;
   /* B13b: keep the hint above the home indicator. */
   bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-  left: 50%;
-  transform: translateX(-50%);
+  /* M-02: raus aus der Stapel-Ecke — der Hinweis lebt einzeilig in der linken
+     unteren Ecke (über dem Panel-Fuß, wo durchgehend Luft ist) statt unter der
+     Kampf-Karte, die ihn in jedem Screen anschnitt. */
+  left: calc(18px + env(safe-area-inset-left, 0px));
+  z-index: 26;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(255, 255, 255, 0.55);
   pointer-events: none;
-  text-align: center;
+  text-align: left;
+  white-space: nowrap;
+  max-width: 46vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
   /* A permanent tutorial line reads unfinished — fade it out after the first
      half-minute; the onboarding coach owns real teaching. */
   animation: hintfade 1.4s ease 26s forwards;
+  transition: opacity 0.6s;
+}
+/* M-02: nach dem ersten echten Twerk hat die Zeile ihren Job getan. */
+.hintbar.done {
+  opacity: 0;
 }
 @keyframes hintfade {
   to {
@@ -457,7 +499,7 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  color: #8a8a99;
+  color: var(--txt-soft);
   margin-bottom: 8px;
 }
 .settings-section textarea {
@@ -711,9 +753,21 @@ body {
 .btn.ghost:active:not(:disabled) {
   box-shadow: 0 0 0 rgba(0, 0, 0, 0.3);
 }
+/* M-12: disabled heißt „nicht jetzt", nicht „nicht existent" — Kontur und
+   Label bleiben als Element erkennbar (≥ 3:1). */
 .btn:disabled {
-  opacity: 0.4;
+  opacity: 0.65;
   cursor: not-allowed;
+}
+/* M-08: der GESPERRTE Aszensions-Knopf ist kein Gefahrenfall — rot bleibt dem
+   scharfen (und dem „armed"-) Zustand vorbehalten; gesperrt trägt neutrales
+   Holz. */
+.btn.danger:disabled {
+  background: linear-gradient(180deg, #7a5a30 0%, #5d4322 100%);
+  color: #d8c49a;
+  border-color: #4a3418;
+  box-shadow: 0 3px 0 #33220e;
+  opacity: 1;
 }
 .rebirth-info {
   font-size: 11.5px;
@@ -1047,12 +1101,18 @@ body {
   color: #9a9aad;
   margin-top: 4px;
 }
+/* M-03: Der Coach überdeckte die Kampf-Karte und fing Pointer über der Bühne
+   ab (gemessen). Er ist jetzt (a) durchlässig — nur sein Knopf ist klickbar,
+   alles andere reicht Klicks durch — und (b) auf Desktop in die linke untere
+   Ecke umgezogen: über den leeren Panel-Fuß (M-04-Verdikt: dort ist Luft),
+   weg von Kampf-Karte, Toasts und Boss-Banner. */
 .coach {
   position: fixed;
   left: 50%;
   bottom: 54px;
   transform: translateX(-50%);
   z-index: 50;
+  pointer-events: none;
   width: min(420px, 90vw);
   background: linear-gradient(180deg, #f8ecd2 0%, var(--parch) 55%, var(--parch-deep) 100%);
   border: 3px solid var(--wood);
@@ -1092,7 +1152,26 @@ body {
   font-size: 12.5px;
   font-weight: 800;
   cursor: pointer;
+  pointer-events: auto;
   box-shadow: 0 2px 0 var(--gold-deep);
+}
+@media (min-width: 641px) {
+  .coach {
+    left: 18px;
+    bottom: 16px;
+    transform: none;
+    width: min(380px, 42vw);
+  }
+  /* M-03: Toasts raus aus der Stapel-Ecke — eigene Spalte oben rechts, unter
+     dem Panel-Toggle, wo weder Kampf-Karte noch Boss-Banner leben. */
+  .toasts {
+    left: auto;
+    right: 16px;
+    top: calc(64px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+    transform: none;
+    align-items: flex-end;
+  }
 }
 .coach-hl {
   outline: 3px solid var(--gold-base);
@@ -1126,10 +1205,21 @@ body {
        (12 px statt 8 px), seine Unterkante stieß sonst in die HUD-Karte. */
     top: calc(68px + env(safe-area-inset-top, 0px));
     width: min(440px, 96vw);
-    gap: 6px;
+    gap: 4px;
+  }
+  /* M-01(1): HUD kompakt — Bühne + BP als eine schmale Karte; DPS/Seelen
+     erst auf Tap (`.open`, Toggle in main.ts). Die Bühne gehört dem SPIEL. */
+  .hud-card {
+    pointer-events: auto;
+    cursor: pointer;
+    padding: 5px 16px 7px;
   }
   .bp {
-    font-size: 30px;
+    font-size: 22px;
+  }
+  .hud-card:not(.open) .stats,
+  .hud-card:not(.open) .ngplus {
+    display: none;
   }
   .tab {
     padding: 10px 4px 8px;
@@ -1145,6 +1235,12 @@ body {
   .hintbar {
     font-size: 11px;
     width: 92%;
+    max-width: 92%;
+    /* M-02-Basis setzt links unten — auf dem Telefon bleibt die Zeile
+       zentriert über der Ekstase-Leiste (die linke Ecke ist dort zu schmal). */
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
     /* X6: Die Zeile lief bei 92 % Breite unter den Mute-Knopf (44×13 px
        Überdeckung). Sie steigt über die Ekstase-Leiste, statt schmaler zu
        werden — so bleibt sie einzeilig lesbar. */
@@ -1230,8 +1326,26 @@ body {
    einmal falsch herum eingebaut und die Basis gewann, DOM-Probe in DECISIONS). */
 @media (max-width: 640px) {
   .rival {
-    bottom: calc(55vh + 10px);
+    /* M-01(2): folgt der neuen Sheet-Peek-Höhe (42 vh, `.tall` 76 vh). */
+    bottom: calc(42vh + 10px);
     width: min(440px, 96vw);
+  }
+  body.sheet-tall .rival {
+    bottom: calc(76vh + 10px);
+  }
+  /* M-01(3): Kampf-Karte als schmale Pill — Name klein, flache HP-Bar. */
+  .rival-card {
+    padding: 4px 12px 6px;
+  }
+  .rival-name {
+    font-size: 13px;
+    margin-bottom: 2px;
+  }
+  .rival-hpbar {
+    height: 12px;
+  }
+  .rival-row {
+    font-size: 10.5px;
   }
 }
 .rival-card {
@@ -1379,40 +1493,43 @@ body {
 .rival-prog.hidden {
   display: none;
 }
+/* M-05: Kaufmenge ist ein MODUS-Schalter, kein Kauf-Knopf — eine flache
+   Segmented Control in einer dunklen Fassung, der aktive Slot trägt das Gold.
+   Vorher waren ×1/×10/Max drei volle Gold-CTAs und damit die visuell
+   schwersten Elemente des Panels. */
 .buyamt {
   display: flex;
-  gap: 6px;
+  gap: 3px;
   margin-bottom: 12px;
+  padding: 3px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid var(--wood-rim);
+  border-radius: 11px;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
 }
 .amt {
   flex: 1;
-  padding: 7px 0 6px;
-  background: var(--gold-btn);
-  color: var(--gold-ink);
-  border: 2px solid var(--gold-line);
-  border-radius: 10px;
+  padding: 5px 0 4px;
+  background: transparent;
+  color: #d8c49a;
+  border: none;
+  border-radius: 8px;
   font-family: var(--display);
   font-size: 12px;
   font-weight: 800;
   cursor: pointer;
-  box-shadow:
-    0 2px 0 var(--gold-deep),
-    inset 0 1px 0 rgba(255, 245, 210, 0.8);
-  transition:
-    transform 0.06s,
-    box-shadow 0.06s;
+  box-shadow: none;
+  transition: background 0.1s;
 }
 .amt:active {
-  transform: translateY(2px);
-  box-shadow: 0 0 0 var(--gold-deep);
+  background: rgba(255, 220, 150, 0.12);
 }
 .amt.active {
-  background: linear-gradient(180deg, #ffbf6e 0%, #ff9d2e 55%, #e07a12 100%);
-  color: #3a1e04;
-  border-color: #8a4a0e;
+  background: var(--gold-btn);
+  color: var(--gold-ink);
   box-shadow:
-    0 2px 0 #a85f14,
-    inset 0 1px 0 rgba(255, 230, 190, 0.8);
+    inset 0 0 0 2px var(--gold-line),
+    0 1px 0 rgba(0, 0, 0, 0.35);
 }
 .crew-foot {
   display: flex;
@@ -1444,7 +1561,7 @@ body {
   color: #e8e8ef;
 }
 .dim {
-  color: #6d6d80;
+  color: var(--txt-soft);
   font-size: 11px;
 }
 .pop.crit {
@@ -1645,15 +1762,48 @@ body {
     right: 0;
     width: 100%;
     max-width: 100%;
-    height: 55vh;
+    /* M-01(2): Peek-Höhe als Default — das Sheet zeigt Tabs + erste Karten,
+       die Bühne bleibt sichtbar. Der Griff (`.sheet-grab`) schaltet auf 76 vh
+       für lange Listen. Übergang animiert die Höhe, nicht das Layout. */
+    height: 42vh;
+    transition:
+      transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1),
+      height 0.24s ease;
     border-left: none;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 18px 18px 0 0;
     padding-top: 0;
     box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.5);
   }
+  .shop.tall {
+    height: 76vh;
+  }
   .shop.hidden {
     transform: translateY(100%);
+  }
+}
+/* M-01(2): der Sheet-Griff — nur auf dem Telefon sichtbar. Die Basis steht VOR
+   dem Sichtbar-Schalter (Kaskade: der Media-Block muss die Basis schlagen). */
+.sheet-grab {
+  display: none;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 20px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.sheet-grab i {
+  width: 44px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 220, 150, 0.4);
+}
+@media (max-width: 640px) {
+  .sheet-grab {
+    display: flex;
   }
 }
 
@@ -2448,10 +2598,15 @@ body {
   color: #9a9aad;
   margin: 3px 0 7px;
 }
+/* M-13: der leere Track muss als Element lesbar bleiben — dunkle Fassung mit
+   Innenkante statt eines kaum sichtbaren Weiß-Hauchs. */
 .quest-bar {
-  height: 7px;
+  height: 8px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.32);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.55),
+    0 1px 0 rgba(255, 220, 150, 0.14);
   overflow: hidden;
   margin-bottom: 8px;
 }
@@ -2656,15 +2811,15 @@ body {
   box-shadow: 0 3px 0 var(--gold-deep);
 }
 
-/* ---- 50/50-Layout: Bühne rechts — Overlays über der rechten Hälfte ---- */
+/* ---- 50/50-Layout: Bühne rechts — Overlays über der rechten Hälfte ----
+   M-02/M-03: Hintbar, Toasts und Coach sind AUS der 75-%-Spalte raus — sie
+   haben eigene Anker (links unten · oben rechts · links unten), damit die
+   Stapel-Ecke um die Kampf-Karte frei bleibt. */
 @media (min-width: 641px) {
   .topui,
   .abilitybar,
-  .hintbar,
-  .toasts,
   .boostBadge,
-  .goblinBadge,
-  .coach {
+  .goblinBadge {
     left: 75%;
   }
   .topui {
@@ -2980,13 +3135,29 @@ body {
 .sc-head {
   gap: 6px;
 }
+/* M-07: der Skin IST das Produkt der Karte — 20 % größer und mit einem
+   Rarity-Spotlight hinter der Figur, statt dunkel auf dunkel zu versinken. */
 .sc-av {
-  width: 42px;
-  height: 53px;
+  width: 50px;
+  height: 64px;
   object-fit: cover;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  background: #2b2a3d;
+  background: radial-gradient(ellipse at 50% 36%, rgba(255, 245, 220, 0.18), transparent 72%)
+    #2b2a3d;
+}
+.rarity-rare .sc-av {
+  background: radial-gradient(ellipse at 50% 36%, rgba(77, 159, 255, 0.32), transparent 72%) #232b40;
+}
+.rarity-epic .sc-av {
+  background: radial-gradient(ellipse at 50% 36%, rgba(176, 107, 255, 0.32), transparent 72%)
+    #2b2340;
+}
+.rarity-legendary .sc-av {
+  background: radial-gradient(ellipse at 50% 36%, rgba(255, 210, 77, 0.3), transparent 72%) #35301f;
+}
+.rarity-mythic .sc-av {
+  background: radial-gradient(ellipse at 50% 36%, rgba(103, 232, 249, 0.3), transparent 72%) #1f3340;
 }
 .sc-hmeta {
   display: flex;
@@ -3071,17 +3242,19 @@ body {
 /* Eine Zeile unter der Bühnen-Nummer: gefüllte Sterne leuchten gold, offene
    bleiben als dunkler Platzhalter stehen (man sieht, was noch zu holen ist).
    Boss-Bühnen tragen drei, normale zwei (kein Timeout-Stern ohne Gate). */
+/* M-10: Die Stern-Pips waren mit 8 px auf dem Telefon nicht mehr lesbar —
+   30 % größer, und „leer" deutlich heller vom Slot-Grund abgesetzt. */
 .zs-stars {
   display: flex;
-  gap: 1px;
+  gap: 2px;
   line-height: 1;
-  height: 8px;
+  height: 11px;
 }
 .zs-stars i {
   font-style: normal;
-  font-size: 8px;
+  font-size: 10.5px;
   line-height: 1;
-  color: rgba(255, 236, 200, 0.22);
+  color: rgba(255, 236, 200, 0.42);
   text-shadow: none;
 }
 .zs-stars i.on {
@@ -3123,6 +3296,23 @@ body {
   background: rgba(139, 92, 246, 0.16);
   border: 1px solid rgba(139, 92, 246, 0.45);
   text-align: left;
+  /* M-01(4): die Karte klappt nach 4 s zum Icon-Chip ein (ch-hud setzt
+     `.mini`); Tap/Klick öffnet sie wieder — dafür braucht sie Pointer,
+     obwohl `.rival` selbst durchlässig ist. */
+  pointer-events: auto;
+  cursor: pointer;
+}
+.stage-mod.mini {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 3px 9px;
+}
+.stage-mod.mini span {
+  display: none;
+}
+.stage-mod.mini b {
+  font-size: 11px;
 }
 .stage-mod b {
   font-family: var(--display);
@@ -3837,10 +4027,8 @@ body {
 @media (min-width: 641px) and (max-height: 480px) {
   .topui,
   .abilitybar,
-  .toasts,
   .boostBadge,
-  .goblinBadge,
-  .coach {
+  .goblinBadge {
     left: 66%;
   }
   .topui {
@@ -4353,11 +4541,16 @@ body {
   gap: 3px;
   margin: 7px 0 6px;
 }
+/* M-09 (Verdikt): die 10 Segmente BLEIBEN — ein Segment ist eine Ruf-Stufe.
+   Aber höher und mit gefasster Leer-Optik (Kontur + Innenschatten), damit eine
+   leere Reihe nach „noch zu verdienen" liest statt nach „kaputt". */
 .tr-seg {
   flex: 1;
-  height: 8px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.08);
+  height: 12px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 220, 150, 0.18);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
   overflow: hidden;
 }
 .tr-seg i {
@@ -4657,12 +4850,38 @@ body {
   opacity: 0.4;
   cursor: default;
 }
+/* M-06: Schmiede + Pfad sind GRUPPIERTE, beschriftete Blöcke mit Trennlinie —
+   vorher zwei fast identische, unbeschriftete Chip-Reihen übereinander. */
+.sc-block {
+  border-top: 1px solid rgba(255, 220, 150, 0.16);
+  margin-top: 7px;
+  padding-top: 5px;
+}
+.sc-bl {
+  display: block;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--txt-soft);
+  margin-bottom: 3px;
+}
 .sc-forge {
   display: flex;
   align-items: stretch;
   flex-wrap: wrap;
   gap: 4px;
   margin: 6px 0 4px;
+}
+.sc-block.sc-forge {
+  display: block;
+  margin: 7px 0 4px;
+}
+.sc-forge .fs-row {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 .sc-fh {
   align-self: center;

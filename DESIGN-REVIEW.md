@@ -226,3 +226,14 @@ Wirkung: **M-01 (Mobile)** → M-03/M-02 (Stapel-Ecke + Coach) → M-11/M-12/M-1
 → M-09/M-10/M-14/M-15-Badge → M-16 → M-18. Kein Punkt berührt Spiellogik,
 Save-Schema oder den Physik-Kontrakt; alles ist CSS/Markup/Panel-Renderer plus
 zwei Szenen-Konstanten.
+
+---
+
+**Umsetzungsstatus (2026-08-15):** Alle 10 ✅-Punkte und die akzeptierten Kerne
+der 5 ⚠️-Punkte sind umgesetzt (Commit auf `claude/booty-clicker-setup-d47tkx`,
+Details in DECISIONS.md); die 2 ❌ bleiben wie begründet unangetastet. Headless
+verifiziert: Coach-Pointer-Durchlässigkeit gemessen, Desktop-/Mobile-/Skins-/
+Ruhm-Screens per Screenshot abgenommen. Korrektur zu M-15: Die Truhen liegen
+nicht unter „Mehr" — der Truhen-Tab ist ein eigener Top-Level-Tab mit
+progressiver Freischaltung; umgesetzt wurde deshalb das Zähler-Badge direkt am
+Truhen-Tab (löst dieselbe Anlass-Auffindbarkeit).
