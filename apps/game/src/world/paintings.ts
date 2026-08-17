@@ -59,6 +59,19 @@ function rng(seed: number): () => number {
 /** Die Ink-Farbe der Welt (materials.INK), als CSS. */
 const INK_CSS = '#141021';
 
+/** `#rrggbb` heller/dunkler ziehen (f < 1 dunkelt, f > 1 hellt auf, geklemmt). */
+function shade(cssHex: string, f: number): string {
+  const v = parseInt(cssHex.slice(1), 16);
+  const ch = (sh: number): number => Math.min(255, Math.round(((v >> sh) & 255) * f));
+  return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+}
+
+/** `#rrggbb` mit Alpha als `rgba(...)` — für Glitzer und Wolkenränder. */
+function alpha(cssHex: string, a: number): string {
+  const v = parseInt(cssHex.slice(1), 16);
+  return `rgba(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255},${a})`;
+}
+
 /**
  * Weiche Alpha-Ausblendung an den Rändern (destination-out): ein Cutout darf
  * nie als harte Rechteck-Kante im Himmel stehen — gemessen am Beach-Panorama,
@@ -389,22 +402,87 @@ export function paintSynthRange(css: CssHue, variant: number): THREE.CanvasTextu
 // Beach — Bucht-Panorama: Inselketten, Segelboote, Wolkenbänke, Möwen
 // ---------------------------------------------------------------------------
 
-export function paintBeachBay(css: CssHue, variant: number): THREE.CanvasTexture {
-  return paint(`beach:${variant}`, 1024, 260, (x) => {
+/**
+ * D-07/F5 — Die gemalte Bucht ist PARAMETRISCH: Himmelsgradient, Wasserton und
+ * Sonnenstand kommen als Palettenwerte herein, statt als Abendfarben im Code zu
+ * stehen. Nur so kann die Lap-Identität (D-09) später dieselbe Kulisse durch
+ * die Tageszeiten schicken — eine fest verdrahtete Abendbucht hätte genau das
+ * blockiert.
+ */
+export interface BeachSky {
+  /** Zenit-Farbe des gemalten Himmelsbands. */
+  skyTop: number;
+  /** Horizont-Farbe (direkt über der Wasserlinie). */
+  skyBot: number;
+  /** Grundton des Wasserbands (der Vordergrund wird daraus abgedunkelt). */
+  water: number;
+  /** Sonnenhöhe: 0 = sitzt auf der Wasserlinie, 1 = am oberen Bildrand. */
+  sunY: number;
+  /** Farbe von Sonne, Glitzerpfad und Wolkenrändern. */
+  sunColor: number;
+}
+
+/** Höhe des gemalten Himmelssaums über der Wasserlinie (px im Panorama-Canvas). */
+const SKY_BAND = 88;
+
+/** Ruhelage: der Abend, den „Sunset Beach" im Namen verspricht. */
+export const BEACH_SKY_EVENING: BeachSky = {
+  skyTop: 0x4a2160,
+  skyBot: 0xff8a4d,
+  water: 0x1d4f78,
+  sunY: 0.1,
+  sunColor: 0xffc46a,
+};
+
+export function paintBeachBay(
+  css: CssHue,
+  variant: number,
+  sky: BeachSky = BEACH_SKY_EVENING,
+): THREE.CanvasTexture {
+  const skyKey = `${sky.skyTop}-${sky.skyBot}-${sky.water}-${sky.sunY}-${sky.sunColor}`;
+  return paint(`beach:${variant}:${skyKey}`, 1024, 260, (x) => {
     const r = rng(2024);
     const H = 260;
     const SEA = H - 56; // Horizontlinie des gemalten Wasserbands
-    // Fernes Wasserband mit Glitzer-Strichen.
+    // Himmelsband über der Wasserlinie — aus den Palettenwerten, nicht aus
+    // fixen Abendfarben (F5): der Gradient IST die Tageszeit. WICHTIG: Das
+    // Panorama ist ein CUTOUT-Billboard; oberhalb der Wasserlinie muss es
+    // durchsichtig bleiben, sonst steht eine opake Farbplatte im Bild (headless
+    // verifiziert). Deshalb ein SAUM: dicht über dem Wasser deckend, nach oben
+    // auf Alpha 0 auslaufend — der Abendglanz am Horizont, keine Tapete.
+    const air = x.createLinearGradient(0, SEA - SKY_BAND, 0, SEA);
+    air.addColorStop(0, alpha(css(sky.skyTop), 0));
+    air.addColorStop(0.55, alpha(css(sky.skyBot), 0.5));
+    air.addColorStop(1, alpha(css(sky.skyBot), 0.9));
+    x.fillStyle = air;
+    x.fillRect(0, SEA - SKY_BAND, 1024, SKY_BAND);
+    // Sonne: Stand aus `sunY`, Scheibe + weicher Hof + Glitzerpfad aufs Wasser.
+    // Der Stand bleibt IM Saum — eine Sonne über dem Cutout-Rand hinge im Nichts.
+    const sunX = 700;
+    const sunPy = SEA - sky.sunY * SKY_BAND;
+    const halo = x.createRadialGradient(sunX, sunPy, 3, sunX, sunPy, 70);
+    halo.addColorStop(0, css(sky.sunColor));
+    halo.addColorStop(1, 'rgba(0,0,0,0)');
+    x.globalAlpha = 0.55;
+    x.fillStyle = halo;
+    x.fillRect(sunX - 72, sunPy - 72, 144, 144);
+    x.globalAlpha = 1;
+    x.fillStyle = css(sky.sunColor);
+    x.beginPath();
+    x.arc(sunX, sunPy, 15, 0, Math.PI * 2);
+    x.fill();
+    // Fernes Wasserband mit Glitzer-Strichen — Ton aus `water`.
     const sea = x.createLinearGradient(0, SEA, 0, H);
-    sea.addColorStop(0, css(0x2f9fd0));
-    sea.addColorStop(1, css(0x1d6fa8));
+    sea.addColorStop(0, css(sky.water));
+    sea.addColorStop(1, shade(css(sky.water), 0.62));
     x.fillStyle = sea;
     x.fillRect(0, SEA, 1024, H - SEA);
-    x.strokeStyle = 'rgba(255,245,220,0.55)';
+    x.strokeStyle = alpha(css(sky.sunColor), 0.55);
     x.lineWidth = 1.5;
     for (let i = 0; i < 90; i++) {
       const gy = SEA + 4 + r() * (H - SEA - 8);
-      const gx = r() * 1024;
+      // Glitzerpfad: dicht unter der Sonne, ausdünnend zu den Seiten.
+      const gx = i % 3 === 0 ? r() * 1024 : sunX + (r() - 0.5) * 190;
       x.beginPath();
       x.moveTo(gx, gy);
       x.lineTo(gx + 6 + r() * 16, gy);
@@ -500,13 +578,15 @@ export function paintBeachBay(css: CssHue, variant: number): THREE.CanvasTexture
     boat(860, SEA + 26, 1.5);
     // Wolkenbänke: flache Böden, gewölbte Rücken, Sonnenrand oben.
     const cloud = (cx2: number, cy: number, s: number) => {
-      x.fillStyle = '#fff2df';
+      // Wolkenbäuche im Schatten des Himmels, Ränder in der Sonnenfarbe — auch
+      // das ist Tageszeit, nicht Dekoration.
+      x.fillStyle = shade(css(sky.skyTop), 1.7);
       x.beginPath();
       x.ellipse(cx2, cy, 46 * s, 13 * s, 0, 0, Math.PI * 2);
       x.ellipse(cx2 - 24 * s, cy + 3 * s, 26 * s, 9 * s, 0, 0, Math.PI * 2);
       x.ellipse(cx2 + 26 * s, cy + 2 * s, 30 * s, 10 * s, 0, 0, Math.PI * 2);
       x.fill();
-      x.strokeStyle = 'rgba(255,214,150,0.9)';
+      x.strokeStyle = alpha(css(sky.sunColor), 0.9);
       x.lineWidth = 3;
       x.beginPath();
       x.arc(cx2, cy - 2 * s, 44 * s, Math.PI * 1.15, Math.PI * 1.85);

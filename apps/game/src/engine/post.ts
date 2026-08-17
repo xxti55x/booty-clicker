@@ -4,6 +4,8 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { TexturePass } from 'three/examples/jsm/postprocessing/TexturePass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
+import type { BackgroundKey } from '../types';
+
 /**
  * Post-Processing (Roadmap L, V2-1): selektives Bloom für die ECHTEN Emissives —
  * Neonkanten, Synth-Grid, Kristalle, Landelichter, Ekstase-Momente.
@@ -32,6 +34,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 export interface Post {
   /** Bloom-Pfad aktiv? Der Loop ruft sonst `renderer.render` direkt. */
   enabled: boolean;
+  /** D-06: Farbstich + Vignette auf das Theme stellen (uniform-getrieben). */
+  setGrade(theme: BackgroundKey): void;
   render(): void;
   /** Nach Resize ODER PixelRatio-Wechsel (Quality-Preset) aufrufen. */
   setSize(w: number, h: number): void;
@@ -61,10 +65,12 @@ const GradeShader = {
   name: 'BootyGradeShader',
   uniforms: {
     tDiffuse: { value: null },
-    /** Kanten-Abdunklung (0 = aus). */
+    /** Kanten-Abdunklung (0 = aus) — pro Theme, siehe {@link GRADES}. */
     uVignette: { value: 0.2 },
     /** 1 = neutral. */
     uSaturation: { value: 1.05 },
+    /** D-06: Farbstich in den LICHTERN, pro Theme (rgb-Offset). */
+    uWarm: { value: new THREE.Vector3(0.02, 0.008, -0.012) },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -76,19 +82,33 @@ const GradeShader = {
     uniform sampler2D tDiffuse;
     uniform float uVignette;
     uniform float uSaturation;
+    uniform vec3 uWarm;
     varying vec2 vUv;
     void main() {
       vec4 c = texture2D( tDiffuse, vUv );
       float luma = dot( c.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
       c.rgb = mix( vec3( luma ), c.rgb, uSaturation );
-      // Warme Lichter: nur oberhalb ~55 % Luma, Blau minimal raus — der
-      // "goldene Bühnenglanz", ohne die Schatten zu kippen.
-      c.rgb += vec3( 0.020, 0.008, -0.012 ) * smoothstep( 0.55, 1.0, luma );
+      // D-06: Farbstich NUR oberhalb ~55 % Luma — der Fingerabdruck des Themes
+      // liegt in den Lichtern, die Schatten kippen nie mit.
+      c.rgb += uWarm * smoothstep( 0.55, 1.0, luma );
       vec2 q = vUv - 0.5;
       float edge = smoothstep( 0.32, 0.85, length( q ) * 1.35 );
       c.rgb *= 1.0 - uVignette * edge;
       gl_FragColor = c;
     }`,
+};
+
+/**
+ * D-06 „Ein Grade pro Theme": Lichter-Stich + Vignetten-Tiefe je Bühne. Rein
+ * UNIFORM-getrieben — der GradeShader bleibt EIN Programm (K-7), der Wechsel
+ * kostet zwei Zahlen. Der low-Preset fährt ohne Post und sieht davon nichts;
+ * das ist Glanz, keine Information (K-9).
+ */
+const GRADES: Record<BackgroundKey, { warm: [number, number, number]; vignette: number }> = {
+  club: { warm: [0.028, 0.01, -0.016], vignette: 0.24 }, // warm, kontrastreich
+  synth: { warm: [0.026, -0.006, 0.03], vignette: 0.3 }, // magenta-lastig, tiefe Kante
+  beach: { warm: [0.034, 0.014, -0.022], vignette: 0.14 }, // warm-weich, flache Kante
+  space: { warm: [-0.014, 0.0, 0.028], vignette: 0.32 }, // kühl, starke Vignette
 };
 
 export function createPost(
@@ -111,10 +131,16 @@ export function createPost(
   composer.addPass(bloom);
   // Grade-Abschluss statt nacktem Kopierer — bewusst KEIN OutputPass: der
   // Puffer ist schon display-referred, jede Transferkurve wäre die Doppelung.
-  composer.addPass(new ShaderPass(GradeShader));
+  const grade = new ShaderPass(GradeShader);
+  composer.addPass(grade);
 
   return {
     enabled: false,
+    setGrade(theme: BackgroundKey) {
+      const g = GRADES[theme];
+      (grade.uniforms.uWarm!.value as THREE.Vector3).set(...g.warm);
+      grade.uniforms.uVignette!.value = g.vignette;
+    },
     render() {
       renderer.render(scene, camera);
       renderer.copyFramebufferToTexture(frameTex);

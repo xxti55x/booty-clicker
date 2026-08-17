@@ -15,7 +15,29 @@ describe('quality presets', () => {
       ambientLife: 0.5,
       bloom: false,
       toonFx: false,
+      rimLights: false,
+      burstScale: 0.5,
+      dynamicBlobShadow: false,
     });
+  });
+
+  // D-07/A9: low nimmt die Rim-Punktlichter über die INTENSITÄT raus, nie über
+  // `visible` — ein Sichtbarkeits-Wechsel änderte die Licht-Anzahl im
+  // Shader-Hash und erzwänge beim Preset-Wechsel Neukompilate.
+  it('only low drops the rim point lights (D-07)', () => {
+    expect(qualityPreset('low').rimLights).toBe(false);
+    expect(qualityPreset('medium').rimLights).toBe(true);
+    expect(qualityPreset('high').rimLights).toBe(true);
+  });
+
+  // D-02/D-03: low halbiert die Klick-Splitter und friert die Sprunghöhen-
+  // Reaktion des Kontaktschattens ein — Dichte und Glanz fallen weg, nie die
+  // Information (K-9).
+  it('low halves the click splinters and freezes the blob shadow (D-02/D-03)', () => {
+    expect(qualityPreset('low').burstScale).toBe(0.5);
+    expect(qualityPreset('medium').burstScale).toBe(1);
+    expect(qualityPreset('low').dynamicBlobShadow).toBe(false);
+    expect(qualityPreset('high').dynamicBlobShadow).toBe(true);
   });
 
   // AAA-Toon-Pass: low spart die Per-Pixel-ALU (Software-Rasterizer), sonst an.

@@ -92,3 +92,37 @@ export function applyAccents(rig: Rig, a: AccentState, frenzy: boolean, t: numbe
     rig.head.rotation.z += Math.sin(t * 30 + 1.2) * 0.05;
   }
 }
+
+/**
+ * **D-21 „Die Bühne atmet"** — die Ruhe-Ebene der Spielfigur.
+ *
+ * Ohne Eingabe stand die Figur bisher praktisch still (shots/SHEET-idle.png):
+ * die `MOVES`-Amplituden skalieren mit der Energie gegen null, und darunter kam
+ * nichts. Diese Schicht legt darunter, was ein lebendiger Körper immer tut —
+ * Atmung, Gewichtsverlagerung, ein Kopf-Nick auf den Beat.
+ *
+ * `calm` blendet sie AUS, sobald wirklich getanzt wird (`1 − min(1, drive)`):
+ * die Ruhe-Ebene ist der Boden unter der Choreografie, nicht eine zweite
+ * Bewegung obendrauf. Wie {@link applyAccents} ist sie strikt ADDITIV und läuft
+ * im selben Slot NACH `stepPhysics` — `applyPose` schreibt jeden Fixschritt
+ * absolute Werte, es kann also nichts akkumulieren.
+ *
+ * Pur und deterministisch: gleiche `(t, calm, beatV)` ⇒ gleiche Pose, kein
+ * Zustand, keine Zufallszahl. Alle Frequenzen sind langsam (0.6–1.7 Hz) und
+ * alle Amplituden klein — das Bild soll atmen, nicht wackeln.
+ */
+export function applyIdleLife(rig: Rig, t: number, calm: number, beatV: number): void {
+  const c = Math.max(0, Math.min(1, calm));
+  if (c > 0) {
+    rig.spine.rotation.x += Math.sin(t * IDLE_BREATH_HZ) * 0.022 * c; // Atmung
+    rig.pelvis.rotation.z += Math.sin(t * IDLE_SHIFT_HZ) * 0.03 * c; // Standbein-Wechsel
+    rig.root.position.y += Math.sin(t * IDLE_BREATH_HZ) * 0.012 * c; // Brustkorb hebt
+  }
+  // Der Kopf-Nick hängt am BEAT, nicht an `calm` — die Musik läuft immer.
+  rig.head.rotation.x -= beatV * 0.05;
+}
+
+/** Atem-Frequenz der Ruhe-Ebene (Hz·2π) — ruhiges Ein/Aus, ~1.7 rad/s. */
+const IDLE_BREATH_HZ = 1.7;
+/** Gewichtsverlagerung: noch langsamer, damit die Ebenen nie im Takt sind. */
+const IDLE_SHIFT_HZ = 0.6;

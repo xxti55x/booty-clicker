@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-import { INK, mk, outlineMaterial, toonMat, withOutline } from '../engine/materials';
+import { INK, KEY_LIGHT_DIR, mk, outlineMaterial, toonMat, withOutline } from '../engine/materials';
+import { ENTITY_STAGE } from '../character/entity';
+import { blobShadow } from '../engine/scene';
 import type { GlowSpriteFn, SceneLights } from '../engine/scene';
 import {
   bandsTex,
@@ -17,6 +19,7 @@ import {
   strataTex,
 } from '../engine/textures';
 import { bake, buildIsland, ISLAND_C, ISLAND_R, TOP_Y } from './island';
+import { THEME_ACCENT } from './theme-accents';
 import {
   PANO_CAM,
   paintBeachBay,
@@ -77,6 +80,12 @@ interface BuildCtx {
    * Traversieren. Bewusst ein Objekt (Referenz), kein Wert.
    */
   hype: { on: boolean };
+  /** D-03: Theme-normierte Schatten-Deckkraft (siehe `World.shadowOpacity`). */
+  shadowOpacity: number;
+  /** D-08: Diskrete Eskalationsstufe 0/1/2 (Publikum, Requisiten, Rang). */
+  stageTier: number;
+  /** D-08: Stetiger Fortschritt 0…1 (Deck-Emissive, Sättigung, Himmel). */
+  stageK: number;
 }
 
 interface BgConfig {
@@ -106,10 +115,17 @@ interface BgConfig {
     /** Relief-Stärke (Roadmap T2): Map/Emissive-Map dient zugleich als Bump-Höhe. */
     bump?: number;
   };
-  /** Per-Theme-Lichtset (Roadmap L): Key/Fill/Hemi/Rims wechseln mit der Kulisse. */
+  /**
+   * Per-Theme-Lichtset (Roadmap L / D-07): Key/Fill/Hemi/Rims wechseln mit der
+   * Kulisse. `keyPos` macht daraus eine echte SIGNATUR statt einer Farbtönung —
+   * die Lichtrichtung ist das, was die vier Themes auch in Graustufen
+   * auseinanderhält (S2), das Key:Fill-Verhältnis ihr Kontrast-Charakter.
+   */
   light: {
     key: number;
     keyInt: number;
+    /** Weltposition des Key-Lichts; Ziel bleibt das Insel-Zentrum (scene.ts). */
+    keyPos: [number, number, number];
     fill: number;
     fillInt: number;
     sky: number;
@@ -660,8 +676,154 @@ function hypeArmsGeo(): THREE.BufferGeometry {
   return geo;
 }
 
+/** D-21: Sekunden, die ein einzelner Gast pro „Arme hoch"-Umlauf bekommt. */
+const CHEER_PERIOD = 5;
+/** D-08: Gäste auf der ersten Stufe (spärlich besetzte Lounge). */
+const AUDIENCE_BASE = 4;
+/** D-08: Zuwachs je Eskalationsstufe — Stufe 2 ist voll umringt (4 → 10). */
+const AUDIENCE_PER_TIER = 3;
+
+// ---------------------------------------------------------------------------
+// D-08 — Bühnen-Eskalation: Rand-Requisiten nach Stufe
+// ---------------------------------------------------------------------------
+
+/**
+ * Sichtkeil der Kamera (F4a): dasselbe Winkelfenster, in dem schon die
+ * Lounge-Buchten stehen. Alles außerhalb liegt HINTER der Kamera-Achse und
+ * wäre unsichtbarer Aufwand.
+ */
+const VIEW_WEDGE: readonly [number, number] = [0.62, Math.PI - 0.62];
+/**
+ * Freihalte-Korridor um die Blickachse Spieler → Gegner (F4b/D-14): keine
+ * Requisite näher als das an die Verbindungslinie — das Duell-Bild bleibt frei.
+ */
+const DUEL_CLEARANCE = 1.2;
+/** Radius, auf dem die Rand-Requisiten stehen (außerhalb der Lounge). */
+const PROP_R = ISLAND_R - 0.35;
+/**
+ * K-6: Requisiten dürfen NIE die hellste Fläche im Bild sein — die gehört dem
+ * wichtigsten Akteur. Deshalb liegt ihre Emissive-Stärke auf Deck-Niveau.
+ */
+const PROP_EMISSIVE = 0.3;
+
+/** Abstand eines Deck-Punktes zur Blickachse Spieler(0,0) → Gegner. */
+function duelAxisDist(x: number, z: number): number {
+  const { x: ax, z: az } = ENTITY_STAGE;
+  return Math.abs(ax * z - az * x) / Math.hypot(ax, az);
+}
+
+/**
+ * **D-08 (3) Requisitendichte am Bühnenrand** — 0 / 2 / 4 Stück je Stufe, aus
+ * denselben Primitiven gebaut, aus denen die Bühne ohnehin besteht (kein neues
+ * Bestiarium). Alles wird in EIN Mesh gebacken: zwei Draw-Calls (Körper +
+ * Ink-Hülle) pro Bühne, egal wie viele Stücke.
+ *
+ * Die drei F4-Auflagen stehen als Code, nicht als Kommentar: Plätze nur im
+ * {@link VIEW_WEDGE}, nichts im {@link DUEL_CLEARANCE}-Korridor, Emissive
+ * gedeckelt auf {@link PROP_EMISSIVE}.
+ */
+function escalationProps(ctx: BuildCtx, theme: BackgroundKey): void {
+  const n = ctx.stageTier * 2;
+  if (n === 0) return;
+  // Kandidaten-Winkel im Sichtkeil, abwechselnd von außen nach innen — so
+  // stehen schon bei zwei Stück beide Bühnenseiten besetzt.
+  const [a0, a1] = VIEW_WEDGE;
+  const cand = [a0 + 0.08, a1 - 0.08, a0 + 0.55, a1 - 0.55, a0 + 1.02, a1 - 1.02];
+  const spots: { x: number; z: number; a: number }[] = [];
+  for (const a of cand) {
+    if (spots.length >= n) break;
+    const x = ISLAND_C.x + Math.cos(a) * PROP_R;
+    const z = ISLAND_C.z + Math.sin(a) * PROP_R;
+    if (duelAxisDist(x, z) < DUEL_CLEARANCE) continue; // Blickachse bleibt frei
+    spots.push({ x, z, a });
+  }
+  if (spots.length === 0) return;
+
+  const { hue } = ctx;
+  const parts: THREE.Mesh[] = [];
+  const glowParts: THREE.Mesh[] = [];
+  for (const sp of spots) {
+    const face = Math.atan2(ISLAND_C.x - sp.x, ISLAND_C.z - sp.z);
+    if (theme === 'club') {
+      // Fackel-Ständer: Säule + Schale (die Flamme trägt die Emissive-Schale,
+      // nicht ein additives Sprite — K-6).
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.19, 1.5, 8));
+      post.position.set(sp.x, TOP_Y + 0.75, sp.z);
+      parts.push(post);
+      const bowl = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.5, 8));
+      bowl.position.set(sp.x, TOP_Y + 1.72, sp.z);
+      glowParts.push(bowl);
+    } else if (theme === 'synth') {
+      // Grid-Scherbe: ein aufragender Keil, leicht gekippt.
+      const shard = new THREE.Mesh(new THREE.ConeGeometry(0.3, 2.1, 4));
+      shard.position.set(sp.x, TOP_Y + 1.05, sp.z);
+      shard.rotation.set(0.12 * Math.cos(sp.a), face, 0.12 * Math.sin(sp.a));
+      parts.push(shard);
+      const cap = new THREE.Mesh(new THREE.OctahedronGeometry(0.2, 0));
+      cap.position.set(sp.x, TOP_Y + 2.15, sp.z);
+      glowParts.push(cap);
+    } else if (theme === 'beach') {
+      // Boje: Kugel auf Ring, dazu ein flacher Sockel im Sand.
+      const base = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.11, 8, 14));
+      base.rotation.x = Math.PI / 2;
+      base.position.set(sp.x, TOP_Y + 0.11, sp.z);
+      parts.push(base);
+      const buoy = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 10));
+      buoy.position.set(sp.x, TOP_Y + 0.5, sp.z);
+      parts.push(buoy);
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6));
+      lamp.position.set(sp.x, TOP_Y + 0.86, sp.z);
+      glowParts.push(lamp);
+    } else {
+      // Satellit: Korpus + zwei Paneele auf einem kurzen Mast.
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.2, 6));
+      mast.position.set(sp.x, TOP_Y + 0.6, sp.z);
+      parts.push(mast);
+      const hull = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.52));
+      hull.position.set(sp.x, TOP_Y + 1.4, sp.z);
+      hull.rotation.y = face;
+      parts.push(hull);
+      for (const side of [-1, 1]) {
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.05, 0.34));
+        panel.position.set(sp.x + Math.cos(face) * side * 0.52, TOP_Y + 1.4, sp.z - Math.sin(face) * side * 0.52);
+        panel.rotation.y = face;
+        glowParts.push(panel);
+      }
+    }
+  }
+  // K-6: Requisiten liegen zwei Helligkeitsstufen unter den Akteuren. Der
+  // Beach-Ton war als Creme zu hell — er konkurrierte im Bild mit der Haut der
+  // Spielfigur (headless gegengeprüft) und ist jetzt Treibholz-Sand.
+  const bodyTone = { club: 0x2c1b38, synth: 0x2a1550, beach: 0xa8916a, space: 0x4a5064 }[theme];
+  const glowTone = {
+    club: 0xffa64d,
+    synth: THEME_ACCENT.synth,
+    beach: THEME_ACCENT.beach,
+    space: THEME_ACCENT.space,
+  }[theme];
+  if (parts.length) ctx.islandGroup.add(O(bake(parts, toonMat({ color: hue(bodyTone) })), 0.025));
+  if (glowParts.length) {
+    ctx.islandGroup.add(
+      O(
+        bake(
+          glowParts,
+          toonMat({
+            color: hue(glowTone),
+            emissive: hue(glowTone),
+            emissiveIntensity: PROP_EMISSIVE,
+          }),
+        ),
+        0.02,
+      ),
+    );
+  }
+}
+
 function audience(ctx: BuildCtx): void {
-  const count = amount(ctx, 10);
+  // D-08 (1) Publikumsdichte: Bühne 1–3 spärlich, kurz vor dem Boss voll
+  // umringt. Die neuen Plätze landen automatisch im Sichtkeil — die
+  // Sitz-Verteilung unten füllt die drei Buchten von innen nach außen auf.
+  const count = amount(ctx, AUDIENCE_BASE + AUDIENCE_PER_TIER * ctx.stageTier);
   if (count === 0) return;
   const rnd = lcg(777);
   const R = ISLAND_R - 0.95;
@@ -696,6 +858,21 @@ function audience(ctx: BuildCtx): void {
   const seats = O(bake(seatParts, toonMat({ color: 0x5a3472 })), 0.025);
   const frames = O(bake(frameParts, toonMat({ color: 0x2c1b38 })), 0.025);
   ctx.islandGroup.add(seats, frames);
+  // D-03: Ein gebackenes Schatten-Trio unter den drei Buchten — die SITZENDEN
+  // Gäste erben den Sofa-Schatten (F4: kein Einzel-Blob je Gast, das wären
+  // zehn Draw-Calls für Nebendarsteller). EIN Bake, ein Draw-Call.
+  {
+    const pads: THREE.Mesh[] = [];
+    for (const a of boothAngles) {
+      const pad = blobShadow(3.2, 1.5, ctx.shadowOpacity * 0.8);
+      pad.position.set(ISLAND_C.x + Math.cos(a) * R, TOP_Y + 0.008, ISLAND_C.z + Math.sin(a) * R);
+      pad.rotation.z = Math.atan2(ISLAND_C.x - pad.position.x, ISLAND_C.z - pad.position.z);
+      pads.push(pad);
+    }
+    const padMat = (pads[0]!.material as THREE.MeshBasicMaterial).clone();
+    pads.forEach((m) => (m.material as THREE.MeshBasicMaterial).dispose());
+    ctx.islandGroup.add(bake(pads, padMat));
+  }
   // Drinks: zwei kleine Glüh-Punkte auf den Tischen — die Lounge lebt.
   for (const a of [1.05, Math.PI - 1.05]) {
     const x = ISLAND_C.x + Math.cos(a) * (R - 0.9);
@@ -741,12 +918,24 @@ function audience(ctx: BuildCtx): void {
     for (let i = 0; i < count; i++) {
       const sp = spots[i]!;
       // Sitzend: sanftes Wippen. Hype: vom Polster springen + Hüft-Sway.
+      // D-21: Die Ruhe-Amplituden waren so klein, dass die Lounge auf dem
+      // Screenshot ein Standbild war — verdoppelt reicht das für „sie wippen
+      // mit", ohne dass die Sitzgruppe zappelt.
       const bob = hype
         ? Math.abs(Math.sin(t * 6.4 + sp.ph)) * 0.36 + beatV * 0.12
-        : beatV * 0.06 + Math.sin(t * 1.5 + sp.ph) * 0.03;
-      const sway = hype ? Math.sin(t * 5.1 + sp.ph) * 0.16 : Math.sin(t * 1.1 + sp.ph) * 0.04;
+        : beatV * 0.06 + Math.sin(t * 1.5 + sp.ph) * 0.07;
+      const sway = hype ? Math.sin(t * 5.1 + sp.ph) * 0.16 : Math.sin(t * 1.1 + sp.ph) * 0.08;
       put(body, i, sp.x, baseY + bob, sp.z, sp.rot + sway, sp.s, sp.s * (1 - beatV * 0.05));
-      const armS = hype ? sp.s * (0.95 + Math.sin(t * 7.3 + sp.ph) * 0.1) : 0.001;
+      // D-21: „Gelegentlich hebt eine die Arme" — pro Umlauf GENAU EIN Gast,
+      // Index aus der Uhr, Phase aus seiner Position. Zustandslos: kein Feld
+      // pro Instanz, der Effekt lebt allein aus `t`.
+      const cheer = !hype && Math.floor(t / CHEER_PERIOD) % count === i;
+      const cheerK = cheer ? Math.sin(((t % CHEER_PERIOD) / CHEER_PERIOD) * Math.PI) : 0;
+      const armS = hype
+        ? sp.s * (0.95 + Math.sin(t * 7.3 + sp.ph) * 0.1)
+        : cheerK > 0.15
+          ? sp.s * cheerK
+          : 0.001;
       put(arms, i, sp.x, baseY + bob, sp.z, sp.rot + sway, armS, armS);
     }
     body.instanceMatrix.needsUpdate = true;
@@ -871,6 +1060,9 @@ function lcg(seed: number): () => number {
 
 function horizonLayer(ctx: BuildCtx, theme: BackgroundKey): void {
   const { propGroup, glowSprite, anims, hue } = ctx;
+  // D-08 (4): Der Himmel lädt sich mit der Bühne auf — Fenster brennen heller,
+  // der Stadt-/Sonnen-Dom wächst. Stetig, also ohne eigenen Rebuild-Anlass.
+  const esc = 0.8 + 0.4 * ctx.stageK;
   // Gemaltes Fern-Panorama (paintings.ts): EIN Cutout-Billboard je Theme,
   // HINTER den 3D-Mittelgrund-Props — die Kamera ist fix, also ist die Fläche
   // von Geometrie nicht zu unterscheiden, trägt aber Detail (hunderte Fenster,
@@ -916,7 +1108,7 @@ function horizonLayer(ctx: BuildCtx, theme: BackgroundKey): void {
       // Bühnenlicht. Die „Fenster" sind der Punkt-Texel im Map-Kanal.
       const mat = noFog(
         new THREE.MeshBasicMaterial({
-          color: new THREE.Color(r.tone).multiplyScalar(2.2),
+          color: new THREE.Color(r.tone).multiplyScalar(2.2 * esc),
           map: repeated(dotsTex(3, 26), 1.4, 2.8),
         }),
       );
@@ -929,7 +1121,7 @@ function horizonLayer(ctx: BuildCtx, theme: BackgroundKey): void {
       propGroup.add(im);
     }
     // Stadt-Glühen: der warme Lichtdom, den eine Nachtstadt an den Himmel wirft.
-    propGroup.add(glowSprite(hue(0xff7a4a), 3.5, 14, -12, 34));
+    propGroup.add(glowSprite(hue(0xff7a4a), 3.5 * esc, 14, -12, 34));
   } else if (theme === 'synth') {
     // Grid-Boden bis zum Fluchtpunkt — das Genre-Versprechen der Synth-Welt.
     const grid = new THREE.Mesh(
@@ -957,7 +1149,7 @@ function horizonLayer(ctx: BuildCtx, theme: BackgroundKey): void {
     sunG.position.set(20, -19, 55);
     sunG.rotation.y = Math.PI;
     propGroup.add(sunG);
-    propGroup.add(glowSprite(hue(0xff5fa4), 12, 20, -18, 54));
+    propGroup.add(glowSprite(hue(0xff5fa4), 12 * esc, 20, -18, 54));
     // Bergkamm-Silhouette vor der Sonne — Tiefe zwischen Grid und Himmel.
     const rnd = lcg(1337);
     const ridge = new THREE.InstancedMesh(
@@ -1200,16 +1392,19 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     fm: 0.55,
     revealAt: 0,
     deck: { map: () => repeated(plankTex(1), 5, 5), bump: 0.35 }, // dunkles Club-Parkett
-    // Club: warmes Key, kühles Fill, Violett/Limette-Rims (der bisherige Look).
+    // D-07 Club-Signatur: Key HOCH UND FRONTAL, hart — das Bühnen-Spotlight von
+    // vorn oben. Kontrast 3:1 (Key 2.1 : Fill 0.7): klare Cel-Kante, aber die
+    // Schattenseite bleibt bunt. Rims Violett/Limette (rimB = K-1-Akzent).
     light: {
       key: 0xfff4e0,
-      keyInt: 2.3,
+      keyInt: 2.1,
+      keyPos: [4.5, 9, 7],
       fill: 0xa9c4ff,
-      fillInt: 0.75,
+      fillInt: 0.7,
       sky: 0xd6daff,
       ground: 0x4a3a40,
       rimA: 0x8b5cf6,
-      rimB: 0xa8e831,
+      rimB: THEME_ACCENT.club,
     },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
@@ -1241,7 +1436,11 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       const cols = [hue(0xff3366), hue(0x33ff88), hue(0x3388ff), hue(0xffdd33)];
       const beams: { l: THREE.SpotLight; beam: THREE.Mesh; ph: number }[] = [];
       for (let i = 0; i < 4; i++) {
-        const l = new THREE.SpotLight(cols[i], 90, 45, 0.45, 0.55, 1.6);
+        // D-01: Die vier Kegel addierten sich mit Key + Hemi + Beat-Licht in der
+        // Bühnenmitte zum Clipping-Loch. Gedeckelt auf ein Drittel — die Kegel
+        // bleiben als FORM sichtbar (Beam-Opacity unverändert), sie brennen nur
+        // keine Hauttöne mehr aus.
+        const l = new THREE.SpotLight(cols[i], 30, 45, 0.45, 0.55, 1.6);
         l.position.set(Math.cos(i * 1.57) * 8, 8.5, Math.sin(i * 1.57) * 8);
         l.target.position.set(0, -2, 0);
         propGroup.add(l, l.target);
@@ -1354,15 +1553,19 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       bump: 0.15, // Grid-Linien als flache Grate
     },
     // Synth: rosé Key, Cyan-Fill, Pink/Cyan-Rims — das Neon-Duo als Licht.
+    // D-07 Synth-Signatur: Key TIEF VON HINTEN (+z ist die Kulissen-Seite) —
+    // Gegenlicht, das die Figuren als Silhouette gegen die Retro-Sonne setzt.
+    // Kontrast 5:1: das härteste Bild nach Space.
     light: {
       key: 0xffe0f2,
       keyInt: 2.2,
+      keyPos: [-3, 3.5, 12],
       fill: 0x7de8ff,
-      fillInt: 0.9,
+      fillInt: 0.45,
       sky: 0xe8c8ff,
       ground: 0x301848,
       rimA: 0xff3fb0,
-      rimB: 0x2ff5e8,
+      rimB: THEME_ACCENT.synth,
     },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
@@ -1473,24 +1676,33 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
   beach: {
     icon: '🏖️',
     name: 'Sunset Beach',
-    top: 0xff8a4d,
-    bot: 0x2a1533,
-    fog: 0x3a1a30,
+    // D-07: `top`/`bot` sind hier NICHT Zenit/Horizont — die Diorama-Kamera
+    // blickt steil ABWÄRTS, also füllt `bot` die untere Bildhälfte (die Leere
+    // unter der Insel) und `top` das sichtbare Himmelsband. Ein Tausch macht
+    // daraus eine orange Vollfläche (headless verifiziert). Der Abend kommt
+    // deshalb aus dem LICHT (siehe `light`) plus einem tieferen Himmelsrot und
+    // einem warmen Dunst — nicht aus vertauschten Enden.
+    top: 0xf07038,
+    bot: 0x241033,
+    fog: 0x4a2338,
     floor: 0xb08b52,
     fr: 0.85,
     fm: 0.05,
     revealAt: 6000,
     deck: { map: () => repeated(speckleTex(1, 1100), 4, 4), bump: 0.25 }, // körniger Sand
-    // Beach: goldene Stunde — warmes starkes Key, weiches Himmel-Fill.
+    // D-07 Beach-Signatur: „Sunset Beach" heißt ABENDLICHT — Key steht SEITLICH
+    // TIEF und satt orange, nicht mittags-neutral (shots/theme-z25.png). Weiches
+    // Verhältnis 2:1: lange Schatten, aber nichts säuft ab.
     light: {
-      key: 0xffd9a0,
-      keyInt: 2.6,
+      key: 0xffb36a,
+      keyInt: 2.4,
+      keyPos: [10, 2.5, 6],
       fill: 0x9ec8ff,
-      fillInt: 0.6,
+      fillInt: 1.2,
       sky: 0xffe4c8,
       ground: 0x6a4a30,
       rimA: 0xff8a4d,
-      rimB: 0x3adfc0,
+      rimB: THEME_ACCENT.beach,
     },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
@@ -1657,16 +1869,18 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     fm: 0.85,
     revealAt: 30000,
     deck: { map: () => repeated(platesTex(1), 4, 4), bump: 0.3 }, // vernietetes Metall-Deck
-    // Space: hartes kaltes Key, gedämpftes Fill, Cyan/Violett-Rims.
+    // D-07 Space-Signatur: eine nackte Sonne über der Plattform — hart von
+    // oben-seitlich, fast KEIN Fill (6:1). Der Vakuum-Kontrast des Themes.
     light: {
       key: 0xeef4ff,
-      keyInt: 2.1,
+      keyInt: 2.3,
+      keyPos: [2, 11, 3],
       fill: 0x8898c8,
-      fillInt: 0.55,
+      fillInt: 0.38,
       sky: 0xb8c8e8,
       ground: 0x1c1c2e,
       rimA: 0x63e8ff,
-      rimB: 0x9d5cf6,
+      rimB: THEME_ACCENT.space,
     },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
@@ -1857,6 +2071,8 @@ interface Palette {
   floor: THREE.Color;
   key: THREE.Color;
   keyInt: number;
+  /** D-07: Die Key-RICHTUNG ist Teil der Theme-Signatur und blendet mit. */
+  keyPos: THREE.Vector3;
   fill: THREE.Color;
   fillInt: number;
   sky: THREE.Color;
@@ -1864,6 +2080,19 @@ interface Palette {
   rimA: THREE.Color;
   rimB: THREE.Color;
 }
+
+/**
+ * Ruhe-Intensitäten der beiden Rim-Punktlichter (Werte aus `scene.ts`). Sie
+ * stehen HIER, weil `applyPalette` sie jeden Frame schreiben muss: nur so kann
+ * der low-Preset sie auf 0 ziehen, OHNE `visible` zu schalten — ein
+ * Sichtbarkeits-Wechsel änderte die Licht-Anzahl im Shader-Hash und ließe beim
+ * Preset-Wechsel ALLE beleuchteten Programme neu kompilieren (K-7, verboten).
+ */
+const RIM_A_INT = 48;
+const RIM_B_INT = 30;
+
+/** low-Preset ohne Rims: der Hemi-Ground gleicht den fehlenden Fülllicht-Anteil aus. */
+const RIMLESS_GROUND_LIFT = 1.2;
 
 /**
  * Owns the swappable stage props and the sky/fog/floor tint. Replaces the
@@ -1889,6 +2118,21 @@ export class World {
   private ekstaseOn = false;
   /** G3: Dichte-Faktor der Ambient-Elemente (aus dem Quality-Preset). */
   private ambientLife = 1;
+  /** D-07/A9: Laufen die beiden Rim-Punktlichter? (low ⇒ Intensität 0.) */
+  private rimLights = true;
+  /**
+   * D-03: Deckkraft der Kontaktschatten, gegen die Deckhelligkeit des Themes
+   * normiert. Auf hellem Grund trägt schon wenig Alpha genug Kontrast, auf
+   * dunklem Grund braucht der Schatten mehr, um überhaupt zu lesen — so wirkt
+   * er über alle vier Bühnen gleich stark und nirgends als Schmutzfleck.
+   * Die World kennt die Akteure nicht; `main` liest den Wert und reicht ihn an
+   * Spieler-Decal und Rivalen weiter.
+   */
+  private shadowOpacityValue = 0.5;
+  /** D-08: Eskalationsstufe der laufenden Bühne (0/1/2) — siehe `setStageTier`. */
+  private stageTierValue = 0;
+  /** D-08: Stetiger Fortschritt 0…1 innerhalb des Themes. */
+  private stageKValue = 0;
   /** Ekstase-Fenster offen? (Lounge-Publikum eskaliert.) */
   private readonly hypeFlag = { on: false };
   /**
@@ -1945,10 +2189,12 @@ export class World {
   }
 
   /**
-   * Die überblendbare Palette eines Themes. Goal „alle Bühnen heller": die
-   * Kulissen-Paletten werden Richtung Weiß geliftet (Sky am stärksten, Boden
-   * dezent) — die Stimmungen bleiben unterscheidbar, aber nichts säuft mehr im
-   * Dunkel ab. Das Licht-Rig (Roadmap L) läuft bewusst OHNE Hue-Lap.
+   * Die überblendbare Palette eines Themes. D-01 (Belichtungs-Disziplin): Der
+   * Weiß-Lift war der zweite Treiber des Clipping-Lochs (0.22–0.30 Richtung
+   * Weiß PLUS Exposure 1.45). Er bleibt als Dunst-Anhebung erhalten, aber
+   * deutlich schwächer — die Stimmung trägt jetzt die SATTE Grundfarbe des
+   * Themes, nicht ein Schritt Richtung Weiß. Das Licht-Rig (Roadmap L) läuft
+   * bewusst OHNE Hue-Lap.
    */
   private static paletteFor(key: BackgroundKey, variant: number): Palette {
     const hue = World.hueFn(variant);
@@ -1956,12 +2202,13 @@ export class World {
     const b = BGS[key];
     const L = b.light;
     return {
-      skyTop: lift(hue(b.top), 0.22),
-      skyBot: lift(hue(b.bot), 0.3),
-      fog: lift(hue(b.fog), 0.26),
-      floor: lift(hue(b.floor), 0.14),
+      skyTop: lift(hue(b.top), 0.1),
+      skyBot: lift(hue(b.bot), 0.12),
+      fog: lift(hue(b.fog), 0.12),
+      floor: lift(hue(b.floor), 0.06),
       key: new THREE.Color(L.key),
       keyInt: L.keyInt,
+      keyPos: new THREE.Vector3(...L.keyPos),
       fill: new THREE.Color(L.fill),
       fillInt: L.fillInt,
       sky: new THREE.Color(L.sky),
@@ -1982,6 +2229,7 @@ export class World {
       floor: this.floorMat.color.clone(),
       key: l ? l.key.color.clone() : base.key,
       keyInt: l ? l.key.intensity : base.keyInt,
+      keyPos: l ? l.key.position.clone() : base.keyPos,
       fill: l ? l.fill.color.clone() : base.fill,
       fillInt: l ? l.fill.intensity : base.fillInt,
       sky: l ? l.hemi.color.clone() : base.sky,
@@ -2001,14 +2249,25 @@ export class World {
     (this.scene.fog as THREE.FogExp2).color.copy(c(from.fog, to.fog));
     this.floorMat.color.copy(c(from.floor, to.floor));
     if (this.lights) {
-      this.lights.key.color.copy(c(from.key, to.key));
-      this.lights.key.intensity = n(from.keyInt, to.keyInt);
-      this.lights.fill.color.copy(c(from.fill, to.fill));
-      this.lights.fill.intensity = n(from.fillInt, to.fillInt);
-      this.lights.hemi.color.copy(c(from.sky, to.sky));
-      this.lights.hemi.groundColor.copy(c(from.ground, to.ground));
-      this.lights.rimA.color.copy(c(from.rimA, to.rimA));
-      this.lights.rimB.color.copy(c(from.rimB, to.rimB));
+      const L = this.lights;
+      L.key.color.copy(c(from.key, to.key));
+      L.key.intensity = n(from.keyInt, to.keyInt);
+      // D-07: Die Lichtrichtung wandert STETIG (kein Sprung) — sonst springt
+      // der Schattenwurf des Decks mitten im G1-Übergang.
+      L.key.position.copy(k >= 1 ? to.keyPos : from.keyPos.clone().lerp(to.keyPos, k));
+      // Der Toon-Glint folgt dem Bühnen-Key: ein geteiltes Uniform-Objekt, das
+      // alle `toonMat`s im selben Frame sehen (kein Traversieren, kein Recompile).
+      KEY_LIGHT_DIR.copy(L.key.position).sub(L.key.target.position).normalize();
+      L.fill.color.copy(c(from.fill, to.fill));
+      L.fill.intensity = n(from.fillInt, to.fillInt);
+      L.hemi.color.copy(c(from.sky, to.sky));
+      L.hemi.groundColor.copy(c(from.ground, to.ground));
+      if (!this.rimLights) L.hemi.groundColor.multiplyScalar(RIMLESS_GROUND_LIFT);
+      L.rimA.color.copy(c(from.rimA, to.rimA));
+      L.rimB.color.copy(c(from.rimB, to.rimB));
+      // A9: Intensität statt `visible` — siehe RIM_A_INT.
+      L.rimA.intensity = this.rimLights ? RIM_A_INT : 0;
+      L.rimB.intensity = this.rimLights ? RIM_B_INT : 0;
     }
   }
 
@@ -2032,6 +2291,10 @@ export class World {
 
     const hue = World.hueFn(variant);
     const b = BGS[key];
+    // D-03: Deckhelligkeit → Schatten-Deckkraft (siehe `shadowOpacityValue`).
+    const fl = new THREE.Color(b.floor);
+    const luma = 0.2126 * fl.r + 0.7152 * fl.g + 0.0722 * fl.b;
+    this.shadowOpacityValue = Math.max(0.22, Math.min(0.5, 0.55 - 0.35 * luma));
     this.floorMat.roughness = b.fr;
     this.floorMat.metalness = b.fm;
     // Deck-Texturen (Goal „apply texture"): Map/Emissive-Map je Theme; ein
@@ -2040,7 +2303,9 @@ export class World {
     this.floorMat.map = d.map?.() ?? null;
     this.floorMat.emissiveMap = d.emissiveMap?.() ?? null;
     this.floorMat.emissive.copy(d.emissive !== undefined ? hue(d.emissive) : new THREE.Color(0));
-    this.floorMat.emissiveIntensity = d.emissiveIntensity ?? 1;
+    // D-08 (2): Das Deck lädt sich zur Boss-Bühne hin auf — Emissive UND
+    // Sättigung. Beides stetig (`stageK`), also ohne eigenen Rebuild-Anlass.
+    this.floorMat.emissiveIntensity = (d.emissiveIntensity ?? 1) * (0.7 + 0.3 * this.stageKValue);
     // T2-Relief: dieselbe Muster-Map trägt die Höhe (Fugen/Nieten/Grid-Grate).
     this.floorMat.bumpMap = d.bump ? (this.floorMat.map ?? this.floorMat.emissiveMap) : null;
     this.floorMat.bumpScale = d.bump ?? 1;
@@ -2067,12 +2332,16 @@ export class World {
       hue,
       density: this.ambientLife,
       hype: this.hypeFlag,
+      shadowOpacity: this.shadowOpacityValue,
+      stageTier: this.stageTierValue,
+      stageK: this.stageKValue,
     };
     b.build(ctx);
     // Politur „vollständige Szenerie": die ferne Horizont-Schicht des Themes —
     // hier statt in den vier `build`-Funktionen, damit sie EIN Vertrag bleibt.
     horizonLayer(ctx, key);
     stageKinetics(ctx, key);
+    escalationProps(ctx, key); // D-08 (3): Rand-Requisiten nach Stufe
     // G3: Publikum-Silhouetten am hinteren Inselrand — für JEDE Bühne gleich
     // (das Publikum ist der Bühne eigen, nicht dem Theme), deshalb hier und
     // nicht in den vier `build`-Funktionen.
@@ -2084,6 +2353,23 @@ export class World {
   /** „Publikum geht ab": Ekstase-Fenster für die Lounge-Anim melden. */
   setHype(on: boolean): void {
     this.hypeFlag.on = on;
+  }
+
+  /**
+   * D-07/A9 — Rim-Punktlichter an/aus (Preset). Bewusst KEIN `visible`-Schalter:
+   * das änderte die Licht-Anzahl im Shader-Hash und erzwänge beim Preset-Wechsel
+   * ein Neukompilat aller beleuchteten Programme. Stattdessen schreibt
+   * {@link applyPalette} die Intensität — der Wert wirkt ab dem nächsten Tick,
+   * hier einmal sofort, damit der Umschalter im Menü nicht erst beim
+   * Bühnen-Wechsel greift.
+   */
+  setRimLights(on: boolean): void {
+    if (on === this.rimLights) return;
+    this.rimLights = on;
+    if (this.cur) {
+      const p = World.paletteFor(this.cur.key, this.cur.variant);
+      this.applyPalette(p, p, 1);
+    }
   }
 
   /** Bühnen-Versatz setzen (G1) — `y` in Welt-Einheiten, `tilt` in Radiant. */
@@ -2209,6 +2495,36 @@ export class World {
     if (t === this.trophyTier) return;
     this.trophyTier = t;
     if (rebuild && this.cur && !this.trans) this.rebuild(this.cur.key, this.cur.variant);
+  }
+
+  /**
+   * **D-08** — Eskalationsstufe + stetigen Fortschritt der NÄCHSTEN Bühne
+   * setzen. Dasselbe Muster wie {@link setTrophy}: Die Glue setzt beide Werte,
+   * BEVOR sie die Kulisse wechselt, damit nicht erst die alte Bühne mit der
+   * neuen Stufe und eine Zeile später die neue gebaut wird.
+   *
+   * Im low-Preset (`ambientLife < 1`) wird die Stufe auf ZWEI Werte quantisiert
+   * (früh/spät): der Unterschied bleibt lesbar, die Zahl der Rebuilds halbiert
+   * sich. K-9 — weniger Dichte, dieselbe Aussage.
+   */
+  setStageTier(tier: number, k: number, rebuild = false): void {
+    const raw = Math.max(0, Math.min(2, Math.floor(Number.isFinite(tier) ? tier : 0)));
+    const t = this.ambientLife < 1 ? (raw === 0 ? 0 : 2) : raw;
+    const kk = Math.max(0, Math.min(1, Number.isFinite(k) ? k : 0));
+    if (t === this.stageTierValue && kk === this.stageKValue) return;
+    this.stageTierValue = t;
+    this.stageKValue = kk;
+    if (rebuild && this.cur && !this.trans) this.rebuild(this.cur.key, this.cur.variant);
+  }
+
+  /** D-08: Die gesetzte Eskalationsstufe — für den Headless-Beweis. */
+  get stageTier(): number {
+    return this.stageTierValue;
+  }
+
+  /** D-03: Theme-normierte Schatten-Deckkraft der zuletzt gebauten Bühne. */
+  get shadowOpacity(): number {
+    return this.shadowOpacityValue;
   }
 
   /** Aktueller Höhen-Versatz der Bühne (0 = Ruhelage) — für den Headless-Beweis. */

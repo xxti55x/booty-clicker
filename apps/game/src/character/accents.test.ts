@@ -7,6 +7,7 @@ import {
   POP_ONBEAT,
   POP_PER_TIER,
   applyAccents,
+  applyIdleLife,
   createAccents,
   stepAccents,
   triggerClickAccent,
@@ -74,6 +75,28 @@ describe('click accents — Klick → Tanz', () => {
     expect(rig.root.position.y).toBeLessThan(0); // body dip
     expect(rig.armL.shoulder.rotation.z).toBeGreaterThan(0); // crit flare (mirrored)
     expect(rig.armR.shoulder.rotation.z).toBeLessThan(0);
+  });
+
+  it('applyIdleLife is silent at calm 0 except for the beat nod (D-21)', () => {
+    const rig = fakeRig();
+    applyIdleLife(rig, 1.23, 0, 0);
+    expect(rig.spine.rotation.x).toBe(0); // volle Choreografie ⇒ keine Ruhe-Ebene
+    expect(rig.pelvis.rotation.z).toBe(0);
+    expect(rig.root.position.y).toBe(0);
+    expect(rig.head.rotation.x).toBe(0);
+  });
+
+  it('applyIdleLife breathes at calm 1 and is deterministic (D-21)', () => {
+    const a = fakeRig();
+    const b = fakeRig();
+    applyIdleLife(a, 1.23, 1, 0.5);
+    applyIdleLife(b, 1.23, 1, 0.5);
+    expect(Math.abs(a.spine.rotation.x)).toBeGreaterThan(0);
+    expect(Math.abs(a.pelvis.rotation.z)).toBeGreaterThan(0);
+    expect(a.head.rotation.x).toBeLessThan(0); // Kopf-Nick auf den Beat
+    // Gleiche Eingabe ⇒ gleiche Pose: kein Zustand, keine Zufallszahl.
+    expect(b.spine.rotation.x).toBe(a.spine.rotation.x);
+    expect(b.root.position.y).toBe(a.root.position.y);
   });
 
   it('Ekstase adds the shimmy oscillation even with no click impulses', () => {

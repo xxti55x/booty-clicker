@@ -71,12 +71,29 @@ export function toonRamp(bands: number = TOON_BANDS): THREE.CanvasTexture {
 export const TOON_FX = { value: 1 };
 
 /**
+ * D-02 „Rim-Blitz" — kurzer Kantenlicht-Schlag auf der Spielfigur beim Treffer
+ * (0 = aus, 1 = voll). Wieder EIN geteiltes Uniform-Objekt: `main` schreibt den
+ * Wert und lässt ihn über ~110 ms abklingen (K-5 Mikro-Feedback), alle
+ * Materialien der Figur sehen ihn im selben Frame.
+ *
+ * Warum Rim und nicht Overlay: der Blitz BETONT den Umriss, statt ihn zu
+ * fluten — genau die Umkehr des alten Glut-Balls (K-3). Er multipliziert
+ * zusätzlich mit {@link TOON_FX}, ist im low-Preset also strukturell aus.
+ */
+export const TOON_FLASH = { value: 0 };
+
+/**
  * Welt-Richtung ZUM Key-Licht (scene.ts: Position (4.5, 8.5, 7) → Ziel
  * (1.4, −2.4, 1.7)) — der Glint ist ein KUNSTLICHT-Vektor wie in jedem
  * stilisierten AAA-Titel: er folgt der Bühnenbeleuchtung, nicht der Physik,
  * damit die Lichtkante immer da sitzt, wo die Kamera sie sehen kann.
+ *
+ * D-07: Seit die Themes eine eigene Key-RICHTUNG haben, schreibt `applyPalette`
+ * hier live die normalisierte Bühnen-Richtung hinein. Das GETEILTE Vector3-
+ * Objekt ist der Uniform-Wert JEDES `toonMat` — eine Mutation wirkt im selben
+ * Frame auf alle Materialien, ohne Traversieren und ohne Neukompilat (K-7).
  */
-const KEY_LIGHT_DIR = new THREE.Vector3(3.1, 10.9, 5.3).normalize();
+export const KEY_LIGHT_DIR = new THREE.Vector3(3.1, 10.9, 5.3).normalize();
 
 /** Kühles Mondlicht-Weiß — die klassische Rim-Farbe des Cartoon-Kinos. */
 const RIM_COLOR = new THREE.Color(0xbcd2ff);
@@ -106,6 +123,12 @@ export interface ToonMatParams {
   rim?: number;
   /** Spekular-Glint-Stärke (0 = aus). */
   glint?: number;
+  /**
+   * D-02: Nimmt dieses Material den globalen Rim-Blitz an? Nur die Materialien
+   * der SPIELFIGUR setzen das — Kulisse und Rivale blitzen nicht mit. Ein
+   * Uniform-WERT (0/1), kein Shader-Zweig: der Cache-Key bleibt unverändert.
+   */
+  flash?: boolean;
 }
 
 /**
@@ -144,6 +167,8 @@ export function toonMat(p: ToonMatParams): THREE.MeshToonMaterial {
     shader.uniforms.uRimColor = { value: RIM_COLOR };
     shader.uniforms.uGlintColor = { value: GLINT_COLOR };
     shader.uniforms.uKeyDir = { value: KEY_LIGHT_DIR };
+    shader.uniforms.uToonFlash = TOON_FLASH; // geteiltes Objekt (D-02)
+    shader.uniforms.uFlashGate = { value: p.flash ? 1 : 0 };
     shader.fragmentShader = shader.fragmentShader
       .replace(
         'void main() {',
@@ -154,6 +179,8 @@ export function toonMat(p: ToonMatParams): THREE.MeshToonMaterial {
           'uniform vec3 uRimColor;',
           'uniform vec3 uGlintColor;',
           'uniform vec3 uKeyDir;',
+          'uniform float uToonFlash;',
+          'uniform float uFlashGate;',
           'void main() {',
         ].join('\n'),
       )
@@ -168,7 +195,10 @@ export function toonMat(p: ToonMatParams): THREE.MeshToonMaterial {
           '\tvec3 fxL = normalize( ( viewMatrix * vec4( uKeyDir, 0.0 ) ).xyz );',
           '\tfloat fxSpec = pow( saturate( dot( fxN, normalize( fxL + fxV ) ) ), 42.0 );',
           '\tfloat fxGlint = smoothstep( 0.42, 0.58, fxSpec );',
-          '\toutgoingLight += uToonFx * ( uRimColor * ( fxRim * uRim ) + uGlintColor * ( fxGlint * uGlint ) );',
+          '\t// D-02: Der Treffer-Blitz hebt NUR den Rim-Term — die Kante leuchtet auf,',
+          '\t// die Fläche bleibt, wo sie war (Silhouetten-Vorrang, K-3).',
+          '\tfloat fxRimK = uRim + uFlashGate * uToonFlash;',
+          '\toutgoingLight += uToonFx * ( uRimColor * ( fxRim * fxRimK ) + uGlintColor * ( fxGlint * uGlint ) );',
           '\t#include <opaque_fragment>',
         ].join('\n'),
       );

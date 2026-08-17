@@ -7,7 +7,13 @@ import { AudioEngine } from './audio/engine';
 import { buildCharacter, type CharacterInstance } from './character/rig';
 import { buildEntity, entityVariant, type EntityInstance } from './character/entity';
 import { DT, renderCheeks, stepPhysics } from './character/physics';
-import { applyAccents, createAccents, stepAccents, triggerClickAccent } from './character/accents';
+import {
+  applyAccents,
+  applyIdleLife,
+  createAccents,
+  stepAccents,
+  triggerClickAccent,
+} from './character/accents';
 import {
   RIVAL_AIM_UP,
   aimPupils,
@@ -42,8 +48,12 @@ import {
 import { createControls, frameCamera } from './engine/camera';
 import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
+import { RingPool } from './engine/rings';
+import type { RingHandle } from './engine/rings';
+import { stageK, stageTier } from './util/escalation';
+import { THEME_ACCENT } from './world/theme-accents';
 import { type DeviceSignals, createFpsGovernor, pickQuality } from './engine/auto-quality';
-import { TOON_FX } from './engine/materials';
+import { TOON_FLASH, TOON_FX } from './engine/materials';
 import { effectivePixelRatio, qualityPreset } from './engine/quality';
 import { setTextureAnisotropy } from './engine/textures';
 import { createPost } from './engine/post';
@@ -362,6 +372,18 @@ const { renderer, scene, camera, beat, skyMat, floorMat, glowSprite, lights, con
 const BASE_FOV = camera.fov;
 /** Ruhe-Belichtung — Basis für das G2-Licht-Dim (siehe `stepCinematics`). */
 const BASE_EXPOSURE = renderer.toneMappingExposure;
+/** D-01: Deckel des Beat-Punktlichts — über 2.4 clippt die Bühnenmitte. */
+const BEAT_LIGHT_MAX = 2.4;
+/** D-02: Laufzeit des Klick-Bodenrings (K-5-Raster „Aktion" 250–400 ms). */
+const CLICK_RING_S = 0.28;
+/**
+ * D-02: Vorzugsrichtung der Klick-Splitter — nach hinten-oben. `+z` zeigt von
+ * der Kamera WEG, also fliegen sie aus der Silhouette heraus statt über sie
+ * hinweg (K-3). Die Streuung bleibt zufällig, nur der Schwerpunkt ist gesetzt.
+ */
+const CLICK_SPLINTER_DIR = [0.25, 0.9, 0.6] as const;
+/** D-02: Abklingrate des Rim-Blitzes (1/s) ⇒ ~110 ms, K-5-Mikro-Feedback. */
+const FLASH_DECAY = 9;
 // Roadmap L: Bloom-Composer (nur high-Preset aktiv — sonst rendert der Loop direkt).
 const post = createPost(renderer, scene, camera);
 const controls = createControls(camera, renderer.domElement);
@@ -742,6 +764,7 @@ const world = new World(scene, skyMat, floorMat, glowSprite, lights);
 // ROADMAP-V2 G3: Ambient-Dichte VOR dem ersten `setBackground` setzen, damit die
 // Boot-Bühne direkt mit den Preset-Stückzahlen gebaut wird (kein Rebuild).
 world.setAmbientLife(preset.ambientLife);
+world.setRimLights(preset.rimLights); // D-07/A9: Intensität 0, nie `visible`
 const audio = new AudioEngine();
 const beatTracker = new BeatTracker();
 const choreo = new Choreographer();
@@ -771,6 +794,8 @@ adoptPlayerIntoSpin();
 let entity: EntityInstance = buildEntity(scene, bgForZone(combat.zone), {
   boss: combat.boss,
   variant: entityVariant(combat.zone),
+  rank: stageTier(combat.zone),
+  lowDetail: !preset.toonFx,
 });
 // ---------- ROADMAP-V2 A4: Choreo-Set der Bühne ----------
 /**
@@ -826,9 +851,59 @@ function syncEntity(): void {
   syncChoreoSet();
   const theme = bgForZone(combat.zone);
   const variant = entityVariant(combat.zone);
-  if (entity.theme !== theme || entity.boss !== combat.boss || entity.variant !== variant) {
-    entity = buildEntity(scene, theme, { boss: combat.boss, variant }, entity);
+  // D-12: Der Rang gehört in den Rebuild-Schlüssel — sonst bliebe auf Bühne 24
+  // der Körper von Bühne 21 stehen. Er kommt aus DEMSELBEN Regler wie die
+  // Bühnen-Eskalation (D-08), Ränge und Recolour-Laps sind zwei Achsen.
+  const rank = stageTier(combat.zone);
+  if (
+    entity.theme !== theme ||
+    entity.boss !== combat.boss ||
+    entity.variant !== variant ||
+    entity.rank !== rank
+  ) {
+    releaseBossAura(); // VOR detach: die Ring-Geometrie gehört dem Pool
+    entity = buildEntity(
+      scene,
+      theme,
+      { boss: combat.boss, variant, rank, lowDetail: !preset.toonFx },
+      entity,
+    );
+    syncShadows(); // D-03: frische Instanz erbt die Theme-Deckkraft
+    attachBossAura();
   }
+}
+
+/** D-13: Aura-Ring des Bosses zurückgeben (No-op, wenn keiner hängt). */
+function releaseBossAura(): void {
+  if (bossAura < 0) return;
+  rings.release(bossAura);
+  bossAura = -1;
+}
+
+/**
+ * D-13 (b) — Der Aura-Ring am Boden in der Akzentfarbe der Bühne. Kein Licht,
+ * kein neues Material: ein Slot aus dem geteilten Ring-Pool, der mit dem Beat
+ * atmet und die Boss-Silhouette von unten unterstreicht (K-3).
+ */
+function attachBossAura(): void {
+  if (!entity.boss) return;
+  bossAura = rings.attach(entity.root, {
+    r: BOSS_AURA_R,
+    color: THEME_ACCENT[entity.theme],
+    pulse: true,
+    opacity: 0.8,
+  });
+}
+
+/**
+ * D-03 — Kontaktschatten von Spieler und Rivale auf die Deckhelligkeit der
+ * laufenden Bühne normieren. Die `World` kennt die Akteure nicht, deshalb geht
+ * der Wert hier durch; aufgerufen bei jedem Bühnen-, Preset- und Modellwechsel.
+ */
+function syncShadows(): void {
+  const o = world.shadowOpacity;
+  (contactShadow.material as THREE.MeshBasicMaterial).opacity = o;
+  entity.setShadow(o, preset.dynamicBlobShadow);
 }
 // Kulisse (§5.5): in Tour-Modus (`bgAuto`) the background rotates with the zone tier;
 // otherwise the manually chosen `gear.bg` is fixed. Keep `gear.bg` in lockstep with
@@ -839,11 +914,19 @@ function syncEntity(): void {
 state.gear.bgAuto = true;
 let currentBg = bgForZone(combat.zone);
 let currentBgVariant = bgVariant(combat.zone);
+/** D-08: Die zuletzt GEBAUTE Eskalationsstufe (Teil des Rebuild-Schlüssels). */
+let currentStageTier = stageTier(combat.zone);
 if (state.gear.bgAuto) state.gear.bg = currentBg;
 // 1b: Die Trophäen-Stufe VOR dem ersten `setBackground` setzen (wie die
 // G3-Ambient-Dichte), damit die Boot-Bühne den Pokal direkt mitbaut.
 syncTrophy(false);
+// D-08: wie die Trophäe — Stufe steht, bevor die Boot-Bühne gebaut wird.
+world.setStageTier(currentStageTier, stageK(combat.zone));
 world.setBackground(currentBg, currentBgVariant);
+// D-03: Erst JETZT steht die Deckkraft der Boot-Bühne fest (`rebuild` rechnet
+// sie) — der Schatten stimmt damit ab dem ersten Frame, nicht erst ab dem
+// ersten Bühnen-Wechsel.
+syncShadows();
 audio.setBackground(currentBg);
 recompute(); // fold the (possibly view-synced) kulisse buff into the derived numbers
 syncChoreoSet(); // A4: das Set der Start-Bühne statt eines festen Move 0
@@ -853,6 +936,25 @@ const toasts = new Toasts();
 // ROADMAP-V2 G4: die Vollbild-Blende der drei Prestige-Schichten (rein optisch).
 const ceremony = new Ceremony();
 const particles = new ParticleSystem(scene);
+// D-02: Der geteilte Boden-Ring-Pool (Klick-Anschlag, KO, Boss-Landung,
+// Boss-Aura, Rarity). Liegt unter den Akteuren — kann per Konstruktion keine
+// Silhouette zudecken (K-3).
+const rings = new RingPool(scene);
+/**
+ * D-13 (b): Handle der Boss-Aura am Boden. Sie hängt am `root` des Rivalen und
+ * MUSS vor jedem Modellwechsel zurückgegeben werden — `entity.detach()`
+ * entsorgt die Geometrie aller Kinder, und die Ring-Geometrie gehört dem Pool.
+ */
+let bossAura: RingHandle = -1;
+/** D-13: Radius der Boss-Aura (der Ring hängt am root und erbt dessen Skala). */
+// Headless gemessen: bei 1.5 lag der Ring fast vollständig unter dem
+// Boss-Körper und dem Kontaktschatten — er muss die Silhouette UMFASSEN.
+const BOSS_AURA_R = 1.85;
+// Ein Boot MITTEN im Bosskampf trägt seine Aura ab dem ersten Frame. Der Aufruf
+// steht bewusst HIER und nicht bei `buildEntity` weiter oben: der Ring-Pool wird
+// erst in dieser Zeile angelegt, ein früherer Zugriff liefe in die temporale
+// Todeszone (headless als `ReferenceError` gefunden).
+attachBossAura();
 const pops = new Pops();
 const haptics = new Haptics();
 const abilityBar = new AbilityBar({ onActivate: () => activateEkstase() });
@@ -1448,6 +1550,8 @@ const chSettings = new ChSettings({
     applyQuality(resolveQuality(effects.quality));
     // G3: Dichte-Wechsel baut die laufende Bühne einmal neu (No-op bei gleichem Wert).
     world.setAmbientLife(preset.ambientLife);
+    world.setRimLights(preset.rimLights); // D-07/A9: Intensität 0, nie `visible`
+    syncShadows(); // D-03: Sprunghöhen-Reaktion folgt dem Preset
     // V2-2: neuer Governor mit frischer Startstufe + aktuellem FPS-Limit.
     governor = createFpsGovernor(effectiveQuality, {
       capMs: effects.fpsCap > 0 ? 1000 / effects.fpsCap : 0,
@@ -1682,7 +1786,11 @@ muteBtn.addEventListener('click', () => {
 function updateBackground(force = false): void {
   const bg = bgForZone(combat.zone);
   const variant = bgVariant(combat.zone); // recolour lap follows depth even on a manual kulisse
-  if (!force && bg === currentBg && variant === currentBgVariant) {
+  // D-08: Die Eskalationsstufe gehört in den Vergleich — Bühne 21, 24 und 28
+  // tragen dasselbe Theme, sollen aber sichtbar verschieden sein. Der stetige
+  // Anteil (`stageK`) läuft ohne Rebuild mit.
+  const tier = stageTier(combat.zone);
+  if (!force && bg === currentBg && variant === currentBgVariant && tier === currentStageTier) {
     // Die Kulisse bleibt — aber die BÜHNE kann trotzdem das Theme gewechselt
     // haben (manuell gewählte Kulisse, `bgAuto` aus). Dann steht hier eine andere
     // Trophäe, und nur sie braucht den Rebuild.
@@ -1691,6 +1799,7 @@ function updateBackground(force = false): void {
   }
   currentBg = bg;
   currentBgVariant = variant;
+  currentStageTier = tier;
   if (state.gear.bgAuto && state.gear.bg !== bg) {
     state.gear.bg = bg;
     recompute(); // Space +5 % dpsPct etc. follow the auto-rotation
@@ -1699,7 +1808,12 @@ function updateBackground(force = false): void {
   // 1b: Trophäen-Stufe VOR dem Wechsel setzen, aber ohne eigenen Rebuild — die
   // neue Bühne wird gleich ohnehin gebaut und nimmt den Pokal mit.
   syncTrophy(false);
+  // D-08: Stufe VOR `setBackground` setzen (gleiches Muster wie die Trophäe) —
+  // die neue Bühne wird gleich gebaut und nimmt Publikum + Requisiten mit.
+  world.setStageTier(tier, stageK(combat.zone));
   world.setBackground(bg, variant, { animate: !force && preset.stageTransition });
+  post.setGrade(bg); // D-06: Farbstich + Vignette des Themes (uniform-getrieben)
+  syncShadows(); // D-03: neues Deck ⇒ neue Schatten-Deckkraft
   audio.setBackground(bg); // idempotent for a same-key (variant-only) rebuild
 }
 
@@ -2421,7 +2535,28 @@ function doShake(x?: number, y?: number): void {
   triggerClickAccent(accents, tier, crit, onBeat);
   if (effects.particles) {
     char.rig.pelvis.getWorldPosition(particleTmp);
-    particles.burst(particleTmp.x, particleTmp.y, particleTmp.z, burstCount(tier));
+    // D-02, Teil (a): Bodenring an der Hüfte — der ANSCHLAG bekommt eine Form
+    // (0.28 s, K-5 Aktion). Er liegt auf dem Deck, unter der Figur.
+    rings.spawn(particleTmp.x, particleTmp.z, {
+      r0: 0.4,
+      r1: 1.6,
+      dur: CLICK_RING_S,
+      color: THEME_ACCENT[currentBg],
+    });
+    // D-02, Teil (b): gerichtete Splitter in der Bühnen-Akzentfarbe statt eines
+    // symmetrischen Gold-Balls — nach hinten-oben (+z = weg von der Kamera).
+    particles.burst(
+      particleTmp.x,
+      particleTmp.y,
+      particleTmp.z,
+      Math.round(burstCount(tier) * preset.burstScale),
+      1,
+      THEME_ACCENT[currentBg],
+      CLICK_SPLINTER_DIR,
+    );
+    // D-02, Teil (c): Rim-Blitz auf der Figur — betont den Umriss, statt ihn zu
+    // fluten. Der Loop lässt ihn über ~110 ms abklingen.
+    TOON_FLASH.value = 1;
   }
   if (effects.screenShake) {
     let mag = shakeForTier(tier);
@@ -3399,6 +3534,8 @@ function loop(nowMs: number): void {
     if (dropped !== null) {
       applyQuality(dropped);
       world.setAmbientLife(preset.ambientLife);
+      world.setRimLights(preset.rimLights); // D-07/A9: Intensität 0, nie `visible`
+    syncShadows(); // D-03: Sprunghöhen-Reaktion folgt dem Preset
       toasts.show(
         '⚙️',
         `Grafik auf „${dropped === 'medium' ? 'Mittel' : 'Niedrig'}" gestellt`,
@@ -3547,12 +3684,19 @@ function loop(nowMs: number): void {
     }
     acc -= DT;
   }
+  // D-21: Die Beat-Hüllkurve wird HIER gelesen (statt weiter unten), weil die
+  // Ruhe-Ebene im Physik-Slot den Kopf-Nick darauf setzt. Zwischen diesem Punkt
+  // und der alten Stelle schreibt nichts mehr `choreo.phase` — derselbe Wert.
+  const beatV = Math.max(0, Math.sin(choreo.phase * 2.2));
   if (physicsStepped) {
     // Klick-Akzente: additiv NACH dem Physik-Schritt (applyPose schreibt absolute
     // Werte, der nächste Step resettet also sauber; ohne Step keine Re-Anwendung,
     // sonst würde der Offset doppeln); Matrix-Refresh, damit renderCheeks die
     // akzentuierte Pelvis-Orientierung sieht.
     applyAccents(char.rig, accents, frenzy, t0);
+    // D-21: Ruhe-Ebene im SELBEN Slot — additiv nach dem Physik-Schritt, vor
+    // dem Matrix-Refresh. `calm` blendet sie aus, sobald wirklich getanzt wird.
+    applyIdleLife(char.rig, t0, 1 - Math.min(1, drive), beatV);
     char.rig.root.updateMatrixWorld(true);
   }
   renderCheeks(char.rig, char.cheeks);
@@ -3566,8 +3710,13 @@ function loop(nowMs: number): void {
   applyFace(char.face, faceView(faceState, frenzy));
   particles.update(dt);
 
-  const beatV = Math.max(0, Math.sin(choreo.phase * 2.2));
-  beat.intensity = beatV * drive * 4;
+  // D-02: Bodenringe + Rim-Blitz hängen an `dt` (Optik-Uhr), nie an `simDt`.
+  rings.update(dt, beatV);
+  if (TOON_FLASH.value > 0) TOON_FLASH.value = Math.max(0, TOON_FLASH.value - dt * FLASH_DECAY);
+  // D-01: Der Beat-Puls skalierte ungedeckelt mit `drive` — bei voller Ekstase
+  // stand er dauerhaft über 4 und trieb die Bühnenmitte ins Clipping. Der
+  // Deckel lässt den Schlag hörbar-sichtbar, nimmt ihm aber die Dauerlast.
+  beat.intensity = Math.min(BEAT_LIGHT_MAX, beatV * drive * 4);
   if (beatTracker.update(choreo.phase)) audio.beat(0.5 + drive * 0.08);
   // G1: Aus-/Einfahrt der Bühne tickt im bestehenden Loop, VOR den Kulissen-
   // Anims (nach einem Rebuild zeigt `world.anims` schon auf die neue Bühne).
