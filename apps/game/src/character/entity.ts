@@ -17,7 +17,8 @@ import type { BackgroundKey } from '../types';
  * Independent of the player rig: `update(t, beatV, drive)` runs its own
  * beat-synced twerk/bob/taunt loop from absolute time (no per-frame
  * allocations), `flinch()` reacts to your hits, `defeat()` plays a cartoon
- * KO-pop that doubles as the next rival's spawn-in bounce. Everything is
+ * KO-pop; the NEXT rival then jump-spawns in from behind as its own beat
+ * (D-16 „KO ≠ Spawn" — Sieg und Nachrücken sind zwei Ereignisse). Everything is
  * procedural (Three primitives), cel-shaded (`toonMat`) and ink-outlined
  * (`withOutline`) to match the Wave-1 look.
  */
@@ -59,6 +60,34 @@ const BOSS_TAUNT_PERIOD = 9;
  * Grund-Wipp-Amplitude angehoben, damit der Rivale auch bei Energie 0 lebt.
  */
 const IDLE_DRIVE_REF = 0.3;
+// ---------------------------------------------------------------------------
+// D-15/D-16 — Treffer-Reaktion & Kill-Takt. Alle Dauern liegen im K-5-Raster
+// (L3): Farbblitz = Mikro (80 ms), Flinch gesamt / KO / Spawn = Aktion
+// (250–400 ms). Gleiche Bedeutung = gleiche Dauer.
+// ---------------------------------------------------------------------------
+/** D-15 (b): Anschlag HALTEN — der Umkehrpunkt steht sichtbar (K-4). */
+const FLINCH_HOLD_S = 0.15;
+/** D-15 (b): weiches Lösen nach dem Halten (quadratisch auslaufend). */
+const FLINCH_RELEASE_S = 0.25;
+/** D-15 (a): Farbblitz-Fenster ab Treffer — K-5-Mikro (~80 ms). */
+const FLASH_WINDOW_S = 0.08;
+/** D-15: Distress Level 2 — Flapper-Ausschlag (wacklige Beine/Arme). */
+const DISTRESS_FLAP = 1.8;
+/** D-16: Dauer des KO-Pops (Anticipation + Kollaps) — K-5 „Aktion". */
+const KO_S = 0.4;
+/** D-16: Anteil der Anticipation am KO (0…0.1 s von 0.4 s). */
+const KO_ANTIC_K = 0.25;
+/** D-16: Dauer des Spawn-Bogenflugs — K-5 „Aktion". */
+const SPAWN_S = 0.35;
+/** D-16: Start-Höhe des Spawns über der Bühne (Bogen-Scheitel). */
+const SPAWN_DROP_Y = 2.2;
+/** D-16: Start-Versatz nach HINTEN (+z = von der Kamera weg) — der Neue kommt
+ * sichtbar aus einer ANDEREN Richtung als der KO-Kollaps am Platz. */
+const SPAWN_BACK_Z = 2.5;
+/** D-23: Boss-Auftritt — Starthöhe über der Bühne (deutlich überm Bildrand). */
+const ENTRANCE_DROP_Y = 7;
+/** D-23: Ease-In-Falldauer des Auftritts — K-5 „Aktion" (250–400 ms + Impact). */
+const ENTRANCE_S = 0.45;
 
 /** One tier-theme's rival species (Wave 3 themes the scenery to match these). */
 export interface EntityThemeConfig {
@@ -141,6 +170,13 @@ export interface EntityBuildOpts {
    * Dichte, dieselbe Aussage).
    */
   lowDetail?: boolean;
+  /**
+   * D-23: Boss-Auftritt — die Instanz wird GEPARKT gebaut (hoch über der
+   * Bühne, KEIN WP-9-Sprung) und wartet auf {@link EntityInstance.entrance}.
+   * Nur `main`s Boss-Inszenierung setzt das Flag; ein Boot mitten in der
+   * Arena baut den Boss normal (sonst hinge er ewig im Himmel).
+   */
+  entrance?: boolean;
 }
 
 /** A live rival on stage. Build with `buildEntity`; drive from the render loop. */
@@ -155,8 +191,27 @@ export interface EntityInstance {
   update(t: number, beatV: number, drive: number): void;
   /** Hit reaction: cartoon squash + knockback + pupil wince. */
   flinch(): void;
-  /** KO pop (shrink–spin–boing back) — doubles as the next rival's spawn-in. */
+  /** D-16: KO-Pop (Anticipation → Kollaps). Der Spawn des Nächsten folgt
+   * automatisch als EIGENER Beat (Bogen-Flug von hinten-oben). */
   defeat(): void;
+  /**
+   * D-23: Den Ease-In-Fall des Boss-Auftritts starten (Instanz muss mit
+   * `entrance: true` gebaut sein — sonst teleportiert sie kurz nach oben).
+   * Die Landung meldet sich über `events.landed` (Ring/Shake/Staub in main).
+   */
+  entrance(): void;
+  /**
+   * D-16: Einmal-Ereignisse des Kill-Takts — `main` liest sie NACH
+   * `update()` und setzt sie zurück (dort hängen Splitter, Ringe und der
+   * Bühnen-Dip, denn Partikel-Pool und Ring-Pool leben in der Glue).
+   */
+  readonly events: { ko: boolean; landed: boolean };
+  /**
+   * D-15: HP-Schadenszustand — der Gegner erzählt seinen Zustand selbst,
+   * nicht nur die Leiste. 0 = fit · 1 (< 50 %) = hängende Lider ·
+   * 2 (< 20 %) = zusätzlich wacklige Gliedmaßen + Körper-Zittern.
+   */
+  setDistress(level: 0 | 1 | 2): void;
   /**
    * D-03 — Deckkraft des Kontaktschattens auf die Deckhelligkeit des Themes
    * normieren (heller Sand braucht mehr, dunkles Metall weniger), und die
@@ -180,12 +235,6 @@ const smooth01 = (x: number): number => {
   const t = clamp01(x);
   return t * t * (3 - 2 * t);
 };
-/** Cartoon elastic-out (KO-pop respawn boing). */
-function elasticOut(x: number): number {
-  if (x <= 0) return 0;
-  if (x >= 1) return 1;
-  return Math.pow(2, -10 * x) * Math.sin((x * 10 - 0.75) * ((2 * Math.PI) / 3)) + 1;
-}
 
 type Axis = 'x' | 'y' | 'z';
 interface Flapper {
@@ -275,6 +324,11 @@ export function buildEntity(
     color: shifted(cfg.booty, dh, ds, dl),
     map: repeated(dotsTex(2, 14), 2.5, 2.5),
   });
+  // D-15 (a): Grundfarben-Cache für den Treffer-Farbblitz. Restauriert wird
+  // durch KOPIEREN der Cache-Farbe, nie additiv — sonst driftete der Ton über
+  // viele Treffer (Abnahme-Kriterium: Idle nach Kampf ist farbgleich).
+  const bodyCol0 = bodyT.color.clone();
+  const bootyCol0 = bootyT.color.clone();
   const accent = shifted(cfg.accent, dh);
   const glowT = toonMat({ color: accent, emissive: accent, emissiveIntensity: 0.85 });
   const darkT = toonMat({ color: 0x221d2e });
@@ -292,6 +346,12 @@ export function buildEntity(
   const px = ENTITY_STAGE.x;
   const pz = ENTITY_STAGE.z + (boss ? BOSS_EXTRA_Z : 0);
   root.position.set(px, ENTITY_STAGE.y, pz);
+  // D-15 (b): Rückstoß-RICHTUNG = Trefferachse Spieler(0,0) → Gegner statt
+  // pauschal +z — der Stoß liest sich als Folge des Schlags (D-22 richtet den
+  // Screen-Shake an derselben Achse aus).
+  const kbLen = Math.hypot(px, pz) || 1;
+  const kbX = px / kbLen;
+  const kbZ = pz / kbLen;
   // Face the player, twisted slightly so the silhouette (incl. booty) reads.
   // D-14: stärkerer Twist ⇒ der Rivale zeigt der Kamera mehr Profil statt
   // Rücken — sein Gesicht gehört ins Duell-Bild.
@@ -321,6 +381,8 @@ export function buildEntity(
   const spinners: Spinner[] = [];
   const pupils: THREE.Mesh[] = [];
   const glowPulse: { m: THREE.MeshToonMaterial; base: number }[] = [];
+  /** D-15: Brauen-Referenzen für den Schadenszustand (hängende Lider). */
+  const browRefs: { m: THREE.Mesh; side: number; base: number }[] = [];
 
   const flap = (o: THREE.Object3D, axis: Axis, amp: number, freq: number, phase = 0): void => {
     flappers.push({ o, axis, base: o.rotation[axis], amp, freq, phase });
@@ -404,6 +466,7 @@ export function buildEntity(
       brow.position.set(0, o.y + 0.05 + r * 1.05, o.z + 0.05);
       brow.rotation.z = 0;
       o.parent.add(brow);
+      browRefs.push({ m: brow, side: 1, base: 0 });
     } else {
       [-1, 1].forEach((s) => {
         eye(s * o.spread, o.y, o.eyeR, o.eyeR * 0.42);
@@ -411,6 +474,7 @@ export function buildEntity(
         brow.position.set(s * o.spread, o.y + o.eyeR * 1.7, o.z + 0.04);
         brow.rotation.z = s * (o.angry ? 0.5 : -0.14);
         o.parent.add(brow);
+        browRefs.push({ m: brow, side: s, base: brow.rotation.z });
       });
       if (o.thirdEye) eye(0, o.y + o.eyeR * 1.9, o.eyeR * 0.62, o.eyeR * 0.28);
     }
@@ -672,6 +736,7 @@ export function buildEntity(
       brow.position.set(0, 0.78, 0.06);
       brow.rotation.z = s * (boss ? 0.5 : -0.14);
       stalkG.add(brow);
+      browRefs.push({ m: brow, side: s, base: brow.rotation.z });
       flap(stalkG, 'x', 0.12, 3.8, s > 0 ? 0.6 : 2.8);
     });
     // big raised claws — snip-snip to the beat
@@ -814,7 +879,10 @@ export function buildEntity(
     // sondern kommt obendrauf: Reif + fünf Zacken, golden und glühend.
     const crownG = new THREE.Group();
     const goldT = toonMat({ color: 0xffd24d, emissive: 0xffd24d, emissiveIntensity: 0.5 });
-    const band = O(new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.38, 0.16, 14, 1, true), goldT), 0.014);
+    const band = O(
+      new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.38, 0.16, 14, 1, true), goldT),
+      0.014,
+    );
     crownG.add(band);
     for (let i = 0; i < 5; i++) {
       const a = (i / 5) * Math.PI * 2;
@@ -853,8 +921,22 @@ export function buildEntity(
   // Animation state + API
   // =====================================================================
   let lastT = 0;
-  let flinchT = 0;
-  let defeatT = 0.55; // spawn-in: play the tail (grow-boing) of the KO pop
+  /** D-15: Sekunden seit dem letzten Treffer (∞ = kein Treffer aktiv). */
+  let flinchAge = Infinity;
+  // D-16 „KO ≠ Spawn": zwei GETRENNTE Takte statt des alten Doppelnutzens
+  // einer Kurve. `koT` spielt Anticipation + Kollaps am Platz, danach kommt
+  // der Nächste per `spawnT` im Bogen-Flug aus einer anderen Richtung.
+  // Erst-Spawn beim Bau = Sprung-Landung (statt „Wachstum aus dem Nichts").
+  let koT = 0;
+  // D-23: Ein Auftritts-Boss wird GEPARKT gebaut (kein WP-9-Sprung) und fällt
+  // erst, wenn `entrance()` die Inszenierungs-Phase 2 auslöst.
+  // entranceT: −1 = geparkt (wartet), > 0 = Fall läuft, 0 = aus.
+  let entranceT = opts.entrance ? -1 : 0;
+  let spawnT = opts.entrance ? 0 : 1;
+  /** D-15: HP-Schadenszustand (siehe `setDistress`). */
+  let distress: 0 | 1 | 2 = 0;
+  /** D-16: Einmal-Ereignisse — `main` liest und löscht sie nach `update()`. */
+  const events = { ko: false, landed: false };
   // Deterministic taunt phase (bosses slightly offset) — the face-off reads
   // face-on most of the time, with a booty-shake taunt once per cycle.
   const tauntSeed = boss ? 0.6 : 0;
@@ -878,8 +960,7 @@ export function buildEntity(
     // hing die ganze Bewegung des Rivalen an `beatV`·drive — bei Energie 0 stand
     // er wie festgeklebt (shots/SHEET-idle.png: „der Rivale kein Pixel"). Der
     // Faktor blendet sich weg, sobald der Kampf läuft.
-    const idleK =
-      (1 + 0.8 * (1 - Math.min(1, drive / IDLE_DRIVE_REF))) * (boss ? BOSS_SWAY : 1);
+    const idleK = (1 + 0.8 * (1 - Math.min(1, drive / IDLE_DRIVE_REF))) * (boss ? BOSS_SWAY : 1);
     // Body groove: beat bounce + squat pump, deeper while taunting.
     body.position.y =
       bodyY +
@@ -892,6 +973,9 @@ export function buildEntity(
     // D-21: Umschauen — ein langsamer Blick über die Bühne, deutlich langsamer
     // als der Wipp-Takt, damit die beiden Ebenen nie synchron laufen.
     body.rotation.y = Math.sin(t * 0.35 + tauntSeed) * 0.12;
+    // D-15: Level 2 — der ganze Körper zittert (hochfrequent, winzig): der
+    // Gegner ist angeschlagen, das ist KEIN Tanz-Wackeln.
+    body.rotation.z = distress >= 2 ? Math.sin(t * 18) * 0.015 : 0;
 
     // The rival's twerk: cheeks alternate-bounce, harder mid-taunt.
     for (const c of cheeks) {
@@ -906,13 +990,18 @@ export function buildEntity(
     // Distanz tragen kann. Im low-Preset bleibt er statisch (K-9: der Schatten
     // IST da, er atmet nur nicht).
     if (shadowDynamic) {
-      const hoverK = Math.max(0, Math.min(1, (body.position.y - bodyY) / 0.34));
+      // D-16: Der Spawn-Bogenflug hebt den ganzen `root` — auch diese Höhe
+      // zählt in die Sprung-Reaktion des Schattens (größer + blasser).
+      const lift = (root.position.y - ENTITY_STAGE.y) / SPAWN_DROP_Y;
+      const hoverK = clamp01((body.position.y - bodyY) / 0.34 + lift);
       (shadow.material as THREE.MeshBasicMaterial).opacity = shadowBase * (1 - 0.5 * hoverK);
       shadow.scale.setScalar(1 + 0.35 * hoverK);
     }
 
+    // D-15: Level 2 (< 20 % HP) — die Gliedmaßen wackeln sichtbar stärker.
+    const flapAmp = distress >= 2 ? DISTRESS_FLAP : 1;
     for (const f of flappers) {
-      f.o.rotation[f.axis] = f.base + Math.sin(t * f.freq * tempo + f.phase) * f.amp;
+      f.o.rotation[f.axis] = f.base + Math.sin(t * f.freq * tempo + f.phase) * f.amp * flapAmp;
     }
     for (const s of spinners) s.o.rotation[s.axis] = t * s.speed;
     // D-21: Blinzeln — alle ~4 s ein kurzes Zukneifen. Phase aus `tauntSeed`,
@@ -925,33 +1014,94 @@ export function buildEntity(
       head.rotation.x = turn * 0.18;
     }
 
-    // Hit/KO overlays (KO wins; both decay via dt so they survive fps caps).
-    if (defeatT > 0) {
-      defeatT = Math.max(0, defeatT - dt * 2.2);
-      const p = 1 - defeatT;
-      root.rotation.y += p * Math.PI * 2; // full cartoon spin on top of the facing
-      const s = p < 0.3 ? 1 - (p / 0.3) * 0.72 : 0.28 + 0.72 * elasticOut((p - 0.3) / 0.7);
-      root.scale.setScalar(baseScale * Math.max(0.001, s));
-      root.position.z = pz;
+    // D-15 (a): Farbblitz — im ersten ~80-ms-Fenster nach dem Treffer kippen
+    // die Grundfarben Richtung Akzent, danach EXAKT die Cache-Farbe zurück
+    // (Copy, nie additiv — kein Drift über viele Treffer). Im low-Preset aus
+    // (`lowDetail`, K-9: Dichte/Glanz weniger, nie Information).
+    const flashK =
+      !lowDetail && koT <= 0 && flinchAge < FLASH_WINDOW_S ? 1 - flinchAge / FLASH_WINDOW_S : 0;
+    bodyT.color.copy(bodyCol0);
+    bootyT.color.copy(bootyCol0);
+    if (flashK > 0) {
+      bodyT.color.lerp(accent, 0.6 * flashK);
+      bootyT.color.lerp(accent, 0.6 * flashK);
+    }
+
+    // Hit/KO/Spawn overlays (KO gewinnt; alles über dt, fps-fest).
+    // D-15 (b): Anschlag-Kurve MIT HALTEN — volle Verformung für 0.15 s,
+    // dann quadratisch auslaufendes Lösen (K-4 „schnell rein, langsam raus").
+    flinchAge += dt;
+    const relK = clamp01((flinchAge - FLINCH_HOLD_S) / FLINCH_RELEASE_S);
+    const f = (1 - relK) * (1 - relK);
+    if (entranceT !== 0) {
+      // D-23: Boss-Auftritt. Geparkt = hoch über der Bühne halten; Fall =
+      // Ease-In (beschleunigend, p²) — die Landung ist der Anschlag und
+      // meldet sich als `landed` (Bodenwelle/Shake/Staub zündet main).
+      if (entranceT < 0) {
+        root.position.set(px, ENTITY_STAGE.y + ENTRANCE_DROP_Y, pz);
+      } else {
+        entranceT = Math.max(0, entranceT - dt / ENTRANCE_S);
+        const p = 1 - entranceT;
+        root.position.set(px, ENTITY_STAGE.y + ENTRANCE_DROP_Y * (1 - p * p), pz);
+        if (entranceT <= 0) {
+          events.landed = true;
+          root.position.set(px, ENTITY_STAGE.y, pz);
+        }
+      }
+      root.scale.setScalar(baseScale);
       root.rotation.x = 0;
-    } else if (flinchT > 0) {
-      flinchT = Math.max(0, flinchT - dt * 3.4);
-      const f = flinchT;
+    } else if (koT > 0) {
+      // D-16 KO: Anticipation (kurz aufblähen, 0…0.1 s), dann Kollaps mit
+      // Spin auf ~0 (0.1…0.4 s). Die Splitter-Auflösung + Bühnen-Dip zündet
+      // `main` über das `ko`-Ereignis — der Pool lebt in der Glue.
+      koT = Math.max(0, koT - dt / KO_S);
+      const p = 1 - koT;
+      const s =
+        p < KO_ANTIC_K
+          ? 1 + 0.12 * (p / KO_ANTIC_K)
+          : 1.12 - 1.07 * ((p - KO_ANTIC_K) / (1 - KO_ANTIC_K));
+      root.scale.setScalar(baseScale * Math.max(0.001, s));
+      root.rotation.y += Math.max(0, p - KO_ANTIC_K) * Math.PI * 2; // Kollaps-Spin
+      root.position.set(px, ENTITY_STAGE.y, pz);
+      root.rotation.x = 0;
+      if (koT <= 0) {
+        events.ko = true;
+        spawnT = 1; // der Nächste kommt — als EIGENER Beat, andere Richtung
+      }
+    } else if (spawnT > 0) {
+      // D-16 Spawn: Bogen-Flug von hinten-oben (Parabel über 0.35 s) statt
+      // Wachstum am Platz — Landung meldet `landed` (Staub-Ring in `main`).
+      spawnT = Math.max(0, spawnT - dt / SPAWN_S);
+      const p = 1 - spawnT;
+      root.position.set(
+        px,
+        ENTITY_STAGE.y + SPAWN_DROP_Y * (1 - p * p),
+        pz + SPAWN_BACK_Z * (1 - p),
+      );
+      root.scale.setScalar(baseScale);
+      root.rotation.x = 0;
+      if (spawnT <= 0) {
+        events.landed = true;
+        root.position.set(px, ENTITY_STAGE.y, pz);
+      }
+    } else if (f > 0.001) {
       root.scale.set(
         baseScale * (1 + 0.17 * f),
         baseScale * (1 - 0.24 * f),
         baseScale * (1 + 0.17 * f),
       );
-      root.position.z = pz + f * 0.3; // knocked back a step
+      // Rückstoß ENTGEGEN der Trefferachse Spieler→Gegner (ein Schritt).
+      root.position.set(px + kbX * 0.3 * f, ENTITY_STAGE.y, pz + kbZ * 0.3 * f);
       root.rotation.x = -0.2 * f; // reeling
       for (const p2 of pupils) p2.scale.setScalar(1 - 0.45 * f);
     } else {
       root.scale.setScalar(baseScale);
-      root.position.z = pz;
+      root.position.set(px, ENTITY_STAGE.y, pz);
       root.rotation.x = 0;
-      // D-21: im Ruhezustand trägt die Pupillen-Skala das Blinzeln.
+      // D-21: im Ruhezustand trägt die Pupillen-Skala das Blinzeln;
+      // D-15: Level ≥ 1 drückt die Lider zusätzlich flach (müder Blick).
       for (const p2 of pupils) {
-        p2.scale.set(1, lid, 1);
+        p2.scale.set(1, lid * (distress >= 1 ? 0.8 : 1), 1);
       }
     }
   }
@@ -965,12 +1115,29 @@ export function buildEntity(
   }
 
   function flinch(): void {
-    if (defeatT <= 0) flinchT = 1;
+    // Während KO, Bogen-Flug oder Auftritt prallt nichts — Takte sind heilig.
+    if (koT <= 0 && spawnT <= 0 && entranceT === 0) flinchAge = 0;
   }
 
   function defeat(): void {
-    defeatT = 1;
-    flinchT = 0;
+    koT = 1;
+    flinchAge = Infinity;
+  }
+
+  function entrance(): void {
+    entranceT = 1;
+    spawnT = 0;
+    koT = 0;
+  }
+
+  function setDistress(level: 0 | 1 | 2): void {
+    if (level === distress) return;
+    distress = level;
+    // Level ≥ 1: hängende Lider — die Brauen kippen nach außen ab. Pupillen-
+    // Skala und Gliedmaßen-Wackeln liest der Loop direkt aus `distress`.
+    for (const b of browRefs) {
+      b.m.rotation.z = level >= 1 ? b.base - b.side * 0.25 : b.base;
+    }
   }
 
   function detach(sceneRef: THREE.Scene): void {
@@ -989,5 +1156,19 @@ export function buildEntity(
     });
   }
 
-  return { root, theme, boss, variant, rank, update, flinch, defeat, setShadow, detach };
+  return {
+    root,
+    theme,
+    boss,
+    variant,
+    rank,
+    update,
+    flinch,
+    defeat,
+    entrance,
+    events,
+    setDistress,
+    setShadow,
+    detach,
+  };
 }

@@ -39,7 +39,7 @@ export class ParticleSystem {
     geo.setAttribute('aColor', this.colorAttr);
     const mat = new THREE.ShaderMaterial({
       // `uColor` bleibt als globaler Multiplikator (Weiß-Default im Attribut
-       // ⇒ exakt der bisherige Funke für jeden Bestandsaufruf).
+      // ⇒ exakt der bisherige Funke für jeden Bestandsaufruf).
       uniforms: { uColor: { value: new THREE.Color(0xffc24d) } },
       transparent: true,
       depthWrite: false,

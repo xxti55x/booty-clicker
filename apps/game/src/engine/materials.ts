@@ -210,6 +210,22 @@ export function toonMat(p: ToonMatParams): THREE.MeshToonMaterial {
 const outlineCache = new Map<string, THREE.MeshBasicMaterial>();
 
 /**
+ * D-04 — Geteilter Ton-Multiplikator ALLER Ink-Konturen (ein Uniform-Objekt,
+ * dieselbe Mechanik wie TOON_FX): Auf hellem Grund (Beach, Club-Spot) läuft
+ * die Kontur kräftiger (< 1 = dunkler), auf dunklem Grund (Space) zarter
+ * (> 1 = aufgehellt), leicht zur Theme-Palette getönt — nie reines Schwarz.
+ * Uniform-getrieben, `customProgramCacheKey` bleibt unverändert (K-7).
+ */
+export const INK_TONE = { value: new THREE.Color(1, 1, 1) };
+const INK_TONE_WHITE = new THREE.Color(1, 1, 1);
+
+/** D-04: Kontur-Ton setzen — `tint` = Theme-Farbe (20 % Anteil), `lift` < 1
+ * kräftiger / > 1 zarter. Wirkt sofort auf alle Ink-Programme (ein Uniform). */
+export function setInkTone(tint: THREE.Color, lift: number): void {
+  INK_TONE.value.copy(tint).lerp(INK_TONE_WHITE, 0.8).multiplyScalar(lift);
+}
+
+/**
  * Ink-line material for inverted-hull outlines: back-face, unlit, with the
  * vertices pushed a constant distance along their normals in the vertex stage
  * (so thin limbs get the same line weight as the torso). Cached per
@@ -229,6 +245,7 @@ export function outlineMaterial(
   // trägt dieselbe Ink-Linie wie ein dünner Arm, statt eine ×1.42-fette. Der
   // Objekt-Space-Push davor multiplizierte mit jeder Parent-Skalierung.
   m.onBeforeCompile = (shader) => {
+    shader.uniforms.uInkTone = INK_TONE; // D-04: geteiltes Objekt, live-Update
     shader.vertexShader = shader.vertexShader.replace(
       '#include <project_vertex>',
       [
@@ -243,6 +260,14 @@ export function outlineMaterial(
         'gl_Position = projectionMatrix * mvPosition;',
       ].join('\n\t'),
     );
+    // D-04: Konturton — NACH color_fragment (der Chunk-Vertrag bleibt:
+    // diffuseColor fließt unverändert weiter, wir multiplizieren nur).
+    shader.fragmentShader =
+      'uniform vec3 uInkTone;\n' +
+      shader.fragmentShader.replace(
+        '#include <color_fragment>',
+        ['#include <color_fragment>', 'diffuseColor.rgb *= uInkTone;'].join('\n\t'),
+      );
   };
   m.customProgramCacheKey = () => `ink-hull-${thickness.toFixed(5)}`;
   outlineCache.set(key, m);

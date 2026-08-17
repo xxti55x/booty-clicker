@@ -29,6 +29,15 @@ export const POP_PER_TIER = 0.12;
 export const POP_ONBEAT = 0.18;
 /** Impulses clamp here so click-mashing can't fold the character in half. */
 export const POP_MAX = 1.35;
+/**
+ * D-22: Windup-Abklingrate (1/s). `wind > 0.5` hält damit ~28 ms (2–3 Frames
+ * bei 60 fps) — genau die winzige ANTICIPATION vor dem harten Anschlag, die
+ * K-4 verlangt: die Pelvis zieht kurz GEGEN die Pop-Richtung, dann schlägt
+ * der Pop durch. K-5-Mikro-Raster, kein eigener Timing-Wert.
+ */
+export const WIND_DECAY = 25;
+/** D-22: Gegenzug der Anticipation (rad) — minimal, eine Aufladung, kein Move. */
+export const WIND_PULL = 0.06;
 
 /** Live accent impulses (transient, never serialized). */
 export interface AccentState {
@@ -36,31 +45,41 @@ export interface AccentState {
   pop: number;
   /** Crit arm-flare impulse, 0…1. */
   crit: number;
+  /** D-22: Anticipation-Impuls (0…1) — zieht kurz gegen die Pop-Richtung. */
+  wind: number;
 }
 
 /** Fresh, silent accents. */
 export function createAccents(): AccentState {
-  return { pop: 0, crit: 0 };
+  return { pop: 0, crit: 0, wind: 0 };
 }
 
-/** A shake landed: kick the pop (tier/beat-scaled), flare on crit. Mutates. */
+/**
+ * A shake landed: kick the pop (tier/beat-scaled), flare on crit. Mutates.
+ * `windup` schaltet die D-22-Anticipation (low-Preset: aus — der Anschlag
+ * bleibt, nur die Aufladung entfällt; K-9: Glanz weg, Aussage bleibt).
+ */
 export function triggerClickAccent(
   a: AccentState,
   tier: number,
   crit: boolean,
   onBeat: boolean,
+  windup = true,
 ): void {
   const kick = POP_BASE + Math.max(0, tier) * POP_PER_TIER + (onBeat ? POP_ONBEAT : 0);
   a.pop = Math.min(POP_MAX, Math.max(a.pop * 0.55, 0) + kick);
   if (crit) a.crit = 1;
+  if (windup) a.wind = 1;
 }
 
 /** Advance the exponential decays by `dt` seconds. Mutates. */
 export function stepAccents(a: AccentState, dt: number): void {
   a.pop *= Math.exp(-dt * POP_DECAY);
   a.crit *= Math.exp(-dt * CRIT_DECAY);
+  a.wind *= Math.exp(-dt * WIND_DECAY);
   if (a.pop < 1e-4) a.pop = 0;
   if (a.crit < 1e-4) a.crit = 0;
+  if (a.wind < 1e-4) a.wind = 0;
 }
 
 /**
@@ -70,6 +89,10 @@ export function stepAccents(a: AccentState, dt: number): void {
  * from the impulses each time and the next physics step resets the joints.
  */
 export function applyAccents(rig: Rig, a: AccentState, frenzy: boolean, t: number): void {
+  // D-22: Anticipation — für 2–3 Frames zieht die Pelvis MINIMAL gegen die
+  // Pop-Richtung (Aufladung), dann übernimmt der Anschlag. Additiv wie alles
+  // hier: der nächste Physik-Schritt schreibt absolute Werte, nichts driftet.
+  if (a.wind > 0.5) rig.pelvis.rotation.x += WIND_PULL;
   const p = a.pop;
   if (p > 0) {
     rig.pelvis.rotation.x -= p * 0.3; // the booty flick

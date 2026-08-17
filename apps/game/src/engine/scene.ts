@@ -127,6 +127,16 @@ function makeGlowTexture(): THREE.CanvasTexture {
   return new THREE.CanvasTexture(c);
 }
 
+let glowTexCache: THREE.CanvasTexture | null = null;
+/**
+ * D-14/D-18: Der geteilte weiche Glow-Punkt — EINE gecachte Textur für alle
+ * Glow-Sprites (Kulisse UND Skin-Signaturen/Rarity-Funken), damit kein zweiter
+ * Kanal entsteht. Wer sie nutzt, klont nur das MATERIAL, nie die Textur.
+ */
+export function glowTexture(): THREE.CanvasTexture {
+  return (glowTexCache ??= makeGlowTexture());
+}
+
 /**
  * Build the renderer, scene, camera, lighting and static stage.
  * Ported 1:1 from the prototype's RENDERER section (behaviour preserved).
@@ -205,7 +215,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   scene.add(beat);
   const lights: SceneLights = { hemi, key, fill, rimA, rimB };
 
-  const GLOW = makeGlowTexture();
+  const GLOW = glowTexture();
   const glowSprite: GlowSpriteFn = (color, size, x, y, z) => {
     const m = new THREE.SpriteMaterial({
       map: GLOW,

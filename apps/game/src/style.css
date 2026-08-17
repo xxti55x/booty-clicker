@@ -473,7 +473,9 @@ body {
   pointer-events: none;
   font-weight: 800;
   font-size: 20px;
-  color: #a8e831;
+  /* D-22: Schadenszahlen tragen die Bühnen-Akzentfarbe (K-1) — `main` setzt
+     die Variable pro Theme; der Fallback ist das bisherige Club-Lime. */
+  color: var(--accent, #a8e831);
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
   animation: rise 0.9s ease-out forwards;
   z-index: 15;
@@ -489,6 +491,41 @@ body {
   100% {
     opacity: 0;
     transform: translate(-50%, -70px) scale(1);
+  }
+}
+/* D-24: Bühnenwechsel-Wischer — ein schmales, schräges Verlaufsband in der
+   Akzentfarbe der NEUEN Bühne. GERICHTET und nie vollflächig (F2-Auflage):
+   Bandbreite 34 vw mit transparenten Rändern, Kern-Deckkraft 0.85. Die Dauer
+   (0.5 s minor / 0.9 s major) setzt main inline als animation-duration. */
+#stageWipe {
+  position: fixed;
+  top: -10vh;
+  left: 0;
+  width: 34vw;
+  height: 120vh;
+  pointer-events: none;
+  z-index: 14;
+  opacity: 0;
+  transform: translateX(-140%) skewX(-12deg);
+  background: linear-gradient(90deg, transparent, var(--accent, #a8e831) 50%, transparent);
+}
+#stageWipe.run {
+  animation: stage-wipe linear forwards;
+}
+@keyframes stage-wipe {
+  0% {
+    opacity: 0;
+    transform: translateX(-140%) skewX(-12deg);
+  }
+  18% {
+    opacity: 0.85;
+  }
+  82% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(340%) skewX(-12deg);
   }
 }
 .settings-section {
@@ -1565,30 +1602,37 @@ body {
   font-size: 11px;
 }
 .pop.crit {
+  /* D-22/K-2: Der Crit bleibt in der SIGNALFARBE (Gold/Orange = Schaden) —
+     er darf nie im Theme-Akzent aufgehen, sonst verliert das Signal. */
   color: #ffd24d;
   font-size: 32px; /* ×1.6 of the base 20px (spec §8.2) */
   text-shadow: 0 2px 12px rgba(255, 138, 77, 0.8);
-  animation-name: riseCrit; /* golden + rotated variant */
+  animation-name: pop-crit-rise; /* D-22: eigene Flugbahn, höher + Bogen */
 }
-@keyframes riseCrit {
+/* D-22: Crit-Flugbahn — steigt deutlich höher und zieht einen leichten Bogen
+   (translateX) — ein Crit ist ohne Lesen der Zahl als Crit erkennbar. */
+@keyframes pop-crit-rise {
   0% {
     opacity: 1;
     transform: translate(-50%, 0) scale(0.8) rotate(-8deg);
   }
   20% {
-    transform: translate(-50%, -16px) scale(1.25) rotate(-8deg);
+    transform: translate(calc(-50% + 8px), -24px) scale(1.3) rotate(-8deg);
   }
   100% {
     opacity: 0;
-    transform: translate(-50%, -74px) scale(1.05) rotate(-8deg);
+    transform: translate(calc(-50% + 28px), -112px) scale(1.05) rotate(-5deg);
   }
 }
 .pop.gold {
   color: #a8e831;
 }
+/* D-22: Beat-Treffer tragen einen RAHMEN in der Akzentfarbe — die Füllung
+   bleibt hell, damit Rahmen und Zahl sich trennen statt zu verschmelzen. */
 .pop.onbeat {
-  color: #ffd24d;
-  text-shadow: 0 0 10px rgba(255, 210, 77, 0.85);
+  color: #fff;
+  -webkit-text-stroke: 1.2px var(--accent, #a8e831);
+  text-shadow: 0 0 10px var(--accent-soft, rgba(255, 210, 77, 0.85));
 }
 /* ROADMAP-V2 A2 (Synth „Schild-Takte"): abgeprallter Klick. Kalt, klein und
    ohne Zahl — die Aussage ist „nichts angekommen", nicht „wie viel". */

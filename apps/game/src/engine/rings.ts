@@ -68,6 +68,12 @@ export interface AttachOpts {
   /** Mit dem Beat atmen (Boss-Aura) oder ruhig stehen (Rarity)? */
   pulse?: boolean;
   opacity?: number;
+  /**
+   * D-19: Lokale Ring-Höhe unterm Träger (Default {@link RING_Y} — für Träger,
+   * die selbst AUF dem Deck stehen). Der Rarity-Ring hängt an der Spieler-
+   * Spin-Gruppe im Welt-Ursprung und braucht die Deckhöhe als Versatz.
+   */
+  y?: number;
 }
 
 /** Handle eines persistenten Rings — zurückgeben mit {@link RingPool.release}. */
@@ -154,7 +160,7 @@ export class RingPool {
     // `spawn` bekommt WELT-Koordinaten (Hüfte, Gegner-Fuß) — der Ring gehört
     // aber aufs DECK, nicht auf die Höhe des Auslösers.
     s.mesh.position.set(x, DECK_Y + RING_Y, z);
-    s.mesh.parent !== this.scene && this.scene.add(s.mesh);
+    if (s.mesh.parent !== this.scene) this.scene.add(s.mesh);
     s.mesh.visible = true;
   }
 
@@ -173,8 +179,8 @@ export class RingPool {
     s.mat.color.setHex(o.color);
     s.mat.opacity = s.opacity;
     // `attach`-Ringe hängen an einem Träger, der schon auf dem Deck steht —
-    // hier ist der Versatz LOKAL.
-    s.mesh.position.set(0, RING_Y, 0);
+    // hier ist der Versatz LOKAL (oder explizit via `o.y`, siehe AttachOpts).
+    s.mesh.position.set(0, o.y ?? RING_Y, 0);
     s.mesh.scale.set(o.r * 2, 1, o.r * 2);
     s.mesh.visible = true;
     parent.add(s.mesh);
