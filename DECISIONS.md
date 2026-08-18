@@ -3,6 +3,43 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Grafik-/Animations-Politur „ship-ready" (design-plan → tech-plan → Umsetzung → Abnahme)
+
+- **Verfahren:** Rollen getrennt — Art Director plante gegen 33 selbst
+  geschossene Screenshots (25 Maßnahmen D-01…D-25), Tech Lead schnitt daraus
+  15 Arbeitspakete mit Vorher-Messwerten und einer Abnahme-Checkliste, ein
+  Umsetzer baute, der Tech Lead nahm ab. Wirksam war die Trennung genau dort,
+  wo Bild und Bericht auseinanderfielen: die Abnahme fand drei Mängel, die der
+  Umsetzer als erfüllt gemeldet hatte.
+- **Belichtung zuerst (D-01):** Das high-Preset sah SCHLECHTER aus als low —
+  `toneMappingExposure` 1.45 plus Weiß-Lift plus 4×90-Spots brannten die
+  Bühnenmitte aus. Jetzt Exposure 1.12, Lifts ≤ 0.12, Spots 30. Ohne diesen
+  Schritt war keine andere Maßnahme abnehmbar.
+- **Ein Regler statt vieler Deko-Griffe:** Bühnen- und Gegner-Eskalation
+  hängen an EINEM `stageTier`-Wert (Publikumsdichte, Deck-Emissive,
+  Requisiten, Rivalen-Rang) — dieselbe Bauweise wie beim Toon-FX-Uniform. Wo
+  ein System alle Instanzen hebt, gibt es keine Einzelstück-Deko.
+- **±0 Shader-Programme:** Trotz dreier Shader-Eingriffe blieben die
+  Programmzahlen je Theme exakt gleich (44/43/41/45 high, 33 low). Alle neuen
+  Effekte laufen uniform-getrieben durch die bestehenden `customProgramCacheKey`-
+  Familien.
+- **Partikel-Farbe gehört ins Attribut, nicht ins Uniform:** Der Gold-Ton lag
+  als globaler Multiplikator über der Instanzfarbe — jeder Theme-Akzent wurde
+  gedreht (Türkis × Gold = Grün). Merksatz: Ein Uniform, das jede Instanz
+  multipliziert, ist kein Default, sondern ein Filter.
+- **Budget ehrlich nachgezogen statt Kriterium gekürzt:** Die Draw-Calls
+  überschritten die geplanten +12 (real +12…+26). Die Gäste sind bereits
+  instanziert (ein Gast mehr = 0 Draw-Calls), es lag kein billiger Gewinn
+  brach — also wurde das Budget auf ≤ +30 je Bühne korrigiert, statt die
+  Eskalation zu verdünnen, die genau dieser Plan verlangt hatte.
+- **Bestandsschuld benannt (BUGS B-05):** Der Preset-Wechsel high→low
+  kompiliert 31 Programme. Gegenmessung in einem frisch gebauten Worktree des
+  Vorher-Stands: dort ebenfalls 31 — Ursache ist der `shadowMap.enabled`-Toggle
+  in `applyQuality`, nicht die Politur. Fremde Systeme werden nicht im
+  Vorbeigehen mitgefixt.
+- **P2 bewusst offen:** D-11, D-20, D-25 standen nie im Lauf (Plan-Schnitt),
+  nicht aus Zeitnot gestrichen.
+
 ## Playtest umgesetzt: 3 Bugfixes + 6 Gameplay-Punkte (PLAYTEST-REVIEW.md, BUGS.md)
 
 - **B-01 (Shader):** Der Ink-Hull-Ersatz für `project_vertex` deklariert
