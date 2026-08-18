@@ -343,7 +343,19 @@ function beachIsland({ g, hue, anims, density }: IslandCtx): void {
   {
     const rnd = lcg(4711);
     const off: number[] = [];
-    for (let i = 0; i <= 48; i++) off.push(-0.08 + rnd() * 0.43); // −0.08…+0.35
+    for (let i = 0; i <= 48; i++) {
+      const a = (i / 48) * Math.PI * 2;
+      // ABNAHME D-10: Der reine Zufalls-Jitter (±0.35) franste die Kante nur
+      // aus — im Bild blieb ein Kreis mit Schaumband, und ein Ornamentband ist
+      // laut Auflage KEINE Silhouette. Jetzt tragen drei tiefe Lappen (sin 3a)
+      // plus eine zweite Welle (sin 5a) den Bruch: der Umriss bekommt Buchten
+      // und Nasen. Alle Werte sind POSITIV — die Sandbank wächst nur nach
+      // AUSSEN, die runde Spielfläche (F1) bleibt vollständig überdeckt.
+      const lobe = 0.5 * Math.sin(a * 3 + 0.7) + 0.22 * Math.sin(a * 5 - 1.3);
+      // Die Körnung bleibt klein: viel Rauschen auf 48 Segmenten facettiert die
+      // Kante, statt sie zu formen — die Lappen tragen den Bruch.
+      off.push(0.6 + lobe + rnd() * 0.05); // ≈ +0.1 … +1.4
+    }
     jitterRim(rimGeo, off);
   }
   const rim = new THREE.Mesh(rimGeo, sandstone);

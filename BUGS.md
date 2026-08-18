@@ -96,6 +96,31 @@ Skalierung, die nicht existiert (und wächst beliebig weiter).
 **Fix-Vorschlag:** Stacks in der ANZEIGE am wirksamen Cap einfrieren
 („Combo ×max · Inferno") oder statt der Stack-Zahl den echten Bonus zeigen.
 
+## B-05 · Preset-Wechsel high→low kompiliert 31 Shader-Programme neu (P2)
+
+**Status: offen** — bewusst nicht in der Grafik-Politur behoben (Bestandsschuld
+außerhalb ihres Auftrags), hier protokolliert statt still mitgeschleppt.
+Aufgenommen bei der Abnahme der Grafik-Politur (2026-08-18).
+
+**Symptom:** Ein Grafik-Preset-Wechsel zur Laufzeit erzeugt einen Kompilier-Peak
+von **31** neuen `createProgram`-Aufrufen — auf einem Handy ein sichtbarer
+Hänger genau in dem Moment, in dem der Spieler auf „low" stellt, WEIL es ruckelt.
+**Repro (Hook-Messung):** `createProgram`/`deleteProgram` per `addInitScript`
+zählen, booten, im ⚙️-Tab die Grafik auf „low" schalten, ein paar Frames warten.
+**Messung:** 31 neue Kompilate — identisch auf dem Politur-Build (`f0bc10c`) und
+auf dem Stand DAVOR (`84f453d`, frisch gebauter Vergleichs-Worktree, eigene
+Messung der Abnahme). Der Beitrag der Grafik-Politur ist **+0**; die Politur
+selbst bringt auf allen sieben Messpunkten ±0 zusätzliche Programme.
+**Ursache (verifiziert, `main.ts` in `applyQuality`):** Der Block schaltet
+`renderer.shadowMap.enabled` um und setzt danach per `scene.traverse` auf JEDEM
+Material `needsUpdate = true` — three.js baut daraufhin alle beleuchteten
+Programme neu. Der Block ist byte-gleich mit `84f453d`.
+**Fix-Vorschlag:** Schattenwurf dauerhaft aktiviert lassen und im low-Preset
+stattdessen nur die Map-Größe drücken (bzw. `castShadow` an den Objekten
+schalten) — dann bleibt `shadowMap.enabled` konstant und der `needsUpdate`-
+Rundumschlag entfällt ersatzlos. Eingriff ins Preset-System, deshalb ein
+eigenes Ticket und keine Nebenwirkung einer Grafik-Politur.
+
 ---
 
 ## Geprüft und sauber (keine Befunde)

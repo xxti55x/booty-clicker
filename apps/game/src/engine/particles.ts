@@ -2,6 +2,8 @@ import * as THREE from 'three';
 
 /** Max live click particles (spec §5 M4: pool, ≤ 200, < 1 ms/frame). */
 const MAX = 200;
+/** Der klassische Gold-Funke — Farbe aller Aufrufe OHNE eigene Farbe. */
+const SPARK_GOLD = 0xffc24d;
 
 /**
  * GPU-drawn click-particle pool. A single THREE.Points with a fade shader;
@@ -23,6 +25,8 @@ export class ParticleSystem {
   private readonly lifeAttr: THREE.BufferAttribute;
   private readonly colorAttr: THREE.BufferAttribute;
   private readonly tmpColor = new THREE.Color();
+  /** Farbe der Bestandsaufrufe ohne `color` (Konfetti) — der bisherige Funke. */
+  private readonly defaultColor = new THREE.Color(SPARK_GOLD);
   private cursor = 0;
 
   constructor(scene: THREE.Scene) {
@@ -33,14 +37,22 @@ export class ParticleSystem {
     this.posAttr.setUsage(THREE.DynamicDrawUsage);
     this.lifeAttr.setUsage(THREE.DynamicDrawUsage);
     this.colorAttr.setUsage(THREE.DynamicDrawUsage);
-    this.colors.fill(1); // Default-Weiß × uColor = der bisherige Funke
+    // Der Gold-Ton steht im ATTRIBUT (nicht im Uniform): so trägt ein Splitter
+    // mit eigener Farbe exakt DIESE Farbe — ein Gold-Multiplikator im Shader
+    // hätte jeden Akzent gedreht (Türkis × Gold = Grün, in der Abnahme im Bild
+    // nachgewiesen). Bestandsaufrufe ohne Farbe sehen unverändert aus.
+    for (let i = 0; i < MAX; i++) {
+      this.colors[i * 3] = this.defaultColor.r;
+      this.colors[i * 3 + 1] = this.defaultColor.g;
+      this.colors[i * 3 + 2] = this.defaultColor.b;
+    }
     geo.setAttribute('position', this.posAttr);
     geo.setAttribute('aLife', this.lifeAttr);
     geo.setAttribute('aColor', this.colorAttr);
     const mat = new THREE.ShaderMaterial({
-      // `uColor` bleibt als globaler Multiplikator (Weiß-Default im Attribut
-      // ⇒ exakt der bisherige Funke für jeden Bestandsaufruf).
-      uniforms: { uColor: { value: new THREE.Color(0xffc24d) } },
+      // `uColor` bleibt als globaler Helligkeits-/Tönungs-Regler — NEUTRAL, die
+      // Farbe kommt jetzt vollständig aus dem Instanz-Attribut (K-1).
+      uniforms: { uColor: { value: new THREE.Color(0xffffff) } },
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
@@ -51,7 +63,7 @@ export class ParticleSystem {
       vertexShader: `attribute float aLife; attribute vec3 aColor;
         varying float vLife; varying vec3 vColor;
         void main(){ vLife = aLife; vColor = aColor; vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = (2.0 + 8.0 * aLife) * (260.0 / -mv.z);
+          gl_PointSize = (1.2 + 4.0 * aLife) * (260.0 / -mv.z);
           gl_Position = projectionMatrix * mv; }`,
       fragmentShader: `varying float vLife; varying vec3 vColor; uniform vec3 uColor;
         void main(){ vec2 d = gl_PointCoord - 0.5; float r = length(d);
@@ -83,7 +95,7 @@ export class ParticleSystem {
     color?: number,
     dir?: readonly [number, number, number],
   ): void {
-    if (color !== undefined) this.tmpColor.setHex(color);
+    const c = color === undefined ? this.defaultColor : this.tmpColor.setHex(color);
     for (let n = 0; n < count; n++) {
       const i = this.cursor;
       this.cursor = (this.cursor + 1) % MAX;
@@ -104,9 +116,9 @@ export class ParticleSystem {
       this.velocities[i * 3] = vx;
       this.velocities[i * 3 + 1] = vy;
       this.velocities[i * 3 + 2] = vz;
-      this.colors[i * 3] = color === undefined ? 1 : this.tmpColor.r;
-      this.colors[i * 3 + 1] = color === undefined ? 1 : this.tmpColor.g;
-      this.colors[i * 3 + 2] = color === undefined ? 1 : this.tmpColor.b;
+      this.colors[i * 3] = c.r;
+      this.colors[i * 3 + 1] = c.g;
+      this.colors[i * 3 + 2] = c.b;
       this.life[i] = 1;
     }
     this.colorAttr.needsUpdate = true;
