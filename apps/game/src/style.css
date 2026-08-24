@@ -436,6 +436,68 @@ body {
   width: 17px;
   height: 17px;
 }
+
+/* ---- Auto-Vorstoß-Schalter (unter dem Crew-Knopf) ---- */
+/* Sitzt am selben Anker wie `.toggleShop`, nur eine Knopfhöhe tiefer — die
+   `--top-btn-h`-Variable trägt genau diese Höhe und wird in den beiden
+   Touch-Media-Blöcken mitgezogen, damit der Abstand nie auseinanderläuft. */
+:root {
+  --top-btn-h: 46px;
+}
+.autoAdv {
+  position: fixed;
+  top: calc(14px + env(safe-area-inset-top, 0px) + var(--top-btn-h));
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 12px;
+  cursor: pointer;
+  background: var(--gold-btn);
+  color: var(--gold-ink);
+  border: 2px solid var(--gold-line);
+  box-shadow:
+    0 3px 0 var(--gold-deep),
+    inset 0 1px 0 rgba(255, 245, 210, 0.8);
+  transition:
+    transform 0.06s,
+    box-shadow 0.06s,
+    filter 0.12s;
+}
+.autoAdv:active {
+  transform: translateY(3px);
+  box-shadow: 0 0 0 var(--gold-deep);
+}
+.autoAdv .ui-ic {
+  width: 20px;
+  height: 20px;
+}
+/* Der Schrägstrich gehört dem AUS-Zustand: im Normalfall ist er nicht da. */
+.autoAdv .aa-slash {
+  display: none;
+}
+/* Farm-Modus: der Knopf tritt zurück (dunkles Holz statt Gold) und trägt den
+   Strich — auf einen Blick unterscheidbar, ohne Text zu lesen. */
+.autoAdv.off {
+  background: var(--wood-deep, #3a2417);
+  color: var(--txt-soft);
+  border-color: var(--wood-rim);
+  box-shadow:
+    0 3px 0 rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 245, 210, 0.14);
+}
+.autoAdv.off .aa-slash {
+  display: block;
+}
+@media (prefers-reduced-motion: reduce) {
+  .autoAdv {
+    transition: none;
+  }
+}
 .hintbar {
   position: fixed;
   bottom: 16px;
@@ -1264,6 +1326,14 @@ body {
   .toggleShop,
   .bossStart {
     padding: 12px 16px;
+  }
+  /* Der Crew-Knopf wächst hier auf Touch-Maß — der Auto-Schalter rutscht mit. */
+  :root {
+    --top-btn-h: 54px;
+  }
+  .autoAdv {
+    width: 44px;
+    height: 44px;
   }
   .muteBtn {
     width: 44px;
@@ -3133,6 +3203,48 @@ body {
   width: 10px;
   height: 10px;
 }
+/* Stufen-Nummer der Fähigkeit — sie stand nirgends, obwohl jede Kachel eine
+   eigene Stufe IST. Unten links, damit sie dem Haken oben rechts nicht ins
+   Gehege kommt. */
+.ab .ab-lv {
+  position: absolute;
+  left: -3px;
+  bottom: -4px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 2px;
+  border-radius: 7px;
+  background: var(--wood-deep, #3a2417);
+  color: var(--gold-base);
+  border: 1px solid var(--wood-rim);
+  font-family: var(--display);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 11px;
+  text-align: center;
+}
+.ab.lk .ab-lv {
+  position: static;
+  margin-right: 3px;
+}
+/* Kopfzeile der Slot-Reihe: „Fähigkeiten 3 · nächste in 12 Lv". */
+.ab-head {
+  flex: none;
+  margin-right: 4px;
+  font-family: var(--display);
+  font-size: 10px;
+  font-weight: 800;
+  /* Die Zeile trägt echte Information (wie viele Käufe offen sind) — sie darf
+     nicht so blass sein wie ein Fußnotentext. */
+  color: var(--gold-base);
+  white-space: nowrap;
+}
+.ab-head i {
+  font-style: normal;
+  opacity: 0.75;
+  margin-left: 3px;
+}
+
 .ab-check {
   position: absolute;
   right: -4px;
@@ -3328,6 +3440,30 @@ body {
   color: var(--parch);
   opacity: 0.6;
   padding: 0 2px;
+}
+/* Blätter-Pfeile der Bühnenleiste: gleiche Höhe wie eine Kachel, aber schmal —
+   sie sollen führen, nicht mit den Bühnen um Aufmerksamkeit konkurrieren. */
+.zs-arrow {
+  flex: 0 0 auto;
+  align-self: stretch;
+  min-width: 22px;
+  padding: 0 4px;
+  border: 2px solid var(--wood-rim);
+  border-radius: 9px;
+  background: var(--wood-deep, #3a2417);
+  color: var(--gold-base);
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+.zs-arrow:hover {
+  color: #fff3c4;
+  border-color: var(--gold-line);
+}
+.zs-arrow:active {
+  transform: translateY(1px);
 }
 /* ---- ROADMAP-V2 A1: Hausregel der Bühne auf der Bühnen-Card ---- */
 .stage-mod {
@@ -4065,6 +4201,13 @@ body {
     padding: 6px 11px;
     font-size: 12px;
     min-height: 40px;
+  }
+  :root {
+    --top-btn-h: 48px;
+  }
+  .autoAdv {
+    width: 40px;
+    height: 40px;
   }
   /* Auch hier gilt die Touch-Untergrenze: die Kauf-Mengen, die Kulissen-Wahl,
      die Skin-Knöpfe und der Board-Wechsler stehen im Panel dicht beieinander. */
@@ -5469,4 +5612,245 @@ body {
   font-size: 1rem;
   color: #ffe9c4;
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+
+/* ================= Himmelsbaum ================= */
+/* Der Tab hieß immer „Baum", zeigte aber drei Listen. Jetzt ist er einer:
+   Stamm, drei Äste, die Knoten als Früchte daran — zoom- und schiebbar. */
+.hv-tree {
+  position: relative;
+  overflow: hidden;
+  margin: 6px 0 10px;
+  height: 420px;
+  border: 2px solid var(--wood-rim);
+  border-radius: 14px;
+  background:
+    radial-gradient(120% 80% at 50% 8%, rgba(120, 190, 255, 0.16), rgba(0, 0, 0, 0) 60%),
+    linear-gradient(180deg, #1b2436 0%, #241d2e 55%, #2b1f18 100%);
+  touch-action: none; /* Ziehen gehört dem Baum, nicht dem Seiten-Scroll */
+}
+.hv-canvas {
+  /* QUADRATISCH und zentriert — das ist keine Kosmetik: Das SVG skaliert mit
+     `preserveAspectRatio` proportional, die Knoten sitzen dagegen in Prozent
+     ihres Containers. Wäre der Container breiter als hoch, liefen beide
+     Koordinatensysteme auseinander und die Früchte stünden neben ihren Ästen
+     (genau dieser Fehler war im ersten Wurf zu sehen). */
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  aspect-ratio: 1;
+  height: 100%;
+  margin-left: 0;
+  translate: -50% 0;
+  transform-origin: 50% 55%;
+  cursor: grab;
+}
+.hv-canvas:active {
+  cursor: grabbing;
+}
+.hv-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.hv-trunk {
+  fill: #5a3b22;
+  stroke: #35200f;
+  stroke-width: 4;
+}
+.hv-branch {
+  fill: none;
+  stroke: #5a3b22;
+  stroke-width: 15;
+  stroke-linecap: round;
+}
+.hv-twig {
+  stroke-width: 9;
+}
+/* Ast-Legende: sitzt im Rahmen, zoomt nicht mit. */
+.hv-legend {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  max-width: 60%;
+  font-family: var(--display);
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--gold-base);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+/* Eine Frucht: rund, mit Ast-Icon. Der Zustand steckt in Farbe und Rand —
+   gekauft leuchtet, kaufbar pulst dezent, gesperrt fällt zurück. */
+.hv-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  /* 40 px passen bei ~420 px Bühnenbreite kollisionsfrei zwischen die
+     Ast-Knoten (siehe die Abstandsrechnung in heaven-tree-layout.ts). */
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 3px solid var(--wood-rim);
+  background: radial-gradient(circle at 34% 30%, #6b5336, #402b16);
+  color: var(--txt-soft);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45);
+  transition:
+    transform 0.09s,
+    filter 0.12s;
+}
+.hv-node .hv-ic {
+  font-size: 16px;
+  line-height: 1;
+}
+.hv-node .hv-lv {
+  font-family: var(--display);
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+.hv-node.buyable {
+  border-color: var(--gold-line);
+  background: radial-gradient(circle at 34% 30%, #ffd97a, #d99a2c);
+  color: var(--gold-ink);
+}
+.hv-node.own {
+  border-color: #7fae6a;
+  background: radial-gradient(circle at 34% 30%, #b6e59a, #5f9247);
+  color: #17300d;
+}
+.hv-node.maxed {
+  box-shadow:
+    0 3px 0 rgba(0, 0, 0, 0.45),
+    0 0 14px rgba(150, 240, 140, 0.55);
+}
+.hv-node.blocked {
+  opacity: 0.42;
+  filter: grayscale(0.8);
+  cursor: not-allowed;
+}
+/* Die Exklusiv-Früchte sitzen an der Gabel und tragen einen Doppelrand — die
+   Weggabelung ist damit auch am Knoten selbst ablesbar. */
+.hv-node.excl {
+  border-style: double;
+  border-width: 5px;
+}
+.hv-node.sel {
+  transform: translate(-50%, -50%) scale(1.16);
+  filter: brightness(1.15);
+  outline: 3px solid var(--gold-base);
+  outline-offset: 2px;
+}
+.hv-node:hover {
+  filter: brightness(1.1);
+}
+/* Zoom-Knöpfe oben rechts — sie liegen ÜBER dem Baum und werden nicht mit ihm
+   verschoben, sonst wären sie nach dem ersten Ziehen aus dem Bild. */
+.hv-zoom {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: flex;
+  gap: 5px;
+}
+.hv-zoom button {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 2px solid var(--wood-rim);
+  background: var(--gold-btn);
+  color: var(--gold-ink);
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+.hv-zoom button:active {
+  transform: translateY(2px);
+}
+.hv-detail {
+  margin-bottom: 8px;
+}
+.hv-hint {
+  padding: 10px 12px;
+  border: 2px dashed var(--wood-rim);
+  border-radius: 12px;
+  color: var(--txt-soft);
+  font-size: 12px;
+  text-align: center;
+}
+@media (max-width: 640px) {
+  .hv-tree {
+    height: 330px;
+  }
+  .hv-node {
+    width: 36px;
+    height: 36px;
+  }
+  .hv-node .hv-ic {
+    font-size: 14px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hv-node {
+    transition: none;
+  }
+}
+
+/* Effekt-Vorschau auf der Ahnen-Karte: wohin der Kauf den Perk bringt. */
+.anc-next {
+  margin-left: 6px;
+  color: var(--gold-base);
+  font-weight: 800;
+}
+
+/* Sperr-Fortschritt („noch X bis zur Freischaltung"): ein Balken statt einer
+   Prozentzahl in Klammern. Er wird überall dort verwendet, wo ein ganzer Tab
+   hinter EINER Schwelle liegt — dort ist der Fortschritt die Hauptinformation,
+   nicht eine Randnotiz. */
+.gate-bar {
+  position: relative;
+  display: block;
+  height: 14px;
+  margin: 6px 0 8px;
+  border: 2px solid var(--wood-rim);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+}
+.gate-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(180deg, #ffe08a 0%, #ffb84d 60%, #f2803a 100%);
+  transition: width 0.25s ease;
+}
+.gate-bar b {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--display);
+  font-size: 9px;
+  font-weight: 800;
+  color: #2a1500;
+  text-shadow: 0 1px 0 rgba(255, 245, 210, 0.55);
+}
+@media (prefers-reduced-motion: reduce) {
+  .gate-bar i {
+    transition: none;
+  }
 }

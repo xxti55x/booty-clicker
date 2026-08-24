@@ -312,6 +312,23 @@ export function abilityTiersUnlocked(level: number): number {
 }
 
 /**
+ * Wie viele Level fehlen bis zum nächsten Fähigkeiten-MEILENSTEIN (Lv 25, 75,
+ * 125, …) — die Kaufmenge „Nächste Fähigkeit".
+ *
+ * Genau ein Level ÜBER den Meilenstein hinaus zu kaufen wäre Verschwendung,
+ * genau einen darunter zu stoppen verfehlt den Zweck: Der Rückgabewert landet
+ * deshalb exakt AUF dem nächsten Freischalt-Level. Steht man bereits darauf,
+ * zeigt er auf den übernächsten — sonst wäre der Knopf auf einem Meilenstein
+ * ein No-Op.
+ */
+export function levelsToNextAbility(level: number): number {
+  const lv = Number.isFinite(level) ? Math.max(0, Math.floor(level)) : 0;
+  if (lv < ABILITY_FIRST_LEVEL) return ABILITY_FIRST_LEVEL - lv;
+  const tiers = abilityTiersUnlocked(lv);
+  return abilityLevel(tiers + 1) - lv;
+}
+
+/**
  * The kind of ability tier `n` (1-based) for a member — v11.1: read from the
  * member's TIER-RHYTHMUS (`TIER_PATTERNS[cfg.rhythm]`, 4er-Zyklus). Every
  * pattern carries 2 power + 2 special per cycle, so the long-run balance is

@@ -4,9 +4,11 @@ import {
   type AncientConfig,
   ancientAtCap,
   ancientBonus,
+  ancientBulkCost,
   ancientCost,
   ancientLevel,
-  buyAncient,
+  ancientMaxAffordable,
+  buyAncientBulk,
   canBuyAncient,
 } from '../game/ancients';
 import type { ChState } from '../game/ch-state';
@@ -34,6 +36,8 @@ export interface AncientsDeps {
  */
 export class Ancients {
   private readonly body = byId('tabAnc');
+  /** Gewählte Kaufmenge der Leiste über der Liste. */
+  private amount: 1 | 10 | 100 | 'max' = 1;
 
   constructor(private readonly deps: AncientsDeps) {
     this.body.innerHTML = `
@@ -41,14 +45,41 @@ export class Ancients {
         <h3>Twerk-Ahnen 🌀</h3>
         <div class="rebirth-info" id="ancInfo"></div>
       </div>
+      <!-- Dieselbe Kaufmengen-Leiste wie in der Crew: Wer sechsstellige Seelen
+           hält, soll nicht hundertmal auf dieselbe Karte tippen müssen. -->
+      <div class="buyamt" id="ancAmt">
+        <button class="amt active" data-a="1" type="button">×1</button>
+        <button class="amt" data-a="10" type="button">×10</button>
+        <button class="amt" data-a="100" type="button">×100</button>
+        <button class="amt" data-a="max" type="button">Max</button>
+      </div>
       <div id="ancList"></div>`;
+    for (const b of Array.from(this.body.querySelectorAll<HTMLButtonElement>('#ancAmt .amt'))) {
+      b.addEventListener('click', () => {
+        const a = b.dataset.a;
+        this.amount = a === 'max' ? 'max' : a === '100' ? 100 : a === '10' ? 10 : 1;
+        for (const x of Array.from(this.body.querySelectorAll('#ancAmt .amt')))
+          x.classList.remove('active');
+        b.classList.add('active');
+        this.render();
+      });
+    }
     this.render();
+  }
+
+  /** Wie viele Level ein Klick auf `cfg` gerade kauft (Menge × Budget × Cap). */
+  private countFor(cfg: AncientConfig): number {
+    const { state } = this.deps;
+    const level = ancientLevel(state.ancients, cfg.id);
+    const max = ancientMaxAffordable(cfg.id, level, state.souls);
+    return this.amount === 'max' ? max : Math.min(this.amount, max);
   }
 
   private buy(cfg: AncientConfig): void {
     const { state } = this.deps;
-    if (!canBuyAncient(state.ancients, state.souls, cfg.id)) return;
-    const r = buyAncient(state.ancients, state.souls, cfg.id);
+    const n = this.countFor(cfg);
+    if (n < 1) return;
+    const r = buyAncientBulk(state.ancients, state.souls, cfg.id, n);
     if (!r.bought) return;
     state.ancients = r.ancients;
     state.souls = r.souls;
@@ -71,9 +102,22 @@ export class Ancients {
       const cur = ancientBonus(cfg.id, level);
       const curTxt = fmtBonus(cfg, cur);
       const capTxt = cfg.cap === null ? '' : ` <span class="dim">(max Lv ${cfg.cap})</span>`;
+      // Der Fuß zeigt die WIRKLICHE Kaufmenge und ihren Preis — bei „Max" also
+      // nicht „Lv 1 · 1 ✨", sondern was der Klick tatsächlich tut.
+      const n = this.countFor(cfg);
+      const bulk = n > 1 ? ancientBulkCost(level, n) : cost;
       const foot = capped
         ? `<span class="cost">Max erreicht</span>`
-        : `<span class="cost ${affordable ? '' : 'bad'}">Lv ${level + 1} · ${fmt(cost)} ✨</span>`;
+        : `<span class="cost ${affordable ? '' : 'bad'}">${
+            n > 1 ? `+${fmt(n)} Lv · ${fmt(bulk)} ✨` : `Lv ${level + 1} · ${fmt(cost)} ✨`
+          }</span>`;
+      // Effekt-Vorschau: Der Ahne sagt nicht nur, was er JETZT bringt, sondern
+      // auch, wo der Kauf ihn hinbringt.
+      const after = ancientBonus(cfg.id, level + Math.max(1, n));
+      const preview =
+        !capped && affordable && after > cur
+          ? `<span class="anc-next">→ ${fmtBonus(cfg, after)}</span>`
+          : '';
       // IDEEN-GAMEPLAY 4b: Ahnen sind benannte Charaktere (Twerkules!) und
       // bekommen denselben Baukasten — Portrait vor dem Namen.
       return `<div class="item ${affordable ? '' : 'locked'}" data-id="${cfg.id}">
@@ -81,7 +125,7 @@ export class Ancients {
           <div class="ds">${cfg.flavor} · ${cfg.label}${capTxt}</div>
           <div class="crew-foot">
             ${foot}
-            <span class="dps">${level > 0 ? curTxt : '—'}</span>
+            <span class="dps">${level > 0 ? curTxt : '—'}${preview}</span>
           </div>
         </div>`;
     });

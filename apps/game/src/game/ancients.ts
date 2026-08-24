@@ -167,6 +167,40 @@ export function ancientTotalCost(level: number): number {
   return (level * (level + 1)) / 2;
 }
 
+/**
+ * Kosten für `n` Level am Stück, ab `level`. Die Leiter ist `level + 1` je
+ * Stufe, die Summe also die Differenz zweier Dreieckszahlen — geschlossen
+ * gerechnet statt in einer Schleife, damit auch „Max" bei fünfstelligen
+ * Mengen sofort antwortet.
+ */
+export function ancientBulkCost(level: number, n: number): number {
+  const lv = Math.max(0, Math.floor(level));
+  const cnt = Math.max(0, Math.floor(n));
+  return ancientTotalCost(lv + cnt) - ancientTotalCost(lv);
+}
+
+/**
+ * Wie viele Level von `id` das Seelen-Budget trägt — geklemmt auf den Cap des
+ * Ahnen, falls er einen hat. Löst `n(n+1)/2 + n·level ≤ souls` nach n auf
+ * (quadratische Formel) und korrigiert das Ergebnis um eine Stufe, damit
+ * Rundungsfehler nie einen Kauf melden, der nicht bezahlbar ist.
+ */
+export function ancientMaxAffordable(id: string, level: number, souls: number): number {
+  const cfg = BY_ID[id];
+  if (!cfg || !Number.isFinite(souls) || souls <= 0) return 0;
+  const lv = Math.max(0, Math.floor(level));
+  const room = cfg.cap === null ? Number.POSITIVE_INFINITY : Math.max(0, cfg.cap - lv);
+  if (room === 0) return 0;
+  // n² + n(2·lv + 1) − 2·souls ≤ 0
+  const b = 2 * lv + 1;
+  const n = Math.floor((Math.sqrt(b * b + 8 * souls) - b) / 2);
+  let take = Math.max(0, Math.min(n, room === Number.POSITIVE_INFINITY ? n : room));
+  // Sicherheitskorrektur gegen Gleitkomma-Ausreißer in beide Richtungen.
+  while (take > 0 && ancientBulkCost(lv, take) > souls) take--;
+  while (take < room && ancientBulkCost(lv, take + 1) <= souls) take++;
+  return take;
+}
+
 /** The effective (cap-clamped, non-negative) level a config's perk uses. */
 function cappedLevel(cfg: AncientConfig, level: number): number {
   const lo = Math.max(0, level);
@@ -213,6 +247,30 @@ export function buyAncient(ancients: AncientLevels, souls: number, id: string): 
   return {
     ancients: { ...ancients, [id]: level + 1 },
     souls: souls - ancientCost(level),
+    bought: true,
+  };
+}
+
+/**
+ * `n` Level am Stück kaufen. Ein einzelner Aufruf statt n Aufrufe von
+ * {@link buyAncient}: So kann die Kauf-Menge nie in einem halb bezahlten
+ * Zustand steckenbleiben — entweder die ganze Menge geht durch, oder es wird
+ * die größte bezahlbare daraus.
+ */
+export function buyAncientBulk(
+  ancients: AncientLevels,
+  souls: number,
+  id: string,
+  n: number,
+): BuyAncientResult {
+  const cfg = BY_ID[id];
+  if (!cfg || !Number.isFinite(n) || n < 1) return { ancients, souls, bought: false };
+  const level = ancientLevel(ancients, id);
+  const take = Math.min(Math.floor(n), ancientMaxAffordable(id, level, souls));
+  if (take < 1) return { ancients, souls, bought: false };
+  return {
+    ancients: { ...ancients, [id]: level + take },
+    souls: souls - ancientBulkCost(level, take),
     bought: true,
   };
 }

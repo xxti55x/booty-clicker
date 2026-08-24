@@ -11,6 +11,7 @@ import {
   noteRetrainRoll,
   retrainCost,
   retrainOffers,
+  retrainSeed,
   retrainRollCount,
   retrainedKind,
 } from './retrain';
@@ -67,16 +68,17 @@ describe('retrain — die Kostenleiter (gemessen gegen ~140 🧩/h)', () => {
     expect(retrainCost(5, 0)).toBe(640);
   });
 
-  it('verdoppelt je weiterem Roll am selben Mitglied (Währungs-Eskalation)', () => {
-    expect(retrainCost(1, 1)).toBe(80);
-    expect(retrainCost(1, 2)).toBe(160);
-    expect(retrainCost(1, 3)).toBe(320);
-    // Slot- und Roll-Eskalation multiplizieren sich.
-    expect(retrainCost(3, 2)).toBe(160 * 4);
+  // Umschul-Umbau: Wiederholungen kosten NICHT mehr extra. Die Slot-Leiter ist
+  // die Bremse; die Verdopplung je Roll bestrafte das Feinjustieren doppelt.
+  it('bleibt beim selben Preis, egal wie oft man dasselbe Mitglied umschult', () => {
+    expect(retrainCost(1, 1)).toBe(RETRAIN_BASE_COST);
+    expect(retrainCost(1, 7)).toBe(RETRAIN_BASE_COST);
+    expect(retrainCost(3, 0)).toBe(160);
+    expect(retrainCost(3, 12)).toBe(160);
   });
 
   it('bleibt endlich, egal wie absurd Slot oder Roll-Zähler sind', () => {
-    const cap = RETRAIN_BASE_COST * Math.pow(2, RETRAIN_MAX_EXP) * Math.pow(2, RETRAIN_MAX_EXP);
+    const cap = RETRAIN_BASE_COST * Math.pow(2, RETRAIN_MAX_EXP);
     expect(retrainCost(1e9, 1e9)).toBe(cap);
     expect(Number.isFinite(retrainCost(1e9, 1e9))).toBe(true);
     // Kein Spezial-Slot ⇒ kein Preis (der Aufrufer prüft, die Funktion wirft nie).
@@ -147,5 +149,41 @@ describe('retrain — das Angebot (Guardrail: kein Blind-Roll)', () => {
       expect(kinds[0]).not.toBe(kinds[1]);
       expect(kinds).not.toContain('boss');
     }
+  });
+});
+
+// Umschul-Umbau: Angebote darf man ansehen, ohne zu zahlen — dafür MÜSSEN sie
+// festliegen, sonst würfelt man den Dialog auf und zu, bis das Wunschpaar kommt.
+describe('retrainSeed — feste Angebote statt Gratis-Würfeln', () => {
+  it('liefert für dieselbe Lage immer dasselbe Zahlenpaar', () => {
+    expect(retrainSeed('boss', 3, 0)).toEqual(retrainSeed('boss', 3, 0));
+    expect(retrainSeed('dj', 7, 2)).toEqual(retrainSeed('dj', 7, 2));
+  });
+
+  it('unterscheidet Mitglied, Stufe und Roll-Zähler', () => {
+    const base = retrainSeed('boss', 3, 0).join();
+    expect(retrainSeed('dj', 3, 0).join()).not.toBe(base);
+    expect(retrainSeed('boss', 4, 0).join()).not.toBe(base);
+    expect(retrainSeed('boss', 3, 1).join()).not.toBe(base);
+  });
+
+  it('bleibt im Einheitsintervall und liefert zwei verschiedene Ströme', () => {
+    for (const id of ['boss', 'dj', 'hype', 'tycoon']) {
+      const [a, b] = retrainSeed(id, 5, 1);
+      for (const r of [a, b]) {
+        expect(r).toBeGreaterThanOrEqual(0);
+        expect(r).toBeLessThan(1);
+      }
+      expect(a).not.toBe(b);
+    }
+  });
+
+  it('taugt als Angebots-Quelle: gleicher Seed ⇒ gleiche zwei Sorten', () => {
+    const [r1, r2] = retrainSeed('boss', 3, 0);
+    const first = retrainOffers('gold', r1, r2);
+    const again = retrainOffers('gold', r1, r2);
+    expect(again.kinds).toEqual(first.kinds);
+    expect(first.kinds[0]).not.toBe(first.kinds[1]);
+    expect(first.kinds).not.toContain('gold');
   });
 });

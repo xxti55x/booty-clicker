@@ -302,7 +302,13 @@ import { isTranscendEnabled } from './game/flags';
 import { shouldShakeOnKey } from './game/input';
 import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
 import { applyLegacyInheritance } from './game/legacy-import';
-import { createKonami, konamiJackpot } from './game/konami';
+import {
+  BOOTY_SEQUENCE,
+  createKonami,
+  konamiJackpot,
+  PABLO_GOLD,
+  PABLO_SEQUENCE,
+} from './game/konami';
 import { loadSettings, type Quality, type QualityChoice, saveSettings } from './game/settings';
 import { type WelcomeBackData, welcomeBackData } from './game/welcome-back';
 import { playKonamiCeremony } from './ui/easter-egg';
@@ -1865,6 +1871,42 @@ muteBtn.addEventListener('click', () => {
   muteBtn.classList.toggle('muted', audio.toggleMute());
 });
 
+// ---------- Auto-Vorstoß (Farm-Modus) ----------
+// EIN Schalter, drei Wege ihn zu drehen: der Knopf unter „Crew", jede
+// selbst gewählte Bühnen-Reise (schaltet ihn aus) und der Loader. Der Zustand
+// lebt in den Einstellungen (eigener Key, keine Save-Migration).
+const autoAdvBtn = document.getElementById('autoAdvBtn') as HTMLButtonElement;
+
+/** Knopf-Optik + ARIA an den Zustand angleichen (change-detected genug). */
+function syncAutoAdvBtn(): void {
+  const on = effects.autoAdvance;
+  autoAdvBtn.classList.toggle('off', !on);
+  autoAdvBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  autoAdvBtn.title = on
+    ? 'Auto-Vorstoß AN — geräumte Bühnen rücken von selbst weiter. Klick = Farm-Modus.'
+    : 'Farm-Modus — die Bühne hält, Rivalen und Boss stellen sich neu. Klick = Auto-Vorstoß an.';
+}
+
+/**
+ * Auto-Vorstoß setzen. `silent` unterdrückt den Toast — die Bühnen-Reise meldet
+ * das Umschalten selbst (und zwar NACH ihrem eigenen Reise-Toast).
+ */
+function setAutoAdvance(on: boolean, silent = false): void {
+  if (effects.autoAdvance === on) return;
+  effects.autoAdvance = on;
+  saveSettings(effects);
+  syncAutoAdvBtn();
+  if (silent) return;
+  if (on) {
+    toasts.show('⏭', 'Auto-Vorstoß an', 'Geräumte Bühnen schieben dich wieder nach vorn.');
+  } else {
+    toasts.show('⏸', 'Farm-Modus', 'Die Bühne hält — Rivalen und Boss stellen sich neu.');
+  }
+}
+
+autoAdvBtn.addEventListener('click', () => setAutoAdvance(!effects.autoAdvance));
+syncAutoAdvBtn();
+
 // ---------- background: zone-tier auto-rotation, gated on the kulisse chooser ----------
 // In Tour-Modus (`gear.bgAuto`) the tier rotation drives the kulisse and keeps
 // `gear.bg` (⇒ its mini-buff/set) synced with the view; with a manual pick the
@@ -2148,6 +2190,12 @@ function bossConfetti(): void {
 function travelToZone(z: number): boolean {
   if (!Number.isFinite(z) || z === combat.zone || z > combat.maxZone || z < 1) return false;
   const back = z < combat.zone;
+  // Wer die Bühne SELBST wählt, will dort bleiben: der Auto-Vorstoß geht aus
+  // (das Icon unter dem Crew-Knopf schaltet ihn wieder an). Sonst hätte eine
+  // Rückreise zum Farmen keinen Bestand — der nächste geräumte Zähler hätte
+  // einen sofort wieder nach vorn geschoben.
+  const autoWasOn = effects.autoAdvance;
+  if (autoWasOn) setAutoAdvance(false, true);
   combat = travelTo(combat, z);
   // Boss-Umbau: eine Gate-Bühne IST die Boss-Arena — schon die Anreise spawnt
   // den Boss. Er bekommt dieselbe verlängerte Uhr wie ein regulär gespawnter
@@ -2155,7 +2203,9 @@ function travelToZone(z: number): boolean {
   if (combat.boss) combat = withBossTimerBonus(combat);
   updateBackground();
   // D-23: Der Auftritt startet VOR `syncEntity` — der Boss-Bau liest
-  // `bossShow` und parkt die Instanz für den Phasen-2-Fall.
+  // `bossShow` und parkt die Instanz für den Phasen-2-Fall. GENAU EINMAL:
+  // ein zweiter Aufruf nach `hud.update` hat die eben gestartete Inszenierung
+  // auf Frame 0 zurückgesetzt (Licht-Dim und Kamera-Punch sprangen sichtbar).
   if (combat.boss) bossEntrance();
   syncEntity();
   hud.update(state, combat, dps, clickDmg);
@@ -2173,12 +2223,20 @@ function travelToZone(z: number): boolean {
     } else {
       toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
     }
-    bossEntrance();
   } else {
     toasts.show(
       '🗺',
       `Bühne ${combat.zone}`,
       back ? 'Farm-Modus — vorwärts geht’s jederzeit wieder.' : 'Zurück an der Front!',
+    );
+  }
+  // Der Hinweis kommt NACH dem Reise-Toast, damit er obenauf liegt — und nur
+  // beim Umschalten, nicht bei jeder weiteren Reise im Farm-Modus.
+  if (autoWasOn) {
+    toasts.show(
+      '⏸',
+      'Auto-Vorstoß aus',
+      'Die Bühne hält. Das ⏭-Icon unter „Crew" schaltet ihn an.',
     );
   }
   return true;
@@ -2539,7 +2597,9 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
   // KLICK-Faktor sitzt dagegen in `doShake` im `extraMult` — dort kennt die
   // Pipeline Takt und Combo, und die angezeigte Schadenszahl bleibt ehrlich.
   if (!wasBoss && !fromClick) effDmg *= stageFactors().dps;
-  const r = hit(combat, effDmg);
+  // Farm-Modus (Auto-Vorstoß aus): der Zonen-Wechsel bleibt aus, Rivalen und
+  // Boss stellen sich neu — die eine Regel dafür steht im Reducer.
+  const r = hit(combat, effDmg, effects.autoAdvance);
   // A newly-spawned boss gets Chronilla's extra timer seconds.
   combat = r.bossSpawned ? withBossTimerBonus(r.state) : r.state;
   if (r.killed) {
@@ -2842,7 +2902,8 @@ canvas.addEventListener('pointerup', (e) => {
   if (dist <= 10 && performance.now() - downT <= 500) doShake(e.clientX, e.clientY);
 });
 // ---------- Easter Egg: Cheat-Code der Ahnen (v19) ----------
-const konami = createKonami();
+const konami = createKonami(); // ↑↑↓↓←→←→BA — jetzt der Rickroll-Gag
+const booty = createKonami(BOOTY_SEQUENCE); // „bootyclicker" — der Jackpot
 /**
  * Die Zeremonie: Zähler hoch, beim ERSTEN Mal den Einmal-Jackpot gutschreiben
  * (20 Boss-Drops der aktuellen Bühne — skaliert mit dem Spielstand statt die
@@ -2867,6 +2928,41 @@ function danceKonami(): void {
   hud.update(state, combat, dps, clickDmg);
 }
 
+/**
+ * Die alte Ahnen-Tastenfolge zündet jetzt den Rickroll: Fanfare aus dem
+ * Synthesizer (keine Tondatei — das Projekt lädt keine externen Assets) plus
+ * Pfirsich-Regen. Reines Spielzeug, keine Beute, kein Zähler.
+ */
+function rickroll(): void {
+  audio.unlock();
+  audio.rickroll();
+  playKonamiCeremony('Never gonna give you up 🎶');
+  toasts.show('🕺', 'Rickrolled!', 'Never gonna let you down …');
+}
+
+const pablo = createKonami(PABLO_SEQUENCE);
+/**
+ * Der „pablokiwi"-Code: legt das Konto auf `PABLO_GOLD` (die größte Zahl, mit
+ * der das Spiel noch exakt rechnet). Bewusst SETZEN statt addieren — eine
+ * Addition auf einen bereits hohen Stand liefe über die sichere Grenze hinaus
+ * und würde still ungenau. Beliebig oft zündbar; die Lebenszeit-Statistik
+ * bekommt nur den tatsächlichen Zuwachs gutgeschrieben.
+ */
+function pabloJackpot(): void {
+  const before = state.gold;
+  if (state.gold >= PABLO_GOLD) {
+    toasts.show('🥝', 'Schon randvoll', 'Mehr BP kann das Spiel nicht exakt zählen.');
+    return;
+  }
+  state.gold = PABLO_GOLD;
+  state.stats.goldLifetime += PABLO_GOLD - before;
+  playKonamiCeremony(`+${fmt(PABLO_GOLD - before)} BP`);
+  toasts.show('🥝', 'PABLOKIWI!', 'Das Konto ist am Anschlag.');
+  audio.bossWin();
+  persist();
+  hud.update(state, combat, dps, clickDmg);
+}
+
 window.addEventListener('keydown', (e) => {
   audio.unlock();
   if (e.code === 'Space') e.preventDefault();
@@ -2877,7 +2973,9 @@ window.addEventListener('keydown', (e) => {
   // dort sind Pfeile und Buchstaben Text, kein Tanz.
   const t = e.target as HTMLElement | null;
   const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
-  if (!typing && !e.repeat && konami.feed(e.code)) danceKonami();
+  if (!typing && !e.repeat && booty.feed(e.code)) danceKonami();
+  if (!typing && !e.repeat && konami.feed(e.code)) rickroll();
+  if (!typing && !e.repeat && pablo.feed(e.code)) pabloJackpot();
 });
 
 // ---------- runtime signals ----------

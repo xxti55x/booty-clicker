@@ -92,6 +92,16 @@ interface BuildCtx {
   hype: { on: boolean };
   /** D-03: Theme-normierte Schatten-Deckkraft (siehe `World.shadowOpacity`). */
   shadowOpacity: number;
+  /**
+   * Sammelstelle für die SCHOLLEN unter den Kulissen-Requisiten. Alles, was in
+   * `propGroup` frei im Raum steht (Palmen, Boxentürme, Strandzeug), landete
+   * auf einer gedachten Ebene bei y ≈ −2.4, die es nie gab — im Bild schwebten
+   * die Objekte sichtbar über dem Meer (das bei −7.5 liegt). Wer hier einen
+   * Eintrag hinterlässt, bekommt am Ende des Aufbaus eine flache Scholle
+   * darunter; sie werden zu EINEM Mesh gebacken, kosten also zwei Draw-Calls
+   * für alle zusammen.
+   */
+  isles: PropIsle[];
   /** D-08: Diskrete Eskalationsstufe 0/1/2 (Publikum, Requisiten, Rang). */
   stageTier: number;
   /** D-08: Stetiger Fortschritt 0…1 (Deck-Emissive, Sättigung, Himmel). */
@@ -157,6 +167,57 @@ interface BgConfig {
     rimB: number;
   };
   build: (ctx: BuildCtx) => void;
+}
+
+/** Eine Scholle unter einer Kulissen-Requisite (siehe `BuildCtx.isles`). */
+interface PropIsle {
+  x: number;
+  y: number;
+  z: number;
+  /** Radius der Oberseite — grob die Standfläche des Objekts darüber. */
+  r: number;
+}
+
+/**
+ * Die gesammelten Schollen bauen: je eine flache Platte mit angedeuteter
+ * Unterseite, wie eine Miniatur der Bühnen-Insel. Sie erklären, WORAUF die
+ * fernen Requisiten stehen, ohne die Durchsicht auf Meer und Fernfeld
+ * zuzubauen (deshalb einzelne Schollen statt einer durchgehenden Ebene).
+ */
+function propIsles(ctx: BuildCtx, theme: BackgroundKey): void {
+  if (ctx.isles.length === 0) return;
+  const TOP_COL: Record<BackgroundKey, number> = {
+    club: 0x2c2340,
+    synth: 0x2a1240,
+    beach: 0xe8cf95,
+    space: 0x3a3550,
+  };
+  const SIDE_COL: Record<BackgroundKey, number> = {
+    club: 0x1a1428,
+    synth: 0x160a24,
+    beach: 0x9c7c46,
+    space: 0x221f33,
+  };
+  const tops: THREE.Matrix4[] = [];
+  const sides: THREE.Matrix4[] = [];
+  for (const i of ctx.isles) {
+    tops.push(
+      new THREE.Matrix4()
+        .makeTranslation(i.x, i.y - 0.16, i.z)
+        .scale(new THREE.Vector3(i.r, 1, i.r)),
+    );
+    sides.push(
+      new THREE.Matrix4()
+        .makeTranslation(i.x, i.y - 0.95, i.z)
+        .scale(new THREE.Vector3(i.r * 0.92, 1, i.r * 0.92)),
+    );
+  }
+  const topGeo = new THREE.CylinderGeometry(1, 0.96, 0.34, 12);
+  const sideGeo = new THREE.ConeGeometry(1, 1.7, 12);
+  sideGeo.rotateX(Math.PI); // Spitze nach UNTEN — die Scholle läuft aus
+  const top = new THREE.Mesh(baked(topGeo, tops), toonMat({ color: ctx.hue(TOP_COL[theme]) }));
+  const side = new THREE.Mesh(baked(sideGeo, sides), toonMat({ color: ctx.hue(SIDE_COL[theme]) }));
+  ctx.propGroup.add(top, side);
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +310,8 @@ function palm(
   g.add(nuts);
   g.position.set(x, -2.4, z);
   propGroup.add(g);
+  // Der Stamm braucht Boden: ohne Scholle stand die Palme sichtbar in der Luft.
+  ctx.isles.push({ x, y: -2.4, z, r: 1.15 * s });
   sways.push({ g, phase: x * 0.7 + z, amp: 0.02 + 0.012 * ((Math.abs(x) + s) % 1) });
 }
 
@@ -267,6 +330,9 @@ function speakerStack(
   const { propGroup, hue } = ctx;
   const g = new THREE.Group();
   g.position.set(x, -2.4, z);
+  // Auch der Boxenturm stand auf nichts — im Club-Bild waren das die grauen
+  // Klötze, die frei im Nachthimmel hingen.
+  ctx.isles.push({ x, y: -2.4, z, r: 1.5 * s });
   g.rotation.y = Math.atan2(-x, -z); // face the stage centre
   const tolex = repeated(speckleTex(9, 1200), 2, 2);
   const cabMat = toonMat({ color: hue(0x3a2b58), map: tolex, bumpMap: tolex, bumpScale: 0.15 });
@@ -1888,6 +1954,8 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
         g.add(pole);
         g.rotation.z = 0.24;
         g.position.set(8, -2.4, 7.2);
+        // Schirm, Handtuch, Ball und Seestern teilen sich EINE breite Sandbank.
+        ctx.isles.push({ x: 8.6, y: -2.4, z: 6.6, r: 3.1 });
         propGroup.add(g);
       }
       // Beach ball (six toon wedges + one ink hull) — bounces on the beat.
@@ -2521,11 +2589,15 @@ export class World {
       density: this.ambientLife,
       hype: this.hypeFlag,
       shadowOpacity: this.shadowOpacityValue,
+      isles: [],
       stageTier: this.stageTierValue,
       stageK: this.stageKValue,
       duck: this.duckClock,
     };
     b.build(ctx);
+    // Die Schollen kommen NACH `build` (dort werden sie angemeldet) und vor
+    // allem anderen — sie sind Untergrund, kein Aufsatz.
+    propIsles(ctx, key);
     // Politur „vollständige Szenerie": die ferne Horizont-Schicht des Themes —
     // hier statt in den vier `build`-Funktionen, damit sie EIN Vertrag bleibt.
     horizonLayer(ctx, key);

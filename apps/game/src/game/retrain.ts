@@ -128,7 +128,16 @@ export const RETRAIN_BASE_COST = 40;
 /** Verdopplung je Spezial-Slot (Slot 1 → 40, Slot 2 → 80, Slot 3 → 160, …). */
 export const RETRAIN_SLOT_GROWTH = 2;
 /** Verdopplung je weiterem Roll am selben Mitglied in derselben Aszension. */
-export const RETRAIN_ROLL_GROWTH = 2;
+/**
+ * Wachstum je WIEDERHOLUNG am selben Mitglied — seit dem Umschul-Umbau 1, also
+ * KEINE Eskalation mehr. Die Verdopplung bestrafte das Ausprobieren doppelt:
+ * Sie kam oben auf die ohnehin geometrische Slot-Leiter (40/80/160/320/640) und
+ * traf genau die Spieler, die ihre Crew feinjustieren wollten. Der Slot-Preis
+ * allein ist die Bremse; er ist an der gemessenen Splitter-Rate (~140/h)
+ * kalibriert und bleibt unverändert. Die Konstante bleibt als benannter
+ * Angelpunkt stehen, damit die Absicht dokumentiert ist.
+ */
+export const RETRAIN_ROLL_GROWTH = 1;
 /**
  * Deckel für beide Exponenten. Rein defensiv: Ein Save mit absurden Zahlen (oder
  * ein Mitglied auf Level 100 000) darf keinen `Infinity`-Preis erzeugen, denn ein
@@ -147,12 +156,10 @@ export function retrainCost(slot: number, rolls: number): number {
   const s = Math.floor(slot);
   if (!Number.isFinite(s) || s <= 0) return 0;
   const slotExp = Math.min(RETRAIN_MAX_EXP, s - 1);
-  const rollExp = Math.min(RETRAIN_MAX_EXP, count(rolls));
-  return (
-    RETRAIN_BASE_COST *
-    Math.pow(RETRAIN_SLOT_GROWTH, slotExp) *
-    Math.pow(RETRAIN_ROLL_GROWTH, rollExp)
-  );
+  // `rolls` bleibt in der Signatur (Aufrufer und Tests führen den Zähler weiter
+  // mit), wirkt aber NICHT mehr auf den Preis — siehe RETRAIN_ROLL_GROWTH.
+  void rolls;
+  return RETRAIN_BASE_COST * Math.pow(RETRAIN_SLOT_GROWTH, slotExp);
 }
 
 // ---------------------------------------------------------------------------
@@ -175,6 +182,28 @@ export interface RetrainOffer {
  * Kaputte/entartete Floats (NaN, ≥ 1, negativ) werden in den gültigen Bereich
  * geklemmt, statt `undefined` zurückzugeben — ein Angebot muss immer existieren.
  */
+/**
+ * Zwei stabile Zufallszahlen aus (Mitglied, Stufe, Roll-Zähler). Die Angebote
+ * dürfen jetzt ANGESEHEN werden, ohne zu kosten — also müssen sie festliegen:
+ * Ohne diesen Anker könnte man den Dialog auf- und zuklappen, bis das
+ * Wunsch-Angebot erscheint, und der Preis wäre bedeutungslos. Gleiche Eingabe
+ * ⇒ gleiches Paar, über Sitzungen und Reloads hinweg.
+ */
+export function retrainSeed(id: string, tier: number, rolls: number): [number, number] {
+  let h = 2166136261 ^ (Math.floor(tier) * 374761393) ^ (Math.floor(rolls) * 2654435761);
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  // Zwei unabhängige Ströme aus demselben Hash (unterschiedliche Endmischung).
+  const mix = (x: number): number => {
+    let y = Math.imul(x ^ (x >>> 15), 2246822507);
+    y = Math.imul(y ^ (y >>> 13), 3266489909);
+    return ((y ^ (y >>> 16)) >>> 0) / 4294967296;
+  };
+  return [mix(h), mix(h ^ 0x9e3779b9)];
+}
+
 export function retrainOffers(current: SpecialKind, r1: number, r2: number): RetrainOffer {
   const pool = SPECIAL_KINDS.filter((k) => k !== current);
   const pick = (xs: readonly SpecialKind[], r: number): number => {

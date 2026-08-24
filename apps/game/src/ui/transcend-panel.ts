@@ -121,9 +121,14 @@ export class Transcend {
         `(Himmelspfirsiche + Himmelsbaum) zurück. Vergoldungen, Gear/Skins, Truhen & TE bleiben.</span>`;
     } else {
       const pct = Math.min(100, Math.round((hpfLife / TRANSCEND_MIN_HPF_LIFETIME) * 100));
+      // Die Sperre ist das ZENTRALE Thema dieses Tabs, solange sie steht — als
+      // Prozentzahl in Klammern war sie eine Fußnote. Ein Balken beantwortet
+      // „wie weit bin ich?" auf einen Blick, die Zahl bleibt daneben stehen.
       preview =
         `<span class="tc-locked">🔒 Noch gesperrt.</span> ` +
-        `Lebenszeit-HPF <b>${fmt(hpfLife)}</b> / ${TRANSCEND_MIN_HPF_LIFETIME} (${pct}%).<br>` +
+        `Lebenszeit-HPF <b>${fmt(hpfLife)}</b> / ${TRANSCEND_MIN_HPF_LIFETIME}` +
+        `<span class="gate-bar" role="img" aria-label="${pct} % bis zur ersten Transzendenz">` +
+        `<i style="width:${pct}%"></i><b>${pct} %</b></span>` +
         `<span class="dim">Die erste Transzendenz braucht 100 HPF Lebenszeit (mehrere Himmelfahrten tief). ` +
         `Sie wipet L1 <b>und</b> L2 für dauerhaft ×3^TE — Held-TE bleiben für immer.</span>`;
     }

@@ -41,6 +41,73 @@ export function konamiJackpot(zone: number): number {
   return goldFor(z, true) * KONAMI_BOSS_DROPS;
 }
 
+/**
+ * Der Jackpot-Code: „bootyclicker", als `KeyboardEvent.code`-Folge.
+ *
+ * „In allen Schreibformen" fällt hier von selbst ab: `KeyboardEvent.code` nennt
+ * die TASTE, nicht das Zeichen — `KeyB` kommt bei „b" wie bei „B". Trennzeichen
+ * (Bindestrich, Leerzeichen, Unterstrich, Umschalt) überspringt
+ * {@link createKonami} als Zierrat, also zünden auch „booty-clicker",
+ * „Booty Clicker" und „BoOtY_ClIcKeR".
+ */
+export const BOOTY_SEQUENCE: readonly string[] = [
+  'KeyB',
+  'KeyO',
+  'KeyO',
+  'KeyT',
+  'KeyY',
+  'KeyC',
+  'KeyL',
+  'KeyI',
+  'KeyC',
+  'KeyK',
+  'KeyE',
+  'KeyR',
+];
+
+/**
+ * Tasten, die in einem Buchstaben-Code als Zierrat gelten: Sie schieben den
+ * Fortschritt weder weiter noch brechen sie ihn ab. Damit ist die Schreibweise
+ * wirklich egal — nur die Buchstabenfolge zählt.
+ */
+export const CODE_SKIP_KEYS: ReadonlySet<string> = new Set([
+  'Minus',
+  'Space',
+  'ShiftLeft',
+  'ShiftRight',
+  'CapsLock',
+  'NumpadSubtract',
+]);
+
+/**
+ * Der zweite Geheimcode: „pablokiwi", als `KeyboardEvent.code`-Folge. Anders
+ * als die Ahnen-Sequenz ist er ein reiner Spaß-Schalter und darf beliebig oft
+ * gezündet werden — er kennt keinen Einmal-Latch.
+ */
+export const PABLO_SEQUENCE: readonly string[] = [
+  'KeyP',
+  'KeyA',
+  'KeyB',
+  'KeyL',
+  'KeyO',
+  'KeyK',
+  'KeyI',
+  'KeyW',
+  'KeyI',
+];
+
+/**
+ * Der Betrag, den „pablokiwi" auf das Konto legt: `Number.MAX_SAFE_INTEGER` —
+ * die größte ganze Zahl, mit der JavaScript noch exakt rechnet.
+ *
+ * Bewusst NICHT `Number.MAX_VALUE` oder `Infinity`: Oberhalb von 2^53 verliert
+ * jede Addition Stellen (`x + 1 === x`), Kauf-Rechnungen würden still falsch,
+ * und `Infinity` überlebt zwar den Save-Loader, macht aber jede Differenz zu
+ * `NaN` — der Kontostand wäre danach unbrauchbar. MAX_SAFE_INTEGER ist das
+ * Maximum, bei dem das Spiel noch korrekt bleibt.
+ */
+export const PABLO_GOLD = Number.MAX_SAFE_INTEGER;
+
 export interface KonamiDetector {
   /**
    * Einen Tastendruck (`KeyboardEvent.code`) einspeisen. `true` genau dann,
@@ -59,6 +126,9 @@ export function createKonami(seq: readonly string[] = KONAMI_SEQUENCE): KonamiDe
   let i = 0;
   return {
     feed(code: string): boolean {
+      // Zierrat (Bindestrich, Leerzeichen, Umschalt) ist weder Fortschritt noch
+      // Abbruch — sonst könnte „booty-clicker" den Code nie zünden.
+      if (i > 0 && CODE_SKIP_KEYS.has(code)) return false;
       if (code === seq[i]) {
         i += 1;
         if (i === seq.length) {

@@ -15,7 +15,10 @@ import {
   abilityKindLabel,
   abilityLevel,
   abilityMult,
+  ABILITY_FIRST_LEVEL,
+  ABILITY_SPACING,
   abilityTiersUnlocked,
+  levelsToNextAbility,
   bestCrewBuy,
   bulkCost,
   CLICK_BASE,
@@ -491,5 +494,32 @@ describe('Erbe (3c) — die doppelte Meisterschaft in der Crew-Faltung', () => {
     expect(totalRawDps(levels, {}, {}, mastery, 'niemand')).toBe(
       totalRawDps(levels, {}, {}, mastery),
     );
+  });
+});
+
+// Kaufmenge „Fähigkeit": bis exakt auf den nächsten Freischalt-Meilenstein.
+describe('levelsToNextAbility — die Kaufmenge bis zur nächsten Fähigkeit', () => {
+  it('führt von Level 0 genau auf die erste Freischaltung', () => {
+    expect(levelsToNextAbility(0)).toBe(ABILITY_FIRST_LEVEL);
+    expect(levelsToNextAbility(10)).toBe(ABILITY_FIRST_LEVEL - 10);
+    expect(levelsToNextAbility(24)).toBe(1);
+  });
+
+  it('landet immer EXAKT auf einem Meilenstein, nie daneben', () => {
+    for (let lv = 0; lv < 400; lv++) {
+      const target = lv + levelsToNextAbility(lv);
+      expect(abilityTiersUnlocked(target)).toBeGreaterThan(abilityTiersUnlocked(lv));
+      expect(abilityTiersUnlocked(target - 1)).toBe(abilityTiersUnlocked(lv));
+    }
+  });
+
+  it('zeigt auf einem Meilenstein auf den ÜBERNÄCHSTEN (kein No-Op-Knopf)', () => {
+    expect(levelsToNextAbility(ABILITY_FIRST_LEVEL)).toBe(ABILITY_SPACING);
+    expect(levelsToNextAbility(75)).toBe(ABILITY_SPACING);
+  });
+
+  it('bleibt bei kaputten Eingaben eine sinnvolle Zahl', () => {
+    expect(levelsToNextAbility(-5)).toBe(ABILITY_FIRST_LEVEL);
+    expect(levelsToNextAbility(Number.NaN)).toBe(ABILITY_FIRST_LEVEL);
   });
 });

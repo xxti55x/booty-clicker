@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { MUSIC_TRACKS } from './tracks';
+import { BOSS_TRACK, MUSIC_TRACKS, PATTERN_STEPS } from './tracks';
 import type { BackgroundKey } from '../types';
 
 describe('MUSIC_TRACKS', () => {
@@ -32,5 +32,50 @@ describe('MUSIC_TRACKS', () => {
     expect(MUSIC_TRACKS.synth.ekstase).toBe('arp');
     expect(MUSIC_TRACKS.beach.ekstase).toBe('steel');
     expect(MUSIC_TRACKS.space.ekstase).toBe('pad');
+  });
+});
+
+// Song-Umbau: jedes Theme trägt einen EIGENEN Hook statt eines Skalen-Durchlaufs.
+describe('MUSIC_TRACKS — Hooks, Bass und Klangfarbe', () => {
+  const keys: BackgroundKey[] = ['club', 'synth', 'beach', 'space'];
+  const all = [...keys.map((k) => MUSIC_TRACKS[k]), BOSS_TRACK];
+
+  it('gibt jedem Track ein volltaktiges Hook- und Bass-Muster', () => {
+    for (const t of all) {
+      expect(t.hook).toHaveLength(PATTERN_STEPS);
+      expect(t.bass).toHaveLength(PATTERN_STEPS);
+    }
+  });
+
+  it('hat in jedem Hook echte Töne UND echte Pausen (der Groove muss atmen)', () => {
+    for (const t of all) {
+      expect(t.hook.some((n) => n !== null)).toBe(true);
+      expect(t.hook.some((n) => n === null)).toBe(true);
+    }
+  });
+
+  it('macht die fünf Hooks paarweise unterscheidbar — kein Theme klingt wie das andere', () => {
+    const sigs = all.map((t) => t.hook.join(','));
+    expect(new Set(sigs).size).toBe(all.length);
+  });
+
+  it('hält jeden Ton in einer singbaren Lage (max. zwei Oktaven über dem Grundton)', () => {
+    for (const t of all) {
+      for (const n of [...t.hook, ...t.bass]) {
+        if (n === null) continue;
+        expect(n).toBeGreaterThanOrEqual(0);
+        expect(n).toBeLessThanOrEqual(24);
+      }
+    }
+  });
+
+  it('gibt jedem Track eine eigene Klangfarbe (Detune + Filter)', () => {
+    for (const t of all) {
+      expect(t.detune).toBeGreaterThan(0);
+      expect(t.cutoff).toBeGreaterThan(400);
+    }
+    // Der Boss steht am dunklen Ende, Trance am offenen — das ist die Absicht.
+    expect(BOSS_TRACK.cutoff).toBeLessThan(MUSIC_TRACKS.synth.cutoff);
+    expect(BOSS_TRACK.detune).toBeGreaterThan(MUSIC_TRACKS.beach.detune);
   });
 });

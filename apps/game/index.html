@@ -95,6 +95,17 @@
       </svg>
       <span id="toggleShopLb">Crew</span>
     </button>
+    <!-- Auto-Vorstoß: sitzt direkt unter dem Crew-Knopf, weil er zur selben
+         Familie „Steuerung der Bühne" gehört. Zwei Dreiecke = weiterspringen;
+         der Schrägstrich erscheint nur im Farm-Modus (Klasse `off`). -->
+    <button class="autoAdv" id="autoAdvBtn" type="button" aria-pressed="true">
+      <svg class="ui-ic" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4.6 6.4 11 12l-6.4 5.6V6.4Z" />
+        <path d="M11.6 6.4 18 12l-6.4 5.6V6.4Z" />
+        <path d="M19.4 6.2v11.6" />
+        <path class="aa-slash" d="M4 19.6 20 4.4" />
+      </svg>
+    </button>
     <button class="muteBtn" id="muteBtn" title="Ton an/aus">
       <svg class="ui-ic" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M4.5 9.6v4.8h3.4l4.6 3.8V5.8L7.9 9.6Z" />

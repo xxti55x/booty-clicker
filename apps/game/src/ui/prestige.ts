@@ -100,6 +100,13 @@ export class Prestige {
       `Aktuell <b>${fmt(state.souls)}</b> gehaltene Seelen (+${bonusNow}% Schaden).<br>` +
       `Beim Neustart deiner Tournee gibt es <b>+${fmt(pending)}</b> Seelen ` +
       `(→ +${bonusAfter}% dauerhaft). Deine Crew, Bühne & BP werden zurückgesetzt; Ahnen bleiben.<br>` +
+      // Vor der ersten Aszension ist die Bühnen-Schwelle die einzige Frage, die
+      // dieser Tab beantworten muss — derselbe Balken wie beim Transzendenz-Gate.
+      (runMax < ASCEND_MIN_ZONE
+        ? `<span class="gate-bar" role="img" aria-label="${Math.round((runMax / ASCEND_MIN_ZONE) * 100)} % bis zur ersten Aszension">` +
+          `<i style="width:${Math.min(100, Math.round((runMax / ASCEND_MIN_ZONE) * 100))}%"></i>` +
+          `<b>Bühne ${fmt(runMax)} / ${ASCEND_MIN_ZONE}</b></span>`
+        : '') +
       `<span class="dim">Ruhm gibt es ab Bühne ${ASCEND_MIN_ZONE}, skaliert mit deiner tiefsten Bühne.</span>`;
 
     if (!this.armed) {
