@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { soulMult } from './ascension';
 import {
   ANCIENTS,
+  ancientBulkCost,
+  ancientMaxAffordable,
+  buyAncientBulk,
   ancientAtCap,
   ancientBonus,
   ancientClickMult,
@@ -105,5 +108,60 @@ describe('ancients — AC1 balance: spend souls, gain perk', () => {
     expect(ancientDpsMult(dps.ancients)).toBeCloseTo(1.15, 6);
     const crit = buyAncient(createAncients(), 100, 'cheeksana');
     expect(ancientCritChanceBonus(crit.ancients)).toBeCloseTo(0.005, 6);
+  });
+});
+
+// Massenkauf: bei sechsstelligen Seelen ist Einzelklicken keine Bedienung.
+describe('Ahnen — Kaufmengen', () => {
+  it('summiert die Kostenleiter korrekt (Differenz zweier Dreieckszahlen)', () => {
+    expect(ancientBulkCost(0, 1)).toBe(1);
+    expect(ancientBulkCost(0, 3)).toBe(1 + 2 + 3);
+    expect(ancientBulkCost(5, 4)).toBe(6 + 7 + 8 + 9);
+    expect(ancientBulkCost(9, 0)).toBe(0);
+  });
+
+  it('rechnet aus, wie viele Level das Budget trägt — exakt an der Grenze', () => {
+    // 1+2+3 = 6 Seelen reichen für genau 3 Level, 5 nur für 2.
+    expect(ancientMaxAffordable('twerkules', 0, 6)).toBe(3);
+    expect(ancientMaxAffordable('twerkules', 0, 5)).toBe(2);
+    expect(ancientMaxAffordable('twerkules', 0, 0)).toBe(0);
+  });
+
+  it('meldet nie mehr Level, als tatsächlich bezahlbar sind', () => {
+    for (const souls of [1, 7, 42, 999, 123456, 9e5]) {
+      for (const lv of [0, 3, 17, 250]) {
+        const n = ancientMaxAffordable('twerkules', lv, souls);
+        expect(ancientBulkCost(lv, n)).toBeLessThanOrEqual(souls);
+        expect(ancientBulkCost(lv, n + 1)).toBeGreaterThan(souls);
+      }
+    }
+  });
+
+  it('hält den Cap eines gedeckelten Ahnen ein', () => {
+    const capped = ANCIENTS.find((a) => a.cap !== null)!;
+    const n = ancientMaxAffordable(capped.id, 0, 1e9);
+    expect(n).toBe(capped.cap);
+  });
+
+  it('kauft die ganze Menge in EINEM Schritt und bucht genau ab', () => {
+    const r = buyAncientBulk({}, 6, 'twerkules', 3);
+    expect(r.bought).toBe(true);
+    expect(r.ancients.twerkules).toBe(3);
+    expect(r.souls).toBe(0);
+  });
+
+  it('nimmt bei zu kleinem Budget die größte bezahlbare Menge statt zu scheitern', () => {
+    const r = buyAncientBulk({}, 5, 'twerkules', 10);
+    expect(r.bought).toBe(true);
+    expect(r.ancients.twerkules).toBe(2); // 1 + 2 = 3 <= 5, +3 waere 6
+    expect(r.souls).toBe(2);
+  });
+
+  it('lässt den Zustand unangetastet, wenn nicht einmal ein Level passt', () => {
+    const before = {};
+    const r = buyAncientBulk(before, 0, 'twerkules', 5);
+    expect(r.bought).toBe(false);
+    expect(r.ancients).toBe(before);
+    expect(r.souls).toBe(0);
   });
 });

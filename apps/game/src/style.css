@@ -5809,3 +5809,10 @@ body {
     transition: none;
   }
 }
+
+/* Effekt-Vorschau auf der Ahnen-Karte: wohin der Kauf den Perk bringt. */
+.anc-next {
+  margin-left: 6px;
+  color: var(--gold-base);
+  font-weight: 800;
+}
