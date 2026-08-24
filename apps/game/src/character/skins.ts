@@ -1,4 +1,18 @@
-import type { SkinConfig, SkinKey } from '../types';
+import type { SkinConfig, SkinKey, SkinRarity } from '../types';
+
+/**
+ * D-19 — Die EINE Farbsprache der fünf Rarity-Stufen (sichtbar am Modell:
+ * Bodenring, Funken, Aura). Reiner Datenexport ohne three-Import — kein
+ * Gear-Feld, kein Save-Thema; die Stufe trägt die Aussage, nicht der Skin.
+ * K-2 beachtet: kein Rot/Orange (das gehört Gefahr/Schaden).
+ */
+export const RARITY_COLOR: Record<SkinRarity, number> = {
+  common: 0x9aa3b2, // Grau — bewusst ohne Auftritt
+  rare: 0x4d9fff, // Blau
+  epic: 0xb45cf6, // Violett
+  legendary: 0xffd24d, // Gold
+  mythic: 0x3ff2e0, // Cyan — die Aura-Stufe
+};
 
 /**
  * The ten character skins — procedural visual configs (materials/colours for the

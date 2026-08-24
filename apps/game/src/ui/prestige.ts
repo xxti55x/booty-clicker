@@ -1,4 +1,4 @@
-import { ASCEND_MIN_ZONE, canAscend, pendingSouls } from '../game/ascension';
+import { ASCEND_MIN_ZONE, canAscend, nextSoulZone, pendingSouls } from '../game/ascension';
 import type { ChState } from '../game/ch-state';
 import { soulBonusEff } from '../game/heaven';
 import { emptyState } from './empty';
@@ -107,12 +107,15 @@ export class Prestige {
       const ok = canAscend(runMax, state.lifetimeMaxZone, state.rsLifetime);
       btn.disabled = !ok;
       // M-08: Der gesperrte Zustand nennt den WEG statt nur das Nein — vor
-      // Bühne 10 die Schwelle samt eigenem Stand, danach die Richtung.
+      // Bühne 10 die Schwelle samt eigenem Stand, danach (PLAYTEST G-04) die
+      // KONKRETE Zielbühne, ab der wieder neue Seelen fließen.
       btn.textContent = ok
         ? `Ruhm einheimsen (+${fmt(pending)} ✨)`
         : runMax < ASCEND_MIN_ZONE
           ? `Ruhm ab Bühne ${ASCEND_MIN_ZONE} — du: Bühne ${fmt(runMax)}`
-          : 'Noch kein neuer Ruhm — stoß tiefer vor als je zuvor';
+          : `Noch kein neuer Ruhm — neue Seelen ab Bühne ${fmt(
+              nextSoulZone(Math.max(runMax, state.lifetimeMaxZone), state.rsLifetime),
+            )}`;
     }
 
     byId('prStats').innerHTML = [

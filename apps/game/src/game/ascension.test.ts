@@ -4,6 +4,7 @@ import {
   applyAscension,
   ASCEND_MIN_ZONE,
   canAscend,
+  nextSoulZone,
   pendingSouls,
   SOUL_BONUS,
   soulMult,
@@ -74,6 +75,34 @@ describe('ascension — pending & gating (against rsLifetime = earned total)', (
     expect(canAscend(5, 1, 0)).toBe(false); // below gate
     expect(canAscend(50, 1, 0)).toBe(true);
     expect(canAscend(50, 50, soulsForMaxZone(50))).toBe(false); // nothing new
+  });
+});
+
+// PLAYTEST G-04: the prestige tab names a concrete target stage instead of a vague
+// "push deeper" — nextSoulZone is the smallest stage whose first-reach yields souls.
+describe('ascension — nextSoulZone (G-04 target stage)', () => {
+  it('is the ascension gate for a fresh account (nothing earned yet)', () => {
+    expect(nextSoulZone(1, 0)).toBe(ASCEND_MIN_ZONE);
+    expect(soulsForMaxZone(ASCEND_MIN_ZONE)).toBeGreaterThan(0);
+  });
+
+  it('is the first stage strictly beyond the earned total', () => {
+    const earned = soulsForMaxZone(50); // 129
+    const z = nextSoulZone(50, earned);
+    expect(z).toBeGreaterThan(50);
+    expect(soulsForMaxZone(z)).toBeGreaterThan(earned); // reaching z earns souls…
+    expect(soulsForMaxZone(z - 1)).toBeLessThanOrEqual(earned); // …and z is minimal
+  });
+
+  it('returns the current deepest when it already yields pending souls', () => {
+    // Deepest 50, never ascended: stage 50 itself is already worth 129 souls.
+    expect(nextSoulZone(50, 0)).toBe(50);
+    expect(pendingSouls(50, 1, 0)).toBeGreaterThan(0);
+  });
+
+  it('terminates against absurd earned totals (bounded search)', () => {
+    expect(nextSoulZone(1, Number.MAX_SAFE_INTEGER)).toBeLessThan(20_000);
+    expect(nextSoulZone(1, Infinity)).toBe(20_000); // safety cap, no hang
   });
 });
 

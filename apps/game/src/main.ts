@@ -7,7 +7,13 @@ import { AudioEngine } from './audio/engine';
 import { buildCharacter, type CharacterInstance } from './character/rig';
 import { buildEntity, entityVariant, type EntityInstance } from './character/entity';
 import { DT, renderCheeks, stepPhysics } from './character/physics';
-import { applyAccents, createAccents, stepAccents, triggerClickAccent } from './character/accents';
+import {
+  applyAccents,
+  applyIdleLife,
+  createAccents,
+  stepAccents,
+  triggerClickAccent,
+} from './character/accents';
 import {
   RIVAL_AIM_UP,
   aimPupils,
@@ -19,7 +25,7 @@ import {
   stepFace,
   triggerGrimace,
 } from './character/face-life';
-import { SKINS } from './character/skins';
+import { RARITY_COLOR, SKINS } from './character/skins';
 import { affixText } from './ui/affix-text';
 import { Choreographer, MOVES } from './choreo/moves';
 import { VICTORY_MOVE, activeSet } from './choreo/sets';
@@ -42,8 +48,13 @@ import {
 import { createControls, frameCamera } from './engine/camera';
 import { frameDue } from './engine/frame-clock';
 import { ParticleSystem } from './engine/particles';
+import { RingPool } from './engine/rings';
+import type { RingHandle } from './engine/rings';
+import { stageK, stageTier } from './util/escalation';
+import { accentCss, GIMMICK_MOOD, THEME_ACCENT } from './world/theme-accents';
+import type { BackgroundKey } from './types';
 import { type DeviceSignals, createFpsGovernor, pickQuality } from './engine/auto-quality';
-import { TOON_FX } from './engine/materials';
+import { TOON_FLASH, TOON_FX } from './engine/materials';
 import { effectivePixelRatio, qualityPreset } from './engine/quality';
 import { setTextureAnisotropy } from './engine/textures';
 import { createPost } from './engine/post';
@@ -362,6 +373,41 @@ const { renderer, scene, camera, beat, skyMat, floorMat, glowSprite, lights, con
 const BASE_FOV = camera.fov;
 /** Ruhe-Belichtung — Basis für das G2-Licht-Dim (siehe `stepCinematics`). */
 const BASE_EXPOSURE = renderer.toneMappingExposure;
+/** D-01: Deckel des Beat-Punktlichts — über 2.4 clippt die Bühnenmitte. */
+const BEAT_LIGHT_MAX = 2.4;
+/** D-02: Laufzeit des Klick-Bodenrings (K-5-Raster „Aktion" 250–400 ms). */
+const CLICK_RING_S = 0.28;
+/**
+ * D-02: Vorzugsrichtung der Klick-Splitter — nach hinten-oben. `+z` zeigt von
+ * der Kamera WEG, also fliegen sie aus der Silhouette heraus statt über sie
+ * hinweg (K-3). Die Streuung bleibt zufällig, nur der Schwerpunkt ist gesetzt.
+ */
+const CLICK_SPLINTER_DIR = [0.25, 0.9, 0.6] as const;
+/** D-02: Abklingrate des Rim-Blitzes (1/s) ⇒ ~110 ms, K-5-Mikro-Feedback. */
+const FLASH_DECAY = 9;
+/** D-15 (c): Funken am Treffpunkt — höchstens einer je 90 ms (Klick-Spam). */
+const SPARK_MIN_GAP_MS = 90;
+/** D-15 (c): Funken-Menge — klein, es ist ein Akzent am Treffpunkt. */
+const SPARK_N = 4;
+/** D-16: KO-Splitterzahl der Auflösung (low halbiert via `burstScale`). */
+const KO_BURST_N = 10;
+/** D-16: KO-Splitter fliegen nach OBEN — Auflösung, kein Feuerwerk (K-3). */
+const KO_BURST_DIR = [0, 1, 0.2] as const;
+/** D-16: KO-Bodenring — wie der Klick-Ring, nur größer (K-5 „Aktion"). */
+const KO_RING_S = 0.32;
+/** D-16: Landungs-Staubring des Spawns (K-5 „Aktion"). */
+const LAND_RING_S = 0.26;
+/** D-16: Bühnen-Dip beim Kill — Restdauer-Zähler (s) und Tiefe (Anteil). */
+const KILL_DIM_S = 0.2;
+const KILL_DIM_DEPTH = 0.25;
+/** D-23: Zeitpunkt des Boss-Falls in der Show (Phase 2 — das Dunkel steht). */
+const BOSS_DROP_AT = 0.35;
+/** D-23: Gesamtdauer der Show-Uhr — 1.6 s Inszenierung + Wellen-Auslauf. */
+const BOSS_SHOW_S = 2.2;
+/** D-23: Bodenwelle der Boss-Landung (K-5 „Aktion", groß). */
+const BOSS_LAND_RING_S = 0.4;
+/** D-23: Erdstoß der Landung (Screen-Shake-Magnitude). */
+const BOSS_LAND_SHAKE = 0.5;
 // Roadmap L: Bloom-Composer (nur high-Preset aktiv — sonst rendert der Loop direkt).
 const post = createPost(renderer, scene, camera);
 const controls = createControls(camera, renderer.domElement);
@@ -742,6 +788,7 @@ const world = new World(scene, skyMat, floorMat, glowSprite, lights);
 // ROADMAP-V2 G3: Ambient-Dichte VOR dem ersten `setBackground` setzen, damit die
 // Boot-Bühne direkt mit den Preset-Stückzahlen gebaut wird (kein Rebuild).
 world.setAmbientLife(preset.ambientLife);
+world.setRimLights(preset.rimLights); // D-07/A9: Intensität 0, nie `visible`
 const audio = new AudioEngine();
 const beatTracker = new BeatTracker();
 const choreo = new Choreographer();
@@ -771,6 +818,8 @@ adoptPlayerIntoSpin();
 let entity: EntityInstance = buildEntity(scene, bgForZone(combat.zone), {
   boss: combat.boss,
   variant: entityVariant(combat.zone),
+  rank: stageTier(combat.zone),
+  lowDetail: !preset.toonFx,
 });
 // ---------- ROADMAP-V2 A4: Choreo-Set der Bühne ----------
 /**
@@ -820,15 +869,93 @@ function victoryMoveIdx(): number {
   return idx >= 0 ? idx : VICTORY_MOVE;
 }
 
+/**
+ * D-23: Zustand der Boss-Auftritts-Inszenierung (~1.6 s, K-5). Phase 1 =
+ * Licht runter (Cinematics), Phase 2 (ab 0.35 s) = `entity.entrance()`-Fall,
+ * Phase 3 (ab 1.0 s) = Licht hoch in die Arena-Stimmung (setBossMood-Lerp).
+ * `null` = keine Show. Steht VOR `syncEntity`, weil der Boss-Bau das Flag
+ * liest (geparkter Auftritts-Bau statt WP-9-Sprung).
+ */
+let bossShow: { t: number; dropped: boolean } | null = null;
+
+/** D-23: Arena-Stimmungsfarbe = Gimmick-Farbe (K-1-Ausnahme), sonst Akzent. */
+function bossMoodColor(): number {
+  const g = gimmickForZone(combat.zone);
+  return g ? GIMMICK_MOOD[g.id] : THEME_ACCENT[currentBg];
+}
+
 /** Rebuild the rival entity only when its look actually changes (cheap check). */
 function syncEntity(): void {
   // A4: derselbe Übergang, dieselbe Stelle — Bühne/Boss gewechselt ⇒ neues Set.
   syncChoreoSet();
+  // D-23: Die Arena-Stimmung folgt dem Boss-Zustand — dieser EINE Ort deckt
+  // alle Endpfade (Kill, Timeout, Reise, Prestige) UND den Spawn ab, denn
+  // jeder dieser Übergänge läuft durch syncEntity.
+  world.setBossMood(combat.boss ? bossMoodColor() : null);
+  if (!combat.boss) bossShow = null;
   const theme = bgForZone(combat.zone);
   const variant = entityVariant(combat.zone);
-  if (entity.theme !== theme || entity.boss !== combat.boss || entity.variant !== variant) {
-    entity = buildEntity(scene, theme, { boss: combat.boss, variant }, entity);
+  // D-12: Der Rang gehört in den Rebuild-Schlüssel — sonst bliebe auf Bühne 24
+  // der Körper von Bühne 21 stehen. Er kommt aus DEMSELBEN Regler wie die
+  // Bühnen-Eskalation (D-08), Ränge und Recolour-Laps sind zwei Achsen.
+  const rank = stageTier(combat.zone);
+  if (
+    entity.theme !== theme ||
+    entity.boss !== combat.boss ||
+    entity.variant !== variant ||
+    entity.rank !== rank
+  ) {
+    releaseBossAura(); // VOR detach: die Ring-Geometrie gehört dem Pool
+    entity = buildEntity(
+      scene,
+      theme,
+      {
+        boss: combat.boss,
+        variant,
+        rank,
+        lowDetail: !preset.toonFx,
+        // D-23: Während der Auftritts-Show wird der Boss GEPARKT gebaut und
+        // fällt erst in Phase 2 — ein Boot mitten in der Arena baut normal.
+        entrance: combat.boss && bossShow !== null,
+      },
+      entity,
+    );
+    syncShadows(); // D-03: frische Instanz erbt die Theme-Deckkraft
+    attachBossAura();
   }
+}
+
+/** D-13: Aura-Ring des Bosses zurückgeben (No-op, wenn keiner hängt). */
+function releaseBossAura(): void {
+  if (bossAura < 0) return;
+  rings.release(bossAura);
+  bossAura = -1;
+}
+
+/**
+ * D-13 (b) — Der Aura-Ring am Boden in der Akzentfarbe der Bühne. Kein Licht,
+ * kein neues Material: ein Slot aus dem geteilten Ring-Pool, der mit dem Beat
+ * atmet und die Boss-Silhouette von unten unterstreicht (K-3).
+ */
+function attachBossAura(): void {
+  if (!entity.boss) return;
+  bossAura = rings.attach(entity.root, {
+    r: BOSS_AURA_R,
+    color: THEME_ACCENT[entity.theme],
+    pulse: true,
+    opacity: 0.8,
+  });
+}
+
+/**
+ * D-03 — Kontaktschatten von Spieler und Rivale auf die Deckhelligkeit der
+ * laufenden Bühne normieren. Die `World` kennt die Akteure nicht, deshalb geht
+ * der Wert hier durch; aufgerufen bei jedem Bühnen-, Preset- und Modellwechsel.
+ */
+function syncShadows(): void {
+  const o = world.shadowOpacity;
+  (contactShadow.material as THREE.MeshBasicMaterial).opacity = o;
+  entity.setShadow(o, preset.dynamicBlobShadow);
 }
 // Kulisse (§5.5): in Tour-Modus (`bgAuto`) the background rotates with the zone tier;
 // otherwise the manually chosen `gear.bg` is fixed. Keep `gear.bg` in lockstep with
@@ -839,11 +966,26 @@ function syncEntity(): void {
 state.gear.bgAuto = true;
 let currentBg = bgForZone(combat.zone);
 let currentBgVariant = bgVariant(combat.zone);
+/** D-08: Die zuletzt GEBAUTE Eskalationsstufe (Teil des Rebuild-Schlüssels). */
+let currentStageTier = stageTier(combat.zone);
 if (state.gear.bgAuto) state.gear.bg = currentBg;
 // 1b: Die Trophäen-Stufe VOR dem ersten `setBackground` setzen (wie die
 // G3-Ambient-Dichte), damit die Boot-Bühne den Pokal direkt mitbaut.
 syncTrophy(false);
+// D-08: wie die Trophäe — Stufe steht, bevor die Boot-Bühne gebaut wird.
+world.setStageTier(currentStageTier, stageK(combat.zone));
 world.setBackground(currentBg, currentBgVariant);
+// D-22: Akzent-Variable der Boot-Bühne — `updateBackground` läuft erst beim
+// ersten WECHSEL, die Schadenszahlen brauchen die Farbe aber ab Klick 1.
+document.documentElement.style.setProperty('--accent', accentCss(THEME_ACCENT[currentBg]));
+document.documentElement.style.setProperty(
+  '--accent-soft',
+  `${accentCss(THEME_ACCENT[currentBg])}8c`,
+);
+// D-03: Erst JETZT steht die Deckkraft der Boot-Bühne fest (`rebuild` rechnet
+// sie) — der Schatten stimmt damit ab dem ersten Frame, nicht erst ab dem
+// ersten Bühnen-Wechsel.
+syncShadows();
 audio.setBackground(currentBg);
 recompute(); // fold the (possibly view-synced) kulisse buff into the derived numbers
 syncChoreoSet(); // A4: das Set der Start-Bühne statt eines festen Move 0
@@ -853,6 +995,56 @@ const toasts = new Toasts();
 // ROADMAP-V2 G4: die Vollbild-Blende der drei Prestige-Schichten (rein optisch).
 const ceremony = new Ceremony();
 const particles = new ParticleSystem(scene);
+// D-02: Der geteilte Boden-Ring-Pool (Klick-Anschlag, KO, Boss-Landung,
+// Boss-Aura, Rarity). Liegt unter den Akteuren — kann per Konstruktion keine
+// Silhouette zudecken (K-3).
+const rings = new RingPool(scene);
+/**
+ * D-13 (b): Handle der Boss-Aura am Boden. Sie hängt am `root` des Rivalen und
+ * MUSS vor jedem Modellwechsel zurückgegeben werden — `entity.detach()`
+ * entsorgt die Geometrie aller Kinder, und die Ring-Geometrie gehört dem Pool.
+ */
+let bossAura: RingHandle = -1;
+/** D-13: Radius der Boss-Aura (der Ring hängt am root und erbt dessen Skala). */
+// Headless gemessen: bei 1.5 lag der Ring fast vollständig unter dem
+// Boss-Körper und dem Kontaktschatten — er muss die Silhouette UMFASSEN.
+const BOSS_AURA_R = 1.85;
+// Ein Boot MITTEN im Bosskampf trägt seine Aura ab dem ersten Frame. Der Aufruf
+// steht bewusst HIER und nicht bei `buildEntity` weiter oben: der Ring-Pool wird
+// erst in dieser Zeile angelegt, ein früherer Zugriff liefe in die temporale
+// Todeszone (headless als `ReferenceError` gefunden).
+attachBossAura();
+// D-23: Ein Boot MITTEN im Bosskampf trägt die Arena-Stimmung ab dem ersten
+// Frame (Kein Auftritt — der lief beim Spawn; nur die Stimmung gehört wieder
+// hin). Gleiche Begründung wie `attachBossAura` direkt darüber.
+if (combat.boss) world.setBossMood(bossMoodColor());
+/** D-19: Handle des Rarity-Bodenrings (Pool-Budget: Boss + Rarity = 2 Slots). */
+let rarityRing: RingHandle = -1;
+/** D-19: Ring-Höhe unter der Spin-Gruppe (Welt-Ursprung → knapp über Deck). */
+const RARITY_RING_Y = -2.388;
+/**
+ * D-18/D-19 — Skin-FX synchronisieren (nach jedem Skin-Bau und Preset-
+ * Wechsel): die Sprite-Schicht (Glut, Funken, Aura) läuft nur im high-Feel,
+ * der Rarity-BODENRING ab „rare" bleibt IMMER (K-9: low behält die
+ * Information — Design-Preset „low = nur der Bodenring").
+ */
+function syncSkinFx(): void {
+  char.fx.visible = preset.toonFx;
+  if (rarityRing >= 0) {
+    rings.release(rarityRing);
+    rarityRing = -1;
+  }
+  const rarity = SKINS[state.gear.skin].rarity;
+  if (rarity !== 'common') {
+    rarityRing = rings.attach(playerSpin, {
+      r: 1.1,
+      color: RARITY_COLOR[rarity],
+      opacity: 0.38,
+      y: RARITY_RING_Y,
+    });
+  }
+}
+syncSkinFx();
 const pops = new Pops();
 const haptics = new Haptics();
 const abilityBar = new AbilityBar({ onActivate: () => activateEkstase() });
@@ -1010,6 +1202,7 @@ const gearPanel = new Gear({
   onEquip: () => {
     char = buildCharacter(scene, SKINS[state.gear.skin], char);
     adoptPlayerIntoSpin();
+    syncSkinFx(); // D-18/D-19: Signatur-Sprites + Rarity-Ring des neuen Skins
     recompute();
     audio.buy();
     hud.update(state, combat, dps, clickDmg);
@@ -1419,6 +1612,7 @@ const chSettings = new ChSettings({
     lastShakeTier = 0;
     char = buildCharacter(scene, SKINS[state.gear.skin], char); // rig follows the imported skin
     adoptPlayerIntoSpin();
+    syncSkinFx(); // D-18/D-19: Signatur-Sprites + Rarity-Ring folgen mit
     recompute();
     updateBackground(true);
     syncEntity(); // rival body follows the imported zone/boss state
@@ -1448,6 +1642,9 @@ const chSettings = new ChSettings({
     applyQuality(resolveQuality(effects.quality));
     // G3: Dichte-Wechsel baut die laufende Bühne einmal neu (No-op bei gleichem Wert).
     world.setAmbientLife(preset.ambientLife);
+    world.setRimLights(preset.rimLights); // D-07/A9: Intensität 0, nie `visible`
+    syncShadows(); // D-03: Sprunghöhen-Reaktion folgt dem Preset
+    syncSkinFx(); // D-18/D-19: Sprite-Schicht folgt dem Preset (Ring bleibt)
     // V2-2: neuer Governor mit frischer Startstufe + aktuellem FPS-Limit.
     governor = createFpsGovernor(effectiveQuality, {
       capMs: effects.fpsCap > 0 ? 1000 / effects.fpsCap : 0,
@@ -1679,18 +1876,44 @@ muteBtn.addEventListener('click', () => {
  * alte Bühne aus und die neue ein (ROADMAP-V2 G1), sofern das Preset das
  * hergibt (low: weiterhin Hard-Swap).
  */
+/**
+ * D-24: Der Übergangs-Wischer — EIN wiederverwendetes DOM-Band (F2-Auflage:
+ * GERICHTET, deckt das Bild nie vollflächig; Bandbreite ≤ 34 vw, weiche
+ * Ränder, Kern-Deckkraft ≤ 0.85 — der alte Orange-Vollbild-Blitz darf in
+ * keiner Form zurückkommen). Farbe = `--accent` der NEUEN Bühne (K-1), die
+ * `updateBackground` eine Zeile vorher setzt. Dauer: Band-DURCHLAUF 0.5 s
+ * (minor) / 0.9 s (major); die Palette blendet über die volle Wechseldauer.
+ */
+const stageWipe = document.createElement('div');
+stageWipe.id = 'stageWipe';
+document.body.appendChild(stageWipe);
+function triggerWipe(major: boolean): void {
+  stageWipe.style.animationDuration = major ? '0.9s' : '0.5s';
+  stageWipe.classList.remove('run');
+  void stageWipe.offsetWidth; // Reflow: Keyframes neu anstoßen
+  stageWipe.classList.add('run');
+}
+
 function updateBackground(force = false): void {
   const bg = bgForZone(combat.zone);
   const variant = bgVariant(combat.zone); // recolour lap follows depth even on a manual kulisse
-  if (!force && bg === currentBg && variant === currentBgVariant) {
+  // D-08: Die Eskalationsstufe gehört in den Vergleich — Bühne 21, 24 und 28
+  // tragen dasselbe Theme, sollen aber sichtbar verschieden sein. Der stetige
+  // Anteil (`stageK`) läuft ohne Rebuild mit.
+  const tier = stageTier(combat.zone);
+  if (!force && bg === currentBg && variant === currentBgVariant && tier === currentStageTier) {
     // Die Kulisse bleibt — aber die BÜHNE kann trotzdem das Theme gewechselt
     // haben (manuell gewählte Kulisse, `bgAuto` aus). Dann steht hier eine andere
     // Trophäe, und nur sie braucht den Rebuild.
     syncTrophy();
     return;
   }
+  // D-24: Theme-Grenze? VOR der Zuweisung entschieden — der Wechsel der Welt
+  // (major) fährt länger und wischt kräftiger als der einer Bühne (minor).
+  const major = bg !== currentBg;
   currentBg = bg;
   currentBgVariant = variant;
+  currentStageTier = tier;
   if (state.gear.bgAuto && state.gear.bg !== bg) {
     state.gear.bg = bg;
     recompute(); // Space +5 % dpsPct etc. follow the auto-rotation
@@ -1699,7 +1922,20 @@ function updateBackground(force = false): void {
   // 1b: Trophäen-Stufe VOR dem Wechsel setzen, aber ohne eigenen Rebuild — die
   // neue Bühne wird gleich ohnehin gebaut und nimmt den Pokal mit.
   syncTrophy(false);
-  world.setBackground(bg, variant, { animate: !force && preset.stageTransition });
+  // D-08: Stufe VOR `setBackground` setzen (gleiches Muster wie die Trophäe) —
+  // die neue Bühne wird gleich gebaut und nimmt Publikum + Requisiten mit.
+  world.setStageTier(tier, stageK(combat.zone));
+  world.setBackground(bg, variant, { animate: !force && preset.stageTransition, major });
+  // D-24: Farbwischer — gerichtet, nie vollflächig (F2). Mit Fahrt immer, im
+  // low-Preset (Hard-Swap) nur an der Theme-Grenze (Design-Preset).
+  if (!force && (preset.stageTransition || major)) triggerWipe(major);
+  post.setGrade(bg); // D-06: Farbstich + Vignette des Themes (uniform-getrieben)
+  syncShadows(); // D-03: neues Deck ⇒ neue Schatten-Deckkraft
+  // D-22: Die Bühnen-Akzentfarbe als CSS-Variable — Schadenszahlen (und der
+  // D-24-Wischer) tragen denselben K-1-Farbfaden wie Splitter und Rim-Licht.
+  const acc = accentCss(THEME_ACCENT[bg]);
+  document.documentElement.style.setProperty('--accent', acc);
+  document.documentElement.style.setProperty('--accent-soft', `${acc}8c`); // 55 % Alpha
   audio.setBackground(bg); // idempotent for a same-key (variant-only) rebuild
 }
 
@@ -1724,10 +1960,15 @@ function syncTrophy(rebuild = true): void {
 
 /** Standzeit des Banners — deckungsgleich mit der CSS-Keyframe-Dauer. */
 const BANNER_MS = 2400;
-/** Dauer des Auftritts-Moments (Licht-Dim + Kamera-Punch) in Sekunden. */
-const BOSS_CINE_S = 0.8;
-/** Anteil des Moments, in dem angezogen wird (Rest = weiches Lösen). */
-const CINE_ATTACK = 0.19;
+/**
+ * Dauer des Auftritts-Moments (Licht-Dim + Kamera-Punch) in Sekunden.
+ * D-23: 0.8 → 1.6 — der Auftritt ist jetzt eine INSZENIERUNG (K-5): Licht
+ * runter, Boss fällt, Bodenwelle, Licht hoch in die Arena-Stimmung.
+ */
+const BOSS_CINE_S = 1.6;
+/** Anteil des Moments, in dem angezogen wird (Rest = weiches Lösen).
+ * D-23: 0.19 → 0.12 — das Dunkel steht früher, der Fall passiert im Dunkeln. */
+const CINE_ATTACK = 0.12;
 
 const bossBanner = document.getElementById('bossBanner') as HTMLElement;
 let bannerTimer = 0;
@@ -1860,6 +2101,12 @@ function bossEntrance(): void {
   // er auf DERSELBEN Bühne (der Retry nach dem Rückwurf), bleibt der Makel.
   if (state.bossFoulZone !== combat.zone) state.bossFoulZone = 0;
   showBossBanner(combat.zone);
+  // D-23: Auftritts-Show anwerfen — VOR `startCinematics`, denn (a) die
+  // Arena-Stimmung muss vor dem Cinematics-Snapshot gesetzt sein
+  // (Reihenfolge-Vertrag aus dem Tech-Plan) und (b) `syncEntity` liest
+  // `bossShow`, um den Boss GEPARKT zu bauen (Fall statt WP-9-Sprung).
+  bossShow = { t: 0, dropped: false };
+  world.setBossMood(bossMoodColor());
   startCinematics();
   audio.bossIntro();
   haptics.boss(effects.haptics);
@@ -1907,10 +2154,25 @@ function travelToZone(z: number): boolean {
   // (Chronilla + Gear + „Gate-Crasher") und denselben G2-Auftritt.
   if (combat.boss) combat = withBossTimerBonus(combat);
   updateBackground();
+  // D-23: Der Auftritt startet VOR `syncEntity` — der Boss-Bau liest
+  // `bossShow` und parkt die Instanz für den Phasen-2-Fall.
+  if (combat.boss) bossEntrance();
   syncEntity();
   hud.update(state, combat, dps, clickDmg);
   if (combat.boss) {
-    toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
+    // PLAYTEST G-05: Was ein Re-Kill zahlt, war nur durch Ausprobieren zu
+    // lernen. Ein bereits geschlagenes Gate (Frontier liegt dahinter) sagt es
+    // jetzt beim Betreten: Ruf, Skin-Pfad & Truhen zahlen jedes Mal — Relikte
+    // und Vergoldung würfeln nur einmal (Highwater in `relics`/`gilds`).
+    if (combat.zone < combat.maxZone) {
+      toasts.show(
+        '👑',
+        'Boss-Arena (besiegt)',
+        'Re-Kill zahlt Ruf, Pfad & Truhen — Relikte nur an neuen Gates.',
+      );
+    } else {
+      toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
+    }
     bossEntrance();
   } else {
     toasts.show(
@@ -1941,6 +2203,69 @@ function draw(): void {
 }
 const particleTmp = new THREE.Vector3();
 let shakeMag = 0;
+/** D-16: Restdauer des Bühnen-Dips nach einem Kill (0 = aus). */
+let killDim = 0;
+/** D-15 (c): Zeitstempel des letzten Funken-Bursts (Drossel). */
+let lastSparkMs = 0;
+/** D-16: Landungs-Staub in HELLER Deck-Farbe — gerechnet aus `floorMat`. */
+const dustTmp = new THREE.Color();
+const WHITE = new THREE.Color(0xffffff);
+/**
+ * D-22 (F6): Schadenszahlen starten am GEGNER — der Anker liegt ÜBER der
+ * Kopfkontur und seitlich VERSETZT (K-3-Auflage: nie auf dem Gesicht), die
+ * Seite alterniert, dazu ±14 px horizontaler Jitter. Die Projektion läuft
+ * durch die echte Kamera: `setViewOffset` steckt in der projectionMatrix,
+ * es braucht KEINE Sonderbehandlung. Der Gold-Pop bleibt am Klickpunkt.
+ */
+const popAnchorTmp = new THREE.Vector3();
+let popSide = 1;
+/**
+ * D-22: Anker-Höhe über dem Gegner-`root` je SPEZIES (lokale Einheiten, mal
+ * Rang-/Boss-Skala). Ein globales 2.5 lag beim hochgewachsenen Synth-Gremlin
+ * (Ohren!) auf Gesichtshöhe — headless nachgemessen: knapp ÜBER der höchsten
+ * Kontur (Ohren, Antennen, Stielaugen, Krone) je Theme.
+ */
+const POP_ANCHOR_Y: Record<BackgroundKey, number> = {
+  club: 2.9,
+  synth: 3.7,
+  beach: 2.7,
+  space: 3.3,
+};
+function damagePopAnchor(): { x: number; y: number } {
+  popSide = -popSide;
+  const s = entity.root.scale.y || 1;
+  popAnchorTmp.set(
+    entity.root.position.x + popSide * 0.55 * s,
+    entity.root.position.y + POP_ANCHOR_Y[entity.theme] * s,
+    entity.root.position.z,
+  );
+  popAnchorTmp.project(camera);
+  return {
+    x: (popAnchorTmp.x * 0.5 + 0.5) * window.innerWidth + (Math.random() * 2 - 1) * 14,
+    // −24 px: die Text-BOX wächst vom Anker nach UNTEN — auch die 32-px-Crit-
+    // Zeile startet damit vollständig über der Kopfkontur (K-3).
+    y: (0.5 - popAnchorTmp.y * 0.5) * window.innerHeight - 24,
+  };
+}
+/**
+ * D-22: Der Screen-Shake ist GERICHTET — Stoßrichtung folgt der Screen-
+ * Projektion der Trefferachse Spieler→Gegner (72 % Richtung, 28 % Streuung).
+ * Beim festen Staging genügt eine Rechnung pro Shake-Frame.
+ */
+const shakeDir = { x: 1, y: 0 };
+const shakeTmpA = new THREE.Vector3();
+const shakeTmpB = new THREE.Vector3();
+function updateShakeDir(): void {
+  shakeTmpA.set(0, -1.2, 0).project(camera); // Spieler (Bühnenmitte, Hüfthöhe)
+  shakeTmpB.copy(entity.root.position);
+  shakeTmpB.y += 1;
+  shakeTmpB.project(camera);
+  const dx = shakeTmpB.x - shakeTmpA.x;
+  const dy = shakeTmpB.y - shakeTmpA.y;
+  const len = Math.hypot(dx, dy) || 1;
+  shakeDir.x = dx / len;
+  shakeDir.y = dy / len;
+}
 
 // 🎁 chest-tier emoji lookup (from the pure catalog) for drop toasts.
 const CHEST_EMOJI = Object.fromEntries(CHEST_TIERS.map((c) => [c.tier, c.emoji])) as Record<
@@ -2226,7 +2551,26 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
   } else if (wasBoss && fromClick) {
     audio.bossHit();
   }
-  if (!r.killed && fromClick) entity.flinch();
+  if (!r.killed && fromClick) {
+    entity.flinch();
+    // D-15 (c): Funken am TREFFPUNKT (Mitte Spieler↔Gegner, Brusthöhe) statt
+    // an der Hüfte des Spielers — der Schlag kommt sichtbar AN. Gedrosselt
+    // (max. 1 Burst je 90 ms) und nur im high-Feel (low: kein Funken, K-9).
+    const nowMs = performance.now();
+    if (effects.particles && preset.toonFx && nowMs - lastSparkMs >= SPARK_MIN_GAP_MS) {
+      lastSparkMs = nowMs;
+      const ep = entity.root.position;
+      particles.burst(
+        ep.x * 0.5,
+        ep.y + 1.2,
+        ep.z * 0.5,
+        SPARK_N,
+        0.55,
+        THEME_ACCENT[currentBg],
+        [0.2, 1, 0.3],
+      );
+    }
+  }
 }
 
 // ---------- input ----------
@@ -2253,6 +2597,23 @@ function syncChestBadge(): void {
 /** M-02: Nach dem ersten echten Twerk hat die Hotkey-Zeile ihren Job getan. */
 let hintDone = false;
 
+/**
+ * Die EINE Summe aller Beat-Fenster-Weitungen: Combo-Tier + Beatrix (§4.6) +
+ * Neon/Synth-Gear (§5) + DJ/KI-Cluster-`beat`-Specials (v11) + P4 „Beat-Gefühl".
+ * Sie weitet On-Beat-Klicks UND das A2-Schild-Fenster — und seit PLAYTEST G-06
+ * liest auch der Metronom-Blitz an der Boss-HP-Bar exakt diese Rechnung, damit
+ * das angezeigte Fenster nie vom tatsächlich getroffenen abweicht.
+ */
+function beatWindowBonusMsNow(): number {
+  return (
+    tierBeatWindowBonusMs(comboTier(comboState.stacks)) +
+    ancientBeatWindowBonusMs(state.ancients) +
+    beatWindowBonus(state.gear) +
+    crewSpec.beatWindowMs +
+    beatGefuhlWindowMs(state.heaven)
+  );
+}
+
 function doShake(x?: number, y?: number): void {
   // G1: Während die Bühne aus- und einfährt zählt kein Klick. Bewusst
   // IGNORIEREN statt puffern — der Wechsel dauert 1.2 s, ein nachgeholter
@@ -2269,18 +2630,7 @@ function doShake(x?: number, y?: number): void {
 
   // On-beat is judged against the CURRENT tier's (possibly widened) window,
   // before this click bumps the combo.
-  const curTier = comboTier(comboState.stacks);
-  // Beatrix (§4.6) + Neon/Synth gear (§5) + DJ/KI-Cluster `beat`-specials (v11)
-  // widen the on-beat window on top of the tier bonus — dieselbe Summe weitet
-  // auch das A2-Schild-Fenster (genau der Hebel, mit dem man sich rüstet).
-  const beatBonusMs =
-    tierBeatWindowBonusMs(curTier) +
-    ancientBeatWindowBonusMs(state.ancients) +
-    beatWindowBonus(state.gear) +
-    crewSpec.beatWindowMs +
-    // ROADMAP-V2 P4 „Beat-Gefühl" (Ritual-Ast): +40 ms im GLEICHEN Term — er
-    // weitet damit auch das A2-Schild-Fenster, genau wie Beatrix und das Gear.
-    beatGefuhlWindowMs(state.heaven);
+  const beatBonusMs = beatWindowBonusMsNow();
   const pps = phaseVelocity(drive);
   const onBeat = isOnBeat(choreo.phase, pps, beatWindowMs(beatBonusMs));
   // A2 Synth „Schild-Takte": eigenes, drive-invariantes Fenster (siehe
@@ -2399,11 +2749,33 @@ function doShake(x?: number, y?: number): void {
     c.vx += (Math.random() * 2 - 1) * 2.6;
   });
   // Klick → Tanz: the dancer answers every shake with a hip-pop (tier/beat-
-  // scaled, crit = arm flare) — see `character/accents.ts`.
-  triggerClickAccent(accents, tier, crit, onBeat);
+  // scaled, crit = arm flare) — see `character/accents.ts`. D-22: `windup`
+  // (die 2–3-Frame-Anticipation) nur im high-Feel — low behält den Anschlag.
+  triggerClickAccent(accents, tier, crit, onBeat, preset.toonFx);
   if (effects.particles) {
     char.rig.pelvis.getWorldPosition(particleTmp);
-    particles.burst(particleTmp.x, particleTmp.y, particleTmp.z, burstCount(tier));
+    // D-02, Teil (a): Bodenring an der Hüfte — der ANSCHLAG bekommt eine Form
+    // (0.28 s, K-5 Aktion). Er liegt auf dem Deck, unter der Figur.
+    rings.spawn(particleTmp.x, particleTmp.z, {
+      r0: 0.4,
+      r1: 1.6,
+      dur: CLICK_RING_S,
+      color: THEME_ACCENT[currentBg],
+    });
+    // D-02, Teil (b): gerichtete Splitter in der Bühnen-Akzentfarbe statt eines
+    // symmetrischen Gold-Balls — nach hinten-oben (+z = weg von der Kamera).
+    particles.burst(
+      particleTmp.x,
+      particleTmp.y,
+      particleTmp.z,
+      Math.round(burstCount(tier) * preset.burstScale),
+      1,
+      THEME_ACCENT[currentBg],
+      CLICK_SPLINTER_DIR,
+    );
+    // D-02, Teil (c): Rim-Blitz auf der Figur — betont den Umriss, statt ihn zu
+    // fluten. Der Loop lässt ihn über ~110 ms abklingen.
+    TOON_FLASH.value = 1;
   }
   if (effects.screenShake) {
     let mag = shakeForTier(tier);
@@ -2416,7 +2788,12 @@ function doShake(x?: number, y?: number): void {
     clicksSinceSwitch = 0;
     choreo.advance(); // A4: im Bühnen-Set kreisen statt stur durch alle Moves
   }
-  if (!bounced) pops.damage({ value: dmg, crit, onBeat, x: px, y: py }, now);
+  // D-22 (F6): Die Zahl startet am GEGNER (über der Kopfkontur, versetzt) —
+  // der Schaden passiert bei IHM. Der Gold-Pop bleibt am Klickpunkt.
+  if (!bounced) {
+    const anchor = damagePopAnchor();
+    pops.damage({ value: dmg, crit, onBeat, x: anchor.x, y: anchor.y }, now);
+  }
   audio.click();
   const stacks = Math.floor(comboState.stacks);
   if (stacks > 2 && stacks % 5 === 0) audio.combo(stacks);
@@ -3381,6 +3758,9 @@ function loop(nowMs: number): void {
     if (dropped !== null) {
       applyQuality(dropped);
       world.setAmbientLife(preset.ambientLife);
+      world.setRimLights(preset.rimLights); // D-07/A9: Intensität 0, nie `visible`
+      syncShadows(); // D-03: Sprunghöhen-Reaktion folgt dem Preset
+      syncSkinFx(); // D-18/D-19: Sprite-Schicht folgt dem Preset (Ring bleibt)
       toasts.show(
         '⚙️',
         `Grafik auf „${dropped === 'medium' ? 'Mittel' : 'Niedrig'}" gestellt`,
@@ -3388,13 +3768,24 @@ function loop(nowMs: number): void {
       );
     }
   }
-  const dt = Math.min(clock.getDelta(), 0.05);
+  // BUGS B-02: ZWEI Zeitbegriffe. `dt` (0.05-Klemme) taktet Optik/Physik —
+  // ein 500-ms-Ruckler darf keine Riesen-Animationsschritte werfen. Die
+  // SPIELUHR (Boss-Timer, Idle-/Coach-Schaden, Combo-Verfall, Gimmick-Wellen,
+  // Tragezeit, UI-Tick) läuft dagegen auf `simDt` und darf pro Frame bis zu
+  // 1 s Wanduhr nachziehen: vorher verfiel bei < 20 fps die Restzeit ersatzlos
+  // (gemessen: 32 s real = ~4 s Boss-Uhr) — die 30-s-Schranke war auf
+  // Low-End-Geräten real länger und das Idle-Einkommen entsprechend kleiner,
+  // beides inkonsistent zur Offline-Rechnung nach Wanduhr. Ab 20 fps sind
+  // beide Werte identisch, an den Ankern ändert sich nichts.
+  const rawDt = clock.getDelta();
+  const dt = Math.min(rawDt, 0.05);
+  const simDt = Math.min(rawDt, 1);
   t0 += dt;
   state.stats.playTimeS += dt;
   // 2b: Tragezeit. Sie hängt am selben Tick wie die Spielzeit — wer die Bühne
   // offen hat, trägt seinen Skin, ob er klickt oder nicht. Offline-Zeit zählt
   // bewusst NICHT (der Skin steht dann in keiner Show).
-  state.skinPath = addWear(state.skinPath, state.gear.skin, dt);
+  state.skinPath = addWear(state.skinPath, state.gear.skin, simDt);
   notePathNodes();
 
   // G1: Der Bühnen-Wechsel friert den Kampf für seine 1.2 s ein — sonst würde
@@ -3406,7 +3797,7 @@ function loop(nowMs: number): void {
   // die Crew schlüge noch einmal durch.
   const gimmickNow = combat.boss && !swapping ? gimmickForZone(combat.zone) : null;
   if (combat.boss && !swapping) {
-    const g = tickGimmick(bossGimmick, gimmickNow, hpFraction(combat), dt);
+    const g = tickGimmick(bossGimmick, gimmickNow, hpFraction(combat), simDt);
     bossGimmick = g.state;
     spotlightOn = g.spotlight;
     if (g.started) {
@@ -3423,18 +3814,28 @@ function loop(nowMs: number): void {
     spotlightOn = false;
   }
   hud.setSpotlight(spotlightOn);
+  // PLAYTEST G-06: Der Schild-Boss verlangte getaktete Treffer, gab aber im
+  // Kampf kein sichtbares Taktsignal — das Fenster fühlte sich wie Glückssache
+  // an. Der Metronom-Blitz an der HP-Bar zeigt jetzt das OFFENE Fenster, mit
+  // exakt der Rechnung, mit der `doShake` den Abpraller entscheidet (gleiche
+  // Phase, gleiche Drive-Geschwindigkeit, gleiche Fenster-Weitungen).
+  const beatPps = phaseVelocity(drive);
+  hud.setShieldOpen(
+    gimmickNow?.id === 'shield' &&
+      isOnBeat(choreo.phase, beatPps, shieldWindowMs(beatPps, beatWindowBonusMsNow())),
+  );
   // Idle DPS chips away at the current target; the Twerk-Coach auto-clicks at
   // 25 % of the click value (no crit/beat, §4.3.5) — Robo gear stars add cps (§5),
   // the same sum the offline accrual uses; boss timer ticks down.
-  if (dps > 0 && !swapping) applyHit(dps * dt, false);
+  if (dps > 0 && !swapping) applyHit(dps * simDt, false);
   const cps =
     coachCps(state.heaven) + coachCpsBonus(state.gear) + pathB().coachCps + loadout().coachCps;
-  if (cps > 0 && !swapping) applyHit(coachDps(clickDmg, cps) * dt, false);
+  if (cps > 0 && !swapping) applyHit(coachDps(clickDmg, cps) * simDt, false);
   if (combat.boss && !swapping) {
     const gateZone = combat.zone; // vor dem möglichen Rückwurf festhalten (P1)
     // 2a ★ „Zweiter Wind": Der Rückwurf erstattet 3 von 10 Rivalen der
     // Rückfall-Bühne — die Bühne startet dann sichtbar bei 3/10 statt 0/10.
-    const bt = tickBoss(combat, dt, secondWindKills(state.constellation));
+    const bt = tickBoss(combat, simDt, secondWindKills(state.constellation));
     combat = bt.state;
     if (bt.failed) {
       state.stats.bossTimeouts += 1;
@@ -3467,8 +3868,8 @@ function loop(nowMs: number): void {
     comboDecayReduction(state.gear) + pathB().comboDecay + comboGedachtnisReduction(state.heaven);
   comboState =
     gimmickNow?.id === 'gravity'
-      ? spaceComboStep(comboState, dt, comboRed)
-      : stageComboStep(comboState, dt, comboRed, stageFactors().comboDecay);
+      ? spaceComboStep(comboState, simDt, comboRed)
+      : stageComboStep(comboState, simDt, comboRed, stageFactors().comboDecay);
   const epochMs = Date.now();
   // Golden-Peach schedule (§6.1): despawn/reschedule the event, then sync the
   // on-screen 🍑 button + ×2-boost badge (clamped/despawned per B13c).
@@ -3508,12 +3909,22 @@ function loop(nowMs: number): void {
     }
     acc -= DT;
   }
+  // D-21: Die Beat-Hüllkurve wird HIER gelesen (statt weiter unten), weil die
+  // Ruhe-Ebene im Physik-Slot den Kopf-Nick darauf setzt. Zwischen diesem Punkt
+  // und der alten Stelle schreibt nichts mehr `choreo.phase` — derselbe Wert.
+  const beatV = Math.max(0, Math.sin(choreo.phase * 2.2));
   if (physicsStepped) {
     // Klick-Akzente: additiv NACH dem Physik-Schritt (applyPose schreibt absolute
     // Werte, der nächste Step resettet also sauber; ohne Step keine Re-Anwendung,
     // sonst würde der Offset doppeln); Matrix-Refresh, damit renderCheeks die
     // akzentuierte Pelvis-Orientierung sieht.
     applyAccents(char.rig, accents, frenzy, t0);
+    // D-21: Ruhe-Ebene im SELBEN Slot — additiv nach dem Physik-Schritt, vor
+    // dem Matrix-Refresh. `calm` blendet sie aus, sobald wirklich getanzt wird.
+    applyIdleLife(char.rig, t0, 1 - Math.min(1, drive), beatV);
+    // D-18/D-19: Skin-Signatur + Rarity-Funken im SELBEN Slot (der Gyrator-
+    // Bob schreibt additiv auf den root). Nur high-Feel — low bleibt statisch.
+    if (preset.toonFx) char.signature?.(t0, beatV);
     char.rig.root.updateMatrixWorld(true);
   }
   renderCheeks(char.rig, char.cheeks);
@@ -3527,8 +3938,13 @@ function loop(nowMs: number): void {
   applyFace(char.face, faceView(faceState, frenzy));
   particles.update(dt);
 
-  const beatV = Math.max(0, Math.sin(choreo.phase * 2.2));
-  beat.intensity = beatV * drive * 4;
+  // D-02: Bodenringe + Rim-Blitz hängen an `dt` (Optik-Uhr), nie an `simDt`.
+  rings.update(dt, beatV);
+  if (TOON_FLASH.value > 0) TOON_FLASH.value = Math.max(0, TOON_FLASH.value - dt * FLASH_DECAY);
+  // D-01: Der Beat-Puls skalierte ungedeckelt mit `drive` — bei voller Ekstase
+  // stand er dauerhaft über 4 und trieb die Bühnenmitte ins Clipping. Der
+  // Deckel lässt den Schlag hörbar-sichtbar, nimmt ihm aber die Dauerlast.
+  beat.intensity = Math.min(BEAT_LIGHT_MAX, beatV * drive * 4);
   if (beatTracker.update(choreo.phase)) audio.beat(0.5 + drive * 0.08);
   // G1: Aus-/Einfahrt der Bühne tickt im bestehenden Loop, VOR den Kulissen-
   // Anims (nach einem Rebuild zeigt `world.anims` schon auf die neue Bühne).
@@ -3545,19 +3961,103 @@ function loop(nowMs: number): void {
   // (0.35 Einheiten ≈ 16 px), und wieder auftreten, sobald es zurück ist —
   // so gibt es keinen Pop VOR der ersten Bewegung. Frisch gelesen, weil
   // `world.update` den Wechsel eben beendet haben kann.
-  const offStage = world.stageY < -0.35;
+  // D-24: Die Reise fährt auch SEITLICH — beide Achsen zählen als „abgefahren".
+  const offStage = world.stageY < -0.35 || Math.abs(world.stageX) > 0.35;
   playerSpin.visible = !offStage;
   entity.root.visible = !offStage;
   contactShadow.visible = !offStage;
   world.anims.forEach((a) => a(t0, beatV));
+  // D-23: Boss-Auftritts-Uhr. Phase 1 (0–0.35 s): das Cinematics-Dunkel
+  // steht. Phase 2: der geparkte Boss fällt (`entrance`). Phase 3 löst das
+  // Cinematics-Release + der BossMood-Lerp — hier läuft nur noch die Ducke-
+  // Welle des Publikums aus (nur mit Regie-Budget, F3/K-9).
+  if (bossShow) {
+    // Erst ticken, wenn die Arena STEHT — während der G1-Anreise ist die
+    // Insel weggefahren, ein Fall + Bodenwelle spielten sonst ins Leere.
+    if (!swapping) bossShow.t += dt;
+    if (!bossShow.dropped && bossShow.t >= BOSS_DROP_AT && entity.boss) {
+      bossShow.dropped = true;
+      entity.entrance();
+    }
+    world.setDuck(preset.cinematics ? bossShow.t : -1);
+    if (bossShow.t > BOSS_SHOW_S) {
+      bossShow = null;
+      world.setDuck(-1);
+    }
+  }
+  // D-15: Der Gegner erzählt seinen Zustand selbst — hängende Lider unter
+  // 50 % HP, wacklige Gliedmaßen + Zittern unter 20 % (change-detected).
+  const hpF = hpFraction(combat);
+  entity.setDistress(hpF < 0.2 ? 2 : hpF < 0.5 ? 1 : 0);
   // The rival twerks back — same beat envelope, its own loop (independent of the rig).
   entity.update(t0, beatV, drive);
+  // D-16: Einmal-Ereignisse des Kill-Takts — NACH `entity.update` gepollt,
+  // dort entstehen sie. Splitter/Ringe leben in der Glue (Pools), deshalb hier.
+  if (entity.events.ko) {
+    entity.events.ko = false;
+    const ep = entity.root.position;
+    if (effects.particles) {
+      // Auflösung in theme-farbige Splitter nach OBEN — „der Alte ist weg".
+      particles.burst(
+        ep.x,
+        ep.y + 1.4,
+        ep.z,
+        Math.round(KO_BURST_N * preset.burstScale),
+        1.2,
+        THEME_ACCENT[currentBg],
+        KO_BURST_DIR,
+      );
+    }
+    rings.spawn(ep.x, ep.z, { r0: 0.5, r1: 2.2, dur: KO_RING_S, color: THEME_ACCENT[currentBg] });
+    // Bühnen-Dip ~0.2 s, damit der Splitterschwarm trägt — nur mit Regie-
+    // Budget (low: keine Abdunklung), und nie gegen die Boss-Cinematics.
+    if (preset.cinematics) killDim = KILL_DIM_S;
+  }
+  if (entity.events.landed) {
+    entity.events.landed = false;
+    const ep = entity.root.position;
+    if (entity.boss) {
+      // D-23: Boss-Landung — GROSSE Bodenwelle in der Arena-Farbe + Erdstoß
+      // + Staub-Burst. Ring + Landung laufen auch im low (K-9: Information).
+      rings.spawn(ep.x, ep.z, {
+        r0: 0.6,
+        r1: 3.2,
+        dur: BOSS_LAND_RING_S,
+        color: bossMoodColor(),
+      });
+      if (effects.screenShake) shakeMag = Math.max(shakeMag, BOSS_LAND_SHAKE);
+      if (effects.particles) {
+        dustTmp.copy(floorMat.color).lerp(WHITE, 0.55);
+        particles.burst(
+          ep.x,
+          ep.y + 0.3,
+          ep.z,
+          Math.round(12 * preset.burstScale),
+          1.1,
+          dustTmp.getHex(),
+          [0, 0.7, 0.5],
+        );
+      }
+      haptics.boss(effects.haptics);
+    } else {
+      // Landungs-Staub in heller DECK-Farbe — der Neue landet im Bühnenlicht,
+      // der Akzent-Ring gehört dem KO (zwei Beats, zwei Farben).
+      dustTmp.copy(floorMat.color).lerp(WHITE, 0.55);
+      rings.spawn(ep.x, ep.z, {
+        r0: 0.3,
+        r1: 1.2,
+        dur: LAND_RING_S,
+        color: dustTmp.getHex(),
+        opacity: 0.55,
+      });
+    }
+  }
 
   // HUD-throttle (B7): the moving HP bar / boss timer refresh cheaply per frame;
   // the full text HUD only rebuilds on the 0.25 s tick (or discrete events).
   hud.frame(combat);
 
-  uiTimer -= dt;
+  uiTimer -= simDt;
   if (uiTimer <= 0) {
     uiTimer = 0.25;
     // 🍬 faucet (§5.4): fold any ripened Zuckerpfirsiche into the gear slice (one per
@@ -3594,10 +4094,31 @@ function loop(nowMs: number): void {
   }
 
   controls.update();
+  // D-16: Bühnen-Dip des Kill-Takts — als FAKTOR auf die AKTUELLEN Licht-
+  // Intensitäten, nur für diesen einen Draw und danach exakt restauriert
+  // (kein Aufsummieren über Frames, egal wer die Werte sonst schreibt).
+  // Prioritätsregel: die Boss-Cinematics gewinnen — läuft `cineT`, setzt der
+  // Dip aus (stepCinematics schreibt absolute Werte aus eigenem Snapshot).
+  let dimmed = false;
+  let dimKey = 0;
+  let dimHemi = 0;
+  if (killDim > 0) {
+    const dipF = 1 - KILL_DIM_DEPTH * (killDim / KILL_DIM_S);
+    killDim = Math.max(0, killDim - dt);
+    if (cineT < 0) {
+      dimmed = true;
+      dimKey = lights.key.intensity;
+      dimHemi = lights.hemi.intensity;
+      lights.key.intensity *= dipF;
+      lights.hemi.intensity *= dipF;
+    }
+  }
   if (shakeMag > 0.001) {
+    // D-22: gerichteter Stoß entlang der Duell-Achse statt reinem Zufall.
+    updateShakeDir();
     shakeMag *= Math.pow(0.0009, dt);
-    const ox = (Math.random() * 2 - 1) * shakeMag;
-    const oy = (Math.random() * 2 - 1) * shakeMag;
+    const ox = (shakeDir.x * 0.72 + (Math.random() * 2 - 1) * 0.28) * shakeMag;
+    const oy = (shakeDir.y * 0.72 + (Math.random() * 2 - 1) * 0.28) * shakeMag;
     camera.position.x += ox;
     camera.position.y += oy;
     draw();
@@ -3606,6 +4127,10 @@ function loop(nowMs: number): void {
   } else {
     shakeMag = 0;
     draw();
+  }
+  if (dimmed) {
+    lights.key.intensity = dimKey;
+    lights.hemi.intensity = dimHemi;
   }
 
   if (firstFrame) {

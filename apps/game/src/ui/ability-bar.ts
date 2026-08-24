@@ -87,10 +87,23 @@ export class AbilityBar {
       this.ringSec.textContent = `${sec}`;
     }
 
-    const label = active ? '×10 EKSTASE' : ready ? 'Ekstase! · F' : 'Ekstase';
+    // PLAYTEST G-01: Die Ladung war stumm — man klickte hunderte Male, ohne zu
+    // wissen, wie weit die Leiste ist. Der Prozentwert steht jetzt IM Label
+    // (ganze Prozente — das Label soll atmen, nicht flackern), und der Knopf
+    // erklärt sich per Tooltip.
+    const label = active
+      ? '×10 EKSTASE'
+      : ready
+        ? 'Ekstase! · F'
+        : `Ekstase · ${Math.floor(pct)} %`;
     if (label !== this.cLabel) {
       this.cLabel = label;
       this.label.textContent = label;
+      this.btn.title = active
+        ? 'Ekstase läuft — alle BP zählen ×10!'
+        : ready
+          ? 'Bereit! Taste F oder Klick — 12 s lang ×10 BP.'
+          : 'Lädt durch deine Twerks — voll = 12 s lang ×10 BP (Taste F).';
     }
   }
 }

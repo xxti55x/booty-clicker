@@ -357,20 +357,32 @@ export class Gear {
         : '';
 
     // Level row (AC4: level + cost). Buttons disabled when locked/maxed/unaffordable.
+    // PLAYTEST G-03: Gesperrte Knöpfe erklären sich per Tooltip — WAS fehlt und
+    // WOHER es kommt, statt nur stumm ausgegraut zu sein.
     const atMaxLv = lv >= MAX_SKIN_LEVEL;
     const lvCost = shardCost(lv);
     const canLevel = unlocked && !atMaxLv && state.gear.shards >= lvCost;
+    const lvWhy = !unlocked
+      ? 'Erst den Skin freischalten.'
+      : canLevel
+        ? `Level-Aufstieg: ${affixText(cfg.buff.stat, cfg.buff.perLevel)}`
+        : `Dir fehlen ${fmt(lvCost - state.gear.shards)} 🧩 — Splitter gibt's aus Truhen, Boss-Arenen und Quests.`;
     const lvBtn = atMaxLv
       ? `<button class="sc-btn" data-act="level" disabled>Max</button>`
-      : `<button class="sc-btn ${canLevel ? '' : 'off'}" data-act="level" ${canLevel ? '' : 'disabled'}>⬆ ${fmt(lvCost)} 🧩</button>`;
+      : `<button class="sc-btn ${canLevel ? '' : 'off'}" data-act="level" ${canLevel ? '' : 'disabled'} title="${lvWhy}">⬆ ${fmt(lvCost)} 🧩</button>`;
 
     // Star row (AC4 continued: stars + cost).
     const atMaxStar = stars >= MAX_SKIN_STARS;
     const stCost = sugarCostForStar(stars);
     const canStar = unlocked && !atMaxStar && stCost !== null && state.gear.sugarPeaches >= stCost;
+    const stWhy = !unlocked
+      ? 'Erst den Skin freischalten.'
+      : canStar
+        ? `Stern-Aufstieg: ${affixText(cfg.star.stat, cfg.star.perStar)}`
+        : `Dir fehlen ${stCost === null ? 0 : stCost - state.gear.sugarPeaches} 🍬 — Zuckerpfirsiche reifen täglich und liegen in Truhen.`;
     const stBtn = atMaxStar
       ? `<button class="sc-btn" data-act="star" disabled>★ Max</button>`
-      : `<button class="sc-btn ${canStar ? '' : 'off'}" data-act="star" ${canStar ? '' : 'disabled'}>⬆ ${stCost} 🍬</button>`;
+      : `<button class="sc-btn ${canStar ? '' : 'off'}" data-act="star" ${canStar ? '' : 'disabled'} title="${stWhy}">⬆ ${stCost} 🍬</button>`;
 
     // Footer: equip (unlocked) · craft (craftable, not yet crafted) · lock hint.
     let footer: string;
@@ -380,8 +392,12 @@ export class Gear {
       const cc = craftCost(id);
       if (cc !== null && !skinCrafted(state.gear, id)) {
         const afford = state.gear.shards >= cc;
+        // PLAYTEST G-03: auch der Craft-Knopf sagt, was fehlt und woher es kommt.
+        const craftWhy = afford
+          ? `Schneidert den Skin aus ${cc} 🧩 — dauerhaft freigeschaltet.`
+          : `Dir fehlen ${fmt(cc - state.gear.shards)} 🧩 — Splitter gibt's aus Truhen, Boss-Arenen und Quests.`;
         footer =
-          `<button class="sc-equip craft ${afford ? '' : 'off'}" data-act="craft" ${afford ? '' : 'disabled'}>Craften · ${cc} 🧩</button>` +
+          `<button class="sc-equip craft ${afford ? '' : 'off'}" data-act="craft" ${afford ? '' : 'disabled'} title="${craftWhy}">Craften · ${cc} 🧩</button>` +
           `<div class="sc-lock">${this.unlockHint(id)}</div>`;
       } else {
         footer = `<div class="sc-lock">${this.unlockHint(id)}</div>`;

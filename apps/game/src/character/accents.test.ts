@@ -6,7 +6,9 @@ import {
   POP_MAX,
   POP_ONBEAT,
   POP_PER_TIER,
+  WIND_PULL,
   applyAccents,
+  applyIdleLife,
   createAccents,
   stepAccents,
   triggerClickAccent,
@@ -76,11 +78,58 @@ describe('click accents — Klick → Tanz', () => {
     expect(rig.armR.shoulder.rotation.z).toBeLessThan(0);
   });
 
+  it('applyIdleLife is silent at calm 0 except for the beat nod (D-21)', () => {
+    const rig = fakeRig();
+    applyIdleLife(rig, 1.23, 0, 0);
+    expect(rig.spine.rotation.x).toBe(0); // volle Choreografie ⇒ keine Ruhe-Ebene
+    expect(rig.pelvis.rotation.z).toBe(0);
+    expect(rig.root.position.y).toBe(0);
+    expect(rig.head.rotation.x).toBe(0);
+  });
+
+  it('applyIdleLife breathes at calm 1 and is deterministic (D-21)', () => {
+    const a = fakeRig();
+    const b = fakeRig();
+    applyIdleLife(a, 1.23, 1, 0.5);
+    applyIdleLife(b, 1.23, 1, 0.5);
+    expect(Math.abs(a.spine.rotation.x)).toBeGreaterThan(0);
+    expect(Math.abs(a.pelvis.rotation.z)).toBeGreaterThan(0);
+    expect(a.head.rotation.x).toBeLessThan(0); // Kopf-Nick auf den Beat
+    // Gleiche Eingabe ⇒ gleiche Pose: kein Zustand, keine Zufallszahl.
+    expect(b.spine.rotation.x).toBe(a.spine.rotation.x);
+    expect(b.root.position.y).toBe(a.root.position.y);
+  });
+
   it('Ekstase adds the shimmy oscillation even with no click impulses', () => {
     const rig = fakeRig();
     const a = createAccents();
     applyAccents(rig, a, true, 0.4);
     expect(Math.abs(rig.spine.rotation.y)).toBeGreaterThan(0);
     expect(Math.abs(rig.pelvis.rotation.z)).toBeGreaterThan(0);
+  });
+
+  it('D-22: windup zieht kurz GEGEN die Pop-Richtung, dann schlägt der Pop durch', () => {
+    // Mit Windup: die Pelvis steht in den ersten Frames um WIND_PULL höher
+    // (Aufladung) als ohne — dieselben Klick-Parameter, gleicher Pop.
+    const withWind = createAccents();
+    const noWind = createAccents();
+    triggerClickAccent(withWind, 2, false, false, true);
+    triggerClickAccent(noWind, 2, false, false, false);
+    expect(noWind.wind).toBe(0);
+    const rigA = fakeRig();
+    const rigB = fakeRig();
+    applyAccents(rigA, withWind, false, 0);
+    applyAccents(rigB, noWind, false, 0);
+    expect(rigA.pelvis.rotation.x - rigB.pelvis.rotation.x).toBeCloseTo(WIND_PULL, 6);
+  });
+
+  it('D-22: windup verfliegt in wenigen Frames (K-5-Mikro) und wird still', () => {
+    const a = createAccents();
+    triggerClickAccent(a, 0, false, false, true);
+    expect(a.wind).toBe(1);
+    for (let i = 0; i < 6; i++) stepAccents(a, 1 / 60); // 100 ms
+    expect(a.wind).toBeLessThan(0.5); // Gegenzug vorbei — der Anschlag steht
+    for (let i = 0; i < 120; i++) stepAccents(a, 1 / 60);
+    expect(a.wind).toBe(0);
   });
 });

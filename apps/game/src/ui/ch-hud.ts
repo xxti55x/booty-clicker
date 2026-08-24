@@ -17,6 +17,7 @@ import {
   isBossZone,
 } from '../game/combat';
 import { MONSTERS_PER_ZONE } from '../game/combat';
+import { COMBO_CAP } from '../game/click';
 import { comboTierName } from '../game/combo';
 import { soulBonusEff } from '../game/heaven';
 import type { StageMod } from '../game/stage-mods';
@@ -177,6 +178,7 @@ export class ChHud {
   // A2: zuletzt geschriebenes Gimmick-Label + Spotlight-Look der HP-Bar.
   private cGimmick = '';
   private cSpotlight: boolean | null = null;
+  private cShieldOpen: boolean | null = null;
   // ROADMAP-V2 G6: der weiche BP-Zähler. `goldShown` ist der zuletzt GEZEIGTE
   // Wert (Startpunkt eines neuen Tweens), `goldTarget` der echte Kontostand.
   private goldShown = Number.NaN;
@@ -476,6 +478,20 @@ export class ChHud {
   }
 
   /**
+   * PLAYTEST G-06 — Metronom-Blitz des Schild-Bosses (A2, Synth): solange das
+   * Beat-Fenster OFFEN ist, leuchten HP-Bar und Gimmick-Pille auf; außerhalb
+   * fallen sie zurück. Eigene Klasse (`beat-open`), bewusst NICHT das
+   * Spotlight-`on` — die beiden Zustände gehören verschiedenen Gimmicks und
+   * dürfen sich nie gegenseitig löschen. Change-detected, läuft pro Frame.
+   */
+  setShieldOpen(open: boolean): void {
+    if (open === this.cShieldOpen) return;
+    this.cShieldOpen = open;
+    this.hpFill.classList.toggle('beat-open', open);
+    this.gimmickEl.classList.toggle('beat-open', open);
+  }
+
+  /**
    * Ein 🌊-Puls auf der HP-Bar (Beach): die Welle hat gerade geheilt. Die
    * Animation wird per Reflow neu angestoßen, damit auch die dritte Welle
    * desselben Kampfes sichtbar ist.
@@ -486,11 +502,20 @@ export class ChHud {
     this.hpFill.classList.add('healed');
   }
 
-  /** Combo readout with the tier name (e.g. "Combo ×27 · Heiß"). */
+  /**
+   * Combo readout with the tier name (e.g. "Combo ×27 · Heiß").
+   *
+   * PLAYTEST G-02 (BUGS B-04): Die Stack-Zahl lief ungebremst weiter
+   * („×897"), obwohl der Schadens-Bonus am `COMBO_CAP` längst gedeckelt ist —
+   * eine Zahl, die Skalierung verspricht, die es nicht gibt. Die Anzeige
+   * friert deshalb am wirksamen Deckel ein und sagt es dazu („MAX"); die
+   * Stacks selbst bleiben unangetastet (das Gnaden-Fenster braucht sie).
+   */
   setCombo(stacks: number, tier: number): void {
-    const n = Math.floor(stacks);
+    const n = Math.floor(Math.min(stacks, COMBO_CAP));
+    const capped = stacks >= COMBO_CAP;
     const name = comboTierName(tier);
-    const txt = n > 1 ? `Combo ×${n}${name ? ` · ${name}` : ''}` : '';
+    const txt = n > 1 ? `Combo ×${n}${capped ? ' MAX' : ''}${name ? ` · ${name}` : ''}` : '';
     if (txt !== this.cCombo) {
       this.cCombo = txt;
       this.comboEl.textContent = txt;

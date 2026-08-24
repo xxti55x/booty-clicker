@@ -82,6 +82,21 @@ export function canAscend(
   return pendingSouls(runMaxZone, lifetimeMaxZone, rsLifetime) >= 1;
 }
 
+/**
+ * PLAYTEST G-04: Die kleinste Bühne, deren Erst-Erreichen NEUE Seelen einbrächte
+ * (`soulsForMaxZone(z) > rsLifetime`). Der Ruhm-Tab sagt damit ein konkretes
+ * Ziel an („neue Seelen ab Bühne X") statt des ratlosen „stoß tiefer vor".
+ * Sucht ab `max(deepest, ASCEND_MIN_ZONE)` aufwärts — dank des exponentiellen
+ * Legendär-Terms (1.1^z) terminiert das für jeden endlichen `rsLifetime` weit
+ * vor dem Sicherheits-Deckel (1.1^7440 ≈ Number-Overflow ⇒ Infinity > alles).
+ */
+export function nextSoulZone(deepest: number, rsLifetime: number): number {
+  const CAP = 20_000;
+  let z = Math.max(Math.floor(deepest), ASCEND_MIN_ZONE);
+  while (z < CAP && soulsForMaxZone(z) <= rsLifetime) z++;
+  return z;
+}
+
 export interface AscendResult {
   /** New held (spendable) soul balance. */
   souls: number;

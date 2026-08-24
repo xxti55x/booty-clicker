@@ -2,7 +2,17 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-import { INK, mk, outlineMaterial, toonMat, withOutline } from '../engine/materials';
+import {
+  INK,
+  KEY_LIGHT_DIR,
+  mk,
+  outlineMaterial,
+  setInkTone,
+  toonMat,
+  withOutline,
+} from '../engine/materials';
+import { ENTITY_STAGE } from '../character/entity';
+import { blobShadow } from '../engine/scene';
 import type { GlowSpriteFn, SceneLights } from '../engine/scene';
 import {
   bandsTex,
@@ -17,7 +27,9 @@ import {
   strataTex,
 } from '../engine/textures';
 import { bake, buildIsland, ISLAND_C, ISLAND_R, TOP_Y } from './island';
+import { THEME_ACCENT } from './theme-accents';
 import {
+  BEACH_SKY_EVENING,
   PANO_CAM,
   paintBeachBay,
   paintClubCity,
@@ -25,6 +37,7 @@ import {
   paintSynthRange,
   paintingMesh,
 } from './paintings';
+import type { BeachSky } from './paintings';
 import type { BackgroundKey, WorldAnim } from '../types';
 
 /**
@@ -77,6 +90,19 @@ interface BuildCtx {
    * Traversieren. Bewusst ein Objekt (Referenz), kein Wert.
    */
   hype: { on: boolean };
+  /** D-03: Theme-normierte Schatten-Deckkraft (siehe `World.shadowOpacity`). */
+  shadowOpacity: number;
+  /** D-08: Diskrete Eskalationsstufe 0/1/2 (Publikum, Requisiten, Rang). */
+  stageTier: number;
+  /** D-08: Stetiger Fortschritt 0…1 (Deck-Emissive, Sättigung, Himmel). */
+  stageK: number;
+  /**
+   * D-23 (F3): Geteilte Ducke-Uhr des Boss-Auftritts — `main` schreibt
+   * Sekunden seit Auftritts-Start (−1 = aus), die Publikums-Anim liest sie im
+   * selben Frame (dasselbe Referenz-Muster wie `hype`). Die Welle selbst ist
+   * zustandslos: jede Verzögerung kommt aus der Distanz des Platzes zum Boss.
+   */
+  duck: { t: number };
 }
 
 interface BgConfig {
@@ -106,10 +132,23 @@ interface BgConfig {
     /** Relief-Stärke (Roadmap T2): Map/Emissive-Map dient zugleich als Bump-Höhe. */
     bump?: number;
   };
-  /** Per-Theme-Lichtset (Roadmap L): Key/Fill/Hemi/Rims wechseln mit der Kulisse. */
+  /**
+   * D-05: Nebeldichte als THEME-Eigenschaft statt Konstante (vorher überall
+   * 0.012): Club dicht (Rauch), Synth mittel, Beach dünn, Space fast klar —
+   * Insel und Kulisse werden EINE Bildebene statt Scheibe vor Tapete.
+   */
+  fogDensity: number;
+  /**
+   * Per-Theme-Lichtset (Roadmap L / D-07): Key/Fill/Hemi/Rims wechseln mit der
+   * Kulisse. `keyPos` macht daraus eine echte SIGNATUR statt einer Farbtönung —
+   * die Lichtrichtung ist das, was die vier Themes auch in Graustufen
+   * auseinanderhält (S2), das Key:Fill-Verhältnis ihr Kontrast-Charakter.
+   */
   light: {
     key: number;
     keyInt: number;
+    /** Weltposition des Key-Lichts; Ziel bleibt das Insel-Zentrum (scene.ts). */
+    keyPos: [number, number, number];
     fill: number;
     fillInt: number;
     sky: number;
@@ -660,8 +699,173 @@ function hypeArmsGeo(): THREE.BufferGeometry {
   return geo;
 }
 
+/** D-21: Sekunden, die ein einzelner Gast pro „Arme hoch"-Umlauf bekommt. */
+const CHEER_PERIOD = 5;
+/** D-08: Gäste auf der ersten Stufe (spärlich besetzte Lounge). */
+const AUDIENCE_BASE = 4;
+/** D-08: Zuwachs je Eskalationsstufe — Stufe 2 ist voll umringt (4 → 10). */
+const AUDIENCE_PER_TIER = 3;
+/**
+ * D-23 (F3): Landepunkt des Bosses in Welt-Koordinaten — Quelle der Ducke-
+ * Welle. Bewusst als Konstante dupliziert statt importiert (`ENTITY_STAGE.x`,
+ * `.z + BOSS_EXTRA_Z` aus `character/entity.ts`): `world/` zeigt nicht auf
+ * `character/` — dieselbe Schichtregel wie `engine/rings.DECK_Y`.
+ */
+const BOSS_SPOT = { x: 3.6, z: 4.4 } as const;
+/** D-23: Wellen-Verzögerung je Welt-Einheit Distanz zum Boss (s/Einheit). */
+const DUCK_WAVE_S = 0.06;
+/** D-23: Anschlag der Ducke (K-4 „schnell rein") — K-5-Aktion-Untergrenze. */
+const DUCK_IN_S = 0.25;
+/** D-23: Ab dieser lokalen Zeit fährt das Licht hoch — die Gäste jubeln. */
+const DUCK_RELEASE_T = 1.0;
+/** D-23: Dauer der Jubel-Arme nach dem Licht-Hochfahren. */
+const DUCK_CHEER_S = 0.6;
+
+// ---------------------------------------------------------------------------
+// D-08 — Bühnen-Eskalation: Rand-Requisiten nach Stufe
+// ---------------------------------------------------------------------------
+
+/**
+ * Sichtkeil der Kamera (F4a): dasselbe Winkelfenster, in dem schon die
+ * Lounge-Buchten stehen. Alles außerhalb liegt HINTER der Kamera-Achse und
+ * wäre unsichtbarer Aufwand.
+ */
+const VIEW_WEDGE: readonly [number, number] = [0.62, Math.PI - 0.62];
+/**
+ * Freihalte-Korridor um die Blickachse Spieler → Gegner (F4b/D-14): keine
+ * Requisite näher als das an die Verbindungslinie — das Duell-Bild bleibt frei.
+ */
+const DUEL_CLEARANCE = 1.2;
+/** Radius, auf dem die Rand-Requisiten stehen (außerhalb der Lounge). */
+const PROP_R = ISLAND_R - 0.35;
+/**
+ * K-6: Requisiten dürfen NIE die hellste Fläche im Bild sein — die gehört dem
+ * wichtigsten Akteur. Deshalb liegt ihre Emissive-Stärke auf Deck-Niveau.
+ */
+const PROP_EMISSIVE = 0.3;
+
+/** Abstand eines Deck-Punktes zur Blickachse Spieler(0,0) → Gegner. */
+function duelAxisDist(x: number, z: number): number {
+  const { x: ax, z: az } = ENTITY_STAGE;
+  return Math.abs(ax * z - az * x) / Math.hypot(ax, az);
+}
+
+/**
+ * **D-08 (3) Requisitendichte am Bühnenrand** — 0 / 2 / 4 Stück je Stufe, aus
+ * denselben Primitiven gebaut, aus denen die Bühne ohnehin besteht (kein neues
+ * Bestiarium). Alles wird in EIN Mesh gebacken: zwei Draw-Calls (Körper +
+ * Ink-Hülle) pro Bühne, egal wie viele Stücke.
+ *
+ * Die drei F4-Auflagen stehen als Code, nicht als Kommentar: Plätze nur im
+ * {@link VIEW_WEDGE}, nichts im {@link DUEL_CLEARANCE}-Korridor, Emissive
+ * gedeckelt auf {@link PROP_EMISSIVE}.
+ */
+function escalationProps(ctx: BuildCtx, theme: BackgroundKey): void {
+  const n = ctx.stageTier * 2;
+  if (n === 0) return;
+  // Kandidaten-Winkel im Sichtkeil, abwechselnd von außen nach innen — so
+  // stehen schon bei zwei Stück beide Bühnenseiten besetzt.
+  const [a0, a1] = VIEW_WEDGE;
+  const cand = [a0 + 0.08, a1 - 0.08, a0 + 0.55, a1 - 0.55, a0 + 1.02, a1 - 1.02];
+  const spots: { x: number; z: number; a: number }[] = [];
+  for (const a of cand) {
+    if (spots.length >= n) break;
+    const x = ISLAND_C.x + Math.cos(a) * PROP_R;
+    const z = ISLAND_C.z + Math.sin(a) * PROP_R;
+    if (duelAxisDist(x, z) < DUEL_CLEARANCE) continue; // Blickachse bleibt frei
+    spots.push({ x, z, a });
+  }
+  if (spots.length === 0) return;
+
+  const { hue } = ctx;
+  const parts: THREE.Mesh[] = [];
+  const glowParts: THREE.Mesh[] = [];
+  for (const sp of spots) {
+    const face = Math.atan2(ISLAND_C.x - sp.x, ISLAND_C.z - sp.z);
+    if (theme === 'club') {
+      // Fackel-Ständer: Säule + Schale (die Flamme trägt die Emissive-Schale,
+      // nicht ein additives Sprite — K-6).
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.19, 1.5, 8));
+      post.position.set(sp.x, TOP_Y + 0.75, sp.z);
+      parts.push(post);
+      const bowl = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.5, 8));
+      bowl.position.set(sp.x, TOP_Y + 1.72, sp.z);
+      glowParts.push(bowl);
+    } else if (theme === 'synth') {
+      // Grid-Scherbe: ein aufragender Keil, leicht gekippt.
+      const shard = new THREE.Mesh(new THREE.ConeGeometry(0.3, 2.1, 4));
+      shard.position.set(sp.x, TOP_Y + 1.05, sp.z);
+      shard.rotation.set(0.12 * Math.cos(sp.a), face, 0.12 * Math.sin(sp.a));
+      parts.push(shard);
+      const cap = new THREE.Mesh(new THREE.OctahedronGeometry(0.2, 0));
+      cap.position.set(sp.x, TOP_Y + 2.15, sp.z);
+      glowParts.push(cap);
+    } else if (theme === 'beach') {
+      // Boje: Kugel auf Ring, dazu ein flacher Sockel im Sand.
+      const base = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.11, 8, 14));
+      base.rotation.x = Math.PI / 2;
+      base.position.set(sp.x, TOP_Y + 0.11, sp.z);
+      parts.push(base);
+      const buoy = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 10));
+      buoy.position.set(sp.x, TOP_Y + 0.5, sp.z);
+      parts.push(buoy);
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6));
+      lamp.position.set(sp.x, TOP_Y + 0.86, sp.z);
+      glowParts.push(lamp);
+    } else {
+      // Satellit: Korpus + zwei Paneele auf einem kurzen Mast.
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.2, 6));
+      mast.position.set(sp.x, TOP_Y + 0.6, sp.z);
+      parts.push(mast);
+      const hull = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.52));
+      hull.position.set(sp.x, TOP_Y + 1.4, sp.z);
+      hull.rotation.y = face;
+      parts.push(hull);
+      for (const side of [-1, 1]) {
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.05, 0.34));
+        panel.position.set(
+          sp.x + Math.cos(face) * side * 0.52,
+          TOP_Y + 1.4,
+          sp.z - Math.sin(face) * side * 0.52,
+        );
+        panel.rotation.y = face;
+        glowParts.push(panel);
+      }
+    }
+  }
+  // K-6: Requisiten liegen zwei Helligkeitsstufen unter den Akteuren. Der
+  // Beach-Ton war als Creme zu hell — er konkurrierte im Bild mit der Haut der
+  // Spielfigur (headless gegengeprüft) und ist jetzt Treibholz-Sand.
+  const bodyTone = { club: 0x2c1b38, synth: 0x2a1550, beach: 0xa8916a, space: 0x4a5064 }[theme];
+  const glowTone = {
+    club: 0xffa64d,
+    synth: THEME_ACCENT.synth,
+    beach: THEME_ACCENT.beach,
+    space: THEME_ACCENT.space,
+  }[theme];
+  if (parts.length) ctx.islandGroup.add(O(bake(parts, toonMat({ color: hue(bodyTone) })), 0.025));
+  if (glowParts.length) {
+    ctx.islandGroup.add(
+      O(
+        bake(
+          glowParts,
+          toonMat({
+            color: hue(glowTone),
+            emissive: hue(glowTone),
+            emissiveIntensity: PROP_EMISSIVE,
+          }),
+        ),
+        0.02,
+      ),
+    );
+  }
+}
+
 function audience(ctx: BuildCtx): void {
-  const count = amount(ctx, 10);
+  // D-08 (1) Publikumsdichte: Bühne 1–3 spärlich, kurz vor dem Boss voll
+  // umringt. Die neuen Plätze landen automatisch im Sichtkeil — die
+  // Sitz-Verteilung unten füllt die drei Buchten von innen nach außen auf.
+  const count = amount(ctx, AUDIENCE_BASE + AUDIENCE_PER_TIER * ctx.stageTier);
   if (count === 0) return;
   const rnd = lcg(777);
   const R = ISLAND_R - 0.95;
@@ -696,6 +900,21 @@ function audience(ctx: BuildCtx): void {
   const seats = O(bake(seatParts, toonMat({ color: 0x5a3472 })), 0.025);
   const frames = O(bake(frameParts, toonMat({ color: 0x2c1b38 })), 0.025);
   ctx.islandGroup.add(seats, frames);
+  // D-03: Ein gebackenes Schatten-Trio unter den drei Buchten — die SITZENDEN
+  // Gäste erben den Sofa-Schatten (F4: kein Einzel-Blob je Gast, das wären
+  // zehn Draw-Calls für Nebendarsteller). EIN Bake, ein Draw-Call.
+  {
+    const pads: THREE.Mesh[] = [];
+    for (const a of boothAngles) {
+      const pad = blobShadow(3.2, 1.5, ctx.shadowOpacity * 0.8);
+      pad.position.set(ISLAND_C.x + Math.cos(a) * R, TOP_Y + 0.008, ISLAND_C.z + Math.sin(a) * R);
+      pad.rotation.z = Math.atan2(ISLAND_C.x - pad.position.x, ISLAND_C.z - pad.position.z);
+      pads.push(pad);
+    }
+    const padMat = (pads[0]!.material as THREE.MeshBasicMaterial).clone();
+    pads.forEach((m) => (m.material as THREE.MeshBasicMaterial).dispose());
+    ctx.islandGroup.add(bake(pads, padMat));
+  }
   // Drinks: zwei kleine Glüh-Punkte auf den Tischen — die Lounge lebt.
   for (const a of [1.05, Math.PI - 1.05]) {
     const x = ISLAND_C.x + Math.cos(a) * (R - 0.9);
@@ -738,16 +957,58 @@ function audience(ctx: BuildCtx): void {
   const baseY = TOP_Y + 0.37;
   ctx.anims.push((t, beatV) => {
     const hype = ctx.hype.on;
+    const duckT = ctx.duck.t;
     for (let i = 0; i < count; i++) {
       const sp = spots[i]!;
       // Sitzend: sanftes Wippen. Hype: vom Polster springen + Hüft-Sway.
+      // D-21: Die Ruhe-Amplituden waren so klein, dass die Lounge auf dem
+      // Screenshot ein Standbild war — verdoppelt reicht das für „sie wippen
+      // mit", ohne dass die Sitzgruppe zappelt.
       const bob = hype
         ? Math.abs(Math.sin(t * 6.4 + sp.ph)) * 0.36 + beatV * 0.12
-        : beatV * 0.06 + Math.sin(t * 1.5 + sp.ph) * 0.03;
-      const sway = hype ? Math.sin(t * 5.1 + sp.ph) * 0.16 : Math.sin(t * 1.1 + sp.ph) * 0.04;
-      put(body, i, sp.x, baseY + bob, sp.z, sp.rot + sway, sp.s, sp.s * (1 - beatV * 0.05));
-      const armS = hype ? sp.s * (0.95 + Math.sin(t * 7.3 + sp.ph) * 0.1) : 0.001;
-      put(arms, i, sp.x, baseY + bob, sp.z, sp.rot + sway, armS, armS);
+        : beatV * 0.06 + Math.sin(t * 1.5 + sp.ph) * 0.07;
+      const sway = hype ? Math.sin(t * 5.1 + sp.ph) * 0.16 : Math.sin(t * 1.1 + sp.ph) * 0.08;
+      // D-23 (F3): Boss-Auftritt — die Gäste ducken sich als GESTAFFELTE
+      // WELLE vom Boss weg (Verzögerung rein aus der Distanz zum Boss-Platz,
+      // zustandslos), halten geduckt, und jubeln beim Licht-Hochfahren 0.6 s
+      // mit den Armen. Anschlag 0.25 s (K-4/K-5), Gesamt in der 1.6-s-Show.
+      let duckK = 0;
+      let cheerBoost = 0;
+      if (duckT >= 0) {
+        const local = duckT - Math.hypot(sp.x - BOSS_SPOT.x, sp.z - BOSS_SPOT.z) * DUCK_WAVE_S;
+        if (local > 0) {
+          if (local < DUCK_RELEASE_T) duckK = Math.min(1, local / DUCK_IN_S);
+          else if (local < DUCK_RELEASE_T + DUCK_CHEER_S) {
+            cheerBoost = Math.sin(((local - DUCK_RELEASE_T) / DUCK_CHEER_S) * Math.PI);
+          }
+        }
+      }
+      put(
+        body,
+        i,
+        sp.x,
+        baseY + bob - duckK * 0.12,
+        sp.z,
+        sp.rot + sway,
+        sp.s,
+        sp.s * (1 - beatV * 0.05) * (1 - 0.25 * duckK),
+      );
+      // D-21: „Gelegentlich hebt eine die Arme" — pro Umlauf GENAU EIN Gast,
+      // Index aus der Uhr, Phase aus seiner Position. Zustandslos: kein Feld
+      // pro Instanz, der Effekt lebt allein aus `t`.
+      const cheer = !hype && Math.floor(t / CHEER_PERIOD) % count === i;
+      const cheerK = cheer ? Math.sin(((t % CHEER_PERIOD) / CHEER_PERIOD) * Math.PI) : 0;
+      let armS = hype
+        ? sp.s * (0.95 + Math.sin(t * 7.3 + sp.ph) * 0.1)
+        : cheerK > 0.15
+          ? sp.s * cheerK
+          : 0.001;
+      // D-23: Ducken = Arme hoch (Schreck), Jubel = Arme voll — beides
+      // überstimmt die Ruhe-Geste, nie den Ekstase-Hype.
+      if (!hype && (duckK > 0.1 || cheerBoost > 0.1)) {
+        armS = sp.s * Math.max(duckK * 0.7, cheerBoost);
+      }
+      put(arms, i, sp.x, baseY + bob - duckK * 0.12, sp.z, sp.rot + sway, armS, armS);
     }
     body.instanceMatrix.needsUpdate = true;
     arms.instanceMatrix.needsUpdate = true;
@@ -869,8 +1130,35 @@ function lcg(seed: number): () => number {
   };
 }
 
+/**
+ * D-09/F5 — Tageszeit der gemalten Bucht je Lap: 0 = der Abend, den „Sunset
+ * Beach" verspricht · 1 = Golden Hour (Sonne höher, alles warm) · 2 = Blaue
+ * Stunde (kühler Mond hoch überm Wasser). Dieselben Panorama-PARAMETER, die
+ * die Lichtsignatur nutzt — keine fest verdrahteten Farben in der Malfunktion.
+ */
+const BEACH_SKY_BY_LAP: readonly BeachSky[] = [
+  BEACH_SKY_EVENING,
+  { skyTop: 0x7a3f7d, skyBot: 0xffb36a, water: 0x2a6a8a, sunY: 0.38, sunColor: 0xffd9a0 },
+  { skyTop: 0x131c38, skyBot: 0x51629e, water: 0x143048, sunY: 0.72, sunColor: 0xcfe0ff },
+];
+
+/**
+ * D-04 — Kontur-Ton je Theme: helle Bühnen (Beach, Club-Spot) bekommen die
+ * KRÄFTIGERE (dunklere) Kontur, das dunkle Space-Theme die zartere — so wirkt
+ * die Strichstärke über alle vier gleich, statt je nach Grund zu kippen.
+ */
+const INK_LIFT: Record<BackgroundKey, number> = {
+  club: 0.85,
+  synth: 1.0,
+  beach: 0.85,
+  space: 1.25,
+};
+
 function horizonLayer(ctx: BuildCtx, theme: BackgroundKey): void {
   const { propGroup, glowSprite, anims, hue } = ctx;
+  // D-08 (4): Der Himmel lädt sich mit der Bühne auf — Fenster brennen heller,
+  // der Stadt-/Sonnen-Dom wächst. Stetig, also ohne eigenen Rebuild-Anlass.
+  const esc = 0.8 + 0.4 * ctx.stageK;
   // Gemaltes Fern-Panorama (paintings.ts): EIN Cutout-Billboard je Theme,
   // HINTER den 3D-Mittelgrund-Props — die Kamera ist fix, also ist die Fläche
   // von Geometrie nicht zu unterscheiden, trägt aber Detail (hunderte Fenster,
@@ -889,7 +1177,15 @@ function horizonLayer(ctx: BuildCtx, theme: BackgroundKey): void {
       // Frames. Ihre Panoramen stehen deshalb NAH — vor Grid/See, hinter der
       // Insel — im gemessenen Sichtfenster (z 11: y −6…+7 · z 16: y −9…+5).
       synth: { tex: () => paintSynthRange(css, ctx.variant), w: 40, x: 2, z: 11, y: 1.5 },
-      beach: { tex: () => paintBeachBay(css, ctx.variant), w: 44, x: 12, z: 16, y: -3 },
+      // D-09/F5: Die gemalte Bucht wechselt die TAGESZEIT mit dem Lap — über
+      // dieselben Panorama-Parameter, die WP-2 parametrisiert hat.
+      beach: {
+        tex: () => paintBeachBay(css, ctx.variant, BEACH_SKY_BY_LAP[ctx.variant % 3]!),
+        w: 44,
+        x: 12,
+        z: 16,
+        y: -3,
+      },
       space: { tex: () => paintSpaceVista(css, ctx.variant), w: 110, x: -6, z: 60, y: -16 },
     }[theme];
     const tex = pano.tex();
@@ -916,7 +1212,7 @@ function horizonLayer(ctx: BuildCtx, theme: BackgroundKey): void {
       // Bühnenlicht. Die „Fenster" sind der Punkt-Texel im Map-Kanal.
       const mat = noFog(
         new THREE.MeshBasicMaterial({
-          color: new THREE.Color(r.tone).multiplyScalar(2.2),
+          color: new THREE.Color(r.tone).multiplyScalar(2.2 * esc),
           map: repeated(dotsTex(3, 26), 1.4, 2.8),
         }),
       );
@@ -929,7 +1225,7 @@ function horizonLayer(ctx: BuildCtx, theme: BackgroundKey): void {
       propGroup.add(im);
     }
     // Stadt-Glühen: der warme Lichtdom, den eine Nachtstadt an den Himmel wirft.
-    propGroup.add(glowSprite(hue(0xff7a4a), 3.5, 14, -12, 34));
+    propGroup.add(glowSprite(hue(0xff7a4a), 3.5 * esc, 14, -12, 34));
   } else if (theme === 'synth') {
     // Grid-Boden bis zum Fluchtpunkt — das Genre-Versprechen der Synth-Welt.
     const grid = new THREE.Mesh(
@@ -957,7 +1253,7 @@ function horizonLayer(ctx: BuildCtx, theme: BackgroundKey): void {
     sunG.position.set(20, -19, 55);
     sunG.rotation.y = Math.PI;
     propGroup.add(sunG);
-    propGroup.add(glowSprite(hue(0xff5fa4), 12, 20, -18, 54));
+    propGroup.add(glowSprite(hue(0xff5fa4), 12 * esc, 20, -18, 54));
     // Bergkamm-Silhouette vor der Sonne — Tiefe zwischen Grid und Himmel.
     const rnd = lcg(1337);
     const ridge = new THREE.InstancedMesh(
@@ -1198,18 +1494,22 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     floor: 0x2a2532,
     fr: 0.3,
     fm: 0.55,
+    fogDensity: 0.02, // D-05: dichter Club-Rauch
     revealAt: 0,
     deck: { map: () => repeated(plankTex(1), 5, 5), bump: 0.35 }, // dunkles Club-Parkett
-    // Club: warmes Key, kühles Fill, Violett/Limette-Rims (der bisherige Look).
+    // D-07 Club-Signatur: Key HOCH UND FRONTAL, hart — das Bühnen-Spotlight von
+    // vorn oben. Kontrast 3:1 (Key 2.1 : Fill 0.7): klare Cel-Kante, aber die
+    // Schattenseite bleibt bunt. Rims Violett/Limette (rimB = K-1-Akzent).
     light: {
       key: 0xfff4e0,
-      keyInt: 2.3,
+      keyInt: 2.1,
+      keyPos: [4.5, 9, 7],
       fill: 0xa9c4ff,
-      fillInt: 0.75,
+      fillInt: 0.7,
       sky: 0xd6daff,
       ground: 0x4a3a40,
       rimA: 0x8b5cf6,
-      rimB: 0xa8e831,
+      rimB: THEME_ACCENT.club,
     },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
@@ -1241,7 +1541,11 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       const cols = [hue(0xff3366), hue(0x33ff88), hue(0x3388ff), hue(0xffdd33)];
       const beams: { l: THREE.SpotLight; beam: THREE.Mesh; ph: number }[] = [];
       for (let i = 0; i < 4; i++) {
-        const l = new THREE.SpotLight(cols[i], 90, 45, 0.45, 0.55, 1.6);
+        // D-01: Die vier Kegel addierten sich mit Key + Hemi + Beat-Licht in der
+        // Bühnenmitte zum Clipping-Loch. Gedeckelt auf ein Drittel — die Kegel
+        // bleiben als FORM sichtbar (Beam-Opacity unverändert), sie brennen nur
+        // keine Hauttöne mehr aus.
+        const l = new THREE.SpotLight(cols[i], 30, 45, 0.45, 0.55, 1.6);
         l.position.set(Math.cos(i * 1.57) * 8, 8.5, Math.sin(i * 1.57) * 8);
         l.target.position.set(0, -2, 0);
         propGroup.add(l, l.target);
@@ -1342,6 +1646,7 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     floor: 0x1c1230,
     fr: 0.2,
     fm: 0.7,
+    fogDensity: 0.013, // D-05: mittlerer Neon-Dunst
     revealAt: 800,
     // Das Neon-Grid ist jetzt das DECK selbst: glühende Grid-Textur über die
     // GANZE Inselfläche (der alte GridHelper deckte nur 9 von 12.8 Einheiten),
@@ -1354,15 +1659,19 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
       bump: 0.15, // Grid-Linien als flache Grate
     },
     // Synth: rosé Key, Cyan-Fill, Pink/Cyan-Rims — das Neon-Duo als Licht.
+    // D-07 Synth-Signatur: Key TIEF VON HINTEN (+z ist die Kulissen-Seite) —
+    // Gegenlicht, das die Figuren als Silhouette gegen die Retro-Sonne setzt.
+    // Kontrast 5:1: das härteste Bild nach Space.
     light: {
       key: 0xffe0f2,
       keyInt: 2.2,
+      keyPos: [-3, 3.5, 12],
       fill: 0x7de8ff,
-      fillInt: 0.9,
+      fillInt: 0.45,
       sky: 0xe8c8ff,
       ground: 0x301848,
       rimA: 0xff3fb0,
-      rimB: 0x2ff5e8,
+      rimB: THEME_ACCENT.synth,
     },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
@@ -1473,24 +1782,34 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
   beach: {
     icon: '🏖️',
     name: 'Sunset Beach',
-    top: 0xff8a4d,
-    bot: 0x2a1533,
-    fog: 0x3a1a30,
+    // D-07: `top`/`bot` sind hier NICHT Zenit/Horizont — die Diorama-Kamera
+    // blickt steil ABWÄRTS, also füllt `bot` die untere Bildhälfte (die Leere
+    // unter der Insel) und `top` das sichtbare Himmelsband. Ein Tausch macht
+    // daraus eine orange Vollfläche (headless verifiziert). Der Abend kommt
+    // deshalb aus dem LICHT (siehe `light`) plus einem tieferen Himmelsrot und
+    // einem warmen Dunst — nicht aus vertauschten Enden.
+    top: 0xf07038,
+    bot: 0x241033,
+    fog: 0x4a2338,
     floor: 0xb08b52,
     fr: 0.85,
     fm: 0.05,
+    fogDensity: 0.009, // D-05: dünner, warmer Abenddunst
     revealAt: 6000,
     deck: { map: () => repeated(speckleTex(1, 1100), 4, 4), bump: 0.25 }, // körniger Sand
-    // Beach: goldene Stunde — warmes starkes Key, weiches Himmel-Fill.
+    // D-07 Beach-Signatur: „Sunset Beach" heißt ABENDLICHT — Key steht SEITLICH
+    // TIEF und satt orange, nicht mittags-neutral (shots/theme-z25.png). Weiches
+    // Verhältnis 2:1: lange Schatten, aber nichts säuft ab.
     light: {
-      key: 0xffd9a0,
-      keyInt: 2.6,
+      key: 0xffb36a,
+      keyInt: 2.4,
+      keyPos: [10, 2.5, 6],
       fill: 0x9ec8ff,
-      fillInt: 0.6,
+      fillInt: 1.2,
       sky: 0xffe4c8,
       ground: 0x6a4a30,
       rimA: 0xff8a4d,
-      rimB: 0x3adfc0,
+      rimB: THEME_ACCENT.beach,
     },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
@@ -1655,18 +1974,21 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
     floor: 0x39404f,
     fr: 0.45,
     fm: 0.85,
+    fogDensity: 0.005, // D-05: Vakuum — fast klar, Tiefe trägt der Rand-Falloff
     revealAt: 30000,
     deck: { map: () => repeated(platesTex(1), 4, 4), bump: 0.3 }, // vernietetes Metall-Deck
-    // Space: hartes kaltes Key, gedämpftes Fill, Cyan/Violett-Rims.
+    // D-07 Space-Signatur: eine nackte Sonne über der Plattform — hart von
+    // oben-seitlich, fast KEIN Fill (6:1). Der Vakuum-Kontrast des Themes.
     light: {
       key: 0xeef4ff,
-      keyInt: 2.1,
+      keyInt: 2.3,
+      keyPos: [2, 11, 3],
       fill: 0x8898c8,
-      fillInt: 0.55,
+      fillInt: 0.38,
       sky: 0xb8c8e8,
       ground: 0x1c1c2e,
       rimA: 0x63e8ff,
-      rimB: 0x9d5cf6,
+      rimB: THEME_ACCENT.space,
     },
     build(ctx) {
       const { propGroup, glowSprite, anims, hue } = ctx;
@@ -1818,16 +2140,30 @@ export const BGS: Record<BackgroundKey, BgConfig> = {
 // G1 — Bühnen-Wechsel als Moment (ROADMAP-V2)
 // ---------------------------------------------------------------------------
 
-/** Ausfahrt der ALTEN Bühne (s) — Cubic-Ease-In, sie fällt beschleunigt weg. */
-const OUT_S = 0.5;
-/** Einfahrt der NEUEN Bühne (s) — Ease-Out mit kleinem Überschwinger. */
-const IN_S = 0.7;
+/**
+ * D-24: Aus-/Einfahrt-Dauern je WECHSELTYP. Ein Bühnen-Wechsel im Theme
+ * (minor) ist ein „Übergang" (0.3 + 0.5 = 0.8 s, K-5 600–900 ms), die
+ * Theme-Grenze (major) eine „Inszenierung" (0.55 + 0.85 = 1.4 s, K-5
+ * 1.2–1.8 s) — der Wechsel der Welt wirkt größer als der einer Bühne.
+ */
+const MINOR_OUT_S = 0.3;
+const MINOR_IN_S = 0.5;
+const MAJOR_OUT_S = 0.55;
+const MAJOR_IN_S = 0.85;
 /** Fallhöhe: weit genug, dass die Insel bei jedem Framing aus dem Bild ist. */
 const DROP_Y = 17;
+/**
+ * D-24: Seitliche Fahrweite — die Reise ist GERICHTET: die alte Insel fährt
+ * nach Screen-rechts (−x) hinaus, die neue kommt von Screen-links (+x)
+ * herein (+x rendert bei der Diorama-Kamera auf Screen-links).
+ */
+const RIDE_X = 5;
 /** Leichter Kippwinkel, damit die Bühne fällt statt zu „faten". */
 const TILT = 0.14;
 /** Kulissen-Parallaxe: die ferne Szenerie zieht schwächer mit als die Insel. */
 const PROP_PARALLAX = 0.55;
+/** D-24: Palette-Blend OHNE Fahrt (low/Hard-Swap) — K-5 „Übergang". */
+const BLEND_S = 0.6;
 
 /**
  * ROADMAP-V2 X2 — Farbe, zu der das Deck-Emissive während der Twerk-Ekstase
@@ -1857,13 +2193,39 @@ interface Palette {
   floor: THREE.Color;
   key: THREE.Color;
   keyInt: number;
+  /** D-07: Die Key-RICHTUNG ist Teil der Theme-Signatur und blendet mit. */
+  keyPos: THREE.Vector3;
   fill: THREE.Color;
   fillInt: number;
   sky: THREE.Color;
   ground: THREE.Color;
   rimA: THREE.Color;
   rimB: THREE.Color;
+  /** D-05: Nebeldichte des Themes (blendet im G1-Übergang stetig mit). */
+  fogDen: number;
 }
+
+/**
+ * Ruhe-Intensitäten der beiden Rim-Punktlichter (Werte aus `scene.ts`). Sie
+ * stehen HIER, weil `applyPalette` sie jeden Frame schreiben muss: nur so kann
+ * der low-Preset sie auf 0 ziehen, OHNE `visible` zu schalten — ein
+ * Sichtbarkeits-Wechsel änderte die Licht-Anzahl im Shader-Hash und ließe beim
+ * Preset-Wechsel ALLE beleuchteten Programme neu kompilieren (K-7, verboten).
+ */
+const RIM_A_INT = 48;
+const RIM_B_INT = 30;
+
+/** low-Preset ohne Rims: der Hemi-Ground gleicht den fehlenden Fülllicht-Anteil aus. */
+const RIMLESS_GROUND_LIFT = 1.2;
+
+/** D-23: Ein-/Ausblendzeit der Boss-Arena-Stimmung (K-5 „Aktion"). */
+const MOOD_S = 0.4;
+/** D-23: Fog-Ziel der Arena (20 % Richtung dunkel). */
+const MOOD_DARK = new THREE.Color(0x000000);
+/** D-23: Arena-Licht — Key hoch, Fill runter: satter UND kontrastreicher. */
+const MOOD_KEY_LIFT = 0.12;
+const MOOD_FILL_CUT = 0.2;
+const MOOD_FOG_DARK = 0.2;
 
 /**
  * Owns the swappable stage props and the sky/fog/floor tint. Replaces the
@@ -1889,8 +2251,33 @@ export class World {
   private ekstaseOn = false;
   /** G3: Dichte-Faktor der Ambient-Elemente (aus dem Quality-Preset). */
   private ambientLife = 1;
+  /** D-07/A9: Laufen die beiden Rim-Punktlichter? (low ⇒ Intensität 0.) */
+  private rimLights = true;
+  /**
+   * D-03: Deckkraft der Kontaktschatten, gegen die Deckhelligkeit des Themes
+   * normiert. Auf hellem Grund trägt schon wenig Alpha genug Kontrast, auf
+   * dunklem Grund braucht der Schatten mehr, um überhaupt zu lesen — so wirkt
+   * er über alle vier Bühnen gleich stark und nirgends als Schmutzfleck.
+   * Die World kennt die Akteure nicht; `main` liest den Wert und reicht ihn an
+   * Spieler-Decal und Rivalen weiter.
+   */
+  private shadowOpacityValue = 0.5;
+  /** D-08: Eskalationsstufe der laufenden Bühne (0/1/2) — siehe `setStageTier`. */
+  private stageTierValue = 0;
+  /** D-08: Stetiger Fortschritt 0…1 innerhalb des Themes. */
+  private stageKValue = 0;
   /** Ekstase-Fenster offen? (Lounge-Publikum eskaliert.) */
   private readonly hypeFlag = { on: false };
+  /** D-23 (F3): geteilte Ducke-Uhr des Boss-Auftritts (siehe BuildCtx.duck). */
+  private readonly duckClock = { t: -1 };
+  /**
+   * D-23: Boss-Arena-Stimmung. `moodColor` bleibt auch nach `setBossMood(null)`
+   * stehen (die Ausblendung braucht die Farbe), `moodOn` steuert die Richtung,
+   * `moodK` ist der Lerp-Stand 0…1 (getickt in `update`).
+   */
+  private moodColor: THREE.Color | null = null;
+  private moodOn = false;
+  private moodK = 0;
   /**
    * 1b: Trophäen-Stufe der AKTUELLEN Bühne (0 = keine, 1–3 = Bronze/Silber/Gold).
    * Sie gehört dem THEME, nicht der Welt — die Glue setzt sie bei jedem
@@ -1908,9 +2295,20 @@ export class World {
     entering: boolean;
     /** Sekunden in der laufenden Phase. */
     t: number;
+    /** D-24: Phasen-Dauern des laufenden Wechsels (minor ≠ major). */
+    outS: number;
+    inS: number;
     from: Palette;
     to: Palette;
   } | null = null;
+
+  /**
+   * D-24: Leichter Palette-Blend OHNE Fahrt — der Hard-Swap-Pfad (low-Preset,
+   * Prestige) baut sofort um, blendet aber die Farben über {@link BLEND_S}.
+   * Setzt `transitioning` bewusst NICHT: das Flag pausiert Klicks/Idle-Schaden,
+   * und im low darf das Gameplay nie anhalten.
+   */
+  private blend: { t: number; from: Palette; to: Palette } | null = null;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -1945,30 +2343,61 @@ export class World {
   }
 
   /**
-   * Die überblendbare Palette eines Themes. Goal „alle Bühnen heller": die
-   * Kulissen-Paletten werden Richtung Weiß geliftet (Sky am stärksten, Boden
-   * dezent) — die Stimmungen bleiben unterscheidbar, aber nichts säuft mehr im
-   * Dunkel ab. Das Licht-Rig (Roadmap L) läuft bewusst OHNE Hue-Lap.
+   * Die überblendbare Palette eines Themes. D-01 (Belichtungs-Disziplin): Der
+   * Weiß-Lift war der zweite Treiber des Clipping-Lochs (0.22–0.30 Richtung
+   * Weiß PLUS Exposure 1.45). Er bleibt als Dunst-Anhebung erhalten, aber
+   * deutlich schwächer — die Stimmung trägt jetzt die SATTE Grundfarbe des
+   * Themes, nicht ein Schritt Richtung Weiß. Das Licht-Rig (Roadmap L) läuft
+   * bewusst OHNE Hue-Lap.
    */
   private static paletteFor(key: BackgroundKey, variant: number): Palette {
     const hue = World.hueFn(variant);
     const lift = (c: THREE.Color, f: number): THREE.Color => c.lerp(new THREE.Color(0xffffff), f);
     const b = BGS[key];
     const L = b.light;
-    return {
-      skyTop: lift(hue(b.top), 0.22),
-      skyBot: lift(hue(b.bot), 0.3),
-      fog: lift(hue(b.fog), 0.26),
-      floor: lift(hue(b.floor), 0.14),
+    const p: Palette = {
+      skyTop: lift(hue(b.top), 0.1),
+      skyBot: lift(hue(b.bot), 0.12),
+      fog: lift(hue(b.fog), 0.12),
+      floor: lift(hue(b.floor), 0.06),
       key: new THREE.Color(L.key),
       keyInt: L.keyInt,
+      keyPos: new THREE.Vector3(...L.keyPos),
       fill: new THREE.Color(L.fill),
       fillInt: L.fillInt,
       sky: new THREE.Color(L.sky),
       ground: new THREE.Color(L.ground),
       rimA: new THREE.Color(L.rimA),
       rimB: new THREE.Color(L.rimB),
+      fogDen: b.fogDensity,
     };
+    // D-09 — Lap-Identität: Jeder Recolour-Lap ist eine TAGESZEIT, die auch
+    // das Licht-Rig erfasst (der 30°-Hue-Schubs der Props bleibt zusätzlich).
+    // Lap 0 = Nacht/Standard · Lap 1 = „Golden Hour" (warmes, tiefes Licht) ·
+    // Lap 2 = „Blaue Stunde" (kühl, kontrastreich, dichterer Nebel), zyklisch.
+    // Save-frei: alles rechnet aus `variant` — und weil die Werte durch
+    // dieselbe Palette laufen, blenden Tageszeiten im G1-Übergang stetig.
+    const mood = variant % 3;
+    if (mood === 1) {
+      const warm = new THREE.Color(0xffc487);
+      p.key.multiply(warm);
+      p.keyInt = L.keyInt + 0.15;
+      p.keyPos.y *= 0.6; // die Sonne steht TIEF — lange Schatten
+      p.skyTop.lerp(warm, 0.1);
+      p.skyBot.lerp(warm, 0.12);
+      p.fog.lerp(warm, 0.1);
+      p.ground.lerp(warm, 0.2);
+    } else if (mood === 2) {
+      const cool = new THREE.Color(0x9db4ff);
+      p.key.multiply(cool);
+      p.fill.multiply(cool);
+      p.fillInt = L.fillInt * 0.6; // härterer Kontrast — Sturmlicht
+      p.skyTop.multiply(cool).multiplyScalar(0.8);
+      p.skyBot.lerp(cool, 0.15);
+      p.fog.lerp(cool, 0.15);
+      p.fogDen = b.fogDensity * 1.2;
+    }
+    return p;
   }
 
   /** Die AKTUELL gesetzte Palette (Startpunkt einer G1-Überblendung). */
@@ -1982,12 +2411,14 @@ export class World {
       floor: this.floorMat.color.clone(),
       key: l ? l.key.color.clone() : base.key,
       keyInt: l ? l.key.intensity : base.keyInt,
+      keyPos: l ? l.key.position.clone() : base.keyPos,
       fill: l ? l.fill.color.clone() : base.fill,
       fillInt: l ? l.fill.intensity : base.fillInt,
       sky: l ? l.hemi.color.clone() : base.sky,
       ground: l ? l.hemi.groundColor.clone() : base.ground,
       rimA: l ? l.rimA.color.clone() : base.rimA,
       rimB: l ? l.rimB.color.clone() : base.rimB,
+      fogDen: (this.scene.fog as THREE.FogExp2).density,
     };
   }
 
@@ -1999,16 +2430,29 @@ export class World {
     (this.skyMat.uniforms.top!.value as THREE.Color).copy(c(from.skyTop, to.skyTop));
     (this.skyMat.uniforms.bot!.value as THREE.Color).copy(c(from.skyBot, to.skyBot));
     (this.scene.fog as THREE.FogExp2).color.copy(c(from.fog, to.fog));
+    // D-05: Die Dichte ist Theme-Eigenschaft und blendet wie jede Farbe.
+    (this.scene.fog as THREE.FogExp2).density = n(from.fogDen, to.fogDen);
     this.floorMat.color.copy(c(from.floor, to.floor));
     if (this.lights) {
-      this.lights.key.color.copy(c(from.key, to.key));
-      this.lights.key.intensity = n(from.keyInt, to.keyInt);
-      this.lights.fill.color.copy(c(from.fill, to.fill));
-      this.lights.fill.intensity = n(from.fillInt, to.fillInt);
-      this.lights.hemi.color.copy(c(from.sky, to.sky));
-      this.lights.hemi.groundColor.copy(c(from.ground, to.ground));
-      this.lights.rimA.color.copy(c(from.rimA, to.rimA));
-      this.lights.rimB.color.copy(c(from.rimB, to.rimB));
+      const L = this.lights;
+      L.key.color.copy(c(from.key, to.key));
+      L.key.intensity = n(from.keyInt, to.keyInt);
+      // D-07: Die Lichtrichtung wandert STETIG (kein Sprung) — sonst springt
+      // der Schattenwurf des Decks mitten im G1-Übergang.
+      L.key.position.copy(k >= 1 ? to.keyPos : from.keyPos.clone().lerp(to.keyPos, k));
+      // Der Toon-Glint folgt dem Bühnen-Key: ein geteiltes Uniform-Objekt, das
+      // alle `toonMat`s im selben Frame sehen (kein Traversieren, kein Recompile).
+      KEY_LIGHT_DIR.copy(L.key.position).sub(L.key.target.position).normalize();
+      L.fill.color.copy(c(from.fill, to.fill));
+      L.fill.intensity = n(from.fillInt, to.fillInt);
+      L.hemi.color.copy(c(from.sky, to.sky));
+      L.hemi.groundColor.copy(c(from.ground, to.ground));
+      if (!this.rimLights) L.hemi.groundColor.multiplyScalar(RIMLESS_GROUND_LIFT);
+      L.rimA.color.copy(c(from.rimA, to.rimA));
+      L.rimB.color.copy(c(from.rimB, to.rimB));
+      // A9: Intensität statt `visible` — siehe RIM_A_INT.
+      L.rimA.intensity = this.rimLights ? RIM_A_INT : 0;
+      L.rimB.intensity = this.rimLights ? RIM_B_INT : 0;
     }
   }
 
@@ -2032,6 +2476,13 @@ export class World {
 
     const hue = World.hueFn(variant);
     const b = BGS[key];
+    // D-03: Deckhelligkeit → Schatten-Deckkraft (siehe `shadowOpacityValue`).
+    const fl = new THREE.Color(b.floor);
+    const luma = 0.2126 * fl.r + 0.7152 * fl.g + 0.0722 * fl.b;
+    this.shadowOpacityValue = Math.max(0.22, Math.min(0.5, 0.55 - 0.35 * luma));
+    // D-04: Konturton der Bühne — leicht zur Theme-Palette (Fog-Ton), auf
+    // hellem Grund kräftiger, auf dunklem zarter. EIN geteiltes Uniform.
+    setInkTone(hue(b.fog), INK_LIFT[key]);
     this.floorMat.roughness = b.fr;
     this.floorMat.metalness = b.fm;
     // Deck-Texturen (Goal „apply texture"): Map/Emissive-Map je Theme; ein
@@ -2040,7 +2491,9 @@ export class World {
     this.floorMat.map = d.map?.() ?? null;
     this.floorMat.emissiveMap = d.emissiveMap?.() ?? null;
     this.floorMat.emissive.copy(d.emissive !== undefined ? hue(d.emissive) : new THREE.Color(0));
-    this.floorMat.emissiveIntensity = d.emissiveIntensity ?? 1;
+    // D-08 (2): Das Deck lädt sich zur Boss-Bühne hin auf — Emissive UND
+    // Sättigung. Beides stetig (`stageK`), also ohne eigenen Rebuild-Anlass.
+    this.floorMat.emissiveIntensity = (d.emissiveIntensity ?? 1) * (0.7 + 0.3 * this.stageKValue);
     // T2-Relief: dieselbe Muster-Map trägt die Höhe (Fugen/Nieten/Grid-Grate).
     this.floorMat.bumpMap = d.bump ? (this.floorMat.map ?? this.floorMat.emissiveMap) : null;
     this.floorMat.bumpScale = d.bump ?? 1;
@@ -2057,7 +2510,7 @@ export class World {
         tex.offset.y = (t * speed) % 1;
       });
     }
-    buildIsland(this.islandGroup, key, hue, this.floorMat, this.anims);
+    buildIsland(this.islandGroup, key, hue, this.floorMat, this.anims, this.ambientLife);
     const ctx: BuildCtx = {
       propGroup: this.propGroup,
       islandGroup: this.islandGroup,
@@ -2067,12 +2520,17 @@ export class World {
       hue,
       density: this.ambientLife,
       hype: this.hypeFlag,
+      shadowOpacity: this.shadowOpacityValue,
+      stageTier: this.stageTierValue,
+      stageK: this.stageKValue,
+      duck: this.duckClock,
     };
     b.build(ctx);
     // Politur „vollständige Szenerie": die ferne Horizont-Schicht des Themes —
     // hier statt in den vier `build`-Funktionen, damit sie EIN Vertrag bleibt.
     horizonLayer(ctx, key);
     stageKinetics(ctx, key);
+    escalationProps(ctx, key); // D-08 (3): Rand-Requisiten nach Stufe
     // G3: Publikum-Silhouetten am hinteren Inselrand — für JEDE Bühne gleich
     // (das Publikum ist der Bühne eigen, nicht dem Theme), deshalb hier und
     // nicht in den vier `build`-Funktionen.
@@ -2086,11 +2544,52 @@ export class World {
     this.hypeFlag.on = on;
   }
 
-  /** Bühnen-Versatz setzen (G1) — `y` in Welt-Einheiten, `tilt` in Radiant. */
-  private setStageOffset(y: number, tilt: number): void {
+  /** D-23 (F3): Ducke-Uhr des Boss-Auftritts schreiben (Sekunden, −1 = aus). */
+  setDuck(t: number): void {
+    this.duckClock.t = t;
+  }
+
+  /**
+   * **D-23** — Die Boss-Arena ist eine ANDERE Bühne: `color` (die Gimmick-
+   * Farbe, K-1-Ausnahme) lerpt beide Rim-Lichter um, hebt den Key (×1.12),
+   * senkt das Fill (×0.8) und zieht den Nebel 20 % Richtung dunkel — alles
+   * über {@link MOOD_S} in `update` geblendet, reine Farb-/Zahlwerte, läuft
+   * deshalb auch im low-Preset (K-9: die Arena-INFORMATION kostet nichts).
+   * `null` blendet zurück in die Theme-Ruhe (alle drei Endpfade des Kampfs).
+   */
+  setBossMood(color: number | null): void {
+    if (color === null) {
+      this.moodOn = false; // Farbe bleibt für die Ausblendung stehen
+      return;
+    }
+    this.moodOn = true;
+    (this.moodColor ??= new THREE.Color()).setHex(color);
+  }
+
+  /**
+   * D-07/A9 — Rim-Punktlichter an/aus (Preset). Bewusst KEIN `visible`-Schalter:
+   * das änderte die Licht-Anzahl im Shader-Hash und erzwänge beim Preset-Wechsel
+   * ein Neukompilat aller beleuchteten Programme. Stattdessen schreibt
+   * {@link applyPalette} die Intensität — der Wert wirkt ab dem nächsten Tick,
+   * hier einmal sofort, damit der Umschalter im Menü nicht erst beim
+   * Bühnen-Wechsel greift.
+   */
+  setRimLights(on: boolean): void {
+    if (on === this.rimLights) return;
+    this.rimLights = on;
+    if (this.cur) {
+      const p = World.paletteFor(this.cur.key, this.cur.variant);
+      this.applyPalette(p, p, 1);
+    }
+  }
+
+  /** Bühnen-Versatz setzen (G1/D-24) — `y`/`x` in Welt-Einheiten, `tilt` rad. */
+  private setStageOffset(y: number, x: number, tilt: number): void {
     this.islandGroup.position.y = y;
+    this.islandGroup.position.x = x;
     this.islandGroup.rotation.z = tilt;
     this.propGroup.position.y = y * PROP_PARALLAX;
+    this.propGroup.position.x = x * PROP_PARALLAX;
     this.propGroup.rotation.z = tilt * PROP_PARALLAX;
   }
 
@@ -2105,29 +2604,41 @@ export class World {
    * siehe `update()`. Ohne die Option (und im low-Preset) bleibt es der
    * bisherige Hard-Swap in EINEM Frame.
    */
-  setBackground(key: BackgroundKey, variant = 0, opts?: { animate?: boolean }): void {
+  setBackground(
+    key: BackgroundKey,
+    variant = 0,
+    opts?: { animate?: boolean; major?: boolean },
+  ): void {
+    // D-24: `major` = Theme-Grenze — längere Fahrt (Inszenierung statt Übergang).
+    const major = opts?.major ?? false;
     if (opts?.animate) {
       if (this.trans) {
         // Nachgereichter Wechsel MITTEN im laufenden: nur das Ziel austauschen,
         // damit nie zwei Übergänge übereinander liegen. Steht die neue Bühne
         // schon in der Einfahrt, wird sie neu gebaut und fährt erneut ein.
+        // D-24: die Dauern (und die x-Parkposition!) des neuen Ziels übernehmen.
         this.trans.key = key;
         this.trans.variant = variant;
         this.trans.to = World.paletteFor(key, variant);
+        this.trans.outS = major ? MAJOR_OUT_S : MINOR_OUT_S;
+        this.trans.inS = major ? MAJOR_IN_S : MINOR_IN_S;
         if (this.trans.entering) {
           this.rebuild(key, variant);
-          this.setStageOffset(-DROP_Y, -TILT);
+          this.setStageOffset(-DROP_Y, RIDE_X, -TILT);
           this.trans.t = 0;
         }
         return;
       }
       // Die alte Bühne bleibt vorerst stehen und fährt aus; entsorgt wird sie
       // erst, wenn sie unter dem Bildrand ist (siehe `update`).
+      this.blend = null; // eine echte Fahrt ersetzt den leichten Blend
       this.trans = {
         key,
         variant,
         entering: false,
         t: 0,
+        outS: major ? MAJOR_OUT_S : MINOR_OUT_S,
+        inS: major ? MAJOR_IN_S : MINOR_IN_S,
         from: this.snapshotPalette(),
         to: World.paletteFor(key, variant),
       };
@@ -2135,11 +2646,13 @@ export class World {
     }
     // Hard-Swap: ein laufender Übergang wird verworfen (Prestige/Import setzen
     // die Bühne hart — dort darf keine halb ausgefahrene Insel hängenbleiben).
+    // D-24: Der Umbau bleibt sofort, aber die PALETTE blendet über 0.6 s —
+    // auch das low-Preset springt farblich nicht mehr (K-9: Aussage bleibt).
+    const from = this.snapshotPalette();
     this.trans = null;
     this.rebuild(key, variant);
-    this.setStageOffset(0, 0);
-    const p = World.paletteFor(key, variant);
-    this.applyPalette(p, p, 1);
+    this.setStageOffset(0, 0, 0);
+    this.blend = { t: 0, from, to: World.paletteFor(key, variant) };
   }
 
   /** Läuft gerade ein Bühnen-Wechsel? (Der Loop pausiert dann Treffer/Klicks.) */
@@ -2211,9 +2724,44 @@ export class World {
     if (rebuild && this.cur && !this.trans) this.rebuild(this.cur.key, this.cur.variant);
   }
 
+  /**
+   * **D-08** — Eskalationsstufe + stetigen Fortschritt der NÄCHSTEN Bühne
+   * setzen. Dasselbe Muster wie {@link setTrophy}: Die Glue setzt beide Werte,
+   * BEVOR sie die Kulisse wechselt, damit nicht erst die alte Bühne mit der
+   * neuen Stufe und eine Zeile später die neue gebaut wird.
+   *
+   * Im low-Preset (`ambientLife < 1`) wird die Stufe auf ZWEI Werte quantisiert
+   * (früh/spät): der Unterschied bleibt lesbar, die Zahl der Rebuilds halbiert
+   * sich. K-9 — weniger Dichte, dieselbe Aussage.
+   */
+  setStageTier(tier: number, k: number, rebuild = false): void {
+    const raw = Math.max(0, Math.min(2, Math.floor(Number.isFinite(tier) ? tier : 0)));
+    const t = this.ambientLife < 1 ? (raw === 0 ? 0 : 2) : raw;
+    const kk = Math.max(0, Math.min(1, Number.isFinite(k) ? k : 0));
+    if (t === this.stageTierValue && kk === this.stageKValue) return;
+    this.stageTierValue = t;
+    this.stageKValue = kk;
+    if (rebuild && this.cur && !this.trans) this.rebuild(this.cur.key, this.cur.variant);
+  }
+
+  /** D-08: Die gesetzte Eskalationsstufe — für den Headless-Beweis. */
+  get stageTier(): number {
+    return this.stageTierValue;
+  }
+
+  /** D-03: Theme-normierte Schatten-Deckkraft der zuletzt gebauten Bühne. */
+  get shadowOpacity(): number {
+    return this.shadowOpacityValue;
+  }
+
   /** Aktueller Höhen-Versatz der Bühne (0 = Ruhelage) — für den Headless-Beweis. */
   get stageY(): number {
     return this.islandGroup.position.y;
+  }
+
+  /** D-24: Aktueller Seiten-Versatz — das Duo tritt auch bei der x-Fahrt ab. */
+  get stageX(): number {
+    return this.islandGroup.position.x;
   }
 
   /** Die gesetzte Trophäen-Stufe (0…3) — für den Headless-Beweis. */
@@ -2230,30 +2778,79 @@ export class World {
    * blendet die Palette stetig — kein Hard-Cut, auch nicht am Himmel.
    */
   update(dt: number): void {
+    this.stepTransition(dt);
+    this.stepBlend(dt);
+    // D-23: Die Boss-Stimmung liegt ÜBER der Basis-Palette (Prioritätsregel
+    // im Loop: applyPalette → BossMood → killDim → Cinematics gewinnt).
+    this.stepMood(dt);
+  }
+
+  private stepTransition(dt: number): void {
     const tr = this.trans;
     if (!tr) return;
     tr.t += dt;
     if (!tr.entering) {
-      const k = Math.min(1, tr.t / OUT_S);
+      const k = Math.min(1, tr.t / tr.outS);
       const e = easeInCubic(k);
-      this.setStageOffset(-DROP_Y * e, TILT * e);
-      this.applyPalette(tr.from, tr.to, (k * OUT_S) / (OUT_S + IN_S));
+      // D-24: GERICHTETE Reise — die alte Insel fährt nach Screen-rechts
+      // (−x) und leicht nach unten hinaus, die Kulisse mit Parallaxe mit.
+      this.setStageOffset(-DROP_Y * e, -RIDE_X * e, TILT * e);
+      this.applyPalette(tr.from, tr.to, (k * tr.outS) / (tr.outS + tr.inS));
       if (k >= 1) {
         this.rebuild(tr.key, tr.variant);
-        this.setStageOffset(-DROP_Y, -TILT);
+        this.setStageOffset(-DROP_Y, RIDE_X, -TILT);
         tr.entering = true;
         tr.t = 0;
       }
       return;
     }
-    const k = Math.min(1, tr.t / IN_S);
+    const k = Math.min(1, tr.t / tr.inS);
     const e = easeOutBack(k);
-    this.setStageOffset(-DROP_Y * (1 - e), -TILT * (1 - e));
-    this.applyPalette(tr.from, tr.to, (OUT_S + k * IN_S) / (OUT_S + IN_S));
+    // D-24: …und die neue kommt aus der GEGENRICHTUNG (von Screen-links).
+    this.setStageOffset(-DROP_Y * (1 - e), RIDE_X * (1 - e), -TILT * (1 - e));
+    this.applyPalette(tr.from, tr.to, (tr.outS + k * tr.inS) / (tr.outS + tr.inS));
     if (k >= 1) {
-      this.setStageOffset(0, 0);
+      this.setStageOffset(0, 0, 0);
       this.applyPalette(tr.to, tr.to, 1);
       this.trans = null;
+    }
+  }
+
+  /** D-24-Tick: der leichte Palette-Blend des Hard-Swap-Pfads (kein Stopp). */
+  private stepBlend(dt: number): void {
+    const b = this.blend;
+    if (!b) return;
+    b.t += dt;
+    const k = Math.min(1, b.t / BLEND_S);
+    this.applyPalette(b.from, b.to, k);
+    if (k >= 1) this.blend = null;
+  }
+
+  /**
+   * D-23-Tick: Solange die Stimmung (an- oder ab-)läuft, wird jede Runde erst
+   * die RUHE-Palette absolut geschrieben und die Stimmung DARÜBER gelegt —
+   * absolute Werte pro Frame, nichts summiert sich auf, und ein `cancel` der
+   * Cinematics (schreibt alte Snapshots) heilt sich im nächsten Frame selbst.
+   * Läuft gerade ein G1-Wechsel, hat `stepTransition` die Basis schon
+   * geschrieben — dann legt sich die Stimmung direkt darüber.
+   */
+  private stepMood(dt: number): void {
+    if (this.moodK <= 0 && !this.moodOn) return;
+    this.moodK = Math.max(0, Math.min(1, this.moodK + ((this.moodOn ? 1 : -1) * dt) / MOOD_S));
+    // Basis nur schreiben, wenn sie dieses Frame nicht schon Transition oder
+    // Blend geschrieben haben — sonst überschriebe die Ruhe-Palette den Blend.
+    if (!this.trans && !this.blend && this.cur) {
+      const p = World.paletteFor(this.cur.key, this.cur.variant);
+      this.applyPalette(p, p, 1);
+    }
+    const k = this.moodK;
+    if (k > 0 && this.moodColor && this.lights) {
+      const L = this.lights;
+      L.rimA.color.lerp(this.moodColor, k);
+      L.rimB.color.lerp(this.moodColor, k);
+      L.key.intensity *= 1 + MOOD_KEY_LIFT * k;
+      L.fill.intensity *= 1 - MOOD_FILL_CUT * k;
+      (this.scene.fog as THREE.FogExp2).color.lerp(MOOD_DARK, MOOD_FOG_DARK * k);
     }
   }
 }

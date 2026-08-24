@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 
 import { INK, sh, toonMat, withOutline } from '../engine/materials';
+import { glowTexture } from '../engine/scene';
+import { RARITY_COLOR } from './skins';
 import { REST_SCALE, createFaceRig, type FaceRig } from './face-life';
 import {
   brushedTex,
@@ -27,6 +29,20 @@ export interface CharacterInstance {
    * dort ein No-op.
    */
   face: FaceRig;
+  /**
+   * D-18/D-19: Die Dauer-Signatur des Skins (+ Rarity-Funken-Loop). `main`
+   * ruft sie im Physik-Slot neben `applyIdleLife` — additive Bone-Anteile
+   * (Gyrator-Schwebe-Bob) dürfen NUR dort schreiben. Gate: `preset.toonFx` —
+   * das low-Preset zeigt die statische Emissive-Farbe ohne Animation (K-9).
+   * `undefined` = der Skin ist bewusst clean (classic — der ruhige Anker).
+   */
+  signature?: (t: number, beatV: number) => void;
+  /**
+   * D-18/D-19: Träger aller Signatur-/Rarity-SPRITES (Glut, Funken, Aura) —
+   * hängt unterm Rig-root (wird beim Skin-Wechsel mit entsorgt); `main`
+   * blendet ihn im low-Preset aus (low: nur Emissive + Bodenring).
+   */
+  fx: THREE.Group;
 }
 
 /**
@@ -70,9 +86,17 @@ export function buildCharacter(
   const accent = cfg.accent ?? (robot ? 0x38bdf8 : boss ? 0xffd24d : 0xa8e831);
   // Roadmap T3: Haut = hauchzartes Poren-Rauschen (Robo: gebürstetes Chassis-
   // Metall), Haare = Strähnen — near-white, der Skin-Farbton tintet weiter.
+  // D-02: `flash: true` = dieses Material nimmt den Rim-Blitz beim Treffer an.
+  // Nur die großen Flächen der Spielfigur (Haut, Hose, Haar) — Zubehör und
+  // Kulisse blitzen nicht mit, sonst flackert das ganze Bild statt der Kante.
+  // D-18 diamond: „harte Glanzkanten" — der Glint-Term der Hauptmaterialien
+  // steigt 0.2 → 0.55 (reiner Uniform-WERT beim Bau, gleicher Programm-Cache).
+  const gemGlint = flair === 'ice' ? { glint: 0.55 } : {};
   const skinT = toonMat({
     color: cfg.skin,
     bands,
+    flash: true,
+    ...gemGlint,
     map: robot ? repeated(brushedTex(2), 2, 2) : repeated(poreTex(1), 2, 2),
   });
   // Shorts (und Cheeks) tragen PRO STIL ihren eigenen Stoff (Goal „apply
@@ -93,12 +117,20 @@ export function buildCharacter(
   const shortsT = toonMat({
     color: cfg.shorts,
     bands,
+    flash: true,
+    ...gemGlint,
     map: shortsDetail,
     ...(disco
       ? { emissiveMap: repeated(sequinTex(9), 2.4, 2.4), emissive: accent, emissiveIntensity: 0.2 }
       : {}),
   });
-  const hairT = toonMat({ color: cfg.hair, bands, map: repeated(strandTex(1), 2, 2) });
+  const hairT = toonMat({
+    color: cfg.hair,
+    bands,
+    flash: true,
+    ...gemGlint,
+    map: repeated(strandTex(1), 2, 2),
+  });
   // host: the `shorts` colour doubles as the suit fabric (trousers + jacket).
   const suitT = shortsT;
   const jointT = toonMat({ color: 0x525c6e, bands, map: repeated(brushedTex(4), 2, 2) });
@@ -120,6 +152,26 @@ export function buildCharacter(
   const leatherLightT = toonMat({ color: 0x6b4522, bands, map: repeated(poreTex(2), 3, 3) });
   const goldTrimT = toonMat({ color: accent, bands, map: repeated(brushedTex(2), 2, 2) });
   const glowT = toonMat({ color: accent, emissive: accent, emissiveIntensity: 0.9, bands });
+  // D-18 neon: „leuchtende Kantenlinien" — der dunkelste Skin des Katalogs
+  // glüht endlich (Hood-Band, Wraps, Gürtel teilen alle dieses glowT). Ein
+  // statischer Emissive-WERT: lesbar im Dunkeln, auch im low-Preset (K-9).
+  if (ninja) glowT.emissiveIntensity = 1.2;
+  // D-18/D-19: Signatur-Bausteine + Sprite-Träger (siehe CharacterInstance).
+  const sigParts: ((t: number, beatV: number) => void)[] = [];
+  const fx = new THREE.Group();
+  const spriteMat = (color: number, opacity = 1): THREE.SpriteMaterial =>
+    new THREE.SpriteMaterial({
+      map: glowTexture(),
+      color,
+      transparent: true,
+      opacity,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+  /** D-18 pirate: Bandana-Zipfel, die im Wind flattern (Basis-Rotation cachen). */
+  const flutterTails: { m: THREE.Object3D; base: number }[] = [];
+  /** D-18 boss: das wehende Cape (Referenz aus dem Boss-Block unten). */
+  let capeRef: THREE.Mesh | null = null;
   // Facial ink + eye whites are unlit so the face always reads.
   const inkFlat = new THREE.MeshBasicMaterial({ color: line, toneMapped: false });
   const eyeWhite = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
@@ -379,9 +431,11 @@ export function buildCharacter(
     });
     if (flair === 'saucer') {
       // tilted flying-saucer halo with glow studs
+      // D-17: +20 % Radius — der Halo ist das einzige Rücken-Merkmal dieses
+      // Skins und muss auch von hinten über die Schulterlinie hinausragen.
       const ring = O(
         new THREE.Mesh(
-          new THREE.TorusGeometry(0.52, 0.05, 10, 30),
+          new THREE.TorusGeometry(0.62, 0.055, 10, 30),
           toonMat({ color: 0xd7dee9, bands }),
         ),
         0.012,
@@ -426,6 +480,19 @@ export function buildCharacter(
         e.position.set(s * 0.095, 0.05, 0.3);
         head.add(e);
       });
+      // D-17: „Neon" hatte bisher nur einen eingefärbten Schädel — von hinten
+      // war er von `classic` nicht zu unterscheiden. Jetzt eine echte KAPUZE:
+      // eine größere Schale um den Kopf plus ein Zipfel nach hinten.
+      {
+        const hood = O(new THREE.Mesh(new THREE.SphereGeometry(0.4, 22, 18), hairT), 0.02);
+        hood.scale.set(1.08, 1.02, 1.12);
+        hood.position.set(0, 0.06, -0.05);
+        head.add(hood);
+        const peak = O(new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.46, 10), hairT), 0.016);
+        peak.position.set(0, 0.12, -0.36);
+        peak.rotation.x = -1.15;
+        head.add(peak);
+      }
       const band = O(new THREE.Mesh(new THREE.TorusGeometry(0.315, 0.035, 8, 28), glowT), 0.01);
       band.position.y = 0.12;
       band.rotation.x = Math.PI / 2 - 0.18;
@@ -472,7 +539,26 @@ export function buildCharacter(
         knot.position.set(0.22 + s * 0.05, -0.02, -0.28);
         knot.rotation.z = 0.5 + s * 0.25;
         head.add(knot);
+        // D-18 pirate: die Zipfel flattern — Signatur „flatterndes Tuch".
+        flutterTails.push({ m: knot, base: knot.rotation.z });
       });
+      // D-17: Dreispitz über dem Bandana — DER Kapitäns-Umriss. Drei
+      // hochgeschlagene Krempen-Segmente auf einer flachen Kalotte; grob
+      // gebaut, weil nur die Kontur zählt.
+      {
+        const hatT = toonMat({ color: 0x241a12, bands });
+        const crown3 = O(new THREE.Mesh(new THREE.SphereGeometry(0.3, 18, 14), hatT), 0.016);
+        crown3.scale.set(1, 0.62, 1);
+        crown3.position.y = 0.3;
+        head.add(crown3);
+        for (let i = 0; i < 3; i++) {
+          const a = (i / 3) * Math.PI * 2 + 0.5;
+          const brim = O(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.055, 0.24), hatT), 0.014);
+          brim.position.set(Math.cos(a) * 0.24, 0.3, Math.sin(a) * 0.24);
+          brim.rotation.set(0, -a, 0.42);
+          head.add(brim);
+        }
+      }
       const ring = O(
         new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 8, 16), glowT), // gold accent
         0.008,
@@ -497,9 +583,18 @@ export function buildCharacter(
       face({ grin: 0.1, blush: 0xd9765a });
       // real afro: a core orb wrapped in a cloud of puffs (reads as actual hair,
       // not a helmet) + sideburns
-      const afro = O(new THREE.Mesh(new THREE.SphereGeometry(0.42, 26, 26), hairT), 0.024);
+      // D-17: Der Afro ist die SILHOUETTE dieses Skins — von hinten sieht die
+      // Kamera nur Kopf und Hose, also muss der Kopf-Umriss allein tragen.
+      const afro = O(new THREE.Mesh(new THREE.SphereGeometry(0.56, 26, 26), hairT), 0.024);
       afro.position.y = 0.18;
       head.add(afro);
+      // Zweite Puff-Lage außen herum — der Umriss wird wolkig statt kugelig.
+      for (let i = 0; i < 7; i++) {
+        const a = (i / 7) * Math.PI * 2;
+        const puff = O(new THREE.Mesh(new THREE.SphereGeometry(0.21, 14, 14), hairT), 0.02);
+        puff.position.set(Math.cos(a) * 0.52, 0.24 + Math.sin(a * 2) * 0.16, Math.sin(a) * 0.44);
+        head.add(puff);
+      }
       (
         [
           [0.3, 0.44, 0.08, 0.17],
@@ -539,12 +634,13 @@ export function buildCharacter(
       if (ice) {
         // crystal crown — jagged gem spikes
         const gem = toonMat({ color: accent, emissive: accent, emissiveIntensity: 0.35, bands });
+        // D-17: +30 % Höhe — die Zacken sind die Kontur, nicht das Detail.
         const spikes: [number, number][] = [
-          [0, 0.36],
-          [0.14, 0.24],
-          [-0.14, 0.24],
-          [0.24, 0.16],
-          [-0.24, 0.16],
+          [0, 0.47],
+          [0.14, 0.31],
+          [-0.14, 0.31],
+          [0.24, 0.21],
+          [-0.24, 0.21],
         ];
         spikes.forEach(([x, h]) => {
           const cSpike = O(new THREE.Mesh(new THREE.ConeGeometry(0.07, h, 6), gem), 0.01);
@@ -733,6 +829,61 @@ export function buildCharacter(
     }
     return { shoulder, elbow, hand };
   }
+  // -------------------------------------------------------------------------
+  // D-17 „Zehn Silhouetten, zehn Figuren" — Rücken-Merkmale.
+  //
+  // Die Kamera sieht die Figur fast nur von HINTEN (shots/SHEET-skins.png): Was
+  // vorne am Gesicht sitzt (Visiere, Masken, Brillen), ist im Spiel nie zu
+  // sehen. Was zählt, ist die RÜCKEN-Kontur — deshalb bekommt jeder der vier
+  // Doppelgänger hier sein eigenes, grobes Umriss-Merkmal. Alles hängt unter
+  // vorhandenen Bones; kein Bone wird umbenannt oder verschoben, die
+  // Cheek-Physik bleibt unberührt (K-8).
+  // -------------------------------------------------------------------------
+  if (flair === 'pirate') {
+    // Mantelschoß: kurze Halb-Schale hüfthoch — die Kapitäns-Kontur.
+    const coat = sh(
+      new THREE.Mesh(
+        new THREE.CylinderGeometry(0.42, 0.72, 0.55, 16, 1, true, -Math.PI / 2, Math.PI),
+        toonMat({ color: 0x8f2222, bands, side: THREE.DoubleSide }),
+      ),
+    );
+    coat.position.set(0, 0.06, 0.12);
+    coat.scale.z = 0.68;
+    spine.add(coat);
+  } else if (flair === 'lava') {
+    // Flammenkamm die ganze Rückenlinie hinunter — abnehmende Zacken.
+    for (let i = 0; i < 5; i++) {
+      const h = 0.34 - i * 0.05;
+      const fin = O(new THREE.Mesh(new THREE.ConeGeometry(0.075, h, 6), glowT), 0.01);
+      fin.position.set(0, 1.12 - i * 0.28, -0.24 - i * 0.012);
+      fin.rotation.x = -0.42;
+      spine.add(fin);
+    }
+  } else if (host) {
+    // Frackschöße: zwei flache Keile, die nach hinten fallen.
+    [-1, 1].forEach((s2) => {
+      const tail = O(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.5, 0.02), suitT), 0.012);
+      tail.position.set(s2 * 0.13, 0.05, -0.28);
+      tail.rotation.set(-0.22, 0, s2 * 0.08);
+      spine.add(tail);
+    });
+  }
+  if (boss && flair === 'ice') {
+    // Diamant: zwei Rücken-Kristalle über der Cape-Kante.
+    [-1, 1].forEach((s2) => {
+      const shard = O(
+        new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.14),
+          toonMat({ color: accent, emissive: accent, emissiveIntensity: 0.35, bands }),
+        ),
+        0.01,
+      );
+      shard.position.set(s2 * 0.22, 1.18, -0.2);
+      shard.rotation.set(0.3, 0, s2 * 0.5);
+      spine.add(shard);
+    });
+  }
+
   const armL = arm(1);
   const armR = arm(-1);
   if (host) {
@@ -748,6 +899,11 @@ export function buildCharacter(
     mic.position.y = -0.76;
     mic.rotation.x = 1.1;
     armR.elbow.add(mic);
+    // D-18 host: „Mikrofon-Glanz" — ein Glint-Stud auf dem Mikro-Kopf. Das
+    // Mikro selbst gab es schon; die Signatur ist der ruhige Lichtpunkt.
+    const micStud = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 8), glowT);
+    micStud.position.set(0.045, 0.185, 0.05);
+    mic.add(micStud);
   }
 
   // ---------- LEGS (hip→knee→foot) ----------
@@ -805,6 +961,28 @@ export function buildCharacter(
       const wrap = O(new THREE.Mesh(new THREE.CylinderGeometry(lw, lw, 0.16, 12), glowT), 0.008);
       wrap.position.y = -0.78;
       knee.add(wrap);
+    }
+    if (disco) {
+      // D-17: Schlaghosen — die BEINLINIE trägt diesen Skin. Ein Kegelstumpf am
+      // Unterschenkel macht aus der geraden Silhouette eine Glocke.
+      const cuff = O(
+        new THREE.Mesh(
+          new THREE.CylinderGeometry(lw + 0.02, lw + 0.13, 0.66, 16, 1, true),
+          shortsT,
+        ),
+        0.014,
+      );
+      cuff.position.y = -0.66;
+      knee.add(cuff);
+    }
+    if (flair === 'lava') {
+      // D-17: zerklüftete Waden — zwei kleine Auswüchse pro Unterschenkel.
+      [0, 1].forEach((i) => {
+        const spur = O(new THREE.Mesh(new THREE.TetrahedronGeometry(0.11), darkT), 0.01);
+        spur.position.set(0, -0.35 - i * 0.32, -0.14 - i * 0.02);
+        spur.rotation.set(0.5 + i, i * 1.2, 0.4);
+        knee.add(spur);
+      });
     }
     // ---- real footwear per style; every sole bottom stays at knee-local
     // -1.075 so the feet keep planting on the floor exactly as before
@@ -978,7 +1156,12 @@ export function buildCharacter(
     );
     cape.position.set(0, 0.48, 0.16);
     cape.scale.z = 0.72;
+    // D-17: +35 % Länge — der Boss-Skin liest von hinten als bodenlanger Mantel
+    // statt als Schulterumhang. Boden-Clearance geprüft (Fuß-Unterkante liegt
+    // bei Becken −2.12, die Cape-Unterkante bei −0.64).
+    cape.scale.y = 1.35;
     spine.add(cape);
+    capeRef = cape; // D-18 boss: Signatur „wehendes Cape" (Loop unten)
     if (ice) {
       // floating sparkle gems on the chest
       const gemT = toonMat({ color: 0xffffff, emissive: 0xdff6ff, emissiveIntensity: 0.8, bands });
@@ -1008,6 +1191,134 @@ export function buildCharacter(
   }
   const cheeks: Cheek[] = [mkCheek(anchorL, 1), mkCheek(anchorR, -1)];
 
+  // -------------------------------------------------------------------------
+  // D-18 „Skin-Signatur-FX" — genau EINE Dauer-Signatur je Skin, so leise,
+  // dass sie den Klick-Effekt nie überstimmt (F7: die Klick-Splitter bleiben
+  // Theme-farbig). Statische Anteile (neon-Emissive, diamond-Glint, host-Stud)
+  // stehen oben beim Bau; hier stehen die ANIMIERTEN Anteile.
+  // + D-19 „Rarity sichtbar": Funken/Glanz/Aura nach Stufe (Ring hängt in
+  // main am Ring-Pool). Sprites leben im `fx`-Träger (low blendet ihn aus).
+  // -------------------------------------------------------------------------
+  root.add(fx);
+  if (flair === 'lava') {
+    // Riss-Glühen pulst + vier kleine Glutfunken steigen die Rückenlinie
+    // hinauf (klein und HINTER der Figur — K-3, und K-2-geprüft: die Glut
+    // bleibt ein Detail, kein Dauer-Orange-Akzent).
+    const embers: THREE.Sprite[] = [];
+    for (let i = 0; i < 4; i++) {
+      const e = new THREE.Sprite(spriteMat(0xff9a3d, 0.8));
+      e.scale.setScalar(0.11);
+      fx.add(e);
+      embers.push(e);
+    }
+    sigParts.push((t) => {
+      glowT.emissiveIntensity = 0.7 + 0.4 * Math.sin(t * 2.1);
+      embers.forEach((e, i) => {
+        const k = (t * 0.35 + i * 0.25) % 1;
+        e.position.set(
+          Math.sin(i * 2.1 + t * 0.7) * 0.3,
+          -0.4 + k * 2.0,
+          -0.25 + Math.cos(i * 1.7) * 0.1,
+        );
+        (e.material as THREE.SpriteMaterial).opacity = 0.75 * (1 - k);
+      });
+    });
+  } else if (disco) {
+    // Pailletten-Shimmer: die Sequin-Emissive der Shorts atmet 0.15–0.45.
+    sigParts.push((t) => {
+      shortsT.emissiveIntensity = 0.3 + 0.15 * Math.sin(t * 2.7);
+    });
+  } else if (robot && faceLife.visorPixels.length > 0) {
+    // Visor-Scan: ein Lauflicht wandert über die Pixel — per SKALA, nicht per
+    // Material (die Pixel teilen glowT; ein Material-Fork wäre K-7-Bruch).
+    const px = faceLife.visorPixels;
+    sigParts.push((t) => {
+      px.forEach((p, i) => {
+        p.scale.y = 1 + 0.7 * Math.max(0, Math.sin(t * 3.2 - i * 0.9));
+      });
+    });
+  } else if (flair === 'ice') {
+    // diamond: alle ~4 s ein kurzer Funkel-Blitz an wechselnder Kante.
+    const spark = new THREE.Sprite(spriteMat(0xdff6ff, 0));
+    spark.scale.setScalar(0.16);
+    fx.add(spark);
+    const edges: readonly [number, number, number][] = [
+      [0.32, 1.35, 0.12],
+      [-0.28, 0.9, 0.2],
+      [0.16, 1.72, -0.05],
+      [-0.2, 0.35, 0.26],
+    ];
+    sigParts.push((t) => {
+      const cyc = t / 4;
+      const e = edges[Math.floor(cyc) % edges.length]!;
+      const k = cyc % 1;
+      spark.position.set(e[0], e[1], e[2]);
+      (spark.material as THREE.SpriteMaterial).opacity =
+        k < 0.12 ? Math.sin((k / 0.12) * Math.PI) : 0;
+    });
+  } else if (boss && capeRef) {
+    // boss: das Cape weht — langsam, schwer, königlich (Mesh, kein Bone).
+    const c = capeRef;
+    sigParts.push((t) => {
+      c.rotation.x = 0.06 * Math.sin(t * 1.3);
+    });
+  } else if (flair === 'pirate' && flutterTails.length > 0) {
+    // pirate: die Bandana-Zipfel flattern (absolute Writes um die Basis).
+    sigParts.push((t) => {
+      flutterTails.forEach((f, i) => {
+        f.m.rotation.z = f.base + 0.28 * Math.sin(t * 3.1 + i * 1.9);
+      });
+    });
+  } else if (flair === 'saucer') {
+    // gyrator: Schwebe-Bob — ADDITIV auf dem root, deshalb darf die Signatur
+    // nur im Physik-Slot laufen (applyPose resettet jeden Fixschritt).
+    sigParts.push((t) => {
+      root.position.y += Math.sin(t * 1.6) * 0.05;
+    });
+  }
+  // D-19: Rarity-Ausstattung (aufsteigend; der Bodenring ab „rare" hängt in
+  // `main` am geteilten Ring-Pool — Pool-Budget: Boss + Rarity = 2 Slots).
+  const rarity = cfg.rarity;
+  if (rarity === 'epic' || rarity === 'legendary' || rarity === 'mythic') {
+    const sparks: THREE.Sprite[] = [];
+    for (let i = 0; i < 3; i++) {
+      const s2 = new THREE.Sprite(spriteMat(RARITY_COLOR[rarity], 0.8));
+      s2.scale.setScalar(0.09);
+      fx.add(s2);
+      sparks.push(s2);
+    }
+    // Langsam kreisende Funken — Radius außerhalb der Silhouette (K-3).
+    sigParts.push((t) => {
+      sparks.forEach((s2, i) => {
+        const a = t * 0.9 + (i / 3) * Math.PI * 2;
+        s2.position.set(
+          Math.cos(a) * 0.62,
+          0.15 + Math.sin(t * 1.3 + i * 2.1) * 0.35,
+          Math.sin(a) * 0.62,
+        );
+      });
+    });
+  }
+  if (rarity === 'legendary' || rarity === 'mythic') {
+    // Kantenglanz: die Akzent-Materialien leuchten eine Stufe höher.
+    goldTrimT.emissive.set(accent);
+    goldTrimT.emissiveIntensity = 0.25;
+    glowT.emissiveIntensity += 0.25;
+  }
+  if (rarity === 'mythic') {
+    // Aura-Schleier: EIN großer, sehr leiser Glow HINTER der Figur (K-3).
+    const aura = new THREE.Sprite(spriteMat(RARITY_COLOR.mythic, 0.1));
+    aura.scale.setScalar(2.6);
+    aura.position.set(0, 0.4, -0.55);
+    fx.add(aura);
+  }
+  const signature =
+    sigParts.length > 0
+      ? (t: number, beatV: number): void => {
+          for (const f of sigParts) f(t, beatV);
+        }
+      : undefined;
+
   const rig: Rig = { root, pelvis, spine, head, armL, armR, legL, legR };
   root.updateMatrixWorld(true);
   const t = new THREE.Vector3();
@@ -1018,5 +1329,5 @@ export function buildCharacter(
     c.z = t.z;
   });
 
-  return { rig, cheeks, face: faceLife };
+  return { rig, cheeks, face: faceLife, signature, fx };
 }

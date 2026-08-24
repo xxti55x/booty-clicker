@@ -71,6 +71,49 @@ function makeEnv(): THREE.CanvasTexture {
   return t;
 }
 
+/** Maße des Spieler-Schattens (D-03) — an den Füßen, nicht als Teppich. */
+const PLAYER_SHADOW_W = 3.4;
+const PLAYER_SHADOW_H = 2.4;
+
+let blobTex: THREE.CanvasTexture | null = null;
+
+/**
+ * D-03 — Weicher elliptischer Kontaktschatten als Decal.
+ *
+ * EINE gecachte Radial-Gradient-Textur für die ganze Bühne, aber ein Material
+ * PRO Instanz: Deckkraft und Größe reagieren je Akteur auf Sprunghöhe und
+ * Deckhelligkeit des Themes. Der Programm-TYP existiert ohnehin schon
+ * (Basic + Map + transparent), es kommt also kein Shader dazu (K-7).
+ *
+ * Liegt flach auf dem Deck (`rotation.x = −π/2`), schreibt keine Tiefe und
+ * kostet damit weder Sortier- noch Schattenkarten-Arbeit.
+ */
+export function blobShadow(w: number, h: number, opacity: number): THREE.Mesh {
+  if (!blobTex) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const x = c.getContext('2d')!;
+    const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+    g.addColorStop(0, 'rgba(0,0,0,1)');
+    g.addColorStop(0.45, 'rgba(0,0,0,.55)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = g;
+    x.fillRect(0, 0, 128, 128);
+    blobTex = new THREE.CanvasTexture(c);
+  }
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, h),
+    new THREE.MeshBasicMaterial({
+      map: blobTex,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+    }),
+  );
+  m.rotation.x = -Math.PI / 2;
+  return m;
+}
+
 function makeGlowTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
@@ -84,6 +127,16 @@ function makeGlowTexture(): THREE.CanvasTexture {
   return new THREE.CanvasTexture(c);
 }
 
+let glowTexCache: THREE.CanvasTexture | null = null;
+/**
+ * D-14/D-18: Der geteilte weiche Glow-Punkt — EINE gecachte Textur für alle
+ * Glow-Sprites (Kulisse UND Skin-Signaturen/Rarity-Funken), damit kein zweiter
+ * Kanal entsteht. Wer sie nutzt, klont nur das MATERIAL, nie die Textur.
+ */
+export function glowTexture(): THREE.CanvasTexture {
+  return (glowTexCache ??= makeGlowTexture());
+}
+
 /**
  * Build the renderer, scene, camera, lighting and static stage.
  * Ported 1:1 from the prototype's RENDERER section (behaviour preserved).
@@ -95,7 +148,13 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.45; // Goal: alle Bühnen deutlich heller
+  // D-01 (Belichtungs-Disziplin): Die Bühnenmitte brannte bei 1.45 aus — die
+  // Spielfigur las als weißer Klecks (shots/theme-z45.png), das low-Preset sah
+  // BESSER aus als high. Grundhelligkeit runter; das verlorene „hell" kommt aus
+  // sattereren Theme-Paletten zurück (kleinerer Weiß-Lift in `paletteFor`),
+  // nicht aus mehr Belichtung. Beide Presets erben denselben Wert — die
+  // Belichtung ist Grundwahrheit, kein high-Extra (K-9).
+  renderer.toneMappingExposure = 1.12;
 
   const scene = new THREE.Scene();
   // Dichte auf die Halbraum-Kamera abgestimmt (Distanz ~45–50): die Insel bleibt
@@ -156,7 +215,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
   scene.add(beat);
   const lights: SceneLights = { hemi, key, fill, rimA, rimB };
 
-  const GLOW = makeGlowTexture();
+  const GLOW = glowTexture();
   const glowSprite: GlowSpriteFn = (color, size, x, y, z) => {
     const m = new THREE.SpriteMaterial({
       map: GLOW,
@@ -185,26 +244,13 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
     envMapIntensity: 0.9,
   });
 
-  // Soft contact-shadow decal under the character.
-  const contactShadow = ((): THREE.Mesh => {
-    const c = document.createElement('canvas');
-    c.width = c.height = 128;
-    const x = c.getContext('2d')!;
-    const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
-    g.addColorStop(0, 'rgba(0,0,0,.5)');
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    x.fillStyle = g;
-    x.fillRect(0, 0, 128, 128);
-    const t = new THREE.CanvasTexture(c);
-    const m = new THREE.Mesh(
-      new THREE.PlaneGeometry(4.5, 3.2),
-      new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false }),
-    );
-    m.rotation.x = -Math.PI / 2;
-    m.position.y = -2.385;
-    scene.add(m);
-    return m;
-  })();
+  // D-03: Der Kontaktschatten des Spielers kommt jetzt aus derselben Fabrik wie
+  // der des Rivalen — ein Decal-Typ für die ganze Bühne. Der alte Fleck war mit
+  // 4.5 × 3.2 deutlich zu groß und las auf dunklem Deck als Schmutz
+  // (shots/theme-z35.png); die kleinere Ellipse sitzt AN den Füßen.
+  const contactShadow = blobShadow(PLAYER_SHADOW_W, PLAYER_SHADOW_H, 0.5);
+  contactShadow.position.y = -2.385;
+  scene.add(contactShadow);
 
   return { renderer, scene, camera, beat, skyMat, floorMat, glowSprite, lights, contactShadow };
 }

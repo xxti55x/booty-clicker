@@ -48,6 +48,23 @@ export interface QualityPreset {
    * teuer — low schaltet den globalen Uniform auf 0.
    */
   toonFx: boolean;
+  /**
+   * D-07: Die beiden Rim-PUNKTLICHTER der Bühne. `false` (low) stellt ihre
+   * INTENSITÄT auf 0 — nie `visible`, das änderte die Licht-Anzahl im
+   * Shader-Hash und erzwänge beim Preset-Wechsel Neukompilate (K-7). Ersatz
+   * ist ein kräftigerer Hemi-Ground-Anteil, die Lichtrichtung bleibt gleich.
+   */
+  rimLights: boolean;
+  /**
+   * D-02: Skalierung der Klick-Splitterzahl (low = halbe Menge). `burstCount`
+   * bleibt die Quelle der Menge, das Preset dosiert nur.
+   */
+  burstScale: number;
+  /**
+   * D-03: Reagiert der Kontaktschatten auf die Sprunghöhe (größer + blasser)?
+   * `false` (low) = statisches Decal — der Schatten IST da, er atmet nur nicht.
+   */
+  dynamicBlobShadow: boolean;
 }
 
 const PRESETS: Record<Quality, QualityPreset> = {
@@ -62,6 +79,9 @@ const PRESETS: Record<Quality, QualityPreset> = {
     ambientLife: 0.5,
     bloom: false,
     toonFx: false,
+    rimLights: false,
+    burstScale: 0.5,
+    dynamicBlobShadow: false,
   },
   medium: {
     pixelRatioCap: 1.5,
@@ -74,6 +94,9 @@ const PRESETS: Record<Quality, QualityPreset> = {
     ambientLife: 1,
     bloom: false,
     toonFx: true,
+    rimLights: true,
+    burstScale: 1,
+    dynamicBlobShadow: true,
   },
   high: {
     pixelRatioCap: 2,
@@ -86,6 +109,9 @@ const PRESETS: Record<Quality, QualityPreset> = {
     ambientLife: 1,
     bloom: true,
     toonFx: true,
+    rimLights: true,
+    burstScale: 1,
+    dynamicBlobShadow: true,
   },
 };
 

@@ -40,6 +40,51 @@ interface IslandCtx {
   g: THREE.Group;
   hue: Hue;
   anims: WorldAnim[];
+  /** D-10: G3-Dichtefaktor — low halbiert Ausläufer/Bruchstück-Zahlen. */
+  density: number;
+}
+
+/**
+ * D-10 — Insel-SILHOUETTE pro Theme (F1): Die Spielfläche (floorMat-Disc,
+ * Tiles, AO, Lounge) bleibt für alle Themes kreisrund — aber KANTE und
+ * Unterbau brechen die Kreiskontur wirklich: Synth = umschriebenes Hexagon
+ * (die Ecken ragen ~1 Einheit über die Deckkante hinaus), Beach = Sandbank
+ * mit Radius-Jitter + Ausläufern, Space = zersprengter 5er-Ring mit
+ * abgesprengten Brocken. Club bleibt bewusst rund (Referenz-Silhouette).
+ */
+/** D-10 Synth: Umschriebenes Hexagon — Ecken bei R/cos(30°) ≈ 7.39. */
+const HEX_R = ISLAND_R / Math.cos(Math.PI / 6);
+/** D-10 Space: Umschriebenes Fünfeck des zersprengten Rings. */
+const PENT_R = (ISLAND_R / Math.cos(Math.PI / 5)) * 0.98;
+
+/** Deterministischer LCG (D-10-Jitter — gleiche Kontur bei jedem Rebuild). */
+function lcg(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 0xffffffff;
+  };
+}
+
+/**
+ * D-10: Radius-Jitter auf einem offenen Zylinder-Mantel — skaliert jede
+ * Vertex-SPALTE radial (Naht-Spalte = Spalte 0, damit die Kante schließt).
+ * `off[i]` in Welt-Einheiten, positiv = nach außen.
+ */
+function jitterRim(geo: THREE.CylinderGeometry, off: number[]): void {
+  const segs = off.length - 1;
+  const pos = geo.attributes.position!;
+  for (let i = 0; i < pos.count; i++) {
+    const col = i % (segs + 1);
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    const r = Math.hypot(x, z) || 1;
+    const f = (r + off[col === segs ? 0 : col]!) / r;
+    pos.setX(i, x * f);
+    pos.setZ(i, z * f);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
 }
 
 function at(m: THREE.Object3D, x: number, y: number, z: number): THREE.Object3D {
@@ -185,24 +230,28 @@ function synthIsland({ g, hue, anims }: IslandCtx): void {
     bumpMap: chromeTex,
     bumpScale: 0.3,
   });
+  // D-10: Das Deck sitzt auf einem UMSCHRIEBENEN Hexagon — die sechs Ecken
+  // ragen ~1 Einheit über die runde Deckkante hinaus, der UMRISS ist das
+  // Sechseck (F1-Auflage: die Kreiskontur wird wirklich gebrochen).
   const rim = new THREE.Mesh(
-    new THREE.CylinderGeometry(ISLAND_R, ISLAND_R * 0.93, 1.1, 48, 1, true),
+    new THREE.CylinderGeometry(HEX_R, HEX_R * 0.93, 1.1, 6, 1, true),
     chrome,
   );
   g.add(at(rim, 0, TOP_Y - 0.55, 0));
   const cap = new THREE.Mesh(
-    new THREE.CircleGeometry(ISLAND_R * 0.94, 40),
+    new THREE.CircleGeometry(HEX_R * 0.9, 6),
     toonMat({ color: hue(0x241c3e), emissive: hue(0x120e22), emissiveIntensity: 0.5 }),
   );
   cap.rotation.x = Math.PI / 2;
   g.add(at(cap, 0, TOP_Y - 1.12, 0));
-  // Doppelte Neonkante (pink + cyan) — das Synthwave-Markenzeichen.
+  // Doppelte Neonkante (pink + cyan) — das Synthwave-Markenzeichen. D-10:
+  // beide Tori auf 6 Segmente, rotations-gleich mit den Hexagon-Ecken.
   const pink = toonMat({ color: hue(0xff3fb0), emissive: hue(0xff3fb0), emissiveIntensity: 1.0 });
   const cyan = toonMat({ color: hue(0x2ff5e8), emissive: hue(0x2ff5e8), emissiveIntensity: 0.85 });
-  const e1 = new THREE.Mesh(new THREE.TorusGeometry(ISLAND_R - 0.05, 0.085, 10, 64), pink);
+  const e1 = new THREE.Mesh(new THREE.TorusGeometry(HEX_R - 0.06, 0.085, 10, 6), pink);
   e1.rotation.x = Math.PI / 2;
   g.add(at(e1, 0, TOP_Y + 0.02, 0));
-  const e2 = new THREE.Mesh(new THREE.TorusGeometry(ISLAND_R * 0.985, 0.05, 8, 64), cyan);
+  const e2 = new THREE.Mesh(new THREE.TorusGeometry(HEX_R * 0.93, 0.05, 8, 6), cyan);
   e2.rotation.x = Math.PI / 2;
   g.add(at(e2, 0, TOP_Y - 1.05, 0));
   // Invertierte Pyramide als Kiel — dunkel mit Neon-Drahtgitter.
@@ -268,7 +317,7 @@ const i2 = (x: number): boolean => Math.abs(Math.round(x)) % 2 === 0;
 // ---------------------------------------------------------------------------
 // Beach — Sandbank mit Sandstein-Schichten, Muscheln + grünen Mini-Inseln
 // ---------------------------------------------------------------------------
-function beachIsland({ g, hue, anims }: IslandCtx): void {
+function beachIsland({ g, hue, anims, density }: IslandCtx): void {
   const sandstoneTex = repeated(strataTex(2), 2.5, 1);
   const sandstone = toonMat({
     color: hue(0xd9b273),
@@ -287,15 +336,62 @@ function beachIsland({ g, hue, anims }: IslandCtx): void {
     bumpMap: earthDarkTex,
     bumpScale: 0.35,
   });
-  const rim = new THREE.Mesh(
-    new THREE.CylinderGeometry(ISLAND_R, ISLAND_R * 0.85, 1.7, 48, 1, true),
-    sandstone,
-  );
+  // D-10: UNREGELMÄSSIGE Sandbank statt Kreiszylinder — deterministischer
+  // Radius-Jitter NACH AUSSEN (nie unter ISLAND_R − 0.1 nach innen), die
+  // Kante wird eine gewachsene Küstenlinie, kein gedrehtes Werkstück.
+  const rimGeo = new THREE.CylinderGeometry(ISLAND_R, ISLAND_R * 0.85, 1.7, 48, 1, true);
+  {
+    const rnd = lcg(4711);
+    const off: number[] = [];
+    for (let i = 0; i <= 48; i++) {
+      const a = (i / 48) * Math.PI * 2;
+      // ABNAHME D-10: Der reine Zufalls-Jitter (±0.35) franste die Kante nur
+      // aus — im Bild blieb ein Kreis mit Schaumband, und ein Ornamentband ist
+      // laut Auflage KEINE Silhouette. Jetzt tragen drei tiefe Lappen (sin 3a)
+      // plus eine zweite Welle (sin 5a) den Bruch: der Umriss bekommt Buchten
+      // und Nasen. Alle Werte sind POSITIV — die Sandbank wächst nur nach
+      // AUSSEN, die runde Spielfläche (F1) bleibt vollständig überdeckt.
+      const lobe = 0.5 * Math.sin(a * 3 + 0.7) + 0.22 * Math.sin(a * 5 - 1.3);
+      // Die Körnung bleibt klein: viel Rauschen auf 48 Segmenten facettiert die
+      // Kante, statt sie zu formen — die Lappen tragen den Bruch.
+      off.push(0.6 + lobe + rnd() * 0.05); // ≈ +0.1 … +1.4
+    }
+    jitterRim(rimGeo, off);
+  }
+  const rim = new THREE.Mesh(rimGeo, sandstone);
   g.add(at(rim, 0, TOP_Y - 0.85, 0));
+  // D-10: Drei flache Sand-AUSLÄUFER, die 1.2–1.8 Einheiten über den Kreis
+  // hinausragen — sie tragen den Kontur-Bruch (low: halbe Stückzahl).
+  {
+    const spits: THREE.Mesh[] = [];
+    const spitCount = Math.max(1, Math.round(3 * density));
+    const spitCfg: readonly [number, number, number][] = [
+      [0.45, 1.8, 1.5], // Winkel, Reichweite über den Rand, Halbdisc-Radius
+      [2.3, 1.2, 1.1],
+      [4.4, 1.5, 1.3],
+    ];
+    for (let i = 0; i < spitCount; i++) {
+      const [a, reach, r] = spitCfg[i]!;
+      const geo = new THREE.CircleGeometry(r, 14, 0, Math.PI);
+      geo.rotateX(-Math.PI / 2); // flach; die runde Seite zeigt lokal −z
+      const d = new THREE.Mesh(geo);
+      // Runde Seite nach AUSSEN drehen (−z → Richtung (cos a, sin a)).
+      d.rotation.y = Math.atan2(-Math.cos(a), -Math.sin(a));
+      d.position.set(
+        ISLAND_C.x + Math.cos(a) * (ISLAND_R + reach - r),
+        TOP_Y - 0.06,
+        ISLAND_C.z + Math.sin(a) * (ISLAND_R + reach - r),
+      );
+      spits.push(d);
+    }
+    g.add(bake(spits, sandstone));
+  }
   const cap = new THREE.Mesh(new THREE.CircleGeometry(ISLAND_R * 0.87, 40), earthDark);
   cap.rotation.x = Math.PI / 2;
   g.add(at(cap, 0, TOP_Y - 1.72, 0));
   // Schaumkante: heller Ring wie eine auslaufende Welle auf dem Sanddeck.
+  // D-10: bleibt bewusst RUND (dokumentierte Vereinfachung — er liest als
+  // auslaufende Welle; den Kontur-Bruch tragen Jitter + Ausläufer).
   const foamMat = toonMat({ color: 0xfff8ea, emissive: 0xcfe8f0, emissiveIntensity: 0.35 });
   const foam = new THREE.Mesh(new THREE.TorusGeometry(ISLAND_R - 0.18, 0.1, 8, 64), foamMat);
   foam.rotation.x = Math.PI / 2;
@@ -387,7 +483,7 @@ function beachIsland({ g, hue, anims }: IslandCtx): void {
 // ---------------------------------------------------------------------------
 // Space — vernietetes Metall-Deck auf Krater-Asteroid, Kristalle + Trümmer
 // ---------------------------------------------------------------------------
-function spaceIsland({ g, hue, anims }: IslandCtx): void {
+function spaceIsland({ g, hue, anims, density }: IslandCtx): void {
   const rockTex = repeated(craterTex(3), 2, 1.2);
   const rock = toonMat({
     color: hue(0x8d87a6),
@@ -407,11 +503,42 @@ function spaceIsland({ g, hue, anims }: IslandCtx): void {
     bumpScale: 0.3,
   });
   // Metall-Fassung unter der Deckkante, darunter der Asteroiden-Bauch.
-  const band = new THREE.Mesh(
-    new THREE.CylinderGeometry(ISLAND_R, ISLAND_R * 0.97, 0.55, 48, 1, true),
-    deck,
-  );
+  // D-10: Der Band-Zylinder wird ein ZERSPRENGTER Ring — fünf unregelmäßige
+  // Radial-Segmente (umschriebenes Fünfeck + Ecken-Jitter): der Umriss ist
+  // kein Kreis mehr, sondern eine geborstene Plattform.
+  const bandGeo = new THREE.CylinderGeometry(PENT_R, PENT_R * 0.97, 0.55, 5, 1, true);
+  {
+    const rnd = lcg(9091);
+    const off: number[] = [];
+    for (let i = 0; i <= 5; i++) off.push(-0.15 + rnd() * 0.45);
+    jitterRim(bandGeo, off);
+  }
+  const band = new THREE.Mesh(bandGeo, deck);
   g.add(at(band, 0, TOP_Y - 0.27, 0));
+  // D-10: Abgesprengte Randstücke — Keile, die mit sichtbarem Spalt AUSSERHALB
+  // der Deckkante schweben (statisch gebakt; low: halbe Stückzahl).
+  {
+    const chunks: THREE.Mesh[] = [];
+    const cfg: readonly [number, number, number, number][] = [
+      [0.7, 1.0, 0.62, -0.5], // Winkel, Abstand über den Rand, Größe, y-Versatz
+      [2.0, 0.55, 0.42, -0.15],
+      [3.5, 1.2, 0.78, -0.75],
+      [5.2, 0.7, 0.5, -0.35],
+    ];
+    const n = Math.max(2, Math.round(cfg.length * density));
+    for (let i = 0; i < n; i++) {
+      const [a, gap, s, dy] = cfg[i]!;
+      const c = new THREE.Mesh(new THREE.TetrahedronGeometry(s));
+      c.rotation.set(a * 1.7, a * 0.9, a * 0.4);
+      c.position.set(
+        ISLAND_C.x + Math.cos(a) * (ISLAND_R + gap + s * 0.6),
+        TOP_Y + dy,
+        ISLAND_C.z + Math.sin(a) * (ISLAND_R + gap + s * 0.6),
+      );
+      chunks.push(c);
+    }
+    g.add(bake(chunks, rock));
+  }
   const belly = new THREE.Mesh(
     new THREE.SphereGeometry(ISLAND_R * 0.96, 40, 18, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
     rock,
@@ -516,6 +643,7 @@ export function buildIsland(
   hue: Hue,
   floorMat: THREE.MeshPhysicalMaterial,
   anims: WorldAnim[],
+  density = 1,
 ): void {
   const floor = new THREE.Mesh(new THREE.CircleGeometry(ISLAND_R, 56), floorMat);
   floor.rotation.x = -Math.PI / 2;
@@ -529,5 +657,53 @@ export function buildIsland(
   );
   ao.rotation.x = -Math.PI / 2;
   g.add(at(ao, 0, TOP_Y + 0.004, 0));
-  BUILDERS[key]({ g, hue, anims });
+  BUILDERS[key]({ g, hue, anims, density });
+  underside(g, key, hue);
+}
+
+/**
+ * D-05 — Der Abschluss UNTER der Insel. Die graue Leere unterm Deck stand in
+ * jedem Theme gleich (shots/theme-z15.png, unteres Drittel); jetzt bekommt
+ * sie je Theme einen Boden: Club = Nebelteppich-Discs, Synth = dunkles
+ * Abgrund-Quad (das Neon-Grid darunter existiert schon in der Kulisse),
+ * Beach = Wasserfläche, Space = dunkler Rand-Falloff (die Sterne dahinter
+ * bleiben in der Mitte sichtbar). Alles statisch, je Theme ≤ 2 Draw-Calls;
+ * hängt an der `islandGroup` und reist beim G1-Wechsel mit der Bühne.
+ */
+function underside(g: THREE.Group, key: BackgroundKey, hue: Hue): void {
+  const disc = (r: number, mat: THREE.Material, drop: number): void => {
+    const d = new THREE.Mesh(new THREE.CircleGeometry(r, 40), mat);
+    d.rotation.x = -Math.PI / 2;
+    g.add(at(d, 0, TOP_Y - drop, 0));
+  };
+  if (key === 'club') {
+    // Nebelteppich: zwei weiche Velvet-Discs — bewusst KEIN Additiv (D-02-
+    // Lektion: additive Flächen sind der Blowout, den wir gerade abgeschafft
+    // haben), der dichte Club-Nebel (fogDensity 0.02) trägt die Tiefe dazu.
+    const fogT = toonMat({ color: hue(0x2c2440), map: repeated(velvetTex(2), 3, 3) });
+    disc(14, fogT, 8);
+    disc(19, fogT, 10);
+  } else if (key === 'synth') {
+    // Dunkles Abgrund-Quad unter dem Gitter-Horizont — der Kiel endet in
+    // Schwärze statt in grauer Leere. Bewusst `toonMat` (geteilte Toon-
+    // Familie): ein map-loses MeshBasicMaterial wäre ein NEUER Programm-Typ
+    // gewesen (+1 Kompilat, Hook-Messung) — K-7: kein Programm für ein Quad.
+    disc(20, toonMat({ color: hue(0x140a26) }), 9);
+  } else if (key === 'beach') {
+    // Wasserfläche: die Sandbank schwebt jetzt ÜBER dem Meer, nicht im Nichts.
+    disc(18, toonMat({ color: hue(0x175a68) }), 7.5);
+  } else {
+    // Space: dunkler Rand-Falloff — Mitte bleibt offen (Sterne), der Rand
+    // vignettiert die Untersicht weich ab.
+    disc(
+      20,
+      new THREE.MeshBasicMaterial({
+        map: edgeShadeTex(),
+        transparent: true,
+        depthWrite: false,
+        opacity: 0.9,
+      }),
+      8,
+    );
+  }
 }

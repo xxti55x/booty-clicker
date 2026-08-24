@@ -694,11 +694,21 @@ function unlockZone(state: Pick<ChState, 'lifetimeMaxZone'> & { gear?: GearState
  * legacy Tyrann claim (§9.2.3) is unioned in as zone 10 so a `bossDefeated`
  * old-save unlocks Tyrann even at a shallow CH zone.
  */
+/**
+ * BUGS B-03: Obergrenze für das Erst-Kill-Set. Das Set existiert NUR für die
+ * Gear-Unlock-Prüfung, und deren tiefste `boss`-Regel liegt bei Bühne 50
+ * (`SKIN_UNLOCKS`) — ein Fuzzing-Save mit `zone = 1e9` ließ die Schleife sonst
+ * 10⁸ Einträge bauen und mit `Set maximum size exceeded` crashen (wodurch der
+ * ganze Save verworfen wurde). 1000 lässt jeder künftigen Unlock-Regel Luft
+ * und bleibt trotzdem ein Mikro-Set.
+ */
+const BOSS_KILL_SET_MAX_ZONE = 1000;
+
 export function bossFirstKillZones(
   state: Pick<ChState, 'lifetimeMaxZone' | 'legacyTyrann'> & { gear?: GearState },
 ): Set<number> {
   const zones = new Set<number>();
-  const deepest = unlockZone(state);
+  const deepest = Math.min(unlockZone(state), BOSS_KILL_SET_MAX_ZONE);
   for (let z = BOSS_EVERY; z < deepest; z += BOSS_EVERY) zones.add(z);
   if (state.legacyTyrann) zones.add(10);
   return zones;
