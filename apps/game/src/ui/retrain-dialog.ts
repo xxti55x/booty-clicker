@@ -35,6 +35,7 @@ import {
   noteRetrainRoll,
   retrainCost,
   retrainRollCount,
+  retrainSeed,
   retrainOffers,
 } from '../game/retrain';
 import { fmt } from './format';
@@ -81,7 +82,7 @@ export class RetrainDialog {
   private offer: RetrainOffer | null = null;
 
   constructor(private readonly deps: RetrainDeps) {
-    byId('rtRoll').addEventListener('click', () => this.pay());
+    byId('rtRoll').addEventListener('click', () => this.preview());
     byId('rtKeep').addEventListener('click', () => this.keep());
     byId('rtClose').addEventListener('click', () => this.close());
     // Klick auf den abgedunkelten Rand schließt — aber nur in Phase 1, damit ein
@@ -136,17 +137,22 @@ export class RetrainDialog {
     );
   }
 
-  /** Phase 1 → 2: bezahlen, eskalieren, zwei Alternativen ziehen. */
-  private pay(): void {
+  /**
+   * Phase 1 → 2: die zwei Alternativen ZEIGEN. Kostet nichts.
+   *
+   * Vorher buchte dieser Schritt die Splitter ab — wer das Angebot dann
+   * ausschlug, hatte für nichts bezahlt. Jetzt gilt die Regel, die jeder
+   * Laden kennt: Ansehen ist frei, bezahlt wird an der Kasse ({@link choose}).
+   * Damit das kein Gratis-Würfeln wird, hängen die beiden Sorten an einem
+   * festen Seed aus (Mitglied, Stufe, Roll-Zähler) — Dialog schließen und
+   * wieder öffnen zeigt exakt dasselbe Paar.
+   */
+  private preview(): void {
     const cfg = this.cfg;
     if (!cfg || this.offer !== null) return;
-    const s = this.deps.state;
-    const cost = this.cost();
-    if (s.gear.shards < cost) return;
-    s.gear.shards -= cost;
-    s.retrainRolls = noteRetrainRoll(s.retrainRolls, cfg.id);
-    this.offer = retrainOffers(this.current(), this.deps.roll(), this.deps.roll());
-    this.deps.onChange(); // Splitter + Eskalator sind gewandert: sofort sichern
+    const rolls = retrainRollCount(this.deps.state.retrainRolls, cfg.id);
+    const [r1, r2] = retrainSeed(cfg.id, this.tier, rolls);
+    this.offer = retrainOffers(this.current(), r1, r2);
     this.render();
   }
 
@@ -154,8 +160,16 @@ export class RetrainDialog {
   private choose(kind: SpecialKind): void {
     const cfg = this.cfg;
     if (!cfg || this.offer === null) return;
-    if (!this.offer.kinds.includes(kind)) return; // nur die zwei bezahlten Angebote
+    if (!this.offer.kinds.includes(kind)) return; // nur die zwei gezeigten Angebote
     const s = this.deps.state;
+    // HIER wird bezahlt — und nur hier. Der Guard bleibt stehen, weil sich der
+    // Splitter-Stand zwischen Öffnen und Zugreifen geändert haben kann.
+    const cost = this.cost();
+    if (s.gear.shards < cost) return;
+    s.gear.shards -= cost;
+    // Der Zähler läuft weiter: er wählt das nächste Angebots-Paar aus (der Preis
+    // hängt seit dem Umbau nicht mehr an ihm).
+    s.retrainRolls = noteRetrainRoll(s.retrainRolls, cfg.id);
     s.crewRetrain = applyRetrain(s.crewRetrain, cfg.id, this.tier, kind);
     this.deps.onChange();
     this.deps.toast(
@@ -166,14 +180,14 @@ export class RetrainDialog {
     this.close();
   }
 
-  /** Das Angebot ausschlagen — die alte Sorte bleibt, der Roll war trotzdem bezahlt. */
+  /** Das Angebot ausschlagen — die alte Sorte bleibt, und es kostet NICHTS. */
   private keep(): void {
     const cfg = this.cfg;
     if (!cfg || this.offer === null) return;
     this.deps.toast(
       '🔧',
       'Beim Alten geblieben',
-      `${cfg.name} behält ${abilityKindName(this.current())}.`,
+      `${cfg.name} behält ${abilityKindName(this.current())} — keine Splitter ausgegeben.`,
     );
     this.close();
   }
@@ -215,21 +229,18 @@ export class RetrainDialog {
     if (this.offer === null) {
       // ---- Phase 1: Vorschau ----
       const cost = this.cost();
-      const rolls = retrainRollCount(s.retrainRolls, cfg.id);
       const can = s.gear.shards >= cost;
       offers.classList.add('hidden');
       offers.innerHTML = '';
       roll.classList.remove('hidden');
       roll.disabled = !can;
-      roll.textContent = `Für ${fmt(cost)} 🧩 umschulen`;
+      roll.textContent = `Alternativen zeigen (${fmt(cost)} 🧩)`;
       keep.classList.add('hidden');
       close.classList.remove('hidden');
       close.textContent = 'Abbrechen';
       msg.className = `msg ${can ? '' : 'bad'}`;
       msg.textContent = can
-        ? rolls > 0
-          ? `Du hast ${fmt(s.gear.shards)} 🧩 · ${rolls}. Umschulung dieser Aszension — jede weitere kostet doppelt.`
-          : `Du hast ${fmt(s.gear.shards)} 🧩 · zwei Alternativen zur Wahl, die aktuelle darfst du behalten.`
+        ? `Du hast ${fmt(s.gear.shards)} 🧩 · Ansehen ist frei — bezahlt wird erst, wenn du eine Sorte nimmst.`
         : `Du hast nur ${fmt(s.gear.shards)} 🧩 — es fehlen ${fmt(cost - s.gear.shards)}.`;
       return;
     }
@@ -241,9 +252,14 @@ export class RetrainDialog {
       this.offer.kinds.map((k) => this.card(k, 'offer', outLabel)).join('');
     roll.classList.add('hidden');
     keep.classList.remove('hidden');
-    keep.textContent = `${abilityKindName(this.current())} behalten`;
+    keep.textContent = `${abilityKindName(this.current())} behalten (gratis)`;
     close.classList.add('hidden');
-    msg.className = 'msg ok';
-    msg.textContent = 'Bezahlt — wähle eine der beiden Sorten oder behalte die alte.';
+    // Phase 2 zeigt den Preis noch einmal: Er fällt erst beim Zugreifen an.
+    const cost = this.cost();
+    const can = s.gear.shards >= cost;
+    msg.className = `msg ${can ? 'ok' : 'bad'}`;
+    msg.textContent = can
+      ? `Eine Sorte wählen kostet ${fmt(cost)} 🧩 — beim Alten bleiben ist kostenlos.`
+      : `Es fehlen ${fmt(cost - s.gear.shards)} 🧩 — beim Alten bleiben ist kostenlos.`;
   }
 }

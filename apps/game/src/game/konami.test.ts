@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import { goldFor } from './combat';
-import { KONAMI_BOSS_DROPS, KONAMI_SEQUENCE, createKonami, konamiJackpot } from './konami';
+import {
+  BOOTY_SEQUENCE,
+  KONAMI_BOSS_DROPS,
+  KONAMI_SEQUENCE,
+  PABLO_GOLD,
+  PABLO_SEQUENCE,
+  createKonami,
+  konamiJackpot,
+} from './konami';
 
 describe('createKonami — der Sequenz-Detektor', () => {
   it('zündet exakt am Ende der vollen Sequenz und startet danach von vorn', () => {
@@ -55,5 +63,64 @@ describe('konamiJackpot — der Einmal-Jackpot', () => {
     expect(konamiJackpot(Number.NaN)).toBe(konamiJackpot(1));
     expect(konamiJackpot(-5)).toBe(konamiJackpot(1));
     expect(konamiJackpot(0.5)).toBe(konamiJackpot(1));
+  });
+});
+
+// Der Jackpot hört jetzt auf „bootyclicker" — in JEDER Schreibweise.
+describe('BOOTY_SEQUENCE — der Wort-Code', () => {
+  it('buchstabiert bootyclicker', () => {
+    expect(BOOTY_SEQUENCE.join(' ')).toBe(
+      'KeyB KeyO KeyO KeyT KeyY KeyC KeyL KeyI KeyC KeyK KeyE KeyR',
+    );
+  });
+
+  it('zündet auf die reine Buchstabenfolge', () => {
+    const k = createKonami(BOOTY_SEQUENCE);
+    const hits = BOOTY_SEQUENCE.map((c) => k.feed(c));
+    expect(hits.slice(0, -1).every((h) => !h)).toBe(true);
+    expect(hits[hits.length - 1]).toBe(true);
+  });
+
+  // Groß-/Kleinschreibung ist auf der `code`-Ebene gar keine Frage (KeyB ist
+  // KeyB) — geprüft wird, dass Umschalt und Trennzeichen nicht ABBRECHEN.
+  it('überlebt Umschalt, Bindestrich und Leerzeichen mittendrin', () => {
+    for (const noise of ['ShiftLeft', 'Minus', 'Space', 'CapsLock']) {
+      const k = createKonami(BOOTY_SEQUENCE);
+      let fired = false;
+      // „booty" + Zierrat + „clicker"
+      for (const c of BOOTY_SEQUENCE.slice(0, 5)) k.feed(c);
+      expect(k.feed(noise)).toBe(false);
+      for (const c of BOOTY_SEQUENCE.slice(5)) fired = k.feed(c);
+      expect(fired).toBe(true);
+    }
+  });
+
+  it('bricht bei einem echten Fehlbuchstaben ab', () => {
+    const k = createKonami(BOOTY_SEQUENCE);
+    for (const c of BOOTY_SEQUENCE.slice(0, 5)) k.feed(c);
+    k.feed('KeyZ');
+    const rest = BOOTY_SEQUENCE.slice(5).map((c) => k.feed(c));
+    expect(rest.every((h) => !h)).toBe(true);
+  });
+});
+
+describe('PABLO — der Maximalgeld-Code', () => {
+  it('buchstabiert pablokiwi', () => {
+    expect(PABLO_SEQUENCE.join(' ')).toBe('KeyP KeyA KeyB KeyL KeyO KeyK KeyI KeyW KeyI');
+  });
+
+  it('zahlt die größte Zahl, mit der das Spiel noch exakt rechnet', () => {
+    expect(PABLO_GOLD).toBe(Number.MAX_SAFE_INTEGER);
+    expect(Number.isSafeInteger(PABLO_GOLD)).toBe(true);
+    // Und der Beweis, warum nicht mehr: Schon zwei Schritte über die Grenze
+    // hinaus verliert die Rechnung eine Stelle (2^53 + 2 − 2 ≠ 2^53 − 1).
+    expect(PABLO_GOLD + 2 - 2).not.toBe(PABLO_GOLD);
+  });
+
+  it('läuft unabhängig vom Ahnen-Code (getrennte Detektoren)', () => {
+    const p = createKonami(PABLO_SEQUENCE);
+    for (const c of KONAMI_SEQUENCE) expect(p.feed(c)).toBe(false);
+    const hits = PABLO_SEQUENCE.map((c) => p.feed(c));
+    expect(hits[hits.length - 1]).toBe(true);
   });
 });

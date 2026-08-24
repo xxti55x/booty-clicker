@@ -737,6 +737,46 @@ export class AudioEngine {
     this.clapNoise(0.15, 0.32, 0.5);
   }
 
+  /**
+   * Der Rickroll-Gag der alten Ahnen-Tastenfolge. Bewusst KEINE Tondatei: Das
+   * Projekt lädt grundsätzlich keine externen Assets (Bundle-Größe, Lizenz —
+   * siehe public/CREDITS.md), also spielt der Synthesizer eine eigene, im Stil
+   * zitierende 80er-Pop-Hookline — dieselbe Bauweise wie jede andere Fanfare
+   * hier. Achtel im Marsch-Tempo, Bläser-Sägezahn über einem Bass, und am
+   * Ende der augenzwinkernde Aufschwung.
+   */
+  rickroll(): void {
+    // C-Dur-Figur: Auftakt, dann die typische Vier-Ton-Wendung, zweimal.
+    const MELODY: readonly [number, number][] = [
+      [392, 0.0],
+      [440, 0.16],
+      [523.25, 0.32],
+      [440, 0.48],
+      [659.25, 0.64],
+      [659.25, 0.88],
+      [587.33, 1.06],
+      [392, 1.34],
+      [440, 1.5],
+      [523.25, 1.66],
+      [440, 1.82],
+      [587.33, 1.98],
+      [587.33, 2.22],
+      [523.25, 2.4],
+      [493.88, 2.58],
+      [440, 2.78],
+    ];
+    for (const [hz, at] of MELODY) this.tone(hz, 0.17, 'sawtooth', 0.1, at);
+    // Bassfundament auf den Taktschwerpunkten — vier Akkordstufen.
+    [
+      [130.81, 0.0],
+      [164.81, 0.64],
+      [174.61, 1.34],
+      [196, 1.98],
+    ].forEach(([hz, at]) => this.tone(hz!, 0.6, 'triangle', 0.11, at!));
+    // Klatschen auf 2 und 4, wie es sich für die Ära gehört.
+    [0.32, 0.96, 1.66, 2.3].forEach((at) => this.clapNoise(0.1, 0.22, at));
+  }
+
   bossLose(): void {
     [440, 349.23, 261.63, 174.61].forEach((f, i) => this.tone(f, 0.24, 'sine', 0.14, i * 0.12));
   }

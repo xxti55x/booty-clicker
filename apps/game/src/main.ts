@@ -302,7 +302,13 @@ import { isTranscendEnabled } from './game/flags';
 import { shouldShakeOnKey } from './game/input';
 import { burstCount, SHAKE_BOSS_KILL, SHAKE_CRIT, SHAKE_FRENZY, shakeForTier } from './game/juice';
 import { applyLegacyInheritance } from './game/legacy-import';
-import { createKonami, konamiJackpot } from './game/konami';
+import {
+  BOOTY_SEQUENCE,
+  createKonami,
+  konamiJackpot,
+  PABLO_GOLD,
+  PABLO_SEQUENCE,
+} from './game/konami';
 import { loadSettings, type Quality, type QualityChoice, saveSettings } from './game/settings';
 import { type WelcomeBackData, welcomeBackData } from './game/welcome-back';
 import { playKonamiCeremony } from './ui/easter-egg';
@@ -2896,7 +2902,8 @@ canvas.addEventListener('pointerup', (e) => {
   if (dist <= 10 && performance.now() - downT <= 500) doShake(e.clientX, e.clientY);
 });
 // ---------- Easter Egg: Cheat-Code der Ahnen (v19) ----------
-const konami = createKonami();
+const konami = createKonami(); // ↑↑↓↓←→←→BA — jetzt der Rickroll-Gag
+const booty = createKonami(BOOTY_SEQUENCE); // „bootyclicker" — der Jackpot
 /**
  * Die Zeremonie: Zähler hoch, beim ERSTEN Mal den Einmal-Jackpot gutschreiben
  * (20 Boss-Drops der aktuellen Bühne — skaliert mit dem Spielstand statt die
@@ -2921,6 +2928,41 @@ function danceKonami(): void {
   hud.update(state, combat, dps, clickDmg);
 }
 
+/**
+ * Die alte Ahnen-Tastenfolge zündet jetzt den Rickroll: Fanfare aus dem
+ * Synthesizer (keine Tondatei — das Projekt lädt keine externen Assets) plus
+ * Pfirsich-Regen. Reines Spielzeug, keine Beute, kein Zähler.
+ */
+function rickroll(): void {
+  audio.unlock();
+  audio.rickroll();
+  playKonamiCeremony('Never gonna give you up 🎶');
+  toasts.show('🕺', 'Rickrolled!', 'Never gonna let you down …');
+}
+
+const pablo = createKonami(PABLO_SEQUENCE);
+/**
+ * Der „pablokiwi"-Code: legt das Konto auf `PABLO_GOLD` (die größte Zahl, mit
+ * der das Spiel noch exakt rechnet). Bewusst SETZEN statt addieren — eine
+ * Addition auf einen bereits hohen Stand liefe über die sichere Grenze hinaus
+ * und würde still ungenau. Beliebig oft zündbar; die Lebenszeit-Statistik
+ * bekommt nur den tatsächlichen Zuwachs gutgeschrieben.
+ */
+function pabloJackpot(): void {
+  const before = state.gold;
+  if (state.gold >= PABLO_GOLD) {
+    toasts.show('🥝', 'Schon randvoll', 'Mehr BP kann das Spiel nicht exakt zählen.');
+    return;
+  }
+  state.gold = PABLO_GOLD;
+  state.stats.goldLifetime += PABLO_GOLD - before;
+  playKonamiCeremony(`+${fmt(PABLO_GOLD - before)} BP`);
+  toasts.show('🥝', 'PABLOKIWI!', 'Das Konto ist am Anschlag.');
+  audio.bossWin();
+  persist();
+  hud.update(state, combat, dps, clickDmg);
+}
+
 window.addEventListener('keydown', (e) => {
   audio.unlock();
   if (e.code === 'Space') e.preventDefault();
@@ -2931,7 +2973,9 @@ window.addEventListener('keydown', (e) => {
   // dort sind Pfeile und Buchstaben Text, kein Tanz.
   const t = e.target as HTMLElement | null;
   const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
-  if (!typing && !e.repeat && konami.feed(e.code)) danceKonami();
+  if (!typing && !e.repeat && booty.feed(e.code)) danceKonami();
+  if (!typing && !e.repeat && konami.feed(e.code)) rickroll();
+  if (!typing && !e.repeat && pablo.feed(e.code)) pabloJackpot();
 });
 
 // ---------- runtime signals ----------
