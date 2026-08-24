@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { AudioEngine, BUILD_BAR, DROP_BAR, PHRASE_BARS, sectionFor } from './engine';
+import { AudioEngine } from './engine';
 import type { AudioPrefs, PrefsStorage } from './prefs';
 
 /** Winziger Speicher-Doppelgänger (dieselbe Rolle wie in `prefs.test.ts`). */
@@ -67,30 +67,5 @@ describe('Mute-Vertrag', () => {
     expect(engine.muted).toBe(true);
     expect(() => engine.ceremony('transcend')).not.toThrow();
     expect(() => engine.goblinSpawn()).not.toThrow();
-  });
-});
-
-// Songstruktur: die Phrase atmet in drei Abschnitten statt flach durchzulaufen.
-describe('Songstruktur — sectionFor', () => {
-  it('trägt zuerst, verdichtet dann und macht am Ende auf', () => {
-    expect(sectionFor(0)).toBe('groove');
-    expect(sectionFor(BUILD_BAR - 1)).toBe('groove');
-    expect(sectionFor(BUILD_BAR)).toBe('build');
-    expect(sectionFor(DROP_BAR - 1)).toBe('build');
-    expect(sectionFor(DROP_BAR)).toBe('drop');
-    expect(sectionFor(PHRASE_BARS - 1)).toBe('drop');
-  });
-
-  it('gibt jeder Phrase alle drei Abschnitte — keiner fällt weg', () => {
-    const seen = new Set<string>();
-    for (let bar = 0; bar < PHRASE_BARS; bar++) seen.add(sectionFor(bar));
-    expect(seen).toEqual(new Set(['groove', 'build', 'drop']));
-  });
-
-  it('lässt den Groove die längste Strecke tragen (der Drop bleibt ein Ereignis)', () => {
-    const bars = Array.from({ length: PHRASE_BARS }, (_, b) => sectionFor(b));
-    const groove = bars.filter((x) => x === 'groove').length;
-    const drop = bars.filter((x) => x === 'drop').length;
-    expect(groove).toBeGreaterThan(drop);
   });
 });
