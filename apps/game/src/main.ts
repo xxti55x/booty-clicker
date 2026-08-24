@@ -334,6 +334,7 @@ import { ForgeDialog } from './ui/forge-dialog';
 import { RelicPanel } from './ui/relic-panel';
 import { Gear } from './ui/gear-panel';
 import { Heaven } from './ui/heaven-panel';
+import { SkyTree } from './ui/sky-tree';
 import { Haptics } from './ui/haptics';
 import { Leaderboard } from './ui/leaderboard';
 import { Meta } from './ui/meta-panel';
@@ -1450,6 +1451,47 @@ const heaven = new Heaven({
     persist();
   },
 });
+
+// ---------- Himmelsbaum als eigener Ort ----------
+// Der Baum wohnt im Vollbild (`ui/sky-tree`), nicht mehr im Panel: dort war er
+// ein 420-px-Kasten zwischen Fließtext und Respec-Knopf. Beide Aktionen laufen
+// über DIESELBEN Handler wie der Tab — es gibt keinen zweiten Kaufpfad.
+const skyTree = new SkyTree({
+  state,
+  onBuyNode: (id) => {
+    const r = buyTreeNode(state.heaven, id);
+    if (!r.bought) return;
+    state.heaven = r.heaven;
+    recompute();
+    audio.buy();
+    hud.update(state, combat, dps, clickDmg);
+    heaven.refresh();
+    persist();
+  },
+  onRespec: () => {
+    const r = respecTree(state.heaven);
+    if (!r.done) return;
+    state.heaven = r.heaven;
+    recompute();
+    audio.buy();
+    hud.update(state, combat, dps, clickDmg);
+    heaven.refresh();
+    toasts.show(
+      '🌳',
+      'Baum zurückgesetzt',
+      `+${fmt(r.refunded - r.fee)} 🍑 zurück (−${r.fee} Gebühr)`,
+    );
+    persist();
+  },
+});
+// Zwei Türen zum selben Ort: das Icon in der rechten Spalte und der Knopf im
+// Himmel-Tab. Beide rufen dieselbe Instanz — es gibt nur einen Baum.
+for (const id of ['skyBtn', 'hvOpenTree']) {
+  document.getElementById(id)?.addEventListener('click', () => {
+    audio.unlock();
+    skyTree.show();
+  });
+}
 
 // 🔮 Transzendenz (prestige L3, §4.5.3) — LIVE as of M15 (flag `isTranscendEnabled()`).
 // A Transzendenz is a strictly DEEPER reset than a Himmelfahrt: `transcendState` banks

@@ -106,6 +106,15 @@
         <path class="aa-slash" d="M4 19.6 20 4.4" />
       </svg>
     </button>
+    <!-- Der Himmelsbaum als eigener Ort: dritter Knopf derselben Spalte, direkt
+         unter dem Farm-Modus. Er öffnet KEIN Panel, sondern den Vollbild-Himmel. -->
+    <button class="skyBtn" id="skyBtn" type="button" title="Himmelsbaum öffnen">
+      <svg class="ui-ic" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 21v-6.4" />
+        <path d="M12 14.6c-3.4 0-5.6-2-5.6-4.5S8.4 4.4 12 4.4s5.6 3.2 5.6 5.7-2.2 4.5-5.6 4.5Z" />
+        <path d="M9.2 9.6h5.6M12 6.9v5.4" />
+      </svg>
+    </button>
     <button class="muteBtn" id="muteBtn" title="Ton an/aus">
       <svg class="ui-ic" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M4.5 9.6v4.8h3.4l4.6 3.8V5.8L7.9 9.6Z" />
@@ -329,6 +338,37 @@
     </div>
 
     <!-- 3b: Crew-Umschulung — Portrait groß, aktuelle Sorte, zwei bezahlte Angebote. -->
+    <!-- ========================= HIMMELSBAUM ==========================
+         Ein eigener ORT statt eines Panel-Abschnitts: Vollbild, eigener
+         Himmels-Look, der Baum groß in der Mitte, die Knoten-Details an der
+         Seite. Geöffnet wird er über den Baum-Knopf unter dem Farm-Modus. -->
+    <div class="sky hidden" id="skyOverlay" role="dialog" aria-label="Himmelsbaum">
+      <div class="sky-bg" aria-hidden="true">
+        <span class="sky-glow"></span>
+        <span class="sky-stars" id="skyStars"></span>
+        <span class="sky-cloud c1"></span>
+        <span class="sky-cloud c2"></span>
+        <span class="sky-cloud c3"></span>
+      </div>
+      <header class="sky-top">
+        <div class="sky-title">
+          <span class="sky-ttl">Himmelsbaum</span>
+          <span class="sky-bank" id="skyBank"></span>
+        </div>
+        <div class="sky-tools">
+          <button type="button" data-z="out" title="Herauszoomen">−</button>
+          <button type="button" data-z="fit" title="Ganzen Baum zeigen">⤢</button>
+          <button type="button" data-z="in" title="Hineinzoomen">+</button>
+          <button type="button" class="sky-x" id="skyClose" title="Schließen">✕</button>
+        </div>
+      </header>
+      <div class="sky-stage" id="skyStage">
+        <div class="sky-canvas" id="skyCanvas"></div>
+      </div>
+      <aside class="sky-side" id="skyDetail"></aside>
+      <footer class="sky-foot" id="skyFoot"></footer>
+    </div>
+
     <div class="overlay hidden" id="retrainOverlay">
       <div class="dialog rt">
         <div class="dt">🔧 Umschulen</div>
