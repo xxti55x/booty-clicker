@@ -5816,3 +5816,41 @@ body {
   color: var(--gold-base);
   font-weight: 800;
 }
+
+/* Sperr-Fortschritt („noch X bis zur Freischaltung"): ein Balken statt einer
+   Prozentzahl in Klammern. Er wird überall dort verwendet, wo ein ganzer Tab
+   hinter EINER Schwelle liegt — dort ist der Fortschritt die Hauptinformation,
+   nicht eine Randnotiz. */
+.gate-bar {
+  position: relative;
+  display: block;
+  height: 14px;
+  margin: 6px 0 8px;
+  border: 2px solid var(--wood-rim);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+}
+.gate-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(180deg, #ffe08a 0%, #ffb84d 60%, #f2803a 100%);
+  transition: width 0.25s ease;
+}
+.gate-bar b {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--display);
+  font-size: 9px;
+  font-weight: 800;
+  color: #2a1500;
+  text-shadow: 0 1px 0 rgba(255, 245, 210, 0.55);
+}
+@media (prefers-reduced-motion: reduce) {
+  .gate-bar i {
+    transition: none;
+  }
+}
