@@ -3203,6 +3203,48 @@ body {
   width: 10px;
   height: 10px;
 }
+/* Stufen-Nummer der Fähigkeit — sie stand nirgends, obwohl jede Kachel eine
+   eigene Stufe IST. Unten links, damit sie dem Haken oben rechts nicht ins
+   Gehege kommt. */
+.ab .ab-lv {
+  position: absolute;
+  left: -3px;
+  bottom: -4px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 2px;
+  border-radius: 7px;
+  background: var(--wood-deep, #3a2417);
+  color: var(--gold-base);
+  border: 1px solid var(--wood-rim);
+  font-family: var(--display);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 11px;
+  text-align: center;
+}
+.ab.lk .ab-lv {
+  position: static;
+  margin-right: 3px;
+}
+/* Kopfzeile der Slot-Reihe: „Fähigkeiten 3 · nächste in 12 Lv". */
+.ab-head {
+  flex: none;
+  margin-right: 4px;
+  font-family: var(--display);
+  font-size: 10px;
+  font-weight: 800;
+  /* Die Zeile trägt echte Information (wie viele Käufe offen sind) — sie darf
+     nicht so blass sein wie ein Fußnotentext. */
+  color: var(--gold-base);
+  white-space: nowrap;
+}
+.ab-head i {
+  font-style: normal;
+  opacity: 0.75;
+  margin-left: 3px;
+}
+
 .ab-check {
   position: absolute;
   right: -4px;

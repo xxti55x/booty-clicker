@@ -11,6 +11,7 @@ import {
   type HeroConfig,
   heroClick,
   heroDps,
+  levelsToNextAbility,
   maxAffordable,
   nextAbility,
   nextLevelCost,
@@ -32,7 +33,12 @@ function byId(id: string): HTMLElement {
   return el;
 }
 
-type BuyAmount = 1 | 10 | 'max';
+/**
+ * Kaufmenge der Crew-Liste. `next` kauft bis exakt auf den nächsten
+ * Fähigkeiten-Meilenstein (Lv 25/75/125…) — die Menge, die man beim Aufbauen
+ * eines Mitglieds tatsächlich will.
+ */
+type BuyAmount = 1 | 10 | 100 | 'next' | 'max';
 
 /** Tiny inline glyph per ability kind (rendered ~14 px inside the slot). */
 const KIND_ICON: Record<AbilityKind, string> = {
@@ -148,13 +154,16 @@ export class Crew {
       <div class="buyamt" id="buyAmt">
         <button class="amt active" data-a="1" type="button">×1</button>
         <button class="amt" data-a="10" type="button">×10</button>
+        <button class="amt" data-a="100" type="button">×100</button>
+        <button class="amt" data-a="next" type="button" title="Bis zur nächsten Fähigkeit (Lv 25, 75, 125 …)">Fähigkeit</button>
         <button class="amt" data-a="max" type="button">Max</button>
       </div>
       <div id="crewList"></div>`;
     for (const b of Array.from(this.body.querySelectorAll<HTMLButtonElement>('.amt'))) {
       b.addEventListener('click', () => {
         const a = b.dataset.a;
-        this.amount = a === 'max' ? 'max' : a === '10' ? 10 : 1;
+        this.amount =
+          a === 'max' ? 'max' : a === 'next' ? 'next' : a === '100' ? 100 : a === '10' ? 10 : 1;
         for (const x of Array.from(this.body.querySelectorAll('.amt')))
           x.classList.remove('active');
         b.classList.add('active');
@@ -215,6 +224,12 @@ export class Crew {
   /** Levels to buy for a hero given the current amount + affordability. */
   private countFor(cfg: HeroConfig, level: number): number {
     if (this.amount === 'max') return maxAffordable(cfg, level, this.deps.state.gold);
+    // „Fähigkeit": bis exakt auf den nächsten Meilenstein — aber nie mehr, als
+    // bezahlbar ist, sonst zeigte der Knopf einen Preis, den niemand aufbringt.
+    if (this.amount === 'next') {
+      const want = levelsToNextAbility(level);
+      return Math.max(1, Math.min(want, maxAffordable(cfg, level, this.deps.state.gold)));
+    }
     return this.amount;
   }
 
@@ -321,7 +336,8 @@ export class Crew {
           // rechts bleibt das „gekauft"-Signal.
           slots.push(
             `<span class="ab done ${tierClass(t)}" title="Fähigkeit ${t}: ${abilityKindLabel(k, outLabel)} — gekauft">` +
-              `${slotArt(cfg.id, k, KIND_ICON[k])}<span class="ab-check">${CHECK}</span>${rt}</span>`,
+              `${slotArt(cfg.id, k, KIND_ICON[k])}<span class="ab-lv">${t}</span>` +
+              `<span class="ab-check">${CHECK}</span>${rt}</span>`,
           );
         }
         const k = abilityKind(cfg, ab.tier, s.crewRetrain);
@@ -330,17 +346,35 @@ export class Crew {
           const can = ab.cost <= s.gold;
           slots.push(
             `<button class="ab ready k-${k} ${tierClass(ab.tier)} ${can ? '' : 'poor'}" data-ab="${cfg.id}" type="button"
-               title="Fähigkeit ${ab.tier}: ${abLabel} kaufen">${slotArt(cfg.id, k, KIND_ICON[k])}</button>`,
+               title="Fähigkeit ${ab.tier}: ${abLabel} kaufen">${slotArt(cfg.id, k, KIND_ICON[k])}` +
+              `<span class="ab-lv">${ab.tier}</span></button>`,
           );
           slots.push(
             `<span class="ab-cost ${can ? '' : 'bad'}">${abLabel} · ${fmt(ab.cost)} BP</span>`,
           );
         } else {
           slots.push(
-            `<span class="ab lk ${tierClass(ab.tier)}" title="Fähigkeit ${ab.tier} (${abLabel}) ab Lv ${ab.level}">Lv${ab.level}</span>`,
+            `<span class="ab lk ${tierClass(ab.tier)}" title="Fähigkeit ${ab.tier} (${abLabel}) ab Lv ${ab.level}">` +
+              `<span class="ab-lv">${ab.tier}</span>Lv${ab.level}</span>`,
           );
         }
-        abRow = `<div class="ab-slots">${slots.join('')}</div>`;
+        // Der Zähler VOR den Kacheln beantwortet die Frage, die die Kacheln
+        // allein nicht beantworten: „Wie weit bin ich?" — gekaufte Stufen und
+        // die Entfernung zur nächsten Freischaltung.
+        // GEKAUFT von FREIGESCHALTET trennen: Bei Lv 130 sind drei Stufen offen,
+        // gekauft sein können null davon — „Fähigkeiten 0" allein hätte genau
+        // diesen Unterschied verschluckt. Der Zusatz zeigt, was als Nächstes
+        // dran ist: offene Käufe zuerst, sonst die Entfernung zur nächsten
+        // Freischaltung.
+        const unlocked = abilityTiersUnlocked(level);
+        const open = Math.max(0, unlocked - ups);
+        const toNext = levelsToNextAbility(level);
+        const head =
+          `<span class="ab-head" title="Gekaufte von freigeschalteten Fähigkeiten">` +
+          `Fähigkeiten ${ups}/${unlocked}` +
+          (open > 0 ? `<i>· ${open} kaufbar</i>` : `<i>· nächste in ${toNext} Lv</i>`) +
+          `</span>`;
+        abRow = `<div class="ab-slots">${head}${slots.join('')}</div>`;
       }
       rows.push(
         `<div class="item ${affordable ? '' : 'locked'}" data-id="${cfg.id}">
@@ -352,8 +386,14 @@ export class Crew {
               mp.rank > 0 ? MASTERY_FRAME[mp.rank] : undefined,
             )}
             <div class="crew-id">
-              <div class="nm">${cfg.name}${gildBadge}<span class="lv">Lv ${level}${ups > 0 ? ` · ×${abilityMult(cfg, ups)}` : ''}</span></div>
-              <div class="ds">${cfg.ds}</div>
+              <div class="nm" title="${cfg.ds}">${cfg.name}${gildBadge}<span class="lv">Lv ${level}${ups > 0 ? ` · ×${abilityMult(cfg, ups)}` : ''}</span></div>
+              ${
+                // Entrümpelung: Der Flavor-Text hilft bei der EINEN Entscheidung
+                // „anheuern oder nicht". Danach kostet er auf jeder Karte eine
+                // Zeile, ohne je wieder gelesen zu werden — ab Level 1 wandert
+                // er in den Tooltip des Namens.
+                level === 0 ? `<div class="ds">${cfg.ds}</div>` : ''
+              }
               ${masteryLine(mp)}
             </div>
           </div>
