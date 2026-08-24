@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { affixBossBudget, affixPowerBudget, affixSingleTermBudget } from './affixes';
+import { BOSS_EVERY } from './combat';
 import { constellationPowerBudget } from './constellation';
 import { FORGE_BEST, forgeCost, forgeSlotsUnlocked } from './forge';
 import { shardCost } from './gear';
@@ -62,8 +63,14 @@ describe('simulateEndless — 1c Relikte (Drop-Kurve + Pity im Bot)', () => {
   };
   const short = (): EconSummary[] => chain(4); // 3 h
   const long = (): EconSummary[] => chain(16); // 12 h
+  // Wie viele berechtigte Gates hat dieser Lauf gewürfelt? Boss-Arenen liegen
+  // alle `BOSS_EVERY` Bühnen, und die Bühnen werden der Reihe nach gefallen —
+  // zwischen 50 und dem Highwater wurde also JEDES Gate genau einmal gewürfelt.
+  // Der Schritt MUSS `BOSS_EVERY` sein: mit dem früheren festen 5 zählte die
+  // Rechnung doppelt so viele Gates wie es gibt (Highwater 70 ⇒ „5" statt 3)
+  // und die Pity-Untergrenze forderte mehr Relikte, als das Pity je verspricht.
   const gatesOf = (e: { deepestGate: number }): number =>
-    e.deepestGate >= RELIC_MIN_ZONE ? (e.deepestGate - RELIC_MIN_ZONE) / 5 + 1 : 0;
+    e.deepestGate >= RELIC_MIN_ZONE ? (e.deepestGate - RELIC_MIN_ZONE) / BOSS_EVERY + 1 : 0;
 
   it('das erste Sitting sieht KEIN Relikt — die Wand steht bei Bühne ~25', () => {
     for (const seed of SIM_SEEDS_HEAVY) {
@@ -75,8 +82,8 @@ describe('simulateEndless — 1c Relikte (Drop-Kurve + Pity im Bot)', () => {
   });
 
   it('ab Bühne 50 tröpfeln sie — und die Zahl hängt an den GATES, nicht an der Zeit', () => {
-    // Gemessen (Kette 3 h / 12 h / 24 h, Seeds 1/7/12345): tiefstes Gate 70/70/72,
-    // also 5,0…5,3 berechtigte Gates ⇒ 1,3…1,7 Relikte. Zwischen Stunde 3 und
+    // Gemessen (Kette 3 h / 12 h, Seeds 1/7/12345): tiefstes Gate überall 70,
+    // also 3 berechtigte Gates (50/60/70) ⇒ 1,67 Relikte. Zwischen Stunde 3 und
     // Stunde 12 bewegt sich fast nichts, weil der Kettenlauf an der M9-Wand
     // hängt — Relikte sind Vorstoß-Loot, kein Sitzfleisch-Loot.
     const three = mean(short().map((e) => e.relicsFound));

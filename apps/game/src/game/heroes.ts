@@ -133,7 +133,7 @@ export const SPECIAL_IDLE = 0.2;
  * davon wieder ein Viertel: ×1.5 — actives feel it only via the 20 % click
  * share, so the click:idle shape stays.
  */
-export const DPS_TUNE = 1.5;
+export const DPS_TUNE = 0.72;
 /** Ability price = the level-cost at its unlock level × this factor (v12: 6 → 9). */
 export const ABILITY_COST_MULT = 9;
 
@@ -300,15 +300,87 @@ export function createCrew(): CrewLevels {
   return {};
 }
 
+// ---------------------------------------------------------------------------
+// Meilensteine, Soft-Cap und Fähigkeiten-Deckel
+// ---------------------------------------------------------------------------
+
+/**
+ * Level, an denen ein Mitglied seinen Ausstoß VERDOPPELT (+100 %). Vorher wuchs
+ * DPS strikt linear mit dem Level — jedes Level war gleich viel wert, und weil
+ * die Kosten nur mit 7.5 % je Stufe stiegen, ließ sich ein Mitglied praktisch
+ * beliebig weit hochkaufen.
+ *
+ * Jetzt liegt der Fortschritt in SPRÜNGEN: Wer den nächsten Meilenstein
+ * erreicht, verdoppelt; dazwischen wächst es linear weiter. Das gibt jedem
+ * Mitglied ein sichtbares Nahziel, statt einer endlosen flachen Rampe.
+ */
+export const DPS_MILESTONES: readonly number[] = [25, 50, 100, 200, 250];
+
+/**
+ * Ab hier wird Leveln zum Sink statt zur Strategie: Der Ausstoß wächst nur noch
+ * LINEAR (keine Meilensteine mehr), der Preis dagegen zusätzlich exponentiell
+ * ({@link SOFTCAP_COST_GROWTH}). Ein Mitglied jenseits davon weiterzuziehen ist
+ * möglich, lohnt aber schnell weniger als der nächste Kauf woanders — genau die
+ * Bremse, die vorher fehlte.
+ */
+export const LEVEL_SOFTCAP = DPS_MILESTONES[DPS_MILESTONES.length - 1]!;
+
+/** Zusätzliches Kostenwachstum je Level ÜBER dem Soft-Cap (multiplikativ). */
+export const SOFTCAP_COST_GROWTH = 1.06;
+
+/**
+ * Der Meilenstein-Multiplikator eines Levels: ×2 je erreichtem Meilenstein.
+ * Auf dem Soft-Cap steht er bei ×32 und wächst danach nicht weiter.
+ */
+export function milestoneMult(level: number): number {
+  const lv = Number.isFinite(level) ? Math.floor(level) : 0;
+  let hit = 0;
+  for (const m of DPS_MILESTONES) if (lv >= m) hit++;
+  return Math.pow(2, hit);
+}
+
+/**
+ * Der Level-Faktor des Ausstoßes: das Level selbst, multipliziert mit den
+ * erreichten Meilenstein-Verdopplungen. Er ersetzt das frühere blanke `level`.
+ *
+ * Über dem Soft-Cap kommt KEIN Meilenstein mehr dazu — dort wächst der Ausstoß
+ * nur noch linear, während der Preis zusätzlich exponentiell steigt. Genau das
+ * ist die Bremse: Weiterleveln bleibt möglich, lohnt aber schnell weniger als
+ * der nächste Kauf woanders.
+ */
+export function dpsLevelFactor(level: number): number {
+  const lv = Number.isFinite(level) ? Math.max(0, Math.floor(level)) : 0;
+  if (lv <= 0) return 0;
+  return lv * milestoneMult(lv);
+}
+
+/** Der NÄCHSTE Meilenstein über `level` — `null`, wenn der Soft-Cap erreicht ist. */
+export function nextMilestone(level: number): number | null {
+  const lv = Number.isFinite(level) ? Math.floor(level) : 0;
+  for (const m of DPS_MILESTONES) if (lv < m) return m;
+  return null;
+}
+
+/**
+ * Maximale Anzahl Fähigkeiten je Mitglied. Vorher liefen die Stufen endlos
+ * weiter (alle 50 Level eine neue) — mit dem Deckel ist ein Mitglied irgendwann
+ * fertig, und „vollständig ausgebaut" wird ein erreichbarer Zustand.
+ */
+export const MAX_ABILITY_TIERS = 8;
+
 /** Unlock level of ability tier `n` (1-based): 25, 75, 125, … */
 export function abilityLevel(tier: number): number {
   return ABILITY_FIRST_LEVEL + ABILITY_SPACING * (Math.max(1, Math.floor(tier)) - 1);
 }
 
-/** How many ability tiers `level` has unlocked (0 below Lv 25, endless above). */
+/**
+ * Wie viele Fähigkeiten `level` freigeschaltet hat — 0 unter Lv 25, danach eine
+ * je {@link ABILITY_SPACING} Level, gedeckelt bei {@link MAX_ABILITY_TIERS}.
+ */
 export function abilityTiersUnlocked(level: number): number {
   if (level < ABILITY_FIRST_LEVEL) return 0;
-  return Math.floor((level - ABILITY_FIRST_LEVEL) / ABILITY_SPACING) + 1;
+  const n = Math.floor((level - ABILITY_FIRST_LEVEL) / ABILITY_SPACING) + 1;
+  return Math.min(MAX_ABILITY_TIERS, n);
 }
 
 /**
@@ -325,6 +397,12 @@ export function levelsToNextAbility(level: number): number {
   const lv = Number.isFinite(level) ? Math.max(0, Math.floor(level)) : 0;
   if (lv < ABILITY_FIRST_LEVEL) return ABILITY_FIRST_LEVEL - lv;
   const tiers = abilityTiersUnlocked(lv);
+  // Alle Fähigkeiten freigeschaltet? Dann gibt es kein Ziel mehr — der Knopf
+  // zielt stattdessen auf den nächsten Meilenstein bzw. ein einzelnes Level.
+  if (tiers >= MAX_ABILITY_TIERS) {
+    const m = nextMilestone(lv);
+    return m === null ? 1 : m - lv;
+  }
   return abilityLevel(tiers + 1) - lv;
 }
 
@@ -565,7 +643,7 @@ export function heroDps(
   return (
     cfg.baseDps *
     DPS_TUNE *
-    level *
+    dpsLevelFactor(level) *
     abilityMult(cfg, ups) *
     gildMult(gildCount) *
     masteryOwnMult(masteryXp, heirWeight)
@@ -589,37 +667,64 @@ export function heroClick(
   if (level <= 0 || !cfg.click) return 0;
   return (
     cfg.baseDps *
-    level *
+    dpsLevelFactor(level) *
     abilityMult(cfg, ups) *
     gildMult(gildCount) *
     masteryOwnMult(masteryXp, heirWeight)
   );
 }
 
-/** Cost to buy the NEXT level from `level`: floor(baseCost · growth^level). */
+/**
+ * Preis des NÄCHSTEN Levels. Bis zum Soft-Cap die gewohnte Leiter
+ * (`baseCost · 1.075^level`); darüber kommt ein ZWEITES Wachstum obendrauf
+ * ({@link SOFTCAP_COST_GROWTH} je Level über dem Cap), weil der Ausstoß dort
+ * nur noch linear steigt. Ein Mitglied über 250 zu ziehen ist damit ein
+ * bewusster Luxus und keine Selbstverständlichkeit mehr.
+ */
 export function nextLevelCost(cfg: HeroConfig, level: number): number {
-  return Math.floor(cfg.baseCost * Math.pow(HERO_COST_GROWTH, level));
+  const lv = Math.max(0, Math.floor(level));
+  const base = cfg.baseCost * Math.pow(HERO_COST_GROWTH, lv);
+  const over = Math.max(0, lv - LEVEL_SOFTCAP);
+  return Math.floor(base * Math.pow(SOFTCAP_COST_GROWTH, over));
 }
 
-/** Cost to buy `count` levels starting at `fromLevel` (geometric sum, floored). */
+/**
+ * Preis für `count` Level ab `fromLevel`.
+ *
+ * Unterhalb des Soft-Caps ist das eine geometrische Summe (geschlossen, sofort).
+ * Reicht der Kauf darüber hinaus, gilt die geschlossene Formel NICHT mehr — dort
+ * wirken zwei Wachstumsraten übereinander, also wird der überstehende Teil
+ * Stufe für Stufe summiert. Das ist der ehrliche Preis; eine Formel, die den
+ * Soft-Cap ignoriert, würde ihn systematisch zu billig ausweisen.
+ */
 export function bulkCost(cfg: HeroConfig, fromLevel: number, count: number): number {
   if (count <= 0) return 0;
+  const from = Math.max(0, Math.floor(fromLevel));
+  const n = Math.floor(count);
   const r = HERO_COST_GROWTH;
-  const first = cfg.baseCost * Math.pow(r, fromLevel);
-  const sum = (first * (Math.pow(r, count) - 1)) / (r - 1);
+  const plain = Math.max(0, Math.min(n, LEVEL_SOFTCAP - from));
+  let sum = 0;
+  if (plain > 0) {
+    const first = cfg.baseCost * Math.pow(r, from);
+    sum += (first * (Math.pow(r, plain) - 1)) / (r - 1);
+  }
+  for (let i = plain; i < n; i++) sum += nextLevelCost(cfg, from + i);
   return Math.floor(sum);
 }
 
 /** How many levels are affordable from `fromLevel` with `gold` (for "buy max"). */
 export function maxAffordable(cfg: HeroConfig, fromLevel: number, gold: number): number {
   if (gold < nextLevelCost(cfg, fromLevel)) return 0;
+  const from = Math.max(0, Math.floor(fromLevel));
   const r = HERO_COST_GROWTH;
-  const first = cfg.baseCost * Math.pow(r, fromLevel);
-  // Largest n with first·(r^n − 1)/(r − 1) ≤ gold.
-  const n = Math.floor(Math.log((gold * (r - 1)) / first + 1) / Math.log(r));
-  // Guard floating error: step down until it truly fits.
-  let count = Math.max(0, n);
-  while (count > 0 && bulkCost(cfg, fromLevel, count) > gold) count--;
+  const first = cfg.baseCost * Math.pow(r, from);
+  // Schätzung aus der geschlossenen Formel (ohne Soft-Cap) — sie liegt nie zu
+  // NIEDRIG, weil der echte Preis über dem Cap nur höher sein kann.
+  const guess = Math.floor(Math.log((gold * (r - 1)) / first + 1) / Math.log(r));
+  let count = Math.max(0, guess);
+  while (count > 0 && bulkCost(cfg, from, count) > gold) count--;
+  // Und nach oben nachziehen, falls die Schätzung (Rundung) zu vorsichtig war.
+  while (bulkCost(cfg, from, count + 1) <= gold) count++;
   return count;
 }
 
@@ -754,7 +859,23 @@ export function bestCrewBuy(
     const cost = nextLevelCost(cfg, lvl);
     if (cost <= budget) {
       const gain = outputAt(cfg, lvl + 1, gild, bought, xp) - outputAt(cfg, lvl, gild, bought, xp);
-      const roi = gain / cost;
+      let roi = gain / cost;
+      // MEILENSTEIN-SICHT. Ein einzelnes Level kurz vor einem Meilenstein bringt
+      // fast nichts, das Level DANACH verdoppelt — eine rein schrittweise
+      // Bewertung sieht deshalb nur die flache Strecke und meidet sie, obwohl
+      // sich der Weg als Ganzes lohnt. Bewertet wird darum zusätzlich die
+      // gesamte Strecke bis zum nächsten Meilenstein; führt sie, zählt sie.
+      // Dieselbe Sicht, die ein Spieler mit dem „Fähigkeit"-Kaufknopf hat.
+      const ms = nextMilestone(lvl);
+      if (ms !== null && ms > lvl) {
+        const span = ms - lvl;
+        const bulk = bulkCost(cfg, lvl, span);
+        if (bulk > 0) {
+          const spanGain =
+            outputAt(cfg, ms, gild, bought, xp) - outputAt(cfg, lvl, gild, bought, xp);
+          roi = Math.max(roi, spanGain / bulk);
+        }
+      }
       if (roi > bestRoi) {
         bestRoi = roi;
         best = { kind: 'level', id: cfg.id, cost, roi };

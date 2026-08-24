@@ -210,7 +210,7 @@ table(
   hf.map((h) => [h.seed, hrs(h.t), min(h.durst), h.milestones, h.asc, h.zone]),
 );
 console.log(
-  `   Anker: Himmelfahrt in [11.6 h, 19.4 h] · Durststrecke ≤ 105 min` +
+  `   Anker: Himmelfahrt in [8.25 h, 13.75 h] · Durststrecke ≤ 105 min` +
     `\n   Mittel: ${hrs(mean(hf.map((h) => h.t)))} h · längste Durststrecke ${min(Math.max(...hf.map((h) => h.durst)))} min`,
 );
 

@@ -8,13 +8,17 @@ import {
   bulkCost,
   CREW,
   crewSpecialBonuses,
+  DPS_MILESTONES,
   type HeroConfig,
   heroClick,
   heroDps,
+  LEVEL_SOFTCAP,
   levelsToNextAbility,
   maxAffordable,
+  milestoneMult,
   nextAbility,
   nextLevelCost,
+  nextMilestone,
   retrainSlotOrdinal,
 } from '../game/heroes';
 import { retrainCost, retrainRollCount } from '../game/retrain';
@@ -78,6 +82,48 @@ function masteryLine(p: MasteryProgress): string {
       ? `Einsatz-XP: ${fmtInt(p.xp)} von ${fmtInt(p.next)} Lebenszeit-Leveln bis ${p.nextName}`
       : `Einsatz-XP: ${fmtInt(p.xp)} Lebenszeit-Level — höchster Rang erreicht`;
   return `<div class="mr-line mr${p.rank}" title="${title}">Meisterschaft: ${body}</div>`;
+}
+
+/**
+ * Die Meilenstein-Zeile einer Crew-Card („⚡ ×4 · +100 % bei Lv 100").
+ *
+ * Ohne sie ist der wichtigste Grund, ein Mitglied WEITER zu leveln, unsichtbar:
+ * Der Ausstoß verdoppelt sich sprunghaft bei {@link DPS_MILESTONES}, dazwischen
+ * wächst er nur linear. Die Zeile zeigt beides — was schon verdient ist (×N)
+ * und wie weit der nächste Sprung noch weg ist — plus einen Balken, der den Weg
+ * vom letzten zum nächsten Meilenstein füllt. Das Ziel steht bewusst als „×N",
+ * nicht als „+100 %": Die Fähigkeits-Zeile derselben Karte trägt schon ein
+ * „+100 % DPS" für einen ganz anderen Kauf — zwei Systeme mit demselben
+ * Wortlaut direkt untereinander liest niemand auseinander. „⚡ ×2 … ×4 bei
+ * Lv 100" zeigt dagegen genau dieselbe Skala wie das Abzeichen davor. Jenseits des Soft-Caps sagt sie
+ * offen, dass es keinen Sprung mehr gibt: Ausstoß linear, Preis exponentiell.
+ */
+function milestoneLine(level: number): string {
+  if (level <= 0) return '';
+  const mult = milestoneMult(level);
+  const next = nextMilestone(level);
+  const badge = mult > 1 ? `⚡ ×${mult}` : '⚡ ×1';
+  if (next === null) {
+    return (
+      `<div class="ms-line cap" title="Soft-Cap ab Lv ${LEVEL_SOFTCAP}: keine Verdopplung mehr — ` +
+      `der Ausstoß wächst nur noch linear, der Preis zusätzlich exponentiell. Weiterziehen ist ` +
+      `erlaubt, lohnt aber meist weniger als der nächste Kauf woanders.">` +
+      `${badge} · Soft-Cap — linear` +
+      `</div>`
+    );
+  }
+  // Der Balken misst den Weg vom ZULETZT erreichten Meilenstein zum nächsten,
+  // nicht von 0 — sonst stünde er bei Lv 240 fast voll, obwohl nur 10 Level
+  // seit dem letzten Sprung vergangen sind.
+  const prev = DPS_MILESTONES.filter((m) => m <= level).pop() ?? 0;
+  const pct = Math.max(0, Math.min(100, ((level - prev) / (next - prev)) * 100));
+  return (
+    `<div class="ms-line" title="Alle paar Level verdoppelt sich der Ausstoß dieses Mitglieds. ` +
+    `Erreicht: ×${mult}. Nächster Sprung auf ×${mult * 2} bei Lv ${next} (noch ${next - level} Level).">` +
+    `${badge}<span class="ms-bar"><i style="width:${pct.toFixed(1)}%"></i></span>` +
+    `<span class="ms-goal">×${mult * 2} bei Lv ${next}</span>` +
+    `</div>`
+  );
 }
 
 /**
@@ -398,6 +444,7 @@ export class Crew {
                 // er in den Tooltip des Namens.
                 level === 0 ? `<div class="ds">${cfg.ds}</div>` : ''
               }
+              ${milestoneLine(level)}
               ${masteryLine(mp)}
             </div>
           </div>

@@ -3,6 +3,47 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Crew-Meilensteine + Level-Soft-Cap (Goal „charaktere lassen sich zu weit upgraden")
+
+- **Meilensteine statt gleichmäßiger Kurve.** Der Ausstoß eines Mitglieds
+  verdoppelt sich auf Lv 25/50/100/200/250 (`DPS_MILESTONES`, ×2 je Stufe, ×32
+  auf dem Cap); dazwischen wächst er linear. `dpsLevelFactor(lv) = lv ·
+milestoneMult(lv)` ist die EINE Stelle, die das ausdrückt — `heroDps` und
+  `heroClick` lesen sie beide, damit Klick und Idle nie auseinanderlaufen.
+- **Der Soft-Cap ist weich, nicht hart.** Ab Lv 250 gibt es keine Verdopplung
+  mehr, und der Preis trägt zusätzlich `SOFTCAP_COST_GROWTH = 1.06` je Level.
+  Ein hartes Limit hätte den Kauf-Knopf tot gemacht; so bleibt Weiterleveln
+  möglich, verliert aber schnell gegen den nächsten Kauf woanders — die Bremse,
+  die vorher komplett fehlte.
+- **Die letzte Fähigkeit liegt ABSICHTLICH jenseits des Caps.**
+  `MAX_ABILITY_TIERS = 8` ⇒ Stufe 8 auf Lv 375, der Cap steht auf 250. Ohne das
+  wäre die teure Zone sinnlos; so hat sie einen eigenen Grund (Fähigkeiten
+  statt DPS-Sprünge). Der Test hält genau diese Beziehung fest.
+- **Kalibriert, nicht geschätzt.** Die Meilensteine als reiner Zusatz machten
+  das Spiel 2–3× zu schnell (Bühne 25 in 14.8 statt 22.5–37.5 min). Zwei
+  Umwege scheiterten messbar (`SEGMENT_GAIN` mit Normierung gab Lv 1 den Faktor
+  9; eine Wurzel-Dämpfung kippte das frühe Spiel). Getragen hat erst
+  `DPS_TUNE` 1.5 → **0.72**, empirisch gesucht: 0.60 → 12 Anker-Fehler,
+  0.66 → 9, **0.72 → 5**, 0.78 → 7, 0.85 → 6.
+- **Anker: Zeugen neu gesetzt, Grenzen begründet verschoben.** Zeugen-Seeds
+  sind Messungen und wurden getauscht (Gear-Level zurück auf 12345, Token auf
+  7). Eine echte Design-Grenze wurde bewegt und dokumentiert: die erste
+  Himmelfahrt von 15.5 h auf **11 h ±25 %** — das liegt NÄHER am ursprünglichen
+  5–9-h-Ziel als der Stand davor. Der Testname trägt jetzt den geprüften Wert,
+  nicht mehr das alte Ziel.
+- **Ein echter Testfehler kam dabei ans Licht:** `sim-loot.test.ts` zählte
+  Relikt-Gates in Schritten von 5, obwohl Boss-Arenen alle `BOSS_EVERY` = 10
+  Bühnen liegen — bei Highwater 70 „5" statt 3 Gates. Die Pity-Untergrenze
+  forderte damit mehr Relikte, als das Pity je verspricht; sie war nur bisher
+  nie eng genug, um aufzufallen. Der Schritt ist jetzt `BOSS_EVERY`.
+- **Sichtbar gemacht statt nur gerechnet:** Ohne Anzeige ist der wichtigste
+  Grund zum Weiterleveln unsichtbar. Die Crew-Card trägt eine Meilenstein-Zeile
+  („⚡ ×2 ▬▬▬ ×4 bei Lv 50"), deren Balken vom LETZTEN zum nächsten Meilenstein
+  füllt (von 0 gemessen stünde er auf Lv 240 fast voll). Formuliert als „×N",
+  nicht „+100 %", weil die Fähigkeits-Zeile derselben Karte bereits „+100 % DPS"
+  für einen anderen Kauf trägt — zwei Systeme, ein Wortlaut, direkt
+  untereinander liest niemand auseinander.
+
 ## Grafik-/Animations-Politur „ship-ready" (design-plan → tech-plan → Umsetzung → Abnahme)
 
 - **Verfahren:** Rollen getrennt — Art Director plante gegen 33 selbst
