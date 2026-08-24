@@ -307,7 +307,9 @@ import {
   createKonami,
   konamiJackpot,
   PABLO_GOLD,
+  PABLO_OVERFLOW_MULT,
   PABLO_SEQUENCE,
+  pabloNextGold,
 } from './game/konami';
 import { loadSettings, type Quality, type QualityChoice, saveSettings } from './game/settings';
 import { type WelcomeBackData, welcomeBackData } from './game/welcome-back';
@@ -1177,7 +1179,6 @@ const crew = new Crew({
  */
 const retrainDialog = new RetrainDialog({
   state,
-  roll: () => rng.next(),
   onChange: () => {
     recompute();
     hud.update(state, combat, dps, clickDmg);
@@ -2950,14 +2951,21 @@ const pablo = createKonami(PABLO_SEQUENCE);
  */
 function pabloJackpot(): void {
   const before = state.gold;
-  if (state.gold >= PABLO_GOLD) {
-    toasts.show('🥝', 'Schon randvoll', 'Mehr BP kann das Spiel nicht exakt zählen.');
+  const next = pabloNextGold(before);
+  if (next <= before) {
+    // Nur hier ist wirklich Schluss: am 1e300-Deckel, jenseits dessen die
+    // nächste Rechnung Infinity und damit NaN-Differenzen liefern würde.
+    toasts.show('🥝', 'Wirklich alles', 'Höher geht es nicht, ohne dass das Konto kaputtrechnet.');
     return;
   }
-  state.gold = PABLO_GOLD;
-  state.stats.goldLifetime += PABLO_GOLD - before;
-  playKonamiCeremony(`+${fmt(PABLO_GOLD - before)} BP`);
-  toasts.show('🥝', 'PABLOKIWI!', 'Das Konto ist am Anschlag.');
+  state.gold = next;
+  state.stats.goldLifetime += next - before;
+  playKonamiCeremony(`+${fmt(next - before)} BP`);
+  toasts.show(
+    '🥝',
+    'PABLOKIWI!',
+    before < PABLO_GOLD ? 'Konto randvoll aufgefüllt.' : `Konto ×${PABLO_OVERFLOW_MULT}.`,
+  );
   audio.bossWin();
   persist();
   hud.update(state, combat, dps, clickDmg);

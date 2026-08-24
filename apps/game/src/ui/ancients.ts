@@ -67,18 +67,33 @@ export class Ancients {
     this.render();
   }
 
-  /** Wie viele Level ein Klick auf `cfg` gerade kauft (Menge × Budget × Cap). */
+  /**
+   * Wie viele Level ein Klick auf `cfg` kauft — GENAU die gewählte Menge.
+   *
+   * Wie in der Crew richtet sich nur `max` nach dem Kontostand; ×10 und ×100
+   * liefern ihre volle Menge, auch wenn sie unbezahlbar ist, und der Kauf
+   * scheitert dann sichtbar. Eine Menge, die still auf das Leistbare
+   * zurückfällt, kauft etwas anderes als draufsteht.
+   */
   private countFor(cfg: AncientConfig): number {
     const { state } = this.deps;
     const level = ancientLevel(state.ancients, cfg.id);
-    const max = ancientMaxAffordable(cfg.id, level, state.souls);
-    return this.amount === 'max' ? max : Math.min(this.amount, max);
+    if (this.amount === 'max') return ancientMaxAffordable(cfg.id, level, state.souls);
+    // Der Cap bleibt eine harte Grenze — über ihn hinaus gibt es keine Level.
+    const room = ancientAtCap(cfg.id, level)
+      ? 0
+      : ancientMaxAffordable(cfg.id, level, Number.POSITIVE_INFINITY);
+    return Math.min(this.amount, room);
   }
 
   private buy(cfg: AncientConfig): void {
     const { state } = this.deps;
     const n = this.countFor(cfg);
     if (n < 1) return;
+    // Exakt-Regel: Reicht das Budget nicht für die GANZE Menge, passiert nichts
+    // (nur „Max" kauft, was gerade geht).
+    const level = ancientLevel(state.ancients, cfg.id);
+    if (this.amount !== 'max' && ancientBulkCost(level, n) > state.souls) return;
     const r = buyAncientBulk(state.ancients, state.souls, cfg.id, n);
     if (!r.bought) return;
     state.ancients = r.ancients;
@@ -98,13 +113,19 @@ export class Ancients {
       const level = ancientLevel(state.ancients, cfg.id);
       const capped = ancientAtCap(cfg.id, level);
       const cost = ancientCost(level);
-      const affordable = canBuyAncient(state.ancients, state.souls, cfg.id);
+      const nWanted = this.countFor(cfg);
+      // „Leistbar" heißt jetzt: die GANZE gewählte Menge ist bezahlbar — sonst
+      // verspräche die Karte einen Kauf, den der Klick nicht ausführt.
+      const affordable =
+        canBuyAncient(state.ancients, state.souls, cfg.id) &&
+        nWanted >= 1 &&
+        ancientBulkCost(level, nWanted) <= state.souls;
       const cur = ancientBonus(cfg.id, level);
       const curTxt = fmtBonus(cfg, cur);
       const capTxt = cfg.cap === null ? '' : ` <span class="dim">(max Lv ${cfg.cap})</span>`;
       // Der Fuß zeigt die WIRKLICHE Kaufmenge und ihren Preis — bei „Max" also
       // nicht „Lv 1 · 1 ✨", sondern was der Klick tatsächlich tut.
-      const n = this.countFor(cfg);
+      const n = nWanted;
       const bulk = n > 1 ? ancientBulkCost(level, n) : cost;
       const foot = capped
         ? `<span class="cost">Max erreicht</span>`

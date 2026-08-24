@@ -5,19 +5,18 @@
  * Zwei Phasen, bewusst getrennt:
  *
  *  1. **Vorschau** — großes Portrait, wer und welche Stufe, die AKTUELLE Sorte
- *     und der Preis. Nichts ist bezahlt, nichts ist gewürfelt; „Abbrechen"
- *     kostet nichts.
- *  2. **Angebot** — erst der Druck auf „Für X 🧩 umschulen" zieht die zwei
- *     Alternativen aus dem seeded Strom (`retrainOffers`) und bucht die
- *     Splitter ab. Danach wählt der Spieler EINE der beiden ODER behält die
- *     aktuelle Sorte. Die Splitter sind in jedem Fall weg — bezahlt wurde der
- *     ROLL, nicht das Ergebnis —, aber der Guardrail des Ideen-Dokuments hält:
- *     nie ein Blind-Roll, nie ein erzwungener Rückschritt.
+ *     und der Preis. Nichts ist bezahlt; „Abbrechen" kostet nichts.
+ *  2. **Auswahl** — der Druck auf „Sorten zeigen" listet ALLE Sorten des Pools
+ *     außer der aktuellen. Der Spieler nimmt eine davon (dann wird bezahlt)
+ *     oder behält die alte (kostenlos).
  *
- * Die RNG-Ziehung sitzt bewusst hinter der Bezahlung und nicht beim Öffnen:
- * Würde der Dialog schon beim Aufklappen ziehen, könnte man das Angebot gratis
- * ansehen, den Dialog schließen und mit verschobenem Cursor neu würfeln —
- * Save-Scumming ohne Save.
+ * **Kein Würfel mehr.** Früher zog dieser Schritt zwei Zufalls-Sorten aus acht
+ * und buchte dabei ab: Wer eine bestimmte Fähigkeit wollte, musste so lange
+ * zahlen, bis der Zufall sie anbot — bei einer Leiter, die pro Slot verdoppelt,
+ * die teuerste Art von Glücksspiel. Jetzt ist die Sorte eine ENTSCHEIDUNG; der
+ * Preis der Slot-Leiter bleibt die einzige Bremse. Damit entfällt auch der
+ * Grund, die Ziehung hinter die Bezahlung zu legen — Save-Scumming braucht
+ * einen Zufall, den es hier nicht mehr gibt.
  */
 import type { ChState } from '../game/ch-state';
 import {
@@ -30,13 +29,11 @@ import {
   retrainSlotOrdinal,
 } from '../game/heroes';
 import {
-  type RetrainOffer,
   applyRetrain,
   noteRetrainRoll,
   retrainCost,
   retrainRollCount,
-  retrainSeed,
-  retrainOffers,
+  retrainChoices,
 } from '../game/retrain';
 import { fmt } from './format';
 import { portraitTile } from './avatars';
@@ -49,12 +46,6 @@ function byId(id: string): HTMLElement {
 
 export interface RetrainDeps {
   state: ChState;
-  /**
-   * EIN Float aus dem persistierten Spiel-Strom (`rng.next()`). Der Dialog zieht
-   * genau zweimal pro bezahltem Roll — dieselbe Quelle wie Krits, Truhen und
-   * Vergoldungen, also ist auch das Angebot save-scum-fest.
-   */
-  roll: () => number;
   /** Nach jeder Zustandsänderung: neu rechnen, HUD/Card auffrischen, persistieren. */
   onChange: () => void;
   /** Der Toast-Kanal (Umschulung ist ein Moment, kein stiller Zahlenwechsel). */
@@ -78,8 +69,8 @@ export class RetrainDialog {
   /** Das gerade bearbeitete Mitglied (null = Dialog zu). */
   private cfg: HeroConfig | null = null;
   private tier = 0;
-  /** Das bezahlte Angebot (null = Phase 1, noch nichts gerollt). */
-  private offer: RetrainOffer | null = null;
+  /** Die zur Wahl stehenden Sorten (null = Vorschau noch nicht geöffnet). */
+  private offer: readonly SpecialKind[] | null = null;
 
   constructor(private readonly deps: RetrainDeps) {
     byId('rtRoll').addEventListener('click', () => this.preview());
@@ -137,22 +128,13 @@ export class RetrainDialog {
     );
   }
 
-  /**
-   * Phase 1 → 2: die zwei Alternativen ZEIGEN. Kostet nichts.
-   *
-   * Vorher buchte dieser Schritt die Splitter ab — wer das Angebot dann
-   * ausschlug, hatte für nichts bezahlt. Jetzt gilt die Regel, die jeder
-   * Laden kennt: Ansehen ist frei, bezahlt wird an der Kasse ({@link choose}).
-   * Damit das kein Gratis-Würfeln wird, hängen die beiden Sorten an einem
-   * festen Seed aus (Mitglied, Stufe, Roll-Zähler) — Dialog schließen und
-   * wieder öffnen zeigt exakt dasselbe Paar.
-   */
+  /** Phase 1 → 2: die Sorten-Auswahl ZEIGEN. Kostet nichts. */
   private preview(): void {
     const cfg = this.cfg;
     if (!cfg || this.offer !== null) return;
-    const rolls = retrainRollCount(this.deps.state.retrainRolls, cfg.id);
-    const [r1, r2] = retrainSeed(cfg.id, this.tier, rolls);
-    this.offer = retrainOffers(this.current(), r1, r2);
+    // Die volle Auswahl statt zweier gewürfelter Sorten — Umschulen ist eine
+    // Entscheidung, kein Wurf (siehe `retrainChoices`).
+    this.offer = retrainChoices(this.current());
     this.render();
   }
 
@@ -160,15 +142,15 @@ export class RetrainDialog {
   private choose(kind: SpecialKind): void {
     const cfg = this.cfg;
     if (!cfg || this.offer === null) return;
-    if (!this.offer.kinds.includes(kind)) return; // nur die zwei gezeigten Angebote
+    if (!this.offer.includes(kind)) return; // nur echte Sorten des Pools
     const s = this.deps.state;
     // HIER wird bezahlt — und nur hier. Der Guard bleibt stehen, weil sich der
     // Splitter-Stand zwischen Öffnen und Zugreifen geändert haben kann.
     const cost = this.cost();
     if (s.gear.shards < cost) return;
     s.gear.shards -= cost;
-    // Der Zähler läuft weiter: er wählt das nächste Angebots-Paar aus (der Preis
-    // hängt seit dem Umbau nicht mehr an ihm).
+    // Der Zähler läuft als reine Statistik weiter — Preis und Auswahl hängen
+    // seit dem Umbau beide nicht mehr an ihm.
     s.retrainRolls = noteRetrainRoll(s.retrainRolls, cfg.id);
     s.crewRetrain = applyRetrain(s.crewRetrain, cfg.id, this.tier, kind);
     this.deps.onChange();
@@ -234,13 +216,13 @@ export class RetrainDialog {
       offers.innerHTML = '';
       roll.classList.remove('hidden');
       roll.disabled = !can;
-      roll.textContent = `Alternativen zeigen (${fmt(cost)} 🧩)`;
+      roll.textContent = `Sorten zeigen (${fmt(cost)} 🧩)`;
       keep.classList.add('hidden');
       close.classList.remove('hidden');
       close.textContent = 'Abbrechen';
       msg.className = `msg ${can ? '' : 'bad'}`;
       msg.textContent = can
-        ? `Du hast ${fmt(s.gear.shards)} 🧩 · Ansehen ist frei — bezahlt wird erst, wenn du eine Sorte nimmst.`
+        ? `Du hast ${fmt(s.gear.shards)} 🧩 · Du wählst die Sorte selbst — bezahlt wird erst beim Zugreifen.`
         : `Du hast nur ${fmt(s.gear.shards)} 🧩 — es fehlen ${fmt(cost - s.gear.shards)}.`;
       return;
     }
@@ -248,8 +230,8 @@ export class RetrainDialog {
     // ---- Phase 2: das bezahlte Angebot ----
     offers.classList.remove('hidden');
     offers.innerHTML =
-      '<span class="rt-k">Angebot — wähle eine</span>' +
-      this.offer.kinds.map((k) => this.card(k, 'offer', outLabel)).join('');
+      '<span class="rt-k">Wähle die neue Sorte</span>' +
+      this.offer.map((k) => this.card(k, 'offer', outLabel)).join('');
     roll.classList.add('hidden');
     keep.classList.remove('hidden');
     keep.textContent = `${abilityKindName(this.current())} behalten (gratis)`;
@@ -259,7 +241,7 @@ export class RetrainDialog {
     const can = s.gear.shards >= cost;
     msg.className = `msg ${can ? 'ok' : 'bad'}`;
     msg.textContent = can
-      ? `Eine Sorte wählen kostet ${fmt(cost)} 🧩 — beim Alten bleiben ist kostenlos.`
+      ? `Jede Sorte kostet dasselbe: ${fmt(cost)} 🧩 — beim Alten bleiben ist kostenlos.`
       : `Es fehlen ${fmt(cost - s.gear.shards)} 🧩 — beim Alten bleiben ist kostenlos.`;
   }
 }

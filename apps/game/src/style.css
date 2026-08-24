@@ -3227,22 +3227,40 @@ body {
   position: static;
   margin-right: 3px;
 }
-/* Kopfzeile der Slot-Reihe: „Fähigkeiten 3 · nächste in 12 Lv". */
+/* Kopfzeile der Slot-Reihe: „Fähigkeiten 0/3 · 3 kaufbar".
+   Sie stand als 10-px-Orange auf braunem Holz und war schlicht nicht lesbar.
+   Jetzt eine echte Plakette: dunkler Grund, heller Text, Lesegröße — und der
+   Zusatz („3 kaufbar") als eigener Chip, damit die Handlungsaufforderung nicht
+   im selben Grau untergeht wie die Bestandszahl. */
 .ab-head {
   flex: none;
-  margin-right: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 6px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--wood-rim);
+  background: rgba(28, 18, 10, 0.55);
   font-family: var(--display);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
-  /* Die Zeile trägt echte Information (wie viele Käufe offen sind) — sie darf
-     nicht so blass sein wie ein Fußnotentext. */
-  color: var(--gold-base);
+  color: #ffe9b8;
   white-space: nowrap;
 }
 .ab-head i {
   font-style: normal;
-  opacity: 0.75;
-  margin-left: 3px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--gold-btn);
+  color: var(--gold-ink);
+  font-size: 11px;
+}
+/* Sind keine Käufe offen, ist der Zusatz eine reine Info — dann tritt er
+   zurück, statt wie ein Knopf zu leuchten. */
+.ab-head.calm i {
+  background: rgba(255, 233, 184, 0.14);
+  color: #ffe9b8;
 }
 
 .ab-check {
@@ -5695,10 +5713,15 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  /* 40 px passen bei ~420 px Bühnenbreite kollisionsfrei zwischen die
-     Ast-Knoten (siehe die Abstandsrechnung in heaven-tree-layout.ts). */
-  width: 40px;
-  height: 40px;
+  /* EINE Größe, von der alles andere abhängt: Icon und Level-Zahl rechnen in
+     `em` gegen `font-size`, das hier gesetzt wird. Vorher standen Icon (16 px)
+     und Zahl (8 px) als feste Pixel daneben — beim Verkleinern des Knotens
+     blieben sie stehen und sprengten den Kreis. */
+  width: var(--hv-node, 40px);
+  height: var(--hv-node, 40px);
+  font-size: calc(var(--hv-node, 40px) * 0.5);
+  line-height: 1;
+  overflow: hidden;
   padding: 0;
   border-radius: 50%;
   cursor: pointer;
@@ -5711,14 +5734,20 @@ body {
     filter 0.12s;
 }
 .hv-node .hv-ic {
-  font-size: 16px;
+  /* 0.5 em vom Knoten — bleibt bei jeder Knotengröße im Kreis. */
+  font-size: 1em;
   line-height: 1;
 }
 .hv-node .hv-lv {
   font-family: var(--display);
-  font-size: 8px;
+  font-size: 0.44em;
   font-weight: 800;
-  line-height: 1.4;
+  line-height: 1.35;
+  /* Die Zahl darf den Kreis nie verbreitern — sie kürzt lieber. */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .hv-node.buyable {
   border-color: var(--gold-line);
@@ -5796,12 +5825,8 @@ body {
   .hv-tree {
     height: 330px;
   }
-  .hv-node {
-    width: 36px;
-    height: 36px;
-  }
-  .hv-node .hv-ic {
-    font-size: 14px;
+  .hv-tree {
+    --hv-node: 34px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
