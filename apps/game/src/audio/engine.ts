@@ -1,6 +1,21 @@
 import type { BackgroundKey } from '../types';
 import { loadAudioPrefs, saveAudioPrefs, type AudioPrefs, type PrefsStorage } from './prefs';
-import { BOSS_TRACK, MUSIC_TRACKS, type TrackConfig } from './tracks';
+import { BOSS_TRACK, MUSIC_TRACKS, PATTERN_STEPS, type TrackConfig } from './tracks';
+
+/** Takte je Phrase — die Länge des „Atems" eines Tracks. */
+export const PHRASE_BARS = 8;
+/** Ab diesem Takt verdichtet die Phrase (Build). */
+export const BUILD_BAR = 4;
+/** Ab diesem Takt macht sie auf (Drop). */
+export const DROP_BAR = 6;
+
+/** Die drei Abschnitte einer Phrase — reine Ableitung aus dem Takt-Zähler. */
+export type Section = 'groove' | 'build' | 'drop';
+export function sectionFor(bar: number): Section {
+  if (bar >= DROP_BAR) return 'drop';
+  if (bar >= BUILD_BAR) return 'build';
+  return 'groove';
+}
 
 function ctxStorage(): PrefsStorage | null {
   try {
@@ -23,6 +38,14 @@ class MusicPlayer {
   private ekstase = false;
   /** Boss-Bühne aktiv? ⇒ der Hardcore-Track übernimmt den ganzen Loop. */
   private bossMode = false;
+  /**
+   * Laufender Takt der Songstruktur (0..PHRASE_BARS-1). Vorher lief ein einziger
+   * 16-Schritt-Loop endlos und flach durch; jetzt atmet er in Achttakt-Phrasen:
+   * GROOVE (0-3) trägt, BUILD (4-5) verdichtet und öffnet den Filter,
+   * DROP (6-7) macht auf. Genau dieses Atmen unterscheidet einen Track von
+   * einer Schleife — und es kostet nichts als einen Zähler.
+   */
+  private bar = 0;
 
   constructor(
     private readonly ctx: AudioContext,
@@ -113,15 +136,25 @@ class MusicPlayer {
     while (this.nextNoteTime < this.ctx.currentTime + 0.2) {
       this.scheduleStep(this.step, this.nextNoteTime);
       this.nextNoteTime += secPerStep;
-      this.step = (this.step + 1) % 16;
+      this.step = (this.step + 1) % PATTERN_STEPS;
+      if (this.step === 0) this.bar = (this.bar + 1) % PHRASE_BARS;
     }
     this.timer = setTimeout(this.tick, 55);
   };
 
   private scheduleStep(step: number, time: number): void {
-    const { rootHz, scale, wave, genre } = this.activeTrack();
-    const deg = scale[step % scale.length]!;
-    const oct = step % 8 >= 4 ? 2 : 1; // lift the arp an octave in the 2nd half
+    const track = this.activeTrack();
+    const { rootHz, wave, genre, hook, bass, detune, cutoff } = track;
+    const section = sectionFor(this.bar);
+    // Der Filter atmet mit der Phrase: im Build öffnet er weit (die Spannung
+    // steigt hörbar), im Drop steht er offen, im Groove trägt er zurückhaltend.
+    const openness =
+      section === 'build' ? 1 + (this.bar - BUILD_BAR + 1) * 0.55 : section === 'drop' ? 2.1 : 1;
+    const leadCut = Math.min(9000, cutoff * openness);
+    // Die Melodie kommt aus dem Hook des Themes, nicht mehr aus dem
+    // Skalen-Durchlauf: `null` ist eine echte Pause und lässt den Groove atmen.
+    const hookSemi = hook[step % hook.length] ?? null;
+    const bassSemi = bass[step % bass.length] ?? null;
     if (this.ekstase) {
       // Der Drop-Groove: Four-on-the-floor, Hats auf JEDEM Achtel, Bass in
       // doppelter Rate mit Wechsel auf die Quinte — der Grund-Groove darunter
@@ -131,62 +164,81 @@ class MusicPlayer {
       const bSemi = step % 4 < 2 ? 0 : 7;
       this.voice((rootHz / 2) * Math.pow(2, bSemi / 12), time, 0.2, wave, 0.16);
     } else {
-      // Techno-Grundgroove je Subgenre (Melodie-Seite bleibt Theme-eigen).
+      // Techno-Grundgroove je Subgenre. Der BREAKDOWN ist die einzige Stelle,
+      // an der die Kick schweigt: die letzten beiden Build-Takte tragen nur
+      // Hats, Riser und Melodie — danach schlägt der Drop umso härter ein.
+      const breakdown = section === 'build';
       switch (genre) {
         case 'bounce':
           // Four-on-the-floor + der „Donk" hüpft auf den Offbeats.
-          if (step % 4 === 0) this.kick(time);
+          if (step % 4 === 0 && !breakdown) this.kick(time);
           if (step % 4 === 2) this.voice(rootHz, time, 0.11, 'square', 0.12);
           if (step % 2 === 1) this.hat(time);
           break;
         case 'trance':
           // Rollender Achtel-Bass unterm Kick — der Motor jeder Trance-Nacht.
-          if (step % 4 === 0) this.kick(time);
-          this.voice(rootHz / 2, time, 0.14, wave, step % 4 === 0 ? 0.08 : 0.12);
+          if (step % 4 === 0 && !breakdown) this.kick(time);
           if (step % 2 === 1) this.hat(time);
           break;
         case 'house':
           // Four-on-the-floor + OFFENE Hats auf den Offbeats (längerer Ausklang).
-          if (step % 4 === 0) this.kick(time);
-          if (step % 4 === 0) this.voice(rootHz / 2, time, 0.3, wave, 0.12);
+          if (step % 4 === 0 && !breakdown) this.kick(time);
           if (step % 4 === 2) this.hat(time, 0.16);
           else if (step % 2 === 1) this.hat(time);
           break;
         case 'hardtechno':
-          // Treibende Doppel-Kick, dunkler Drone, Hats auf jedem Achtel.
-          if (step % 2 === 0) this.kick(time);
-          if (step % 4 === 1) this.voice(rootHz / 2, time, 0.22, wave, 0.13);
+          // Treibende Doppel-Kick, Hats auf jedem Achtel.
+          if (step % 2 === 0 && !breakdown) this.kick(time);
           this.hat(time);
           break;
         case 'hardcore':
-          // Boss: die Kick-Wand — jeder Achtel, mit Verzerr-Transiente, Bass
-          // pendelt im Halbton (bedrohlich), Hats doppelt.
+          // Boss: die Kick-Wand — jeder Achtel, mit Verzerr-Transiente. Sie
+          // kennt KEINEN Breakdown; der Boss lässt nicht locker.
           this.kick(time, true);
           this.hat(time);
-          this.voice(
-            (rootHz / 2) * Math.pow(2, (step % 4 < 2 ? 0 : 1) / 12),
-            time,
-            0.16,
-            wave,
-            0.15,
-          );
           break;
       }
+      // Backbeat-Clap auf 2 und 4 — das Rückgrat jedes Tanzflächen-Grooves.
+      // Im Breakdown bleibt er stehen und hält den Takt zusammen.
+      if (step % 8 === 4) this.clap(time, breakdown ? 0.11 : 0.09);
+      // Die Bassfigur des Themes (Muster statt Dauerton). Sie trägt zusätzlich
+      // einen Sub auf den Taktschwerpunkten — Gewicht, kein Ton.
+      if (bassSemi !== null && !breakdown) {
+        const bHz = (rootHz / 2) * Math.pow(2, bassSemi / 12);
+        this.voice(bHz, time, genre === 'house' ? 0.26 : 0.14, wave, 0.12);
+        if (step % 8 === 0) this.sub(bHz / 2, time, 0.22);
+      }
+      // Der Riser läuft EINMAL je Phrase über die beiden Build-Takte.
+      if (step === 0 && this.bar === BUILD_BAR) {
+        this.riser(time, (60 / track.bpm) * 8);
+      }
     }
-    this.voice(rootHz * oct * Math.pow(2, deg / 12), time, 0.16, wave, 0.06); // arp
+    // Melodie: der Hook des Themes, gespielt als fette Doppel-Stimme. Im Drop
+    // kommt die Oktave darüber dazu — dieselbe Melodie, nur größer.
+    if (hookSemi !== null) {
+      const hz = rootHz * Math.pow(2, hookSemi / 12);
+      this.lead(hz, time, 0.19, wave, 0.075, detune, leadCut);
+      if (section === 'drop') this.lead(hz * 2, time, 0.13, wave, 0.03, detune, leadCut);
+    }
 
     // Additive combo-intensity layers (spec §8.10) — muteable (all under `out`),
-    // lazy (only while the loop plays), never autoplaying.
+    // lazy (only while the loop plays), never autoplaying. Sie hängen jetzt am
+    // HOOK statt am Skalen-Durchlauf: die Combo macht denselben Song größer,
+    // sie stellt keinen zweiten daneben.
     if (this.intensity >= 1 && step % 4 === 2) this.kick(time); // Tier 2: percussion
-    if (this.intensity >= 2) {
-      this.voice(rootHz * 2 * oct * Math.pow(2, deg / 12), time, 0.12, wave, 0.045); // Tier 3: lead +1 oct
+    if (this.intensity >= 2 && hookSemi !== null) {
+      // Tier 3: dieselbe Melodie eine Oktave höher, schlank (kein Detune).
+      this.voice(rootHz * 2 * Math.pow(2, hookSemi / 12), time, 0.12, wave, 0.045);
     }
     if (this.intensity >= 3 && step % 8 === 0) this.sweep(time); // Ekstase: filter-sweep
 
     // ROADMAP-V2 X5: die ZWEITE Instrumenten-Lage des Themes — nur im
     // Ekstase-Fenster, dezent unter dem Hauptmix (Gains ≈ ein Drittel der
-    // Bass-Stimme), damit sie das Fenster faerbt statt es zu übertönen.
-    if (this.ekstase) this.ekstaseLayer(step, time, deg, oct);
+    // Bass-Stimme), damit sie das Fenster faerbt statt es zu übertönen. Sie
+    // liest denselben Hook (Pause = Pause), damit sie nie gegen ihn läuft.
+    if (this.ekstase) {
+      this.ekstaseLayer(step, time, hookSemi ?? 0, step % 8 >= 4 ? 2 : 1);
+    }
   }
 
   /**
@@ -310,6 +362,116 @@ class MusicPlayer {
   }
 
   /** Geschlossene Hat; `dur` > 0.04 macht sie zur OFFENEN (House-Offbeat). */
+  /**
+   * Der Backbeat-Clap auf 2 und 4 — das Instrument, das dem Groove vorher am
+   * meisten gefehlt hat. Drei sehr schnelle Rausch-Anrisse (die „Hände") plus
+   * ein längerer Körper, alles durch einen Bandpass: so klingt eine Handfläche
+   * und nicht ein Zischen.
+   */
+  private clap(time: number, gain = 0.09): void {
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1500;
+    bp.Q.value = 1.1;
+    const g = this.ctx.createGain();
+    bp.connect(g);
+    g.connect(this.out);
+    // Die drei Anrisse im Abstand von ~9 ms — das Ohr hört sie als EINEN Schlag
+    // mit Textur, nicht als drei Ereignisse.
+    for (let i = 0; i < 3; i++) {
+      const t = time + i * 0.009;
+      g.gain.setValueAtTime(gain * (0.6 + 0.2 * i), t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.012);
+    }
+    const body = time + 0.027;
+    g.gain.setValueAtTime(gain, body);
+    g.gain.exponentialRampToValueAtTime(0.0001, body + 0.13);
+    const src = this.ctx.createBufferSource();
+    src.buffer = getNoiseBuffer(this.ctx);
+    src.connect(bp);
+    src.start(time);
+    src.stop(time + 0.2);
+  }
+
+  /**
+   * Lead-Stimme mit Doppel-Oszillator: zweimal derselbe Ton, gegeneinander um
+   * `detune` Cent verstimmt, hinter einem Tiefpass. Die Schwebung der beiden
+   * macht aus einem dünnen Piepen einen Synth-Sound — derselbe Trick, auf dem
+   * jeder Trance-Lead steht. `cutoff` atmet mit der Songstruktur.
+   */
+  private lead(
+    freq: number,
+    time: number,
+    dur: number,
+    wave: OscillatorType,
+    gain: number,
+    detune: number,
+    cutoff: number,
+  ): void {
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(cutoff, time);
+    lp.Q.value = 6;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(gain, time + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    lp.connect(g);
+    g.connect(this.out);
+    for (const cents of [-detune, detune]) {
+      const o = this.ctx.createOscillator();
+      o.type = wave;
+      o.frequency.setValueAtTime(freq, time);
+      o.detune.setValueAtTime(cents, time);
+      o.connect(lp);
+      o.start(time);
+      o.stop(time + dur + 0.02);
+    }
+  }
+
+  /**
+   * Das Fundament unter dem Kick: eine reine Sinus-Tiefe. Sie trägt keine
+   * Melodie, sie trägt das Gewicht — auf Handy-Lautsprechern spürt man sie als
+   * Druck, nicht als Ton.
+   */
+  private sub(freq: number, time: number, dur: number, gain = 0.13): void {
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(freq, time);
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(gain, time + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    o.connect(g);
+    g.connect(this.out);
+    o.start(time);
+    o.stop(time + dur + 0.02);
+  }
+
+  /**
+   * Rausch-Anstieg über einen ganzen Takt: das Signal „gleich passiert etwas".
+   * Läuft einmal im Build und macht den Drop überhaupt erst zu einem Ereignis.
+   */
+  private riser(time: number, dur: number): void {
+    const src = this.ctx.createBufferSource();
+    src.buffer = getNoiseBuffer(this.ctx);
+    src.loop = true;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(700, time);
+    bp.frequency.exponentialRampToValueAtTime(7200, time + dur);
+    bp.Q.value = 2.5;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(0.05, time + dur * 0.85);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    src.connect(bp);
+    bp.connect(g);
+    g.connect(this.out);
+    src.start(time);
+    src.stop(time + dur + 0.02);
+  }
+
   private hat(time: number, dur = 0.04): void {
     const src = this.ctx.createBufferSource();
     src.buffer = getNoiseBuffer(this.ctx);
