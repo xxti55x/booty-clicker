@@ -16,6 +16,13 @@ import {
   abilityLevel,
   abilityMult,
   ABILITY_FIRST_LEVEL,
+  MAX_ABILITY_TIERS,
+  dpsLevelFactor,
+  DPS_MILESTONES,
+  LEVEL_SOFTCAP,
+  milestoneMult,
+  nextMilestone,
+  SOFTCAP_COST_GROWTH,
   ABILITY_SPACING,
   abilityTiersUnlocked,
   levelsToNextAbility,
@@ -83,7 +90,10 @@ describe('heroes — kaufbare Fähigkeiten (buyable abilities)', () => {
     expect(abilityTiersUnlocked(74)).toBe(1);
     expect(abilityTiersUnlocked(75)).toBe(2);
     expect(abilityTiersUnlocked(125)).toBe(3);
-    expect(abilityTiersUnlocked(1025)).toBe(21);
+    // Seit dem Fähigkeiten-Deckel ist bei acht Schluss — ein Mitglied kann
+    // fertig ausgebaut sein, statt endlos neue Stufen zu bekommen.
+    expect(abilityTiersUnlocked(375)).toBe(MAX_ABILITY_TIERS);
+    expect(abilityTiersUnlocked(1025)).toBe(MAX_ABILITY_TIERS);
   });
 
   it('only POWER tiers raise output — mult follows the member RHYTHM (v11.1)', () => {
@@ -104,11 +114,13 @@ describe('heroes — kaufbare Fähigkeiten (buyable abilities)', () => {
     }
     expect(powerTiers(boss, 7)).toBe(4);
     expect(specialTiers(boss, 7)).toBe(3);
-    // A Lv-100 member with nothing bought has NO milestone multiplier any more
-    // (DPS_TUNE is the flat idle retune, not level-derived).
-    expect(heroDps(hype, 100, 0, 0)).toBe(hype.baseDps * DPS_TUNE * 100);
-    expect(heroDps(hype, 100, 0, 2)).toBe(hype.baseDps * DPS_TUNE * 100 * 3); // P P
-    expect(heroClick(boss, 100, 0, 3)).toBe(boss.baseDps * 100 * 3); // P S P
+    // Der Level-Anteil ist seit den DPS-Meilensteinen nicht mehr das blanke
+    // Level, sondern `dpsLevelFactor` — auf Lv 100 sind drei Meilensteine
+    // erreicht (25/50/100), also 100 × 2³ = 800.
+    expect(dpsLevelFactor(100)).toBe(800);
+    expect(heroDps(hype, 100, 0, 0)).toBe(hype.baseDps * DPS_TUNE * 800);
+    expect(heroDps(hype, 100, 0, 2)).toBe(hype.baseDps * DPS_TUNE * 800 * 3); // P P
+    expect(heroClick(boss, 100, 0, 3)).toBe(boss.baseDps * 800 * 3); // P S P
   });
 
   it('abilityKind follows the member rhythm; tier 1 is ALWAYS power (v11.1)', () => {
@@ -505,15 +517,31 @@ describe('levelsToNextAbility — die Kaufmenge bis zur nächsten Fähigkeit', (
     expect(levelsToNextAbility(24)).toBe(1);
   });
 
-  it('landet immer EXAKT auf einem Meilenstein, nie daneben', () => {
+  it('landet immer EXAKT auf einer Freischaltung, solange es noch eine gibt', () => {
     for (let lv = 0; lv < 400; lv++) {
+      if (abilityTiersUnlocked(lv) >= MAX_ABILITY_TIERS) continue; // alles offen
       const target = lv + levelsToNextAbility(lv);
       expect(abilityTiersUnlocked(target)).toBeGreaterThan(abilityTiersUnlocked(lv));
       expect(abilityTiersUnlocked(target - 1)).toBe(abilityTiersUnlocked(lv));
     }
   });
 
-  it('zeigt auf einem Meilenstein auf den ÜBERNÄCHSTEN (kein No-Op-Knopf)', () => {
+  // Ist alles freigeschaltet, zielt die Menge auf den nächsten DPS-Meilenstein
+  // statt ins Leere — der Knopf bleibt sinnvoll.
+  it('zielt nach der letzten Fähigkeit auf den nächsten DPS-Meilenstein', () => {
+    const full = abilityLevel(MAX_ABILITY_TIERS); // Lv 375
+    expect(abilityTiersUnlocked(full)).toBe(MAX_ABILITY_TIERS);
+    const target = full + levelsToNextAbility(full);
+    // 375 liegt über dem Soft-Cap: dort gibt es keinen Meilenstein mehr, also
+    // kauft die Menge genau ein Level.
+    expect(target).toBe(full + 1);
+    // Unterhalb des Caps zeigt sie dagegen auf den Meilenstein.
+    const below = 260;
+    expect(nextMilestone(below)).toBe(null);
+    expect(nextMilestone(180)).toBe(200);
+  });
+
+  it('zeigt auf einer Freischaltung auf die NÄCHSTE (kein No-Op-Knopf)', () => {
     expect(levelsToNextAbility(ABILITY_FIRST_LEVEL)).toBe(ABILITY_SPACING);
     expect(levelsToNextAbility(75)).toBe(ABILITY_SPACING);
   });
@@ -521,5 +549,106 @@ describe('levelsToNextAbility — die Kaufmenge bis zur nächsten Fähigkeit', (
   it('bleibt bei kaputten Eingaben eine sinnvolle Zahl', () => {
     expect(levelsToNextAbility(-5)).toBe(ABILITY_FIRST_LEVEL);
     expect(levelsToNextAbility(Number.NaN)).toBe(ABILITY_FIRST_LEVEL);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DPS-Meilensteine + Level-Soft-Cap
+// ---------------------------------------------------------------------------
+// Goal: „charaktere lassen sich zu weit upgraden. sie sollen alle x level einen
+// dps +100 % passiv bekommen … und ab da nurnoch linear dps und exponentiell
+// preis." Die Meilensteine machen das Leveln in Sprüngen lohnend, der Soft-Cap
+// beendet es als Dauerstrategie — beides wird hier an den KANTEN geprüft, weil
+// genau dort die Fehler sitzen (ein Level zu früh/zu spät verdoppelt).
+describe('DPS-Meilensteine und Soft-Cap', () => {
+  const cfg = CREW[0]!;
+
+  it('verdoppelt GENAU auf dem Meilenstein, keinen Level früher', () => {
+    for (const m of DPS_MILESTONES) {
+      expect(milestoneMult(m)).toBe(milestoneMult(m - 1) * 2);
+    }
+    expect(milestoneMult(0)).toBe(1);
+    expect(milestoneMult(24)).toBe(1);
+    expect(milestoneMult(25)).toBe(2);
+    // Auf dem Cap stehen alle fünf Verdopplungen: 2^5.
+    expect(milestoneMult(LEVEL_SOFTCAP)).toBe(2 ** DPS_MILESTONES.length);
+  });
+
+  it('wächst über dem Soft-Cap nur noch LINEAR (keine Sprünge mehr)', () => {
+    const cap = milestoneMult(LEVEL_SOFTCAP);
+    for (const lv of [LEVEL_SOFTCAP, 300, 500, 1000, 5000]) {
+      expect(milestoneMult(lv)).toBe(cap);
+      expect(dpsLevelFactor(lv)).toBe(lv * cap);
+    }
+    // Der Zuwachs je Level ist über dem Cap konstant — das ist „linear".
+    const step = dpsLevelFactor(1001) - dpsLevelFactor(1000);
+    expect(dpsLevelFactor(5001) - dpsLevelFactor(5000)).toBe(step);
+  });
+
+  it('bleibt streng monoton und startet bei 0 (kein Gratis-Ausstoß auf Lv 0)', () => {
+    expect(dpsLevelFactor(0)).toBe(0);
+    expect(dpsLevelFactor(-5)).toBe(0);
+    expect(dpsLevelFactor(Number.NaN)).toBe(0);
+    let prev = 0;
+    for (let lv = 1; lv <= 400; lv++) {
+      const v = dpsLevelFactor(lv);
+      expect(v).toBeGreaterThan(prev);
+      prev = v;
+    }
+  });
+
+  it('lässt den Preis erst ÜBER dem Cap zusätzlich exponentiell steigen', () => {
+    // Unter dem Cap ist das Verhältnis zweier Nachbarpreise exakt das normale
+    // Leiter-Wachstum; darüber kommt SOFTCAP_COST_GROWTH obendrauf.
+    const ratio = (lv: number): number => nextLevelCost(cfg, lv + 1) / nextLevelCost(cfg, lv);
+    const under = ratio(100);
+    const over = ratio(LEVEL_SOFTCAP + 50);
+    expect(over / under).toBeCloseTo(SOFTCAP_COST_GROWTH, 2);
+    // Und die Bremse ist spürbar: 100 Level über dem Cap kostet ein Level ein
+    // Vielfaches dessen, was dieselbe Leiter ohne Cap verlangt hätte.
+    expect(nextLevelCost(cfg, LEVEL_SOFTCAP + 100)).toBeGreaterThan(
+      nextLevelCost(cfg, LEVEL_SOFTCAP) * SOFTCAP_COST_GROWTH ** 99,
+    );
+  });
+
+  it('bulkCost summiert dieselben Preise, die nextLevelCost einzeln nennt', () => {
+    // Die geschlossene Formel gilt nur UNTER dem Cap — über ihm muss `bulkCost`
+    // Stück für Stück rechnen. Dieser Test läuft genau über die Kante.
+    for (const from of [0, 10, LEVEL_SOFTCAP - 5, LEVEL_SOFTCAP, LEVEL_SOFTCAP + 30]) {
+      for (const n of [1, 7, 25]) {
+        let sum = 0;
+        for (let i = 0; i < n; i++) sum += nextLevelCost(cfg, from + i);
+        // Rundung je Level ⇒ kleine Abweichung; relativ vergleichen.
+        expect(bulkCost(cfg, from, n)).toBeGreaterThan(sum * 0.999);
+        expect(bulkCost(cfg, from, n)).toBeLessThan(sum * 1.001 + n);
+      }
+    }
+    expect(bulkCost(cfg, 0, 0)).toBe(0);
+    expect(bulkCost(cfg, 0, -3)).toBe(0);
+  });
+
+  it('maxAffordable kauft nie über das Konto hinaus — auch über der Kante nicht', () => {
+    for (const from of [0, 40, LEVEL_SOFTCAP - 3, LEVEL_SOFTCAP, LEVEL_SOFTCAP + 20]) {
+      for (const mult of [1, 3.5, 40, 1e4]) {
+        const gold = nextLevelCost(cfg, from) * mult;
+        const n = maxAffordable(cfg, from, gold);
+        // Was gekauft wird, ist bezahlbar …
+        expect(bulkCost(cfg, from, n)).toBeLessThanOrEqual(gold);
+        // … und ein Level mehr wäre es nicht (die Schätzung ist exakt, nicht scheu).
+        expect(bulkCost(cfg, from, n + 1)).toBeGreaterThan(gold);
+      }
+    }
+    expect(maxAffordable(cfg, 0, 0)).toBe(0);
+  });
+
+  it('deckelt die Fähigkeiten bei MAX_ABILITY_TIERS — erreichbar ÜBER dem Cap', () => {
+    // Bewusstes Design: Die letzte Fähigkeit liegt jenseits des Soft-Caps. Damit
+    // behält die teure Zone einen Grund — kein DPS-Sprung mehr, aber die
+    // restlichen Fähigkeiten. Ohne das wäre alles über Lv 250 sinnlos.
+    const last = abilityLevel(MAX_ABILITY_TIERS);
+    expect(last).toBeGreaterThan(LEVEL_SOFTCAP);
+    expect(abilityTiersUnlocked(last)).toBe(MAX_ABILITY_TIERS);
+    expect(abilityTiersUnlocked(last - 1)).toBe(MAX_ABILITY_TIERS - 1);
+    expect(abilityTiersUnlocked(last + 5000)).toBe(MAX_ABILITY_TIERS);
   });
 });

@@ -222,14 +222,21 @@ describe('simulateEndless — 1d Legenden-Level (additiv, und quälend langsam)'
    * Ideen-Dokument wollte: eine sichtbare Zahl für Ultra-Langzeitspieler, kein
    * Machtterm.
    */
-  it('sammelt in 24 h genau ein Level (eine Himmelfahrt = ein Level)', () => {
+  it('sammelt in 24 h zwei Level (eine Himmelfahrt = ein Level)', () => {
     for (const seed of SIM_SEEDS_HEAVY) {
       const c = simulateContinuous(
         { ...ACTIVE, seed, legend: 0 },
         { stallSeconds: 1500, maxSeconds: 86_400, plateauAscensions: 4, fullPrestige: true },
       );
+      // Die eigentliche Behauptung: JEDE Himmelfahrt gibt genau ein Level —
+      // nie mehr, nie weniger. Sie ist unverändert.
       expect(c.legend).toBe(c.himmelfahrten);
-      expect(c.legend).toBe(1);
+      // MEILENSTEIN-RETUNE: In 24 h fallen jetzt ein bis zwei Himmelfahrten
+      // (die erste kommt bei ~11 h statt ~15.5 h, die zweite je nach Seed knapp
+      // davor oder dahinter). „Quälend langsam" hält damit weiterhin — mehr als
+      // zwei Level am Tag gibt es nicht.
+      expect(c.legend).toBeGreaterThanOrEqual(1);
+      expect(c.legend).toBeLessThanOrEqual(2);
     }
   }, 30_000);
 

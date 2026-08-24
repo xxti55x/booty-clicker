@@ -3161,6 +3161,47 @@ body {
   color: #8b3fd0;
 }
 
+/* Meilenstein-Zeile: der ×N-Blitz, ein schmaler Weg-Balken und das Ziel-Level.
+   Sie steht über der Meisterschaft, weil sie die HÄUFIGERE Entscheidung trägt
+   („noch 12 Level bis +100 %") — Meisterschaft läuft über Stunden, der nächste
+   Meilenstein über Minuten. Nie im Klickpfad. */
+.ms-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  color: #ffd76a;
+  pointer-events: none;
+}
+.ms-bar {
+  flex: 1 1 auto;
+  min-width: 22px;
+  max-width: 96px;
+  height: 4px;
+  border-radius: 3px;
+  background: rgba(255, 215, 106, 0.2);
+  overflow: hidden;
+}
+.ms-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #ffb347, #ffd76a);
+}
+.ms-goal {
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+/* Jenseits des Soft-Caps gibt es nichts mehr zu füllen — die Zeile wird ruhig
+   und sagt das auch, statt einen vollen Balken zu zeigen, der Fortschritt
+   verspricht, den es nicht gibt. */
+.ms-line.cap {
+  color: var(--parch-soft);
+}
+
 /* Ahnen-Zeile: Portrait vor dem Namen, Level bleibt rechtsbündig. */
 .nm-who {
   display: flex;
