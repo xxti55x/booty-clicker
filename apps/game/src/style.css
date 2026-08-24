@@ -3227,22 +3227,40 @@ body {
   position: static;
   margin-right: 3px;
 }
-/* Kopfzeile der Slot-Reihe: „Fähigkeiten 3 · nächste in 12 Lv". */
+/* Kopfzeile der Slot-Reihe: „Fähigkeiten 0/3 · 3 kaufbar".
+   Sie stand als 10-px-Orange auf braunem Holz und war schlicht nicht lesbar.
+   Jetzt eine echte Plakette: dunkler Grund, heller Text, Lesegröße — und der
+   Zusatz („3 kaufbar") als eigener Chip, damit die Handlungsaufforderung nicht
+   im selben Grau untergeht wie die Bestandszahl. */
 .ab-head {
   flex: none;
-  margin-right: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 6px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--wood-rim);
+  background: rgba(28, 18, 10, 0.55);
   font-family: var(--display);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
-  /* Die Zeile trägt echte Information (wie viele Käufe offen sind) — sie darf
-     nicht so blass sein wie ein Fußnotentext. */
-  color: var(--gold-base);
+  color: #ffe9b8;
   white-space: nowrap;
 }
 .ab-head i {
   font-style: normal;
-  opacity: 0.75;
-  margin-left: 3px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--gold-btn);
+  color: var(--gold-ink);
+  font-size: 11px;
+}
+/* Sind keine Käufe offen, ist der Zusatz eine reine Info — dann tritt er
+   zurück, statt wie ein Knopf zu leuchten. */
+.ab-head.calm i {
+  background: rgba(255, 233, 184, 0.14);
+  color: #ffe9b8;
 }
 
 .ab-check {
@@ -5695,10 +5713,15 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  /* 40 px passen bei ~420 px Bühnenbreite kollisionsfrei zwischen die
-     Ast-Knoten (siehe die Abstandsrechnung in heaven-tree-layout.ts). */
-  width: 40px;
-  height: 40px;
+  /* EINE Größe, von der alles andere abhängt: Icon und Level-Zahl rechnen in
+     `em` gegen `font-size`, das hier gesetzt wird. Vorher standen Icon (16 px)
+     und Zahl (8 px) als feste Pixel daneben — beim Verkleinern des Knotens
+     blieben sie stehen und sprengten den Kreis. */
+  width: var(--hv-node, 40px);
+  height: var(--hv-node, 40px);
+  font-size: calc(var(--hv-node, 40px) * 0.5);
+  line-height: 1;
+  overflow: hidden;
   padding: 0;
   border-radius: 50%;
   cursor: pointer;
@@ -5711,14 +5734,20 @@ body {
     filter 0.12s;
 }
 .hv-node .hv-ic {
-  font-size: 16px;
+  /* 0.5 em vom Knoten — bleibt bei jeder Knotengröße im Kreis. */
+  font-size: 1em;
   line-height: 1;
 }
 .hv-node .hv-lv {
   font-family: var(--display);
-  font-size: 8px;
+  font-size: 0.44em;
   font-weight: 800;
-  line-height: 1.4;
+  line-height: 1.35;
+  /* Die Zahl darf den Kreis nie verbreitern — sie kürzt lieber. */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .hv-node.buyable {
   border-color: var(--gold-line);
@@ -5796,12 +5825,8 @@ body {
   .hv-tree {
     height: 330px;
   }
-  .hv-node {
-    width: 36px;
-    height: 36px;
-  }
-  .hv-node .hv-ic {
-    font-size: 14px;
+  .hv-tree {
+    --hv-node: 34px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -5851,6 +5876,478 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .gate-bar i {
+    transition: none;
+  }
+}
+
+/* =========================== HIMMELSBAUM (Vollbild) ===========================
+   Ein eigener Ort, kein Panel-Abschnitt: Nachthimmel, Sterne, Wolken, der Baum
+   groß in der Mitte, Details an der Seite. Alles Layout hängt an EINEM Grid,
+   damit Kopf, Bühne, Seite und Fuß sich nie gegenseitig überlagern. */
+.sky {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: 1fr minmax(240px, 22vw);
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    'top top'
+    'stage side'
+    'foot side';
+  color: #eef3ff;
+  animation: skyIn 0.28s ease both;
+}
+.sky.hidden {
+  display: none;
+}
+@keyframes skyIn {
+  from {
+    opacity: 0;
+    transform: scale(1.02);
+  }
+}
+/* Der Himmel selbst: tiefes Blau nach oben, warmer Schein am Baumfuß. */
+.sky-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 70% at 50% 100%, #3a2a4a 0%, rgba(0, 0, 0, 0) 62%),
+    linear-gradient(180deg, #060a1c 0%, #121036 42%, #241a44 76%, #3a2740 100%);
+}
+.sky-glow {
+  position: absolute;
+  left: 50%;
+  bottom: -12%;
+  width: 78vmin;
+  height: 78vmin;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 226, 150, 0.22), rgba(255, 226, 150, 0) 68%);
+  animation: skyBreathe 7s ease-in-out infinite;
+}
+@keyframes skyBreathe {
+  50% {
+    opacity: 0.62;
+    transform: translateX(-50%) scale(1.06);
+  }
+}
+.sky-stars {
+  position: absolute;
+  inset: 0;
+}
+.sky-stars i {
+  position: absolute;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.75;
+  animation: skyTwinkle 3.6s ease-in-out infinite;
+}
+@keyframes skyTwinkle {
+  0%,
+  100% {
+    opacity: 0.28;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+.sky-cloud {
+  position: absolute;
+  height: 12vmin;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(190, 205, 255, 0.13), rgba(190, 205, 255, 0) 70%);
+  filter: blur(2px);
+}
+.sky-cloud.c1 {
+  left: -10%;
+  top: 22%;
+  width: 46vmin;
+  animation: skyDrift 64s linear infinite;
+}
+.sky-cloud.c2 {
+  left: 40%;
+  top: 54%;
+  width: 60vmin;
+  animation: skyDrift 92s linear infinite reverse;
+}
+.sky-cloud.c3 {
+  left: 62%;
+  top: 12%;
+  width: 38vmin;
+  animation: skyDrift 78s linear infinite;
+}
+@keyframes skyDrift {
+  to {
+    transform: translateX(120vw);
+  }
+}
+
+.sky-top {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 10px;
+}
+.sky-ttl {
+  display: block;
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.sky-bank {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: #c8d2f0;
+}
+.sky-bank b {
+  color: #ffe9a8;
+}
+.sky-tools {
+  display: flex;
+  gap: 6px;
+}
+.sky-tools button {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  border: 2px solid rgba(255, 233, 168, 0.35);
+  background: rgba(12, 16, 38, 0.62);
+  color: #ffe9a8;
+  font-family: var(--display);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+.sky-tools button:hover {
+  border-color: #ffe9a8;
+}
+.sky-tools .sky-x {
+  color: #ffb3b3;
+  border-color: rgba(255, 179, 179, 0.4);
+}
+
+.sky-stage {
+  grid-area: stage;
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+}
+.sky-canvas {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  aspect-ratio: 1;
+  height: 100%;
+  translate: -50% 0;
+  transform-origin: 50% 55%;
+  cursor: grab;
+}
+.sky-canvas:active {
+  cursor: grabbing;
+}
+.sky-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.sky-trunk {
+  fill: #4a3220;
+  stroke: #6b4a2c;
+  stroke-width: 3;
+}
+.sky-branch {
+  fill: none;
+  stroke: #4a3220;
+  stroke-width: 16;
+  stroke-linecap: round;
+}
+.sky-twig {
+  stroke-width: 10;
+}
+
+/* Eine Frucht. Die Größe steckt in --sky-node; Icon und Stufenzahl rechnen in
+   em dagegen, damit beim Skalieren nichts aus dem Kreis läuft. */
+.sky-node {
+  --sky-node: 62px;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--sky-node);
+  height: var(--sky-node);
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, #4a3f5e, #241d33);
+  box-shadow:
+    0 4px 0 rgba(0, 0, 0, 0.5),
+    inset 0 0 0 2px rgba(255, 255, 255, 0.08);
+  font-size: calc(var(--sky-node) * 0.42);
+  color: #cbd4f0;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    filter 0.12s ease;
+}
+.sky-node .sky-ic {
+  font-size: 1em;
+  line-height: 1;
+}
+/* Stufenring: ein Conic-Gradient zeigt den Ausbau ohne Zahl im Kreis. */
+.sky-node .sky-ring {
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  background: conic-gradient(#8de08a var(--fill, 0deg), rgba(255, 255, 255, 0.09) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+}
+.sky-node .sky-pip {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  min-width: 1.05em;
+  padding: 0 0.25em;
+  border-radius: 1em;
+  background: #1b2340;
+  border: 2px solid #8de08a;
+  color: #d9ffd4;
+  font-family: var(--display);
+  font-size: 0.42em;
+  font-weight: 800;
+  line-height: 1.5;
+}
+.sky-node.buyable {
+  background: radial-gradient(circle at 34% 30%, #ffe08a, #d99a2c);
+  color: #3a2400;
+  box-shadow:
+    0 4px 0 rgba(0, 0, 0, 0.5),
+    0 0 22px rgba(255, 214, 120, 0.55);
+  animation: skyPulse 2.4s ease-in-out infinite;
+}
+@keyframes skyPulse {
+  50% {
+    filter: brightness(1.13);
+  }
+}
+.sky-node.own {
+  background: radial-gradient(circle at 34% 30%, #bff0a4, #4e8a45);
+  color: #16300d;
+}
+.sky-node.maxed {
+  box-shadow:
+    0 4px 0 rgba(0, 0, 0, 0.5),
+    0 0 26px rgba(150, 240, 140, 0.6);
+}
+.sky-node.blocked {
+  opacity: 0.4;
+  filter: grayscale(0.85);
+  cursor: not-allowed;
+}
+.sky-node.excl {
+  box-shadow:
+    0 4px 0 rgba(0, 0, 0, 0.5),
+    inset 0 0 0 3px rgba(255, 233, 168, 0.5);
+}
+.sky-node.sel {
+  transform: translate(-50%, -50%) scale(1.14);
+  outline: 3px solid #ffe9a8;
+  outline-offset: 3px;
+}
+.sky-node:hover {
+  filter: brightness(1.12);
+}
+
+.sky-side {
+  grid-area: side;
+  overflow-y: auto;
+  padding: 8px 14px 16px;
+}
+.sky-card,
+.sky-empty {
+  padding: 14px;
+  border-radius: 14px;
+  border: 2px solid rgba(255, 233, 168, 0.22);
+  background: rgba(10, 14, 34, 0.62);
+  backdrop-filter: blur(3px);
+}
+.sky-empty b {
+  display: block;
+  margin-bottom: 6px;
+  color: #ffe9a8;
+}
+.sky-empty p,
+.sky-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #c8d2f0;
+}
+.sky-branch-tag {
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffe9a8;
+  opacity: 0.9;
+}
+.sky-card h3 {
+  margin: 4px 0 2px;
+  font-family: var(--display);
+  font-size: 17px;
+}
+.sky-lv {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #c8d2f0;
+}
+.sky-lv b {
+  color: #8de08a;
+}
+.sky-buy {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 2px solid var(--gold-line);
+  background: var(--gold-btn);
+  color: var(--gold-ink);
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.sky-buy.off {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #9aa6c8;
+  cursor: not-allowed;
+}
+.sky-need {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #ffb3b3;
+}
+.sky-act {
+  margin-top: 12px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.sky-act.done {
+  color: #b6f0a4;
+}
+.sky-act.blocked {
+  color: #ffc9a0;
+}
+
+.sky-foot {
+  grid-area: foot;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+}
+.sky-respec {
+  flex: none;
+  padding: 9px 14px;
+  border-radius: 11px;
+  border: 2px solid rgba(255, 179, 179, 0.4);
+  background: rgba(90, 30, 40, 0.5);
+  color: #ffd9d9;
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.sky-respec.off {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.sky-respec-note {
+  font-size: 11px;
+  color: #9aa6c8;
+}
+
+/* Der Öffner-Knopf: dritter in der Spalte unter Crew und Farm-Modus. */
+.skyBtn {
+  position: fixed;
+  top: calc(14px + env(safe-area-inset-top, 0px) + var(--top-btn-h) + 46px);
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 12px;
+  cursor: pointer;
+  background: linear-gradient(180deg, #3d4d86 0%, #26305c 100%);
+  color: #ffe9a8;
+  border: 2px solid rgba(255, 233, 168, 0.45);
+  box-shadow:
+    0 3px 0 rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 245, 210, 0.18);
+  transition:
+    transform 0.06s,
+    box-shadow 0.06s;
+}
+.skyBtn:active {
+  transform: translateY(3px);
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0.45);
+}
+.skyBtn .ui-ic {
+  width: 21px;
+  height: 21px;
+}
+
+@media (max-width: 900px) {
+  /* Auf schmalen Geräten liegt die Detailspalte UNTER der Bühne — nebeneinander
+     bliebe für den Baum zu wenig Fläche. */
+  .sky {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto auto;
+    grid-template-areas:
+      'top'
+      'stage'
+      'side'
+      'foot';
+  }
+  .sky-side {
+    max-height: 34vh;
+  }
+  .sky-node {
+    --sky-node: 48px;
+  }
+  .sky-foot {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sky,
+  .sky-glow,
+  .sky-stars i,
+  .sky-cloud,
+  .sky-node.buyable {
+    animation: none;
+  }
+  .sky-node {
     transition: none;
   }
 }

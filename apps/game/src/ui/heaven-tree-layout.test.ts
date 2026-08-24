@@ -11,6 +11,12 @@ import {
   ZOOM_MIN,
 } from './heaven-tree-layout';
 
+/**
+ * Mindestabstand zweier Knoten in Baum-Einheiten. Hergeleitet, nicht geraten:
+ * 62-px-Frucht auf einer ~880-px-Bühne ⇒ ~70 Einheiten, plus Reserve.
+ */
+const MIN_NODE_GAP = 80;
+
 describe('Himmelsbaum-Geometrie', () => {
   const layouts = treeLayout();
 
@@ -67,13 +73,26 @@ describe('Himmelsbaum-Geometrie', () => {
         const a = b.slots[i - 1]!;
         const c = b.slots[i]!;
         const d = Math.hypot(c.x - a.x, c.y - a.y);
-        // Eine Frucht misst 40 px in einer ~420-px-Bühne, also ~95 Einheiten.
-        // Weniger Abstand als das heißt sichtbare Überlappung.
-        expect(d).toBeGreaterThan(95);
+        // Eine Frucht misst 62 px auf der ~880-px-Vollbildbühne, also ~70
+        // Einheiten; 80 lässt Luft. Weniger heißt sichtbare Überlappung.
+        expect(d).toBeGreaterThan(MIN_NODE_GAP);
       }
       // Die beiden Gabel-Knoten dürfen sich ebenfalls nicht berühren.
       const gap = Math.hypot(b.fork[0].x - b.fork[1].x, b.fork[0].y - b.fork[1].y);
-      expect(gap).toBeGreaterThan(95);
+      expect(gap).toBeGreaterThan(MIN_NODE_GAP);
+    }
+  });
+
+  // Der Fehler, den erst das Vollbild zeigte: Innerhalb eines Astes stimmten die
+  // Abstände, aber die INNERSTEN Knoten dreier Äste liefen am Stammansatz
+  // zusammen und lagen sichtbar übereinander.
+  it('hält auch Knoten VERSCHIEDENER Äste auseinander', () => {
+    const all = layouts.flatMap((b) => [...b.slots, ...b.fork]);
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        const d = Math.hypot(all[i]!.x - all[j]!.x, all[i]!.y - all[j]!.y);
+        expect(d).toBeGreaterThan(MIN_NODE_GAP);
+      }
     }
   });
 

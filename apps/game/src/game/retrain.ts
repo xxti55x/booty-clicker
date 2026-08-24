@@ -204,6 +204,21 @@ export function retrainSeed(id: string, tier: number, rolls: number): [number, n
   return [mix(h), mix(h ^ 0x9e3779b9)];
 }
 
+/**
+ * ALLE Sorten, die für einen Slot in Frage kommen — also der volle Pool ohne
+ * die aktuelle. Seit dem Umbau „Umschulen ist eine Entscheidung, kein Wurf"
+ * ist das die Auswahl, die der Dialog zeigt.
+ *
+ * Vorher zog er zwei Zufalls-Sorten aus acht: Wer eine bestimmte Fähigkeit
+ * wollte, musste den Dialog so lange bezahlen, bis der Zufall sie anbot — bei
+ * einer Kostenleiter, die pro Slot verdoppelt, war das die teuerste Art von
+ * Glücksspiel. Die Slot-Leiter bleibt die Bremse; WAS man dafür bekommt, ist
+ * jetzt Planung statt Glück.
+ */
+export function retrainChoices(current: SpecialKind): readonly SpecialKind[] {
+  return SPECIAL_KINDS.filter((k) => k !== current);
+}
+
 export function retrainOffers(current: SpecialKind, r1: number, r2: number): RetrainOffer {
   const pool = SPECIAL_KINDS.filter((k) => k !== current);
   const pick = (xs: readonly SpecialKind[], r: number): number => {

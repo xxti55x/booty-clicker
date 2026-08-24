@@ -36,15 +36,15 @@ export interface BranchLayout {
 }
 
 /** Fuß und Spitze des Stamms. */
-export const TRUNK_BOTTOM: TreePoint = { x: 500, y: 945 };
-export const TRUNK_TOP: TreePoint = { x: 500, y: 640 };
+export const TRUNK_BOTTOM: TreePoint = { x: 500, y: 930 };
+export const TRUNK_TOP: TreePoint = { x: 500, y: 700 };
 
 /**
  * Die drei Äste in der Reihenfolge von {@link TREE_BRANCHES}: links, Mitte,
  * rechts. Der Winkel ist die Richtung, in die der Ast wächst (0° = senkrecht
  * nach oben, negativ = nach links).
  */
-const BRANCH_ANGLES = [-51, 0, 51] as const;
+const BRANCH_ANGLES = [-49, 0, 49] as const;
 
 /** Punkt auf einer kubischen Bézier — die eine Rechnung, die alles platziert. */
 function bezier(p0: TreePoint, p1: TreePoint, p2: TreePoint, p3: TreePoint, t: number): TreePoint {
@@ -70,15 +70,22 @@ const rad = (deg: number): number => (deg * Math.PI) / 180;
 export function branchLayout(i: number): BranchLayout {
   const angle = BRANCH_ANGLES[Math.max(0, Math.min(2, Math.floor(i)))]!;
   const dir = rad(angle);
-  // Astlänge in Baum-Einheiten. Sie ist KEINE Geschmacksfrage: Der Baum wird in
-  // einem QUADRAT von rund 420 px gezeigt, eine Einheit ist also ~0.42 px. Eine
-  // 40-px-Frucht belegt damit ~95 Einheiten, und die Knotenabstände müssen
-  // darüber liegen — die erste Fassung stapelte sie sichtbar übereinander.
-  const LEN = 450;
+  // Astlänge in Baum-Einheiten. Sie ist KEINE Geschmacksfrage, sondern folgt aus
+  // der Anzeigegröße: Der Baum füllt jetzt den Vollbild-Himmel (Bühnenhöhe rund
+  // 880 px), eine Einheit ist also ~0.88 px. Eine 62-px-Frucht belegt damit
+  // ~70 Einheiten — so viel Abstand brauchen die Knoten mindestens, sonst
+  // überlappen sie sichtbar (erst innerhalb eines Astes passiert, dann zwischen
+  // benachbarten Ästen am Stammansatz).
+  const LEN = 462;
   const start = TRUNK_TOP;
-  // Der Ast verlässt den Stamm zunächst senkrecht und dreht dann erst in seine
-  // Richtung — so wächst er aus dem Stamm heraus, statt an ihm zu kleben.
-  const c1: TreePoint = { x: start.x, y: start.y - LEN * 0.32 };
+  // Der Ast dreht FRÜH in seine Richtung. Vorher stieg er erst senkrecht auf
+  // (c1 exakt über dem Stamm) — dadurch lagen die innersten Knoten aller drei
+  // Äste am Ansatz fast übereinander, im Vollbild deutlich zu sehen. Jetzt
+  // trägt schon der erste Kontrollpunkt einen Teil der Richtung.
+  const c1: TreePoint = {
+    x: start.x + Math.sin(dir) * LEN * 0.3,
+    y: start.y - LEN * 0.34,
+  };
   const c2: TreePoint = {
     x: start.x + Math.sin(dir) * LEN * 0.62,
     y: start.y - Math.cos(dir) * LEN * 0.58,
@@ -93,12 +100,15 @@ export function branchLayout(i: number): BranchLayout {
   // Stamm, der letzte lässt Platz für die Gabel.
   const slots: TreePoint[] = [];
   for (let n = 0; n < 4; n++) {
-    slots.push(bezier(start, c1, c2, end, 0.22 + (0.76 * n) / 3));
+    // Start bei 30 % der Astlänge: Weiter innen liegen die drei Äste noch so
+    // dicht beieinander, dass ihre ersten Knoten kollidieren (der Fehler, den
+    // der Vollbild-Screen zeigte und den der Kreuz-Ast-Test jetzt abfängt).
+    slots.push(bezier(start, c1, c2, end, 0.3 + (0.68 * n) / 3));
   }
 
   // Die Gabel: zwei kurze Zweige, die sich an der Astspitze trennen.
-  const FORK = 132;
-  const spread = rad(30);
+  const FORK = 124;
+  const spread = rad(27);
   const mk = (sign: number): TreePoint => ({
     x: end.x + Math.sin(dir + sign * spread) * FORK,
     y: end.y - Math.cos(dir + sign * spread) * FORK,

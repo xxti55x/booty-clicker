@@ -2,31 +2,15 @@ import type { ChState } from '../game/ch-state';
 import {
   HPF_RS_DIVISOR,
   RESPEC_FEE,
-  TREE_BRANCHES,
   TREE_NODES,
-  type TreeNodeConfig,
-  canBuyTreeNode,
   canHimmelfahrt,
   canRespec,
   himmelfahrtGain,
   hpfForRsLifetime,
   treeLevel,
-  treeNodeBlockedBy,
-  treeNodeConfig,
-  treeNodeCost,
-  treeNodeMaxLevel,
-  treeNodesOfBranch,
   treeRefund,
 } from '../game/heaven';
 import { emptyState } from './empty';
-import {
-  clampZoom,
-  TREE_VIEW,
-  TRUNK_BOTTOM,
-  TRUNK_TOP,
-  treeLayout,
-  ZOOM_STEP,
-} from './heaven-tree-layout';
 import { fmt } from './format';
 
 function byId(id: string): HTMLElement {
@@ -72,15 +56,6 @@ export class Heaven {
   private armTimer: ReturnType<typeof window.setTimeout> | null = null;
   private respecArmed = false;
   private respecTimer: ReturnType<typeof window.setTimeout> | null = null;
-  /** Der angetippte Knoten — seine Karte steht unter dem Baum. */
-  private picked: string | null = null;
-  private zoom = 1;
-  private panX = 0;
-  private panY = 0;
-  /** Läuft gerade ein Ziehen? (Pointer-Id, damit Multitouch nicht durcheinanderkommt.) */
-  private dragId: number | null = null;
-  private dragX = 0;
-  private dragY = 0;
 
   constructor(private readonly deps: HeavenDeps) {
     this.body.innerHTML = `
@@ -92,19 +67,11 @@ export class Heaven {
       <div class="settings-section">
         <h3>Himmelsbaum 🌳</h3>
         <div class="rebirth-info" id="hvTreeInfo"></div>
-        <!-- Der Baum als BAUM (statt drei Listen): SVG-Geäst, darauf die
-             Knoten als Früchte. Zoom-Knöpfe oben rechts, Mausrad und Ziehen
-             tun dasselbe. Die Detail-Karte darunter gehört dem gewählten
-             Knoten — so bleibt die Krone frei von Fließtext. -->
-        <div class="hv-tree" id="hvTree">
-          <div class="hv-zoom">
-            <button type="button" data-z="out" title="Herauszoomen">−</button>
-            <button type="button" data-z="fit" title="Ganzen Baum zeigen">⤢</button>
-            <button type="button" data-z="in" title="Hineinzoomen">+</button>
-          </div>
-          <div class="hv-canvas" id="hvCanvas"></div>
-        </div>
-        <div class="hv-detail" id="hvDetail"></div>
+        <!-- Der Baum selbst wohnt im VOLLBILD (siehe ui/sky-tree) — hier steht
+             nur noch die Tür dorthin. Ein 420-px-Kasten zwischen Fließtext und
+             Respec-Knopf war zu klein für die Schicht, die das halbe Endgame
+             trägt. -->
+        <button class="btn hv-open" id="hvOpenTree" type="button">🌳 Himmelsbaum öffnen</button>
         <div class="rebirth-info hv-respec-info" id="hvRespecInfo"></div>
         <button class="btn" id="hvRespecBtn" type="button">Baum zurücksetzen</button>
       </div>
@@ -112,8 +79,6 @@ export class Heaven {
         <h3>Danach 🔮</h3>
         <div id="hvTeaser"></div>
       </div>`;
-
-    this.wireTree();
 
     const btn = byId('himmelfahrtBtn') as HTMLButtonElement;
     btn.addEventListener('click', () => {
@@ -214,8 +179,6 @@ export class Heaven {
         : '';
 
     byId('hvTreeInfo').insertAdjacentHTML('beforeend', treeEmpty);
-    this.renderTree();
-    this.renderDetail();
 
     this.refreshRespec(spent);
     this.refreshTeaser();
@@ -256,235 +219,6 @@ export class Heaven {
     byId('hvTeaser').innerHTML = `<div class="item tc-teaser">
         <div class="nm">🔮 ??? <span class="lv">🔒</span></div>
         <div class="ds">Erreiche deine erste Himmelfahrt, um die dritte Schicht zu enthüllen.</div>
-      </div>`;
-  }
-
-  /**
-   * Bedienung des Baums: Knoten wählen, Zoom-Knöpfe, Mausrad, Ziehen. Alles
-   * hängt an EINEM delegierten Handler auf dem Rahmen — die Knoten werden bei
-   * jedem Refresh neu gebaut, ein Handler je Knoten müsste bei jedem Kauf neu
-   * angeheftet werden.
-   */
-  private wireTree(): void {
-    const frame = byId('hvTree');
-    const canvas = byId('hvCanvas');
-
-    frame.addEventListener('click', (ev) => {
-      const t = ev.target as HTMLElement;
-      const zoomBtn = t.closest<HTMLElement>('[data-z]');
-      if (zoomBtn) {
-        const kind = zoomBtn.dataset.z;
-        if (kind === 'in') this.zoom = clampZoom(this.zoom * ZOOM_STEP);
-        else if (kind === 'out') this.zoom = clampZoom(this.zoom / ZOOM_STEP);
-        else {
-          this.zoom = 1;
-          this.panX = 0;
-          this.panY = 0;
-        }
-        this.applyView();
-        return;
-      }
-      const node = t.closest<HTMLElement>('[data-node]');
-      if (node?.dataset.node) {
-        this.picked = node.dataset.node;
-        this.renderTree();
-        this.renderDetail();
-      }
-    });
-
-    // Mausrad zoomt — ohne die Seite darunter mitzuscrollen.
-    frame.addEventListener(
-      'wheel',
-      (ev) => {
-        ev.preventDefault();
-        this.zoom = clampZoom(this.zoom * (ev.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP));
-        this.applyView();
-      },
-      { passive: false },
-    );
-
-    // Ziehen verschiebt den Ausschnitt.
-    canvas.addEventListener('pointerdown', (ev) => {
-      if (this.dragId !== null) return;
-      this.dragId = ev.pointerId;
-      this.dragX = ev.clientX - this.panX;
-      this.dragY = ev.clientY - this.panY;
-    });
-    canvas.addEventListener('pointermove', (ev) => {
-      if (this.dragId !== ev.pointerId) return;
-      this.panX = ev.clientX - this.dragX;
-      this.panY = ev.clientY - this.dragY;
-      this.applyView();
-    });
-    for (const name of ['pointerup', 'pointercancel', 'pointerleave'] as const) {
-      canvas.addEventListener(name, (ev) => {
-        if (this.dragId === ev.pointerId) this.dragId = null;
-      });
-    }
-  }
-
-  /**
-   * Den Baum zeichnen: erst das Geäst als EIN SVG, dann die Knoten als
-   * absolut gesetzte Knöpfe darüber. Die Knoten sind bewusst HTML und nicht
-   * Teil des SVG — so tragen sie dieselben Zustandsklassen wie überall im
-   * Spiel und bleiben ohne Sonderweg bedienbar.
-   */
-  private renderTree(): void {
-    const canvas = byId('hvCanvas');
-    const layouts = treeLayout();
-    const pct = (v: number, total: number): string => `${((v / total) * 100).toFixed(3)}%`;
-
-    const branchPaths = layouts
-      .map(
-        (b, i) =>
-          `<path class="hv-branch b${i}" d="${b.path}"/>` +
-          b.forkPaths.map((f) => `<path class="hv-branch hv-twig b${i}" d="${f}"/>`).join(''),
-      )
-      .join('');
-    // Die Ast-Titel standen als SVG-Text an den Astspitzen und liefen dort aus
-    // dem Bild, sobald man zoomte. Sie sind jetzt eine Legende im Rahmen: Die
-    // Zuordnung tragen ohnehin die Icons auf den Früchten selbst.
-    const legend =
-      `<div class="hv-legend">` +
-      TREE_BRANCHES.map((b) => `<span title="${b.desc}">${b.icon} ${b.name}</span>`).join('') +
-      `</div>`;
-    const svg =
-      `<svg class="hv-svg" viewBox="0 0 ${TREE_VIEW.w} ${TREE_VIEW.h}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">` +
-      // Der Stamm: unten breit, oben schmal — zwei Kanten statt einer Linie.
-      `<path class="hv-trunk" d="M ${TRUNK_BOTTOM.x - 46} ${TRUNK_BOTTOM.y} C ${TRUNK_BOTTOM.x - 30} ${TRUNK_BOTTOM.y - 190}, ${TRUNK_TOP.x - 22} ${TRUNK_TOP.y + 120}, ${TRUNK_TOP.x - 15} ${TRUNK_TOP.y} L ${TRUNK_TOP.x + 15} ${TRUNK_TOP.y} C ${TRUNK_TOP.x + 22} ${TRUNK_TOP.y + 120}, ${TRUNK_BOTTOM.x + 30} ${TRUNK_BOTTOM.y - 190}, ${TRUNK_BOTTOM.x + 46} ${TRUNK_BOTTOM.y} Z"/>` +
-      branchPaths +
-      `</svg>`;
-
-    const nodes: string[] = [];
-    layouts.forEach((b, i) => {
-      const cfg = TREE_BRANCHES[i];
-      if (!cfg) return;
-      const all = treeNodesOfBranch(cfg.id);
-      const plain = all.filter((n) => !n.exclusiveWith);
-      const pair = all.filter((n) => n.exclusiveWith);
-      plain.forEach((node, n) => {
-        const p = b.slots[n];
-        if (p) nodes.push(this.nodeDot(node, p.x, p.y, pct));
-      });
-      pair.forEach((node, n) => {
-        const p = b.fork[n === 0 ? 0 : 1];
-        nodes.push(this.nodeDot(node, p.x, p.y, pct, true));
-      });
-    });
-
-    canvas.innerHTML = svg + nodes.join('');
-    // Die Legende liegt NEBEN der Bühne (im Rahmen), nicht in ihr — sie darf
-    // nicht mitzoomen und nicht mitwandern.
-    const frame = byId('hvTree');
-    frame.querySelector('.hv-legend')?.remove();
-    frame.insertAdjacentHTML('beforeend', legend);
-    this.applyView();
-  }
-
-  /** Ein Knoten als runde Frucht am Ast — Icon, Zustand, Level-Ring. */
-  private nodeDot(
-    cfg: TreeNodeConfig,
-    x: number,
-    y: number,
-    pct: (v: number, t: number) => string,
-    exclusive = false,
-  ): string {
-    const h = this.deps.state.heaven;
-    const level = treeLevel(h, cfg.id);
-    const max = treeNodeMaxLevel(cfg.id);
-    const maxed = level >= max;
-    const blockedBy = treeNodeBlockedBy(h, cfg.id);
-    const affordable = canBuyTreeNode(h, cfg.id);
-    const cls = [
-      'hv-node',
-      exclusive ? 'excl' : '',
-      level > 0 ? 'own' : '',
-      maxed ? 'maxed' : '',
-      blockedBy !== null ? 'blocked' : '',
-      blockedBy === null && !maxed && affordable ? 'buyable' : '',
-      this.picked === cfg.id ? 'sel' : '',
-    ]
-      .filter(Boolean)
-      .join(' ');
-    const branch = TREE_BRANCHES.find((b) => b.id === cfg.branch);
-    const title =
-      blockedBy !== null ? `${cfg.name} — gesperrt` : `${cfg.name} (Lv ${level}/${max})`;
-    return (
-      `<button type="button" class="${cls}" data-node="${cfg.id}" title="${title}" ` +
-      `style="left:${pct(x, TREE_VIEW.w)};top:${pct(y, TREE_VIEW.h)}">` +
-      `<span class="hv-ic">${branch?.icon ?? '🍑'}</span>` +
-      (max > 1
-        ? `<span class="hv-lv">${level}/${max}</span>`
-        : level > 0
-          ? `<span class="hv-lv">✔</span>`
-          : '') +
-      `</button>`
-    );
-  }
-
-  /** Die Karte unter dem Baum: alles zum gewählten Knoten, samt Kauf-Knopf. */
-  private renderDetail(): void {
-    const el = byId('hvDetail');
-    const cfg = this.picked !== null ? treeNodeConfig(this.picked) : undefined;
-    if (!cfg) {
-      el.innerHTML = `<div class="hv-hint">Tippe eine Frucht am Baum an, um sie zu prüfen und zu kaufen.</div>`;
-      return;
-    }
-    el.innerHTML = this.nodeCard(cfg);
-    const item = el.querySelector<HTMLElement>('.item');
-    item?.addEventListener('click', () => {
-      this.deps.onBuyNode(cfg.id);
-    });
-  }
-
-  /** Zoom + Verschiebung auf den Baum-Container schreiben. */
-  private applyView(): void {
-    const c = byId('hvCanvas');
-    c.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.zoom})`;
-  }
-
-  private nodeCard(cfg: TreeNodeConfig): string {
-    const { state } = this.deps;
-    const level = treeLevel(state.heaven, cfg.id);
-    const max = treeNodeMaxLevel(cfg.id);
-    const maxed = level >= max;
-    const cost = treeNodeCost(cfg.id, level);
-    const blockedBy = treeNodeBlockedBy(state.heaven, cfg.id);
-    const affordable = canBuyTreeNode(state.heaven, cfg.id);
-    const chosen = cfg.exclusiveWith !== undefined && level > 0;
-    let foot: string;
-    if (blockedBy !== null) {
-      // Der Partner ist gekauft — dieser Knoten ist für immer zu (bis zum Respec).
-      foot = `<span class="cost bad">🚫 Doktrin gewählt: ${treeNodeConfig(blockedBy)?.name ?? blockedBy}</span>`;
-    } else if (maxed) {
-      foot = chosen
-        ? `<span class="cost tc-owned">✔ Deine Doktrin</span>`
-        : `<span class="cost">Voll ausgebaut (Lv ${level})</span>`;
-    } else {
-      foot = `<span class="cost ${affordable ? '' : 'bad'}">Lv ${level + 1}/${max} · ${fmt(cost ?? 0)} 🍑</span>`;
-    }
-    // Die GEWÄHLTE Doktrin trägt bewusst kein `locked`: sie ist zwar nicht mehr
-    // klickbar, soll aber als Gewinn lesen (Goldrahmen), nicht als Grauschleier —
-    // der gehört dem Verlierer des Paares (`hv-blocked`).
-    const cls = [
-      'item',
-      cfg.exclusiveWith !== undefined ? 'hv-excl' : '',
-      chosen ? 'tc-node-owned' : '',
-      blockedBy !== null ? 'hv-blocked' : affordable || chosen ? '' : 'locked',
-    ]
-      .filter(Boolean)
-      .join(' ');
-    const lv = chosen
-      ? '✔'
-      : max > 1
-        ? `Lv ${level}/${max}`
-        : level > 0
-          ? '✔'
-          : `${fmt(cost ?? 0)} 🍑`;
-    return `<div class="${cls}" data-id="${cfg.id}">
-        <div class="nm">${cfg.name}<span class="lv">${lv}</span></div>
-        <div class="ds">${cfg.desc}</div>
-        <div class="crew-foot">${foot}</div>
       </div>`;
   }
 }

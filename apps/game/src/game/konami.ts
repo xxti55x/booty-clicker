@@ -108,6 +108,35 @@ export const PABLO_SEQUENCE: readonly string[] = [
  */
 export const PABLO_GOLD = Number.MAX_SAFE_INTEGER;
 
+/**
+ * Der Faktor, um den „pablokiwi" ein Konto hebt, das die exakte Grenze BEREITS
+ * überschritten hat. Nötig, weil das Spiel dort keineswegs stehenbleibt: Boosts
+ * und Idle-Einkommen tragen den Stand weiter (gemessen: 9.01 Qa ⇒ 10.23 Qa) —
+ * nur eben mit Rundung in den letzten Stellen. Ein Cheat, der in dieser Lage
+ * „mehr geht nicht" meldet und nichts tut, sagt schlicht die Unwahrheit.
+ */
+export const PABLO_OVERFLOW_MULT = 1000;
+
+/**
+ * Die absolute Obergrenze des Cheats. Bewusst weit UNTER `Number.MAX_VALUE`
+ * (~1.8e308): Ab dort kippt die nächste Multiplikation nach `Infinity`, und ab
+ * `Infinity` liefert jede Differenz `NaN` — der Kontostand wäre unbrauchbar,
+ * nicht bloß ungenau. 1e300 lässt selbst dem ×1000-Schritt noch Luft.
+ */
+export const PABLO_CEILING = 1e300;
+
+/**
+ * Was „pablokiwi" aus dem aktuellen Stand macht — pur, damit die Regel testbar
+ * ist: unter der exakten Grenze wird auf sie aufgefüllt, darüber vertausendfacht
+ * (bis zum Deckel). Gibt den NEUEN Stand zurück; ist er gleich dem alten, gibt
+ * es tatsächlich nichts mehr zu holen.
+ */
+export function pabloNextGold(gold: number): number {
+  const cur = Number.isFinite(gold) && gold > 0 ? gold : 0;
+  if (cur < PABLO_GOLD) return PABLO_GOLD;
+  return Math.min(PABLO_CEILING, cur * PABLO_OVERFLOW_MULT);
+}
+
 export interface KonamiDetector {
   /**
    * Einen Tastendruck (`KeyboardEvent.code`) einspeisen. `true` genau dann,

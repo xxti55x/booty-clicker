@@ -5,8 +5,11 @@ import {
   BOOTY_SEQUENCE,
   KONAMI_BOSS_DROPS,
   KONAMI_SEQUENCE,
+  PABLO_CEILING,
   PABLO_GOLD,
+  PABLO_OVERFLOW_MULT,
   PABLO_SEQUENCE,
+  pabloNextGold,
   createKonami,
   konamiJackpot,
 } from './konami';
@@ -122,5 +125,44 @@ describe('PABLO — der Maximalgeld-Code', () => {
     for (const c of KONAMI_SEQUENCE) expect(p.feed(c)).toBe(false);
     const hits = PABLO_SEQUENCE.map((c) => p.feed(c));
     expect(hits[hits.length - 1]).toBe(true);
+  });
+});
+
+// Gemeldeter Bug: Der Code sagte „mehr kann das Spiel nicht zählen" und tat
+// nichts — während der Kontostand danach munter weiterwuchs (9.01 Qa ⇒ 10.23 Qa).
+describe('pabloNextGold — der Cheat tut immer etwas Ehrliches', () => {
+  it('füllt ein kleines Konto auf die exakte Grenze auf', () => {
+    expect(pabloNextGold(0)).toBe(PABLO_GOLD);
+    expect(pabloNextGold(1000)).toBe(PABLO_GOLD);
+    expect(pabloNextGold(PABLO_GOLD - 1)).toBe(PABLO_GOLD);
+  });
+
+  it('hebt ein Konto, das die Grenze schon überschritten hat, weiter an', () => {
+    const over = PABLO_GOLD * 2;
+    expect(pabloNextGold(over)).toBe(over * PABLO_OVERFLOW_MULT);
+    // Genau der Fall aus dem Bug-Bericht: Boosts hatten den Stand über die
+    // Grenze getragen, und der Cheat verweigerte trotzdem die Arbeit.
+    expect(pabloNextGold(1.023e16)).toBeGreaterThan(1.023e16);
+  });
+
+  it('bleibt endlich — nie Infinity, nie NaN', () => {
+    for (const g of [0, 1e6, PABLO_GOLD, 1e100, 1e299, PABLO_CEILING, 1e308]) {
+      const n = pabloNextGold(g);
+      expect(Number.isFinite(n)).toBe(true);
+      expect(Number.isNaN(n)).toBe(false);
+      expect(n).toBeLessThanOrEqual(PABLO_CEILING);
+      // Und die Differenz bleibt rechenbar (genau das bricht bei Infinity).
+      expect(Number.isFinite(n - g)).toBe(true);
+    }
+  });
+
+  it('meldet am Deckel ehrlich Stillstand (Rückgabe steigt nicht mehr)', () => {
+    expect(pabloNextGold(PABLO_CEILING)).toBe(PABLO_CEILING);
+  });
+
+  it('verträgt kaputte Stände, statt sie weiterzureichen', () => {
+    expect(pabloNextGold(Number.NaN)).toBe(PABLO_GOLD);
+    expect(pabloNextGold(-5)).toBe(PABLO_GOLD);
+    expect(pabloNextGold(Number.POSITIVE_INFINITY)).toBe(PABLO_GOLD);
   });
 });

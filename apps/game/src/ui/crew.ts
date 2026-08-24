@@ -222,14 +222,18 @@ export class Crew {
   }
 
   /** Levels to buy for a hero given the current amount + affordability. */
+  /**
+   * Wie viele Level eine Menge kauft — GENAU so viele, wie sie verspricht.
+   *
+   * Nur `max` richtet sich nach dem Kontostand; ×10, ×100 und „Fähigkeit"
+   * liefern ihre volle Menge, auch wenn sie unbezahlbar ist. Der Kauf scheitert
+   * dann sauber (`buy` prüft den Preis) und die Karte zeigt sich als zu teuer.
+   * Vorher fiel „Fähigkeit" auf das gerade Leistbare zurück und kaufte damit
+   * heimlich etwas anderes als draufstand — genau dafür gibt es den Max-Knopf.
+   */
   private countFor(cfg: HeroConfig, level: number): number {
     if (this.amount === 'max') return maxAffordable(cfg, level, this.deps.state.gold);
-    // „Fähigkeit": bis exakt auf den nächsten Meilenstein — aber nie mehr, als
-    // bezahlbar ist, sonst zeigte der Knopf einen Preis, den niemand aufbringt.
-    if (this.amount === 'next') {
-      const want = levelsToNextAbility(level);
-      return Math.max(1, Math.min(want, maxAffordable(cfg, level, this.deps.state.gold)));
-    }
+    if (this.amount === 'next') return levelsToNextAbility(level);
     return this.amount;
   }
 
@@ -370,9 +374,9 @@ export class Crew {
         const open = Math.max(0, unlocked - ups);
         const toNext = levelsToNextAbility(level);
         const head =
-          `<span class="ab-head" title="Gekaufte von freigeschalteten Fähigkeiten">` +
+          `<span class="ab-head${open > 0 ? '' : ' calm'}" title="Gekaufte von freigeschalteten Fähigkeiten">` +
           `Fähigkeiten ${ups}/${unlocked}` +
-          (open > 0 ? `<i>· ${open} kaufbar</i>` : `<i>· nächste in ${toNext} Lv</i>`) +
+          (open > 0 ? `<i>${open} kaufbar</i>` : `<i>nächste in ${toNext} Lv</i>`) +
           `</span>`;
         abRow = `<div class="ab-slots">${head}${slots.join('')}</div>`;
       }
