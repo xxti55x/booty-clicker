@@ -171,7 +171,7 @@ export interface HitResult {
  *     dort sofort der Boss — `bossSpawned` meldet den Betreten-Moment)
  *   · boss kill → advance to next zone
  */
-export function hit(state: CombatState, dmg: number): HitResult {
+export function hit(state: CombatState, dmg: number, autoAdvance: boolean = true): HitResult {
   const hp = state.hp - dmg;
   if (hp > 0) {
     return {
@@ -186,12 +186,30 @@ export function hit(state: CombatState, dmg: number): HitResult {
   const gold = goldFor(state.zone, state.boss);
 
   if (state.boss) {
-    const next = spawnFor(state.zone + 1, 0, state.maxZone, state.remix, state.week);
-    return { state: next, killed: true, gold, advancedZone: true, bossSpawned: next.boss };
+    // FARM-MODUS: Ohne Auto-Vorstoß bleibt die Arena stehen und der Boss tritt
+    // frisch an (neue Uhr). Genau das ist Boss-Farmen — die Belohnungen zahlt
+    // die Glue, der Highwater in `relics`/`gilds` gattert die Einmaligen selbst.
+    const next = autoAdvance
+      ? spawnFor(state.zone + 1, 0, state.maxZone, state.remix, state.week)
+      : spawnFor(state.zone, 0, state.maxZone, state.remix, state.week);
+    return {
+      state: next,
+      killed: true,
+      gold,
+      advancedZone: autoAdvance,
+      bossSpawned: next.boss,
+    };
   }
 
   const kills = state.killsThisZone + 1;
   if (kills >= MONSTERS_PER_ZONE) {
+    if (!autoAdvance) {
+      // Zähler läuft rund (10/10 ⇒ 0/10): die Bühne bleibt, die Runde beginnt
+      // neu. Der Fortschrittsbalken zeigt damit weiter echte Bewegung, statt am
+      // Anschlag zu kleben.
+      const again = spawnFor(state.zone, 0, state.maxZone, state.remix, state.week);
+      return { state: again, killed: true, gold, advancedZone: false, bossSpawned: false };
+    }
     // Boss-Umbau: normale Bühnen sind NIE Gate-Bühnen — der Vorstoß auf eine
     // Gate-Bühne spawnt den Boss direkt in `spawnFor` (bossSpawned meldet den
     // Betreten-Moment für Banner/Stinger).

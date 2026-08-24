@@ -1865,6 +1865,42 @@ muteBtn.addEventListener('click', () => {
   muteBtn.classList.toggle('muted', audio.toggleMute());
 });
 
+// ---------- Auto-Vorstoß (Farm-Modus) ----------
+// EIN Schalter, drei Wege ihn zu drehen: der Knopf unter „Crew", jede
+// selbst gewählte Bühnen-Reise (schaltet ihn aus) und der Loader. Der Zustand
+// lebt in den Einstellungen (eigener Key, keine Save-Migration).
+const autoAdvBtn = document.getElementById('autoAdvBtn') as HTMLButtonElement;
+
+/** Knopf-Optik + ARIA an den Zustand angleichen (change-detected genug). */
+function syncAutoAdvBtn(): void {
+  const on = effects.autoAdvance;
+  autoAdvBtn.classList.toggle('off', !on);
+  autoAdvBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  autoAdvBtn.title = on
+    ? 'Auto-Vorstoß AN — geräumte Bühnen rücken von selbst weiter. Klick = Farm-Modus.'
+    : 'Farm-Modus — die Bühne hält, Rivalen und Boss stellen sich neu. Klick = Auto-Vorstoß an.';
+}
+
+/**
+ * Auto-Vorstoß setzen. `silent` unterdrückt den Toast — die Bühnen-Reise meldet
+ * das Umschalten selbst (und zwar NACH ihrem eigenen Reise-Toast).
+ */
+function setAutoAdvance(on: boolean, silent = false): void {
+  if (effects.autoAdvance === on) return;
+  effects.autoAdvance = on;
+  saveSettings(effects);
+  syncAutoAdvBtn();
+  if (silent) return;
+  if (on) {
+    toasts.show('⏭', 'Auto-Vorstoß an', 'Geräumte Bühnen schieben dich wieder nach vorn.');
+  } else {
+    toasts.show('⏸', 'Farm-Modus', 'Die Bühne hält — Rivalen und Boss stellen sich neu.');
+  }
+}
+
+autoAdvBtn.addEventListener('click', () => setAutoAdvance(!effects.autoAdvance));
+syncAutoAdvBtn();
+
 // ---------- background: zone-tier auto-rotation, gated on the kulisse chooser ----------
 // In Tour-Modus (`gear.bgAuto`) the tier rotation drives the kulisse and keeps
 // `gear.bg` (⇒ its mini-buff/set) synced with the view; with a manual pick the
@@ -2148,6 +2184,12 @@ function bossConfetti(): void {
 function travelToZone(z: number): boolean {
   if (!Number.isFinite(z) || z === combat.zone || z > combat.maxZone || z < 1) return false;
   const back = z < combat.zone;
+  // Wer die Bühne SELBST wählt, will dort bleiben: der Auto-Vorstoß geht aus
+  // (das Icon unter dem Crew-Knopf schaltet ihn wieder an). Sonst hätte eine
+  // Rückreise zum Farmen keinen Bestand — der nächste geräumte Zähler hätte
+  // einen sofort wieder nach vorn geschoben.
+  const autoWasOn = effects.autoAdvance;
+  if (autoWasOn) setAutoAdvance(false, true);
   combat = travelTo(combat, z);
   // Boss-Umbau: eine Gate-Bühne IST die Boss-Arena — schon die Anreise spawnt
   // den Boss. Er bekommt dieselbe verlängerte Uhr wie ein regulär gespawnter
@@ -2155,7 +2197,9 @@ function travelToZone(z: number): boolean {
   if (combat.boss) combat = withBossTimerBonus(combat);
   updateBackground();
   // D-23: Der Auftritt startet VOR `syncEntity` — der Boss-Bau liest
-  // `bossShow` und parkt die Instanz für den Phasen-2-Fall.
+  // `bossShow` und parkt die Instanz für den Phasen-2-Fall. GENAU EINMAL:
+  // ein zweiter Aufruf nach `hud.update` hat die eben gestartete Inszenierung
+  // auf Frame 0 zurückgesetzt (Licht-Dim und Kamera-Punch sprangen sichtbar).
   if (combat.boss) bossEntrance();
   syncEntity();
   hud.update(state, combat, dps, clickDmg);
@@ -2173,12 +2217,20 @@ function travelToZone(z: number): boolean {
     } else {
       toasts.show('👑', 'Boss!', 'Besiege ihn in 30 Sekunden!');
     }
-    bossEntrance();
   } else {
     toasts.show(
       '🗺',
       `Bühne ${combat.zone}`,
       back ? 'Farm-Modus — vorwärts geht’s jederzeit wieder.' : 'Zurück an der Front!',
+    );
+  }
+  // Der Hinweis kommt NACH dem Reise-Toast, damit er obenauf liegt — und nur
+  // beim Umschalten, nicht bei jeder weiteren Reise im Farm-Modus.
+  if (autoWasOn) {
+    toasts.show(
+      '⏸',
+      'Auto-Vorstoß aus',
+      'Die Bühne hält. Das ⏭-Icon unter „Crew" schaltet ihn an.',
     );
   }
   return true;
@@ -2539,7 +2591,9 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
   // KLICK-Faktor sitzt dagegen in `doShake` im `extraMult` — dort kennt die
   // Pipeline Takt und Combo, und die angezeigte Schadenszahl bleibt ehrlich.
   if (!wasBoss && !fromClick) effDmg *= stageFactors().dps;
-  const r = hit(combat, effDmg);
+  // Farm-Modus (Auto-Vorstoß aus): der Zonen-Wechsel bleibt aus, Rivalen und
+  // Boss stellen sich neu — die eine Regel dafür steht im Reducer.
+  const r = hit(combat, effDmg, effects.autoAdvance);
   // A newly-spawned boss gets Chronilla's extra timer seconds.
   combat = r.bossSpawned ? withBossTimerBonus(r.state) : r.state;
   if (r.killed) {

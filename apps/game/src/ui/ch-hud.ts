@@ -68,6 +68,10 @@ export function rivalName(zone: number, boss: boolean): string {
  */
 /** Kulissen-Tier je Zone — dieselbe Quelle wie Kulisse + Boss-Gimmick (A2). */
 const stripTheme = themeForZone;
+/** Sichtbare Bühnen-Kacheln der Leiste (das Blätter-Fenster). */
+const STRIP_SLOTS = 5;
+/** Wie viele Bühnen ein Pfeil-Klick weiterblättert. */
+const STRIP_PAGE = 3;
 /** Insel-Thumbnail-Farben je Kulisse (Oberseite / Unterseite). */
 const STRIP_COLORS: Record<'club' | 'synth' | 'beach' | 'space', [string, string]> = {
   club: ['#8b5cf6', '#4c2f8a'],
@@ -152,6 +156,21 @@ export class ChHud {
   private readonly gimmickEl = byId('bossGimmick');
   private readonly stageModEl = byId('stageMod');
 
+  /**
+   * Scroll-Versatz der Bühnenleiste in Bühnen (0 = das Fenster folgt der
+   * aktuellen Bühne). Negativ blättert zurück, positiv wieder nach vorn — die
+   * Pfeile am Rand schreiben ihn, jeder echte Bühnenwechsel setzt ihn zurück.
+   */
+  private stripOffset = 0;
+  /** Letzte Render-Argumente, damit ein Pfeil-Klick allein neu zeichnen kann. */
+  private stripArgs: {
+    zone: number;
+    frontier: number;
+    stars: StageStars;
+    remix: number;
+    week: number;
+  } | null = null;
+
   // Cached last-written values (change-detection, no DOM churn).
   private cZone = '';
   private cKind = '';
@@ -195,6 +214,28 @@ export class ChHud {
       this.stageModEl.classList.remove('mini');
       this.armModMini();
     });
+    // Blätter-Pfeile der Bühnenleiste. Sie liegen IM Strip, fangen ihren Klick
+    // aber selbst ab (`stopPropagation`), damit der Reise-Handler in der Glue
+    // sie nicht als Bühnen-Klick missversteht.
+    this.zoneStrip.addEventListener('click', (e) => {
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-strip]');
+      if (!el) return;
+      e.stopPropagation();
+      this.scrollStrip(el.dataset.strip === 'next' ? STRIP_PAGE : -STRIP_PAGE);
+    });
+  }
+
+  /**
+   * Fenster der Bühnenleiste um `delta` Bühnen verschieben und sofort neu
+   * zeichnen. Die Klemmung selbst steckt in {@link updateZoneStrip} — hier
+   * genügt es, den Wunsch zu notieren und die Change-Detection zu lösen.
+   */
+  private scrollStrip(delta: number): void {
+    const a = this.stripArgs;
+    if (!a) return;
+    this.stripOffset += delta;
+    this.cStrip = ''; // Signatur invalidieren: derselbe Zustand, neues Fenster
+    this.updateZoneStrip(a.zone, a.frontier, a.stars, a.remix, a.week);
   }
 
   /** Karte in 4 s zum Icon-Chip einklappen (laufenden Timer ersetzen). */
@@ -392,8 +433,21 @@ export class ChHud {
     // Nur ERREICHTE Bühnen zeigen (nichts Zukünftiges spoilern): das Fenster
     // endet an der Frontier und jede Bühne ist klickbar — zurückreisen zum
     // Farmen, wieder vor zur Boss-Bühne.
-    const end = Math.min(frontier, Math.max(zone + 2, 5));
-    const start = Math.max(1, end - 4);
+    // Ein echter Bühnenwechsel holt das Fenster zurück zur aktuellen Bühne —
+    // sonst stünde man nach einer Reise vor einem Ausschnitt, in dem die eigene
+    // Bühne gar nicht vorkommt.
+    if (this.stripArgs !== null && this.stripArgs.zone !== zone) this.stripOffset = 0;
+    this.stripArgs = { zone, frontier, stars, remix, week };
+    // Das Fenster folgt normalerweise der aktuellen Bühne. `stripOffset` (die
+    // Blätter-Pfeile) verschiebt es und wird dabei so geklemmt, dass es nie
+    // über die Frontier hinaus- oder vor Bühne 1 zurückläuft.
+    const baseEnd = Math.min(frontier, Math.max(zone + 2, STRIP_SLOTS));
+    const minEnd = Math.min(frontier, STRIP_SLOTS);
+    const end = Math.max(minEnd, Math.min(frontier, baseEnd + this.stripOffset));
+    // Den geklemmten Wert zurückschreiben: sonst sammelt sich am Anschlag ein
+    // unsichtbarer Rest an und der erste Klick zurück täte nichts.
+    this.stripOffset = end - baseEnd;
+    const start = Math.max(1, end - (STRIP_SLOTS - 1));
     // Die Sterne der SICHTBAREN Bühnen gehören in die Change-Detection: sonst
     // bliebe ein frisch verdienter Pip bis zur nächsten Bühnen-Änderung leer.
     let starSig = '';
@@ -423,10 +477,21 @@ export class ChHud {
            title="${title}">${modBadge(z, remix, week)}${islandSvg(z)}<span>${z}</span>${starPips(z, stars)}</button>`;
     };
     const slots: string[] = [];
+    // Pfeil nach hinten: nur wenn es dort noch Bühnen gibt.
+    if (start > 1) {
+      slots.push(
+        `<button type="button" class="zs-arrow" data-strip="prev" title="Weiter zurück blättern">‹</button>`,
+      );
+    }
     for (let z = start; z <= end; z++) slots.push(slot(z));
     // Weit zurückgereist? Die Frontier bleibt IMMER erreichbar — als letzter
     // Slot hinter einer „…"-Lücke (der Weg zurück zum Boss-Gate).
     if (frontier > end) {
+      // Vorwärts-Pfeil steht VOR der Lücke: erst blättern, dann der Sprung an
+      // die Frontier — die beiden Wege nach vorn stehen damit nebeneinander.
+      slots.push(
+        `<button type="button" class="zs-arrow" data-strip="next" title="Weiter nach vorn blättern">›</button>`,
+      );
       if (frontier > end + 1) slots.push('<span class="zs-gap">…</span>');
       slots.push(slot(frontier));
     }

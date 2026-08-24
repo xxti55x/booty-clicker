@@ -436,6 +436,68 @@ body {
   width: 17px;
   height: 17px;
 }
+
+/* ---- Auto-Vorstoß-Schalter (unter dem Crew-Knopf) ---- */
+/* Sitzt am selben Anker wie `.toggleShop`, nur eine Knopfhöhe tiefer — die
+   `--top-btn-h`-Variable trägt genau diese Höhe und wird in den beiden
+   Touch-Media-Blöcken mitgezogen, damit der Abstand nie auseinanderläuft. */
+:root {
+  --top-btn-h: 46px;
+}
+.autoAdv {
+  position: fixed;
+  top: calc(14px + env(safe-area-inset-top, 0px) + var(--top-btn-h));
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 12px;
+  cursor: pointer;
+  background: var(--gold-btn);
+  color: var(--gold-ink);
+  border: 2px solid var(--gold-line);
+  box-shadow:
+    0 3px 0 var(--gold-deep),
+    inset 0 1px 0 rgba(255, 245, 210, 0.8);
+  transition:
+    transform 0.06s,
+    box-shadow 0.06s,
+    filter 0.12s;
+}
+.autoAdv:active {
+  transform: translateY(3px);
+  box-shadow: 0 0 0 var(--gold-deep);
+}
+.autoAdv .ui-ic {
+  width: 20px;
+  height: 20px;
+}
+/* Der Schrägstrich gehört dem AUS-Zustand: im Normalfall ist er nicht da. */
+.autoAdv .aa-slash {
+  display: none;
+}
+/* Farm-Modus: der Knopf tritt zurück (dunkles Holz statt Gold) und trägt den
+   Strich — auf einen Blick unterscheidbar, ohne Text zu lesen. */
+.autoAdv.off {
+  background: var(--wood-deep, #3a2417);
+  color: var(--txt-soft);
+  border-color: var(--wood-rim);
+  box-shadow:
+    0 3px 0 rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 245, 210, 0.14);
+}
+.autoAdv.off .aa-slash {
+  display: block;
+}
+@media (prefers-reduced-motion: reduce) {
+  .autoAdv {
+    transition: none;
+  }
+}
 .hintbar {
   position: fixed;
   bottom: 16px;
@@ -1264,6 +1326,14 @@ body {
   .toggleShop,
   .bossStart {
     padding: 12px 16px;
+  }
+  /* Der Crew-Knopf wächst hier auf Touch-Maß — der Auto-Schalter rutscht mit. */
+  :root {
+    --top-btn-h: 54px;
+  }
+  .autoAdv {
+    width: 44px;
+    height: 44px;
   }
   .muteBtn {
     width: 44px;
@@ -3329,6 +3399,30 @@ body {
   opacity: 0.6;
   padding: 0 2px;
 }
+/* Blätter-Pfeile der Bühnenleiste: gleiche Höhe wie eine Kachel, aber schmal —
+   sie sollen führen, nicht mit den Bühnen um Aufmerksamkeit konkurrieren. */
+.zs-arrow {
+  flex: 0 0 auto;
+  align-self: stretch;
+  min-width: 22px;
+  padding: 0 4px;
+  border: 2px solid var(--wood-rim);
+  border-radius: 9px;
+  background: var(--wood-deep, #3a2417);
+  color: var(--gold-base);
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+.zs-arrow:hover {
+  color: #fff3c4;
+  border-color: var(--gold-line);
+}
+.zs-arrow:active {
+  transform: translateY(1px);
+}
 /* ---- ROADMAP-V2 A1: Hausregel der Bühne auf der Bühnen-Card ---- */
 .stage-mod {
   display: flex;
@@ -4065,6 +4159,13 @@ body {
     padding: 6px 11px;
     font-size: 12px;
     min-height: 40px;
+  }
+  :root {
+    --top-btn-h: 48px;
+  }
+  .autoAdv {
+    width: 40px;
+    height: 40px;
   }
   /* Auch hier gilt die Touch-Untergrenze: die Kauf-Mengen, die Kulissen-Wahl,
      die Skin-Knöpfe und der Board-Wechsler stehen im Panel dicht beieinander. */

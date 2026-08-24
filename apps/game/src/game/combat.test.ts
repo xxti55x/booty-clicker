@@ -170,3 +170,40 @@ describe('combat — travel', () => {
     expect(travelTo(s, 3).killsThisZone).toBe(0);
   });
 });
+
+// Farm-Modus (Auto-Vorstoß aus): Der Reducer hält die Bühne, statt vorzurücken.
+describe('combat — Farm-Modus (autoAdvance = false)', () => {
+  it('rückt bei geräumtem Zähler NICHT vor, sondern beginnt die Runde neu', () => {
+    const c = spawnFor(7, MONSTERS_PER_ZONE - 1, 7);
+    const r = hit(c, c.hp, false);
+    expect(r.killed).toBe(true);
+    expect(r.advancedZone).toBe(false);
+    expect(r.state.zone).toBe(7); // Bühne hält
+    expect(r.state.killsThisZone).toBe(0); // Zähler läuft rund
+    expect(r.gold).toBeGreaterThan(0); // Beute zahlt weiter
+  });
+
+  it('stellt einen geschlagenen Boss neu — mit frischer Uhr, gleiche Arena', () => {
+    const c = spawnFor(20, 0, 20);
+    expect(c.boss).toBe(true);
+    const r = hit(c, c.hp, false);
+    expect(r.killed).toBe(true);
+    expect(r.advancedZone).toBe(false);
+    expect(r.state.zone).toBe(20);
+    expect(r.state.boss).toBe(true);
+    expect(r.state.bossTimer).toBe(BOSS_TIME_S); // Uhr steht wieder voll
+  });
+
+  it('lässt normale Zwischen-Kills unverändert (nur der Übergang ändert sich)', () => {
+    const c = spawnFor(7, 0, 7);
+    const auto = hit(c, c.hp, true);
+    const farm = hit(c, c.hp, false);
+    expect(farm.state.killsThisZone).toBe(auto.state.killsThisZone);
+    expect(farm.gold).toBe(auto.gold);
+  });
+
+  it('ist per Default an — der Vorstoß bleibt das Normalverhalten', () => {
+    const c = spawnFor(7, MONSTERS_PER_ZONE - 1, 7);
+    expect(hit(c, c.hp).advancedZone).toBe(true);
+  });
+});

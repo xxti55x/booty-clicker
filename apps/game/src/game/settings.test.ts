@@ -33,6 +33,7 @@ describe('game settings', () => {
       qualityChosen: false,
       fpsCap: 0,
       onboarded: false,
+      autoAdvance: true,
     });
   });
 
@@ -46,6 +47,7 @@ describe('game settings', () => {
       qualityChosen: true,
       fpsCap: 30,
       onboarded: true,
+      autoAdvance: false,
     };
     saveSettings(s, store);
     expect(loadSettings(store)).toEqual(s);

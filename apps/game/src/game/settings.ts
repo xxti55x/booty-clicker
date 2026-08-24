@@ -38,6 +38,14 @@ export interface GameSettings {
   fpsCap: number;
   /** Whether the first-run onboarding has been shown. */
   onboarded: boolean;
+  /**
+   * Rückt ein geräumter Bühnen-Zähler automatisch auf die nächste Bühne vor?
+   * Default an (der bisherige, einzige Modus). Aus heißt FARM-MODUS: die Bühne
+   * hält, Rivalen respawnen endlos, ein Boss stellt sich neu. Der Schalter
+   * wohnt hier statt im Save, weil die Einstellungen einen eigenen Key haben —
+   * so kostet ein Umschalten keine Save-Migration, hält aber über den Reload.
+   */
+  autoAdvance: boolean;
 }
 
 export interface SettingsStorage {
@@ -54,6 +62,7 @@ export function defaultSettings(): GameSettings {
     qualityChosen: false,
     fpsCap: 0,
     onboarded: false,
+    autoAdvance: true,
   };
 }
 
@@ -104,6 +113,7 @@ export function loadSettings(storage: SettingsStorage | null = defaultStorage())
     qualityChosen,
     fpsCap: asFpsCap(p.fpsCap, d.fpsCap),
     onboarded: typeof p.onboarded === 'boolean' ? p.onboarded : d.onboarded,
+    autoAdvance: typeof p.autoAdvance === 'boolean' ? p.autoAdvance : d.autoAdvance,
   };
 }
 
