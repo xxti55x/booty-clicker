@@ -170,7 +170,7 @@ describe('advisor — bestPurchaseHint (P3)', () => {
     expect(hint).not.toBeNull();
     expect(hint!.kind).toBe('ability');
     expect(hint!.id).toBe('boss');
-    expect(hint!.cost).toBe(nextAbility(CREW[0], 200, 0).cost);
+    expect(hint!.cost).toBe(nextAbility(CREW[0], 200, 0)!.cost);
     expect(hint!.label).toContain('+100% Klick');
   });
 

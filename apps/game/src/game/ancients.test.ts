@@ -5,6 +5,7 @@ import {
   ANCIENTS,
   ancientBulkCost,
   ancientMaxAffordable,
+  ancientRoomToCap,
   buyAncientBulk,
   ancientAtCap,
   ancientBonus,
@@ -163,5 +164,46 @@ describe('Ahnen — Kaufmengen', () => {
     expect(r.bought).toBe(false);
     expect(r.ancients).toBe(before);
     expect(r.souls).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Platz bis zum Cap — die Frage, die NICHT das Budget stellt
+// ---------------------------------------------------------------------------
+// Der Bug, der diesen Block erzwungen hat: Die Kaufmengen-Knöpfe (×1/×10/×100)
+// holten sich „wie viele Level gäbe es überhaupt noch?" über
+// `ancientMaxAffordable(id, level, Infinity)`. Deren Budget-Guard verwirft jedes
+// nicht-endliche Budget und lieferte 0 — die Menge fiel auf 0, jede Karte galt
+// als unbezahlbar, und mit ×1/×10/×100 ließ sich KEIN Ahne kaufen (nur „Max",
+// weil das echte Seelen übergibt). Budget und Cap sind zwei Fragen.
+describe('ancientRoomToCap — Cap-Platz ohne Budget-Frage', () => {
+  it('liefert bei uncapped Ahnen unendlich viel Platz', () => {
+    expect(ancientRoomToCap('twerkules', 0)).toBe(Number.POSITIVE_INFINITY);
+    expect(ancientRoomToCap('twerkules', 9999)).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('zählt bei gedeckelten Ahnen die Level bis zum Cap herunter', () => {
+    // chronilla: cap 15
+    expect(ancientRoomToCap('chronilla', 0)).toBe(15);
+    expect(ancientRoomToCap('chronilla', 14)).toBe(1);
+    expect(ancientRoomToCap('chronilla', 15)).toBe(0);
+    expect(ancientRoomToCap('chronilla', 99)).toBe(0);
+  });
+
+  it('bleibt bei Unsinn ruhig (unbekannte Id, negatives Level)', () => {
+    expect(ancientRoomToCap('gibtsnicht', 0)).toBe(0);
+    expect(ancientRoomToCap('chronilla', -5)).toBe(15);
+  });
+
+  // Der eigentliche Regressionsschutz: Ein frischer Ahne mit Seelen im Konto
+  // MUSS mit Menge 1 kaufbar sein. Genau das war kaputt.
+  it('erlaubt Menge 1 bei frischem Ahnen (der gemeldete Fehlerfall)', () => {
+    const level = 0;
+    const souls = 1890; // der Kontostand aus dem Fehlerbericht
+    const room = ancientRoomToCap('twerkules', level);
+    const wanted = Math.min(1, room);
+    expect(wanted).toBe(1);
+    expect(ancientBulkCost(level, wanted)).toBeLessThanOrEqual(souls);
+    expect(canBuyAncient({}, souls, 'twerkules')).toBe(true);
   });
 });

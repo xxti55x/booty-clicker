@@ -8,6 +8,7 @@ import {
   ancientCost,
   ancientLevel,
   ancientMaxAffordable,
+  ancientRoomToCap,
   buyAncientBulk,
   canBuyAncient,
 } from '../game/ancients';
@@ -80,10 +81,11 @@ export class Ancients {
     const level = ancientLevel(state.ancients, cfg.id);
     if (this.amount === 'max') return ancientMaxAffordable(cfg.id, level, state.souls);
     // Der Cap bleibt eine harte Grenze — über ihn hinaus gibt es keine Level.
-    const room = ancientAtCap(cfg.id, level)
-      ? 0
-      : ancientMaxAffordable(cfg.id, level, Number.POSITIVE_INFINITY);
-    return Math.min(this.amount, room);
+    // `ancientRoomToCap` beantwortet genau diese Frage; `ancientMaxAffordable`
+    // mit Infinity zu füttern tat es NICHT (die Funktion verwirft ein nicht
+    // endliches Budget und lieferte 0, womit jede Menge auf 0 fiel und kein
+    // Ahne mit ×1/×10/×100 kaufbar war).
+    return Math.min(this.amount, ancientRoomToCap(cfg.id, level));
   }
 
   private buy(cfg: AncientConfig): void {

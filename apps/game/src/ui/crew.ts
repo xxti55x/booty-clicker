@@ -14,6 +14,7 @@ import {
   heroDps,
   LEVEL_SOFTCAP,
   levelsToNextAbility,
+  maxAbilityTiers,
   maxAffordable,
   milestoneMult,
   nextAbility,
@@ -279,7 +280,7 @@ export class Crew {
    */
   private countFor(cfg: HeroConfig, level: number): number {
     if (this.amount === 'max') return maxAffordable(cfg, level, this.deps.state.gold);
-    if (this.amount === 'next') return levelsToNextAbility(level);
+    if (this.amount === 'next') return levelsToNextAbility(cfg, level);
     return this.amount;
   }
 
@@ -318,7 +319,8 @@ export class Crew {
     const level = s.crew[cfg.id] ?? 0;
     const ups = s.crewUp[cfg.id] ?? 0;
     const ab = nextAbility(cfg, level, ups);
-    if (!ab.unlocked || ups >= abilityTiersUnlocked(level) || ab.cost > s.gold) return false;
+    if (!ab || !ab.unlocked || ups >= abilityTiersUnlocked(cfg, level) || ab.cost > s.gold)
+      return false;
     s.gold -= ab.cost;
     s.crewUp[cfg.id] = ups + 1;
     this.deps.onBuy();
@@ -364,9 +366,14 @@ export class Crew {
       // Tiers mit Haken, der nächste verfügbare leuchtet klickbar, kommende zeigen
       // ihr Level). v11: ungerade Tiers = +100 % Output, gerade Tiers = das
       // Themen-Special des Mitglieds — Icon, Label und Farbton folgen der Art.
+      // `ab` ist null, sobald dieses Mitglied ALLE seine Fähigkeiten gekauft hat
+      // (die Grenze ist mitgliedsabhängig, 4…8). Die Zeile bleibt trotzdem
+      // stehen — sie zeigt dann die gekauften Kacheln und die Schluss-Plakette.
+      // Sie an `ab` zu hängen hätte bei einem fertigen Mitglied die komplette
+      // Fähigkeits-Zeile verschwinden lassen, gekaufte Kacheln inklusive.
       const ab = level > 0 ? nextAbility(cfg, level, ups) : null;
       let abRow = '';
-      if (ab) {
+      if (level > 0) {
         const CHECK =
           '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12.5l5 5L19.5 7" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         const slots: string[] = [];
@@ -390,23 +397,25 @@ export class Crew {
               `<span class="ab-check">${CHECK}</span>${rt}</span>`,
           );
         }
-        const k = abilityKind(cfg, ab.tier, s.crewRetrain);
-        const abLabel = abilityKindLabel(k, outLabel);
-        if (ab.unlocked) {
-          const can = ab.cost <= s.gold;
-          slots.push(
-            `<button class="ab ready k-${k} ${tierClass(ab.tier)} ${can ? '' : 'poor'}" data-ab="${cfg.id}" type="button"
+        if (ab) {
+          const k = abilityKind(cfg, ab.tier, s.crewRetrain);
+          const abLabel = abilityKindLabel(k, outLabel);
+          if (ab.unlocked) {
+            const can = ab.cost <= s.gold;
+            slots.push(
+              `<button class="ab ready k-${k} ${tierClass(ab.tier)} ${can ? '' : 'poor'}" data-ab="${cfg.id}" type="button"
                title="Fähigkeit ${ab.tier}: ${abLabel} kaufen">${slotArt(cfg.id, k, KIND_ICON[k])}` +
-              `<span class="ab-lv">${ab.tier}</span></button>`,
-          );
-          slots.push(
-            `<span class="ab-cost ${can ? '' : 'bad'}">${abLabel} · ${fmt(ab.cost)} BP</span>`,
-          );
-        } else {
-          slots.push(
-            `<span class="ab lk ${tierClass(ab.tier)}" title="Fähigkeit ${ab.tier} (${abLabel}) ab Lv ${ab.level}">` +
-              `<span class="ab-lv">${ab.tier}</span>Lv${ab.level}</span>`,
-          );
+                `<span class="ab-lv">${ab.tier}</span></button>`,
+            );
+            slots.push(
+              `<span class="ab-cost ${can ? '' : 'bad'}">${abLabel} · ${fmt(ab.cost)} BP</span>`,
+            );
+          } else {
+            slots.push(
+              `<span class="ab lk ${tierClass(ab.tier)}" title="Fähigkeit ${ab.tier} (${abLabel}) ab Lv ${ab.level}">` +
+                `<span class="ab-lv">${ab.tier}</span>Lv${ab.level}</span>`,
+            );
+          }
         }
         // Der Zähler VOR den Kacheln beantwortet die Frage, die die Kacheln
         // allein nicht beantworten: „Wie weit bin ich?" — gekaufte Stufen und
@@ -416,13 +425,23 @@ export class Crew {
         // diesen Unterschied verschluckt. Der Zusatz zeigt, was als Nächstes
         // dran ist: offene Käufe zuerst, sonst die Entfernung zur nächsten
         // Freischaltung.
-        const unlocked = abilityTiersUnlocked(level);
+        const unlocked = abilityTiersUnlocked(cfg, level);
         const open = Math.max(0, unlocked - ups);
-        const toNext = levelsToNextAbility(level);
+        const cap = maxAbilityTiers(cfg);
+        // Drei Zustände, drei Sätze. „Nächste in X Lv" wäre bei einem fertigen
+        // Mitglied gelogen — es gibt keine nächste, und der Zähler steht am
+        // Anschlag seiner eigenen Grenze (4…8, nicht für alle gleich).
+        const done = ups >= cap;
+        const toNext = done ? 0 : levelsToNextAbility(cfg, level);
+        const tail = done
+          ? `<i>komplett</i>`
+          : open > 0
+            ? `<i>${open} kaufbar</i>`
+            : `<i>nächste in ${toNext} Lv</i>`;
         const head =
-          `<span class="ab-head${open > 0 ? '' : ' calm'}" title="Gekaufte von freigeschalteten Fähigkeiten">` +
-          `Fähigkeiten ${ups}/${unlocked}` +
-          (open > 0 ? `<i>${open} kaufbar</i>` : `<i>nächste in ${toNext} Lv</i>`) +
+          `<span class="ab-head${open > 0 ? '' : ' calm'}" title="Gekaufte von freigeschalteten Fähigkeiten — ${cfg.name} lernt ${cap}">` +
+          `Fähigkeiten ${ups}/${cap}` +
+          tail +
           `</span>`;
         abRow = `<div class="ab-slots">${head}${slots.join('')}</div>`;
       }
