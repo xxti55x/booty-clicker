@@ -56,16 +56,39 @@ describe('Fähigkeits-Icons', () => {
     expect(seen.size).toBe(CREW.length * ALL_KINDS.length);
   });
 
-  it('färbt das Icon in der Palette seines Trägers', () => {
-    // Ohne Tönung erbte jedes Icon die Kachelfarbe — dann unterschieden sich
-    // die Kacheln zweier Mitglieder nur noch durch das winzige Beizeichen.
-    const farben = new Set(
-      CREW.map((c) => /style="color:([^"]+)"/.exec(abilityIcon(c.id, 'power'))?.[1]),
+  // Die Zusicherung ist dieselbe wie vorher — die Kacheln zweier Mitglieder
+  // müssen sich auf einen Blick unterscheiden. Nur der KANAL hat gewechselt:
+  // Vorher trug eine Tönung (`style="color:…"`) die Trägerfarbe, jetzt die
+  // vollflächige Platte. Eine Tönung reicht bei 34 px nicht, um fünfzehn
+  // Träger zu trennen — die Fläche schon.
+  it('gibt jedem Träger seine EIGENE Plattenfarbe', () => {
+    const platten = CREW.map(
+      (c) => /<rect width="24" height="24" fill="([^"]+)"\/>/.exec(abilityIcon(c.id, 'power'))?.[1],
     );
-    for (const f of farben) expect(f).toMatch(/^#[0-9a-fA-F]{3,8}$/);
-    // Nicht alle Mitglieder müssen eine eigene Farbe haben, aber die Crew darf
-    // nicht in einer einzigen Tönung verschwimmen.
-    expect(farben.size).toBeGreaterThanOrEqual(8);
+    for (const f of platten) expect(f).toMatch(/^#[0-9a-fA-F]{6}$/);
+    // Keine zwei Mitglieder teilen sich eine Platte — sonst wäre der Kanal für
+    // genau das Paar wertlos, das man auseinanderhalten will.
+    expect(new Set(platten).size).toBe(CREW.length);
+  });
+
+  // Die Sortenform steht AUF der Platte und muss dort lesbar bleiben. Eine
+  // feste Tinte ginge auf der hellen Creme-Platte des A-Promis unter, eine
+  // helle auf keiner der dunklen.
+  it('wählt die Tinte nach der Helligkeit der Platte', () => {
+    for (const c of CREW) {
+      const svg = abilityIcon(c.id, 'power');
+      const bg = /<rect width="24" height="24" fill="(#[0-9a-fA-F]{6})"\/>/.exec(svg)?.[1];
+      const ink = /style="color:(#[0-9a-fA-F]{6})"/.exec(svg)?.[1];
+      expect(bg, c.id).toBeDefined();
+      expect(ink, c.id).toBeDefined();
+      const hell = (hex: string): number => {
+        const v = (i: number): number => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16) / 255;
+        return 0.2126 * v(0) + 0.7152 * v(1) + 0.0722 * v(2);
+      };
+      // Der Abstand ist der Punkt: Tinte und Platte dürfen nie nah beieinander
+      // liegen, egal in welche Richtung.
+      expect(Math.abs(hell(bg!) - hell(ink!)), c.id).toBeGreaterThan(0.35);
+    }
   });
 
   it('bleibt bei einem unbekannten Träger heil (nur die Grundform)', () => {

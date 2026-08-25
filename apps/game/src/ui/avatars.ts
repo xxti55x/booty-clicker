@@ -26,6 +26,7 @@
  */
 import { ANCIENTS } from '../game/ancients';
 import { CREW } from '../game/heroes';
+import { cartoonBody, cartoonColor, hasCartoon } from './cartoon';
 
 /** Standard- oder „Power"-Pose (Power = die angespannte Variante, 4a). */
 export type AvatarPose = 'base' | 'power';
@@ -528,7 +529,7 @@ export function avatarSpec(id: string): AvatarSpec {
 
 /** Die Rahmenfarbe eines Mitglieds (Crew-Card + Kachel-Rand, 4b). */
 export function avatarFrame(id: string): string {
-  return avatarSpec(id).palette.frame;
+  return cartoonColor(id) ?? avatarSpec(id).palette.frame;
 }
 
 /**
@@ -551,8 +552,16 @@ export function avatarSymbolId(id: string, pose: AvatarPose = 'base'): string {
   return pose === 'power' ? `av-${safe}-power` : `av-${safe}`;
 }
 
-/** Die Portrait-Geometrie einer Id/Pose (nur für den Sprite-Aufbau). */
+/**
+ * Die Portrait-Geometrie einer Id/Pose (nur für den Sprite-Aufbau).
+ *
+ * Die CREW zeichnet seit dem Cartoon-Umbau {@link cartoonBody} — vollflächige
+ * Figuren mit eigener Platte. Die Twerk-Ahnen bleiben beim Strich-Baukasten
+ * darunter: Sie stehen auf einem anderen Bildschirm, nie neben der Crew, und
+ * ihr geisterhafter Strich passt zu dem, was sie sind.
+ */
 function portraitBody(id: string, pose: AvatarPose): string {
+  if (hasCartoon(id)) return cartoonBody(id, pose);
   const s = avatarSpec(id);
   return (
     `<g fill="none" stroke="currentColor" stroke-width="${pose === 'power' ? '1.75' : '1.4'}" ` +
@@ -582,8 +591,12 @@ export function avatarSpriteSvg(ids: readonly string[] = AVATAR_IDS): string {
   const syms: string[] = [];
   for (const id of ids) {
     for (const pose of ['base', 'power'] as const) {
+      // Cartoons zeichnen auf 32er-Fläche, der Strich-Baukasten auf 24er. Ein
+      // `<symbol>` bringt seinen viewBox selbst mit, `<use>` skaliert korrekt —
+      // beide Stile passen deshalb ins selbe Sprite.
+      const box = hasCartoon(id) ? '0 0 32 32' : '0 0 24 24';
       syms.push(
-        `<symbol id="${avatarSymbolId(id, pose)}" viewBox="0 0 24 24">${portraitBody(id, pose)}</symbol>`,
+        `<symbol id="${avatarSymbolId(id, pose)}" viewBox="${box}">${portraitBody(id, pose)}</symbol>`,
       );
     }
   }
@@ -632,8 +645,12 @@ export function portraitTile(
   cls = '',
   frame?: string,
 ): string {
+  // `av-toon` schaltet Kachel-Grund und Innenabstand ab: Eine Cartoon-Figur
+  // bringt ihre eigene vollflächige Platte mit, ein Pergament-Rand darunter
+  // stünde als Fehlfarbe am Bildrand.
+  const toon = hasCartoon(id) ? ' av-toon' : '';
   return (
-    `<span class="av${cls ? ` ${cls}` : ''}" style="--av-frame:${frame ?? avatarFrame(id)}">` +
+    `<span class="av${toon}${cls ? ` ${cls}` : ''}" style="--av-frame:${frame ?? avatarFrame(id)}">` +
     `${portraitSvg(id, pose)}</span>`
   );
 }

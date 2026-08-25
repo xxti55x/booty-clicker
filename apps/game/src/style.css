@@ -2954,22 +2954,39 @@ body {
 .ab-slots {
   display: flex;
   align-items: center;
+  /* Umbrechen statt überlaufen: Ein Mitglied mit acht Fähigkeiten und einem
+     langen Label („Fähigkeiten 5/8 · nächste in 20 Lv") passt nicht in eine
+     Zeile — ohne wrap stand die letzte Kachel AUSSERHALB der Karte auf dem
+     Panel-Hintergrund. Sichtbar wurde das erst mit der größeren Kachel, falsch
+     war es vorher schon. */
+  flex-wrap: wrap;
   gap: 5px;
   margin-top: 8px;
 }
+/* Die Kachel ist gewachsen und das Motiv füllt sie jetzt aus. Vorher steckte
+   ein 15-px-Icon mitten auf 28 px — über die Hälfte der Fläche lag brach, und
+   genau deshalb war auf einer Karte mit acht Kacheln nichts zu unterscheiden.
+   Die FLÄCHE gehört seither dem Träger (Figurfarbe), der RAHMEN der Sorte. */
 .ab {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
   border: 2px solid var(--parch-line);
   background: rgba(67, 46, 18, 0.08);
   padding: 0;
+  overflow: hidden;
   flex: none;
 }
 .ab svg {
+  width: 100%;
+  height: 100%;
+}
+/* Die gesperrte Kachel trägt eine Ziffer statt eines Motivs — dort bleibt der
+   Kachelgrund sichtbar und das Feld darf nicht vollflächig werden. */
+.ab.lk svg {
   width: 15px;
   height: 15px;
 }
@@ -3112,30 +3129,62 @@ body {
    inline, der Rahmen-Selektor `.av` von 4b bleibt unverändert) — hier stehen nur
    der zusätzliche Schein und der Legenden-Schimmer. Die Animation schlägt in der
    Kaskade auch die Inline-Deklaration, deshalb kann `mr4` den Rahmen färben. */
+/* Der Rang färbt seit dem Level-Rahmen den SCHEIN, nicht mehr den Rand — sonst
+   trügen beide Fortschritte dieselbe Farbe und keiner sagte noch etwas. Die
+   Glow-Farbe hat deshalb ihre eigene Variable und liest NICHT `--av-frame`. */
 .av.mr {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.75),
     0 0 0 1px rgba(70, 44, 12, 0.35),
-    0 0 6px var(--av-frame);
+    0 0 7px 1px var(--mr-glow, #c47a3a);
 }
+.av.mr1 {
+  --mr-glow: #c47a3a;
+}
+.av.mr2 {
+  --mr-glow: #cfd8e0;
+}
+.av.mr3 {
+  --mr-glow: #ffcf5e;
+}
+/* Der Legenden-Rang schimmert. Animiert wird der SCHATTEN selbst, nicht die
+   Variable: Eine Custom Property ist ohne `@property`-Deklaration nicht
+   animierbar — die Keyframes wären still durchgelaufen und der Rang hätte
+   ausgesehen wie jeder andere. */
 .av.mr4 {
+  --mr-glow: #c79bf0;
   animation: mrshimmer 3.2s linear infinite;
 }
 @keyframes mrshimmer {
   0% {
-    border-color: #ff6ab0;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.75),
+      0 0 0 1px rgba(70, 44, 12, 0.35),
+      0 0 8px 1px #ff6ab0;
   }
   25% {
-    border-color: #ffcf5e;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.75),
+      0 0 0 1px rgba(70, 44, 12, 0.35),
+      0 0 8px 1px #ffcf5e;
   }
   50% {
-    border-color: #6ee7a8;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.75),
+      0 0 0 1px rgba(70, 44, 12, 0.35),
+      0 0 8px 1px #6ee7a8;
   }
   75% {
-    border-color: #6ec3e3;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.75),
+      0 0 0 1px rgba(70, 44, 12, 0.35),
+      0 0 8px 1px #6ec3e3;
   }
   100% {
-    border-color: #ff6ab0;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.75),
+      0 0 0 1px rgba(70, 44, 12, 0.35),
+      0 0 8px 1px #ff6ab0;
   }
 }
 /* Die Fortschritts-Zeile unter der Beschreibung („Meisterschaft: Silber ·
@@ -6566,4 +6615,56 @@ body {
   line-height: 1.4;
   color: var(--parch-ink);
   opacity: 0.78;
+}
+
+/* ---- Level-Rahmen ums Portrait ----------------------------------------------
+   Der Rahmen beantwortet beim Kaufen die Frage „wer hängt zurück?": Er wechselt
+   an genau den Schwellen, an denen auch der crew-weite Faktor springt
+   (25/50/100/200/250 — `levelTier` in game/heroes). Die FARBE kommt inline als
+   `--av-frame`, hier stehen nur der zusätzliche Schliff und der Schimmer der
+   letzten Stufe.
+
+   Er hat den Rahmen von der Meisterschaft übernommen. Zwei Fortschritte können
+   nicht denselben Kanal belegen, und das Level ist der, den man steuert; die
+   Meisterschaft behält ihren Schein (`.av.mr`) und ihre Zeile unter dem Namen. */
+.av.lv {
+  border-width: 2.5px;
+}
+.av.lv3,
+.av.lv4 {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 0 0 1px rgba(70, 44, 12, 0.4);
+}
+.av.lv5 {
+  animation: lvprism 3.6s linear infinite;
+}
+@keyframes lvprism {
+  0% {
+    border-color: #ff6ab0;
+  }
+  20% {
+    border-color: #ffcf5e;
+  }
+  40% {
+    border-color: #a8e831;
+  }
+  60% {
+    border-color: #6ec3e3;
+  }
+  80% {
+    border-color: #c07bff;
+  }
+  100% {
+    border-color: #ff6ab0;
+  }
+}
+/* Die Crew-Portraits sind seit dem Cartoon-Umbau vollflächige Figuren mit
+   eigener Platte — ein heller Kachel-Grund und der 1-px-Rand darunter würden
+   als Fehlfarbe am Rand stehen. Die Ahnen behalten beides, ihr Strich-Portrait
+   braucht den Pergament-Grund. */
+.av.av-toon {
+  padding: 0;
+  overflow: hidden;
+  background: none;
 }

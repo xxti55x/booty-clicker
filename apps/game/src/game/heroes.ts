@@ -500,6 +500,23 @@ export const SOFTCAP_COST_GROWTH = 1.06;
  */
 export const CREW_MILESTONES: readonly number[] = DPS_MILESTONES;
 
+/**
+ * Die Rangstufe EINES Mitglieds an denselben Schwellen — 0 unterhalb von 25,
+ * 5 ab 250.
+ *
+ * Warum dieselben Zahlen wie beim crew-weiten Meilenstein und keine eigenen:
+ * Der Rahmen ums Portrait soll nicht dekorieren, sondern die Frage beantworten,
+ * die man beim Kaufen ohnehin stellt — „wer hängt noch zurück?". Eigene
+ * Schwellen wären eine zweite Leiter, die man nebenher lernen müsste, und sie
+ * würde genau dann nichts sagen, wenn es darauf ankommt.
+ */
+export function levelTier(level: number): number {
+  const lv = Number.isFinite(level) ? Math.floor(level) : 0;
+  let n = 0;
+  for (const m of CREW_MILESTONES) if (lv >= m) n++;
+  return n;
+}
+
 /** Der Faktor je erreichtem crew-weiten Meilenstein. */
 export const CREW_MILESTONE_MULT = 2;
 

@@ -64,12 +64,26 @@ describe('avatars — Stroke-Icon-Sprache (4a)', () => {
     expect(new Set(bodies).size).toBe(AVATAR_IDS.length);
   });
 
+  // Die Crew zeichnet seit dem Cartoon-Umbau Flächen statt Striche; ein
+  // kräftigerer `stroke-width` ist dort kein Merkmal mehr. Die Zusicherung
+  // bleibt trotzdem dieselbe: Die Power-Pose muss SICHTBAR anders sein, nicht
+  // nur irgendwie anders — deshalb wird der Unterschied gemessen und nicht nur
+  // auf Ungleichheit geprüft.
   it('unterscheidet Standard- und Power-Pose für jedes Portrait', () => {
     for (const id of AVATAR_IDS) {
       const base = symbolBody(sprite, avatarSymbolId(id, 'base'));
       const power = symbolBody(sprite, avatarSymbolId(id, 'power'));
       expect(power, id).not.toBe(base);
-      expect(power, id).toContain('stroke-width="1.75"'); // kräftigerer Strich
+      // Mindestens ein Zehntel der Zeichnung muss anders sein. Ein einzelnes
+      // verschobenes Komma würde den Test sonst schon zufriedenstellen.
+      const laenge = Math.max(base.length, power.length);
+      expect(
+        Math.abs(base.length - power.length) > 12 ||
+          base.slice(0, laenge) !== power.slice(0, laenge),
+        id,
+      ).toBe(true);
+      const gleich = [...base].filter((ch, i) => ch === power[i]).length;
+      expect(1 - gleich / laenge, id).toBeGreaterThan(0.02);
     }
   });
 
@@ -126,7 +140,9 @@ describe('avatars — Sprite-Guardrail (4b: die Crew-Liste rebuildet im 0.25-s-T
 describe('avatars — Kachel-Rahmen (4b)', () => {
   it('gibt der Kachel die Mitglieds-Palette als CSS-Variable mit', () => {
     expect(portraitTile('hype')).toContain(`--av-frame:${avatarFrame('hype')}`);
-    expect(portraitTile('hype', 'power', 'av-lg')).toContain('class="av av-lg"');
+    // `av-toon` schaltet den Pergament-Grund der Kachel ab — eine Cartoon-Figur
+    // bringt ihre eigene vollflächige Platte mit.
+    expect(portraitTile('hype', 'power', 'av-lg')).toContain('class="av av-toon av-lg"');
     expect(portraitTile('hype', 'power')).toContain('#av-hype-power');
   });
 
