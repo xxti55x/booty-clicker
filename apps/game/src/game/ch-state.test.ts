@@ -81,12 +81,12 @@ describe('ch-state', () => {
     expect(dpsOf(robo)).toBeCloseTo(totalRawDps({ boss: 20 }) * 1.6, 6);
     expect(clickDamageOf(robo)).toBeCloseTo(clickDamageRaw({ boss: 20 }), 6);
 
-    // Classic lv 10 + 2⭐ = 0.8 + 0.2 = +100 % click ⇒ clickGearMult ×2; DPS unaffected.
+    // Classic lv 10 + 2⭐ = 1.8 + 0.4 = +220 % click ⇒ clickGearMult ×3.2; DPS unberührt.
     const classic = {
       ...base,
       gear: { ...createGear(), skinLevels: { classic: 10 }, skinStars: { classic: 2 } },
     };
-    expect(clickDamageOf(classic)).toBeCloseTo(clickDamageRaw({ boss: 20 }) * 2, 6);
+    expect(clickDamageOf(classic)).toBeCloseTo(clickDamageRaw({ boss: 20 }) * 3.2, 6);
     expect(dpsOf(classic)).toBeCloseTo(totalRawDps({ boss: 20 }), 6);
   });
 

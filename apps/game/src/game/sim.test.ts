@@ -414,10 +414,16 @@ describe('simulateEndless — E4 with best-in-slot gear (M11-AC5, P1 intact)', (
   it('catalog P1 guard: the strongest click multiplier beats the strongest idle multiplier', () => {
     const { click, idle } = bisMults();
     expect(click).toBeGreaterThan(idle);
-    // Pin the review-pass balance so an accidental catalog edit is caught loudly:
-    // Klassiker lv 50 + 5★ ⇒ ×5.5 click; Robo lv 50 + Space ⇒ ×4.05 crew-DPS.
-    expect(click).toBeCloseTo(5.5, 9);
-    expect(idle).toBeCloseTo(4.05, 9);
+    // Die Katalog-Werte sind gepinnt, damit eine versehentliche Änderung LAUT
+    // auffällt. Nach dem Seltenheits-Retune: Klassiker (Klick-Spezialist,
+    // 0.18/lvl + 0.20/⭐) auf Lv 50 mit 5★ ⇒ ×11 Klick; die stärkste Idle-Seite
+    // stellt der Transzendenz-Skin über `allPct` plus Space-Kulisse ⇒ ×7.8.
+    //
+    // Der Abstand ist die eigentliche Aussage: Genau diese Leitplanke hat den
+    // ersten Entwurf gefangen, in dem der Klick-Anker bei 0.08 stehen blieb —
+    // dort lag Idle mit 7.80 gegen 7.75 vorn und P1 war gekippt.
+    expect(click).toBeCloseTo(11, 9);
+    expect(idle).toBeCloseTo(7.8, 9);
   });
 
   // The gear-P1 comparison is CONTROLLED (`economy: false`): it isolates click gear vs

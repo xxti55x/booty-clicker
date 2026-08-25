@@ -118,8 +118,21 @@ export const PATH_NODES = 5;
  */
 export const PATH_THRESHOLDS: readonly number[] = [3_000, 18_000, 72_000, 216_000, 720_000];
 
-/** Wie viel STERN-Anteil ein Bonus-Knoten zahlt (vier Knoten ⇒ 0,8 ⭐). */
-export const NODE_STARS = 0.2;
+/**
+ * Wie viel STERN-Anteil ein Bonus-Knoten zahlt (vier Knoten ⇒ 0,4 ⭐).
+ *
+ * Halbiert mit dem Seltenheits-Retune der Skins. Der Wert war exakt auf den
+ * alten Katalog kalibriert: Der stärkste Stern lag bei 0.10, und
+ * `0.10 × 0.2 × 4 = 0.08` traf die Leitplanke des Ideen-Dokuments („≤ +8 % auf
+ * den skin-typischen Term") auf den Punkt. Nachdem die Sterne der Spezialisten
+ * auf 0.20 gestiegen sind, riss derselbe Faktor die Grenze um das Doppelte.
+ *
+ * Halbiert statt Leitplanke angehoben: Die Grenze ist eine Design-Entscheidung
+ * („ein voller Pfad ist weniger wert als EIN zusätzlicher Stern"), der Faktor
+ * nur ihre Umrechnung. Wenn die Sterne stärker werden, muss der Pfad-Anteil
+ * relativ kleiner werden — sonst wächst er als blinder Passagier mit.
+ */
+export const NODE_STARS = 0.1;
 
 /** Der Stern-Anteil des VOLLEN Pfades — die Leitplanken-Konstante für Tests/UI. */
 export const PATH_MAX_STARS = NODE_STARS * (PATH_NODES - 1);
@@ -202,15 +215,37 @@ export function signatureMove(path: SkinPath, id: string): string | null {
 // ---------------------------------------------------------------------------
 
 /**
+ * Deckel für den Pfad-Anteil auf einem PROZENT-Term.
+ *
+ * Die Leitplanke des Ideen-Dokuments („≤ +8 % auf den skin-typischen Term",
+ * Leistungs-Produkt < ×1.15) hing vorher an einer Kalibrierung: Der stärkste
+ * Stern lag bei 0.10, und `0.10 × NODE_STARS × 4` traf die Grenze zufällig
+ * genau. Mit dem Seltenheits-Retune wurden die Sterne stärker — und die
+ * Leitplanke riss, ohne dass jemand am Pfad etwas geändert hätte.
+ *
+ * Jetzt ist sie STRUKTURELL erzwungen statt getroffen: Der Skin selbst darf so
+ * stark werden, wie der Katalog es will (der Transzendenz-Skin ist bewusst der
+ * mächtigste im Spiel), aber sein PFAD-Anteil ist gedeckelt. Beides sind zwei
+ * Systeme; der Pfad muss nicht mitwachsen, nur weil ein Skin es tut.
+ *
+ * Absolute Terme (Sekunden, Millisekunden, Coach-cps) bleiben ungedeckelt —
+ * ihre Einheiten sind keine Prozente und das Budget meint sie nicht.
+ */
+export const PATH_PERCENT_CAP = 0.02;
+
+/**
  * Der Bonus-Betrag EINES Skins aus `nodes` Bonus-Knoten: `star.perStar ·
- * NODE_STARS · min(nodes, 4)`. Knoten 5 zahlt bewusst 0 (er ist der Move).
+ * NODE_STARS · min(nodes, 4)`, auf Prozent-Termen gedeckelt durch
+ * {@link PATH_PERCENT_CAP}. Knoten 5 zahlt bewusst 0 (er ist der Move).
  * Ein unbekannter Skin liefert 0.
  */
 export function pathAmount(id: string, nodes: number): number {
   const cfg = SKINS[id as SkinKey];
   if (!cfg) return 0;
   const n = Math.max(0, Math.min(PATH_NODES - 1, Math.floor(nodes) || 0));
-  return cfg.star.perStar * NODE_STARS * n;
+  const raw = cfg.star.perStar * NODE_STARS * n;
+  const isPercent = cfg.star.stat === 'allPct' || PERCENT_STATS.includes(cfg.star.stat);
+  return isPercent ? Math.min(raw, PATH_PERCENT_CAP * (n / (PATH_NODES - 1))) : raw;
 }
 
 /**
