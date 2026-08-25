@@ -85,6 +85,27 @@ export const CARTOON_PALETTES: Record<string, CartoonPalette> = {
   cosmic: p('#4c1d95', '#6d28d9', '#ffe9a3', '#1c0b38', '#ffe9a3'),
 };
 
+/**
+ * Die Paletten der zehn Twerk-Ahnen.
+ *
+ * Getrennt von der Crew, weil sie einen eigenen Bildschirm haben und deshalb
+ * nur UNTEREINANDER Abstand halten müssen — siehe die Begründung bei
+ * {@link ANCIENT_FIGURES}. Die Farben folgen dem Mythos: Bronze für den Helden,
+ * Meergrün für den Meeresherrn, Stein für den Unerschütterlichen.
+ */
+export const ANCIENT_PALETTES: Record<string, CartoonPalette> = {
+  twerkules: p('#d99a3c', '#e8b183', '#8a5a24', '#5a3a18', '#ffe6b0'),
+  poposeidon: p('#1f9aa8', '#d9b596', '#e8eef0', '#12525c', '#8ff0ff'),
+  cheeksana: p('#8a7fd0', '#e8c4a0', '#2a2440', '#3a3160', '#efe8ff'),
+  glutaeus: p('#b83a3a', '#d9a273', '#3a1a14', '#7a2020', '#f5d06a'),
+  chronilla: p('#2c5f9e', '#e0bfa0', '#4a3a70', '#1a3b66', '#9fd8ff'),
+  peachiel: p('#f5cf5e', '#f0cba6', '#c98a2c', '#fff6de', '#fff2c0'),
+  wackelias: p('#6e7a6a', '#9aa39a', '#3a4038', '#333a32', '#cfe0c8'),
+  beatrix: p('#d64a8a', '#e8b48f', '#3a1424', '#7a1f46', '#ffd6e8'),
+  truhilda: p('#6b421c', '#e0b085', '#4a2f14', '#8a5a2a', '#f2c94a'),
+  ekstasius: p('#7b2fd6', '#e0a8c8', '#ff5ea8', '#3a1060', '#ffe36a'),
+};
+
 // ---------------------------------------------------------------------------
 // Gemeinsame Bausteine
 //
@@ -474,13 +495,248 @@ const FIGURES: Record<string, Figure> = {
       : `<path d="M13.6 18.6c1.4 1.7 3.4 1.7 4.8 0" fill="none" stroke="${c.acc}" stroke-width="1.35" stroke-linecap="round"/>`),
 };
 
-/** Trägt diese Id eine handgezeichnete Cartoon-Figur? */
-export function hasCartoon(id: string): boolean {
-  return FIGURES[id] !== undefined && CARTOON_PALETTES[id] !== undefined;
+// ---------------------------------------------------------------------------
+// Die zehn Twerk-Ahnen
+//
+// Sie sind keine Kollegen, sondern Gottheiten — und dürfen das zeigen. Zwei
+// Dinge trennen sie deshalb sichtbar vom Kader, ohne den Stil zu brechen:
+// die AURA hinter dem Kopf (die kein Crew-Mitglied hat) und Motive, die aus
+// dem Mythos kommen statt aus dem Club.
+//
+// Ihre Paletten müssen nur UNTEREINANDER Abstand halten, nicht auch zur Crew:
+// Ahnen und Crew stehen auf verschiedenen Bildschirmen und nie nebeneinander.
+// Beide Gruppen auf denselben Mindestabstand zu zwingen hieße, 25 Farben in
+// einen Raum zu pressen, in dem 15 schon eng waren — der Gewinn wäre null und
+// der Preis wären Farben, die keiner mehr auseinanderhält.
+// ---------------------------------------------------------------------------
+
+/** Der Heiligenschein — das gemeinsame Zeichen aller Ahnen. */
+function aura(c: CartoonPalette): string {
+  return (
+    `<circle cx="16" cy="14" r="11.6" fill="none" stroke="${c.acc}" stroke-width="1.1" opacity=".5"/>` +
+    `<circle cx="16" cy="14" r="9.4" fill="none" stroke="${c.acc}" stroke-width="1.6" opacity=".85"/>`
+  );
 }
 
-/** Alle Ids mit Cartoon-Figur, in Kader-Reihenfolge. */
-export const CARTOON_IDS: readonly string[] = Object.keys(FIGURES);
+const ANCIENT_FIGURES: Record<string, Figure> = {
+  /** Twerkules, Held der 1000 Reps: Löwenfell-Kapuze, Keule, breite Schultern. */
+  twerkules: (c, pose) =>
+    plate(c) +
+    aura(c) +
+    shoulders(c, pose, 12) +
+    neck(c, pose, 21) +
+    // Die Mähne als Zackenkranz. Der erste Entwurf legte zwei Dreiecke seitlich
+    // an den Kopf — gerendert las sich das als spitze Ohren, nicht als Löwenfell.
+    fill(
+      'M16 1.4c2.4 0 4.4.8 6 2.2l2.8-1.6-.4 3.2c1 1.4 1.6 3.1 1.6 5.2l2.8 1.2-2.8 2.2c-.2 1.6-.7 3-1.5 4.2l1.5 3-3.2-1.2c-1.8 1.5-4.1 2.2-6.8 2.2s-5-.7-6.8-2.2L6 22.6l1.5-3c-.8-1.2-1.3-2.6-1.5-4.2L3.2 13.2 6 12c0-2.1.6-3.8 1.6-5.2l-.4-3.2L10 5.2c1.6-1.4 3.6-3.8 6-3.8Z',
+      c.hair,
+      1.2,
+    ) +
+    fill(
+      'M16 6.8c4.3 0 7.2 2.9 7.2 7.2s-2.9 7.8-7.2 7.8-7.2-3.5-7.2-7.8 2.9-7.2 7.2-7.2Z',
+      c.skin,
+      1.3,
+    ) +
+    (pose === 'power' ? brows(3.1, 12.6) : '') +
+    eyes(3.1, 14.6) +
+    mouth(pose, 18.4, 3) +
+    `<path d="M21.4 27.4 27 22" stroke="${c.acc}" stroke-width="2.4" stroke-linecap="round"/>` +
+    `<circle cx="28.2" cy="20.8" r="2.6" fill="${c.acc}" stroke="${INK}" stroke-width="1.1"/>`,
+
+  /** Poposeidon, Herr der Wellen: Dreizack, Wellenbart, Muschelkrone. */
+  poposeidon: (c, pose) =>
+    plate(c) +
+    aura(c) +
+    shoulders(c, pose, 10.4) +
+    neck(c, pose, 21.2) +
+    fill(
+      'M16 6.4c4.3 0 7.2 3 7.2 7.4s-2.9 7.8-7.2 7.8-7.2-3.4-7.2-7.8 2.9-7.4 7.2-7.4Z',
+      c.skin,
+      1.3,
+    ) +
+    fill('M8.8 12.4C8.8 7 11.8 4.2 16 4.2s7.2 2.8 7.2 8.2Z', c.hair, 1.2) +
+    fill('M11 3.6 8.6 1l4 .4Zm10 0 2.4-2.6-4 .4Z', c.acc, 1.05) +
+    (pose === 'power' ? brows(3, 12.2) : '') +
+    eyes(3, 14.4) +
+    fill(
+      'M10.4 18.2c1.4 0 1.4 1.4 2.8 1.4s1.4-1.4 2.8-1.4 1.4 1.4 2.8 1.4 1.4-1.4 2.8-1.4c-.4 4.2-2.8 6.4-5.6 6.4s-5.2-2.2-5.6-6.4Z',
+      c.hair,
+      1.15,
+    ) +
+    `<path d="M27.4 6.2v18.4" stroke="${c.acc}" stroke-width="1.9" stroke-linecap="round"/>` +
+    fill('M24.2 8.6V4.4l1.6 2.6 1.6-3 1.6 3 1.6-2.6v4.2Z', c.acc, 1.1),
+
+  /** Cheeksana, Auge des Sturms: Wirbel um den Kopf, ruhiger Blick. */
+  cheeksana: (c, pose) =>
+    plate(c) +
+    aura(c) +
+    `<path d="M3.4 6.4c5.4-2.6 12-2.4 16.6.6M28.6 24c-5.4 2.6-12 2.4-16.6-.6" fill="none" stroke="${c.acc}" stroke-width="1.5" stroke-linecap="round" opacity=".75"/>` +
+    shoulders(c, pose, 9.4) +
+    neck(c, pose) +
+    fill(
+      'M16 6.6c4.1 0 6.9 3 6.9 7.5s-2.8 8.5-6.9 8.5-6.9-4-6.9-8.5 2.8-7.5 6.9-7.5Z',
+      c.skin,
+      1.3,
+    ) +
+    fill(
+      'M9.1 13.6C8.4 7.4 11.7 4.2 16 4.2s7.6 3.2 6.9 9.4l-2-.7C21.4 9 19.1 6.8 16 6.8s-5.4 2.2-4.9 6.1Z',
+      c.hair,
+      1.15,
+    ) +
+    (pose === 'power'
+      ? brows(3, 12.4) + eyes(3, 14.8, 1.2)
+      : `<circle cx="16" cy="14.8" r="2.6" fill="none" stroke="${INK}" stroke-width="1.3"/>` +
+        `<circle cx="16" cy="14.8" r="1.1" fill="${INK}"/>` +
+        `<path d="M11.4 14.8h1.8M18.8 14.8h1.8" stroke="${INK}" stroke-width="1.3" stroke-linecap="round"/>`) +
+    mouth(pose, 18.8, 2.6),
+
+  /** Glutaeus Maximus, Gladiator: Römerhelm mit Querbusch. */
+  glutaeus: (c, pose) =>
+    plate(c) +
+    aura(c) +
+    shoulders(c, pose, 11.6) +
+    neck(c, pose, 21.4) +
+    fill('M16 7c4.4 0 7.4 3 7.4 7.4s-3 7.8-7.4 7.8-7.4-3.4-7.4-7.8S11.6 7 16 7Z', c.skin, 1.3) +
+    fill(
+      'M8.2 13.4C8.2 7.4 11.6 4.4 16 4.4s7.8 3 7.8 9H21c0-3.6-2-5.4-5-5.4s-5 1.8-5 5.4Z',
+      c.fit,
+      1.2,
+    ) +
+    fill('M13.8 4.6c0-2.4 1-3.6 2.2-3.6s2.2 1.2 2.2 3.6v8.8h-4.4Z', c.acc, 1.15) +
+    `<path d="M11 13.4v4.2M21 13.4v4.2" stroke="${c.fit}" stroke-width="2" stroke-linecap="round"/>` +
+    (pose === 'power' ? brows(2.9, 14.2) : '') +
+    eyes(2.9, 16, 1.15) +
+    mouth(pose, 19.4, 2.6),
+
+  /** Chronilla, Hüterin der Zeit: Zifferblatt statt Stirn, Sanduhr. */
+  chronilla: (c, pose) =>
+    plate(c) +
+    aura(c) +
+    shoulders(c, pose, 9.6) +
+    neck(c, pose) +
+    fill('M16 6.4c4.2 0 7 3.1 7 7.6s-2.8 8.6-7 8.6-7-4.1-7-8.6 2.8-7.6 7-7.6Z', c.skin, 1.3) +
+    fill(
+      'M9 13.4C8.3 7.2 11.6 4 16 4s7.7 3.2 7 9.4l-2-.7C21.6 8.8 19.2 6.6 16 6.6s-5.6 2.2-5 6.1Z',
+      c.hair,
+      1.15,
+    ) +
+    `<circle cx="16" cy="10.4" r="3.2" fill="${c.acc}" stroke="${INK}" stroke-width="1.15"/>` +
+    `<path d="M16 8.6v1.8l1.4 1" stroke="${INK}" stroke-width="1.1" stroke-linecap="round" fill="none"/>` +
+    (pose === 'power' ? brows(3, 14.4) : '') +
+    eyes(3, 16.2, 1.15) +
+    mouth(pose, 19.4, 2.6) +
+    fill('M22.6 24.4h6.2l-3.1 3.2 3.1 3.2h-6.2l3.1-3.2Z', c.acc, 1.1),
+
+  /** Peachiel, Erzengel des Goldes: Flügel und Heiligenschein-Reif. */
+  peachiel: (c, pose) =>
+    plate(c) +
+    aura(c) +
+    fill(
+      'M8.4 26.2C4.6 24 2.4 20.4 2.6 16c2.2 2 4.2 3.4 6 4.2Zm15.2 0c3.8-2.2 6-5.8 5.8-10.2-2.2 2-4.2 3.4-6 4.2Z',
+      c.acc,
+      1.15,
+    ) +
+    shoulders(c, pose, 9.4) +
+    neck(c, pose) +
+    fill('M16 7c4.1 0 6.9 3 6.9 7.4s-2.8 8.4-6.9 8.4-6.9-4-6.9-8.4S11.9 7 16 7Z', c.skin, 1.3) +
+    fill(
+      'M9.2 13.6C8.6 7.6 11.8 4.6 16 4.6s7.4 3 6.8 9l-2-.6C21.2 9.4 19 7.2 16 7.2s-5.2 2.2-4.8 5.8Z',
+      c.hair,
+      1.15,
+    ) +
+    `<ellipse cx="16" cy="3.4" rx="5" ry="1.6" fill="none" stroke="${c.acc}" stroke-width="1.5"/>` +
+    (pose === 'power' ? brows(2.9, 12.8) : '') +
+    eyes(2.9, 14.8, 1.15) +
+    mouth(pose, 18.6, 2.6),
+
+  /** Wackelias, der Unerschütterliche: Steinkopf mit Rissen. */
+  wackelias: (c, pose) =>
+    plate(c) +
+    aura(c) +
+    shoulders(c, pose, 12.4) +
+    neck(c, pose, 21.4) +
+    fill('M16 4.6 24.4 8.2v11.4L16 23.4 7.6 19.6V8.2Z', c.skin, 1.35) +
+    `<path d="M11.4 8.6 13 12l-1.6 2.4M21 9.4l-1.8 3 1.4 2.6" fill="none" stroke="${INK}" stroke-width="1" opacity=".55"/>` +
+    (pose === 'power' ? brows(3.1, 11.8) : '') +
+    eyes(3.1, 13.8, 1.2) +
+    mouth(pose, 18, 2.8) +
+    `<path d="M4.6 22.6h3.2M24.2 22.6h3.2" stroke="${c.acc}" stroke-width="1.6" stroke-linecap="round"/>`,
+
+  /** Beatrix, Taktgeberin: Metronom-Silhouette und Taktstock. */
+  beatrix: (c, pose) =>
+    plate(c) +
+    aura(c) +
+    shoulders(c, pose, 9.2) +
+    neck(c, pose) +
+    fill(
+      'M16 6.2c4 0 6.7 3 6.7 7.5s-2.7 8.7-6.7 8.7-6.7-4.2-6.7-8.7 2.7-7.5 6.7-7.5Z',
+      c.skin,
+      1.3,
+    ) +
+    fill(
+      'M9.3 13.6C8.6 7.2 11.8 3.8 16 3.8s7.4 3.4 6.7 9.8l-2-.7C21.2 8.8 19 6.6 16 6.6s-5.2 2.2-4.7 6.3Z',
+      c.hair,
+      1.15,
+    ) +
+    fill('M12.6 3.4 16 .8l3.4 2.6-1.2 2.2h-4.4Z', c.acc, 1.1) +
+    (pose === 'power' ? brows(2.9, 12.4) : '') +
+    eyes(2.9, 14.6, 1.15) +
+    mouth(pose, 18.4, 2.6) +
+    `<path d="M21.6 30 28.4 21" stroke="${c.acc}" stroke-width="1.9" stroke-linecap="round"/>` +
+    `<circle cx="29.2" cy="20" r="1.7" fill="${c.acc}" stroke="${INK}" stroke-width="1"/>`,
+
+  /** Truhilda, Schatzmeisterin: Truhendeckel als Haube, Schlüssel. */
+  truhilda: (c, pose) =>
+    plate(c) +
+    aura(c) +
+    shoulders(c, pose, 10) +
+    neck(c, pose) +
+    fill('M16 7c4.2 0 7 3 7 7.4s-2.8 8.4-7 8.4-7-4-7-8.4S11.8 7 16 7Z', c.skin, 1.3) +
+    fill('M7.4 12.6C7.4 6.6 11.2 3.4 16 3.4s8.6 3.2 8.6 9.2Z', c.fit, 1.2) +
+    `<path d="M8.6 9.6h14.8" stroke="${c.acc}" stroke-width="1.5"/>` +
+    fill('M14.2 10.6h3.6v3.4h-3.6Z', c.acc, 1.1) +
+    (pose === 'power' ? brows(2.9, 15) : '') +
+    eyes(2.9, 16.6, 1.15) +
+    mouth(pose, 19.8, 2.6) +
+    `<circle cx="25.4" cy="25.6" r="2.4" fill="none" stroke="${c.acc}" stroke-width="1.6"/>` +
+    `<path d="M25.4 28v3.4M25.4 30h1.8" stroke="${c.acc}" stroke-width="1.6" stroke-linecap="round"/>`,
+
+  /** Ekstasius, der Entfesselte: gesprengte Ketten, wilde Mähne, Blitze. */
+  ekstasius: (c, pose) =>
+    plate(c) +
+    aura(c) +
+    fill(
+      'M16 1.2c1.2 2.6 3.4 3.8 6.4 3.6-1.4 2-1.4 3.8 0 5.4-2.6-.6-4.6 0-6.4 1.8-1.8-1.8-3.8-2.4-6.4-1.8 1.4-1.6 1.4-3.4 0-5.4 3 .2 5.2-1 6.4-3.6Z',
+      c.hair,
+      1.2,
+    ) +
+    shoulders(c, pose, 10.6) +
+    neck(c, pose, 21.4) +
+    fill('M16 8c4.2 0 7 3 7 7.4s-2.8 8.2-7 8.2-7-3.8-7-8.2S11.8 8 16 8Z', c.skin, 1.3) +
+    (pose === 'power' ? brows(3, 13.4) : '') +
+    `<circle cx="13" cy="15.2" r="1.5" fill="${c.acc}"/><circle cx="19" cy="15.2" r="1.5" fill="${c.acc}"/>` +
+    mouth(pose, 19, 3) +
+    fill('M4.6 20.2h3.4l-2 3.2h2.6L4.2 29l1.2-4H3.2Z', c.acc, 1.05) +
+    fill('M27.4 20.2H24l2 3.2h-2.6l4.4 5.6-1.2-4h2.2Z', c.acc, 1.05),
+};
+
+/**
+ * Kader und Ahnen in EINER Nachschlagetabelle — der Rest des Moduls (und alles,
+ * was `hasCartoon` fragt) muss den Unterschied nicht kennen.
+ */
+const ALL_FIGURES: Record<string, Figure> = { ...FIGURES, ...ANCIENT_FIGURES };
+const ALL_PALETTES: Record<string, CartoonPalette> = {
+  ...CARTOON_PALETTES,
+  ...ANCIENT_PALETTES,
+};
+
+/** Trägt diese Id eine handgezeichnete Cartoon-Figur? */
+export function hasCartoon(id: string): boolean {
+  return ALL_FIGURES[id] !== undefined && ALL_PALETTES[id] !== undefined;
+}
+
+/** Alle Ids mit Cartoon-Figur — erst der Kader, dann die Ahnen. */
+export const CARTOON_IDS: readonly string[] = Object.keys(ALL_FIGURES);
 
 /**
  * Die Zeichnung einer Figur (viewBox `0 0 32 32`) — leer für eine unbekannte
@@ -488,14 +744,14 @@ export const CARTOON_IDS: readonly string[] = Object.keys(FIGURES);
  * nichts liefert und auf das Strich-Portrait zurückfällt.
  */
 export function cartoonBody(id: string, pose: Pose = 'base'): string {
-  const f = FIGURES[id];
-  const c = CARTOON_PALETTES[id];
+  const f = ALL_FIGURES[id];
+  const c = ALL_PALETTES[id];
   return f !== undefined && c !== undefined ? f(c, pose) : '';
 }
 
 /** Die Kachelfarbe einer Figur — auch der Vorgabewert ihres Rahmens. */
 export function cartoonColor(id: string): string | undefined {
-  return CARTOON_PALETTES[id]?.bg;
+  return ALL_PALETTES[id]?.bg;
 }
 
 // ---------------------------------------------------------------------------

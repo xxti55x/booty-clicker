@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
+import { ANCIENTS } from '../game/ancients';
 import { CREW, levelTier, CREW_MILESTONES } from '../game/heroes';
 import {
+  ANCIENT_PALETTES,
   CARTOON_IDS,
   CARTOON_PALETTES,
   cartoonBody,
@@ -37,7 +39,8 @@ describe('Cartoon-Figuren — der Kader', () => {
       expect(hasCartoon(c.id), c.id).toBe(true);
       expect(cartoonBody(c.id).length, c.id).toBeGreaterThan(200);
     }
-    expect(CARTOON_IDS.length).toBe(CREW.length);
+    // Kader UND Ahnen — seit dem Nachziehen zeichnet niemand mehr Striche.
+    expect(CARTOON_IDS.length).toBe(CREW.length + ANCIENTS.length);
   });
 
   // Regel 1 des Moduls: Die Platte ist der einzige Kanal, der bei 32 px sicher
@@ -147,5 +150,64 @@ describe('Level-Rahmen', () => {
   it('klemmt Stufen außerhalb der Leiter statt zu werfen', () => {
     expect(levelFrame(-3)).toBeUndefined();
     expect(levelFrame(99)).toBe(LEVEL_FRAMES[LEVEL_FRAMES.length - 1]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Die Twerk-Ahnen
+// ---------------------------------------------------------------------------
+describe('Cartoon-Figuren — die Ahnen', () => {
+  it('lässt KEINEN Ahnen im alten Strich-Stil zurück', () => {
+    for (const a of ANCIENTS) {
+      expect(hasCartoon(a.id), a.id).toBe(true);
+      expect(cartoonBody(a.id).length, a.id).toBeGreaterThan(200);
+    }
+  });
+
+  /**
+   * Die Ahnen-Farben müssen nur UNTEREINANDER Abstand halten.
+   *
+   * Ahnen und Crew stehen auf verschiedenen Bildschirmen und nie nebeneinander;
+   * beide Gruppen auf denselben Mindestabstand zu zwingen hieße, 25 Farben in
+   * einen Raum zu pressen, in dem 15 schon eng waren. Der Anker hält deshalb
+   * genau die Grenze, die etwas bedeutet.
+   */
+  it('hält die Ahnen-Platten untereinander wahrnehmbar auseinander', () => {
+    let engste = Number.POSITIVE_INFINITY;
+    let paar = '';
+    for (let i = 0; i < ANCIENTS.length; i++) {
+      for (let j = i + 1; j < ANCIENTS.length; j++) {
+        const a = ANCIENTS[i]!.id;
+        const b = ANCIENTS[j]!.id;
+        const d = abstand(ANCIENT_PALETTES[a]!.bg, ANCIENT_PALETTES[b]!.bg);
+        if (d < engste) {
+          engste = d;
+          paar = `${a}/${b}`;
+        }
+      }
+    }
+    expect(engste, `engstes Paar: ${paar}`).toBeGreaterThan(60);
+  });
+
+  // Die Aura ist das gemeinsame Zeichen der Gottheiten — und die Grenze zum
+  // Kader. Trüge ein Crew-Mitglied sie auch, wäre sie keine Aussage mehr.
+  it('gibt JEDEM Ahnen eine Aura und KEINEM Crew-Mitglied', () => {
+    for (const a of ANCIENTS) {
+      expect(cartoonBody(a.id), a.id).toContain('cx="16" cy="14" r="9.4"');
+    }
+    for (const c of CREW) {
+      expect(cartoonBody(c.id), c.id).not.toContain('cx="16" cy="14" r="9.4"');
+    }
+  });
+
+  it('macht keine zwei Ahnen gleich — und keinen gleich einem Crew-Mitglied', () => {
+    const alle = [...CREW, ...ANCIENTS].map((x) => cartoonBody(x.id));
+    expect(new Set(alle).size).toBe(CREW.length + ANCIENTS.length);
+  });
+
+  it('unterscheidet auch bei den Ahnen die beiden Posen', () => {
+    for (const a of ANCIENTS) {
+      expect(cartoonBody(a.id, 'power'), a.id).not.toBe(cartoonBody(a.id, 'base'));
+    }
   });
 });

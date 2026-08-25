@@ -51,8 +51,12 @@ describe('avatars — Roster-Abdeckung (4a)', () => {
 describe('avatars — Stroke-Icon-Sprache (4a)', () => {
   const sprite = avatarSpriteSvg();
 
-  it('zeichnet mit currentColor-Strichen und ohne Bild-Assets oder Emojis', () => {
-    expect(sprite).toContain('stroke="currentColor"');
+  // Der Strich-Baukasten ist nicht mehr im Sprite: Kader UND Ahnen zeichnen
+  // Cartoon-Flächen. Er lebt weiter als FALLBACK für eine Id, die noch keine
+  // Figur hat — ein neu erfundenes Mitglied bekommt so ein Gesicht statt
+  // keines. Was hier zählte, war ohnehin nie `currentColor`, sondern dass alles
+  // im Bundle liegt: keine Bild-Assets, keine externen URLs, keine Emojis.
+  it('zeichnet ohne Bild-Assets, externe URLs oder Emojis', () => {
     expect(sprite).not.toContain('<image');
     expect(sprite).not.toContain('url(');
     // Emojis: alles oberhalb der BMP-Basisebene ist hier ein Fehler.
