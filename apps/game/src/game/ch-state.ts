@@ -9,6 +9,7 @@
 import { type AbilityState, createAbility } from './ability';
 import { applyAscension, soulMult } from './ascension';
 import { BOSS_EVERY } from './combat';
+import { setlistEffect } from './setlist';
 import {
   type AncientLevels,
   ancientChestLuckBonus,
@@ -360,6 +361,19 @@ export interface ChState {
    * Von keinem der drei Resets angefasst, auch nicht vom tiefsten.
    */
   legend: number;
+  /**
+   * **Setlist (L2-Verb).** Die Karte, die den AKTUELLEN Lauf regiert, und der
+   * Seed, aus dem ihr Angebot folgt.
+   *
+   * `card` ist `''`, solange keine gewählt ist — dann rechnet alles exakt wie
+   * vor diesem System. `seed` überlebt einen Reload, damit das Wegklicken des
+   * Auswahl-Dialogs kein Reroll ist: Wer die App schließt, findet dieselben
+   * drei Karten vor.
+   *
+   * Beides gehört zum LAUF und fällt mit ihm: Eine Aszension zieht eine neue
+   * Karte, eine Himmelfahrt ebenso.
+   */
+  setlist: { card: string; seed: number };
 }
 
 /** A brand-new run/profile. */
@@ -404,6 +418,7 @@ export function createChState(): ChState {
     skinPath: createSkinPath(),
     heir: '',
     legend: 0,
+    setlist: { card: '', seed: 0 },
   };
 }
 
@@ -590,6 +605,8 @@ export function goldMult(
     permTokens?: PermTokens;
     crewUp?: CrewUps;
     crewRetrain?: CrewRetrain;
+    /** Die Setlist-Karte des Laufs (L2) — fehlend ⇒ neutral. */
+    setlist?: { card: string; seed: number };
     heaven?: HeavenState;
     constellation?: ConstellationState;
     relics?: RelicsState;
@@ -604,6 +621,8 @@ export function goldMult(
     // `gold` ist als Fähigkeits-Sorte entfallen — ein BP-Multiplikator lässt
     // sich nicht an ein Mitglied binden. Gold kommt aus Ahnen, Gebieten,
     // Truhen und Himmel.
+    // L2-Setlist: „Kollekte" füllt die Kasse, „Kurzer Auftritt" leert sie.
+    setlistEffect(state.setlist?.card).gold *
     (state.heaven ? goldeneHandeMult(state.heaven) : 1) *
     // 2a: „Anfängerglück" + „Tantiemen" der Konstellation (+2 %/Knoten, ×1 ohne Baum).
     (state.constellation ? constellationGoldMult(state.constellation) : 1) *
@@ -752,6 +771,27 @@ export function gearUnlockCtx(
  * spent. Ancients, gilds, the L2 heaven state and all lifetime meta persist; only
  * the L1 run itself resets. `rsLifetime` is the never-shrinking earned highwater.
  */
+/**
+ * Der Seed des nächsten Setlist-Angebots.
+ *
+ * Aus dem RNG-Cursor und der bisherigen Tiefe gemischt: Er muss sich je
+ * Aszension ÄNDERN (sonst stünden immer dieselben drei Karten zur Wahl) und
+ * einen Reload ÜBERLEBEN (sonst wäre das Wegklicken des Dialogs ein Reroll).
+ * Beide Zutaten sind bereits Teil des Spielstands, es braucht also kein neues
+ * persistiertes Feld.
+ */
+function nextSetlistSeed(state: ChState): number {
+  const cursor = Math.abs(Math.floor(state.rng?.cursor ?? 0));
+  // Die Tiefe des GERADE BEENDETEN Laufs gehört mit hinein, nicht nur der
+  // Lebenszeit-Rekord: Zwei Aszensionen hintereinander lassen den Rekord oft
+  // unverändert, und ohne `runMaxZone` stünden dann zweimal dieselben drei
+  // Karten zur Wahl — der Zufall wäre tot, ohne dass es jemand merkt.
+  const run = Math.abs(Math.floor(state.runMaxZone ?? 0));
+  const depth = Math.abs(Math.floor(state.lifetimeMaxZone ?? 0));
+  const asc = Math.abs(Math.floor(state.heaven?.ascensions2 ?? 0));
+  return ((cursor * 31 + run * 13 + depth * 7 + asc * 101 + 1) % 2147483646) + 1;
+}
+
 export function ascendState(state: ChState): ChState {
   const { souls, lifetimeMaxZone, rsLifetime } = applyAscension(
     state.runMaxZone,
@@ -764,6 +804,10 @@ export function ascendState(state: ChState): ChState {
     souls,
     lifetimeMaxZone,
     rsLifetime,
+    // Die Setlist gehört zum LAUF: Die alte Karte fällt mit ihm, und ein neues
+    // Angebot wird gezogen. Der Seed kommt aus dem persistierten RNG-Strom,
+    // damit er einen Reload überlebt (sonst wäre Wegklicken ein Reroll).
+    setlist: { card: '', seed: nextSetlistSeed(state) },
     totalClicks: state.totalClicks,
     rng: state.rng,
     stats: state.stats,

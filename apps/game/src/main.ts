@@ -195,6 +195,7 @@ import {
   tickBoss,
   travelTo,
 } from './game/combat';
+import { setlistEffect, setlistZoneKills } from './game/setlist';
 import {
   type GearBonus,
   accrueSugar,
@@ -331,6 +332,7 @@ import { addEmber, emberForDuplicate, shardsForEmber } from './game/forge';
 import { affixConfig } from './game/affixes';
 import { Crew } from './ui/crew';
 import { RetrainDialog } from './ui/retrain-dialog';
+import { SetlistDialog } from './ui/setlist-dialog';
 import { ForgeDialog } from './ui/forge-dialog';
 import { RelicPanel } from './ui/relic-panel';
 import { Gear } from './ui/gear-panel';
@@ -628,7 +630,12 @@ function fightCtx(now = Date.now()): FightCtx {
 
 /** Die Idle-DPS dieses Augenblicks — mit allen Bedingungen, die gerade zutreffen. */
 function dpsNow(): number {
-  return dpsOf(state, fightCtx());
+  return dpsOf(state, fightCtx()) * setlistEffect(state.setlist.card).dps;
+}
+
+/** Der Klick-Schaden dieses Augenblicks, inklusive Setlist-Karte. */
+function clickNow(): number {
+  return clickDmg * setlistEffect(state.setlist.card).click;
 }
 
 /**
@@ -1225,6 +1232,24 @@ const retrainDialog = new RetrainDialog({
   toast: (icon, title, sub) => toasts.show(icon, title, sub),
 });
 
+/**
+ * L2-Verb „Setlist": Nach jeder Aszension wählt der Spieler eine von drei
+ * Karten, die die REGELN des kommenden Laufs ändert. Der Dialog fragt sich
+ * selbst, ob er fällig ist (Stufe frei? für diesen Lauf schon gewählt?), damit
+ * die Aufrufstelle nichts über die Bedingungen wissen muss.
+ */
+const setlistDialog = new SetlistDialog({
+  state,
+  onChoose: () => {
+    // Die Karte verschiebt DPS, Klick, Gold und die Bühnenlänge — alles muss
+    // sofort neu gerechnet und gesichert sein.
+    recompute();
+    hud.update(state, combat, dps, clickDmg);
+    crew.render();
+    persist();
+  },
+});
+
 // 🎽 Gear/Skins (§5): equipping rebuilds the 3D rig for the new skin and re-folds
 // the gear buff into click/DPS immediately (AC1); levelling/starring/crafting re-fold
 // too; the kulisse chooser drives the background + auto-rotation toggle.
@@ -1346,6 +1371,9 @@ const prestige = new Prestige({
     // unmittelbar danach gebucht wird. Die Zeremonie zeigt sie nur, sie rechnet nichts.
     const soulsBefore = state.souls;
     Object.assign(state, ascendState(state)); // mutate in place — panels hold this ref
+    // Die neue Ära bekommt ihre Setlist-Karte, sobald die Stufe freigeschaltet
+    // ist — der Dialog prüft das selbst.
+    setlistDialog.maybeShow();
     applyFruhstarter(prevCrew);
     applyMythosFruhstart(); // P2: Lv-5-Boden für die ersten drei Plätze
     applyMasteryFreeTiers(); // 1a: Legenden-Slot NACH dem Wiederanheuern buchen
@@ -2523,6 +2551,9 @@ function onKillProgress(
       goldMult(state) *
       peachIncomeMult(state, now) *
       stage.gold *
+      // L2-Setlist: „Rampenfieber" zahlt NUR auf Boss-Kills — der allgemeine
+      // Gold-Faktor der Karte steckt bereits in `goldMult`.
+      (wasBoss ? setlistEffect(state.setlist.card).bossLoot : 1) *
       territoryGoldMult(state.territory, killZone),
   );
   state.gold += gold;
@@ -2661,6 +2692,8 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
       // Kein crew-weiter Boss-Faktor mehr: „Rampenlicht" zahlt auf die eigene
       // Linie seines Trägers und steckt bereits im Idle-Anteil, den `dpsOf`
       // mit `{ boss: true }` liefert.
+      // L2-Setlist: „Rampenfieber" macht Bosse zäher, dafür wertvoller.
+      setlistEffect(state.setlist.card).boss *
       bossBreakerDmgMult(state.transcend)
     : dmg;
   // ROADMAP-V2 A2: Theme-Gimmick des Gates. Nur der IDLE-Anteil wird hier
@@ -2679,7 +2712,7 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
   if (!wasBoss && !fromClick) effDmg *= stageFactors().dps;
   // Farm-Modus (Auto-Vorstoß aus): der Zonen-Wechsel bleibt aus, Rivalen und
   // Boss stellen sich neu — die eine Regel dafür steht im Reducer.
-  const r = hit(combat, effDmg, effects.autoAdvance);
+  const r = hit(combat, effDmg, effects.autoAdvance, setlistZoneKills(state.setlist.card));
   // A newly-spawned boss gets Chronilla's extra timer seconds.
   combat = r.bossSpawned ? withBossTimerBonus(r.state) : r.state;
   if (r.killed) {
@@ -2837,7 +2870,11 @@ function doShake(x?: number, y?: number): void {
   // ×1.5 into the pure click pipeline. Idle DPS never gets any of this (P1).
   state.ability = abilityOnClick(state.ability, onBeat);
   const dmg = effectiveClick({
-    baseClick: clickDmg,
+    // Die Setlist-Karte des Laufs sitzt auf dem BASIS-Klick, damit sie durch
+    // dieselbe Pipeline läuft wie jeder andere Klick-Faktor (Combo, Krit,
+    // On-Beat) — ein Sonderweg daneben würde die Zahlen auseinanderlaufen
+    // lassen.
+    baseClick: clickNow(),
     combo: comboState.stacks,
     crit,
     // Combo-tier + Disco/Lava gear (§5) + Booty-Boss/A-Promi `critdmg`-specials
@@ -4021,7 +4058,7 @@ function loop(nowMs: number): void {
   if (idleDpsNow > 0 && !swapping) applyHit(idleDpsNow * simDt, false);
   const cps =
     coachCps(state.heaven) + coachCpsBonus(state.gear) + pathB().coachCps + loadout().coachCps;
-  if (cps > 0 && !swapping) applyHit(coachDps(clickDmg, cps) * simDt, false);
+  if (cps > 0 && !swapping) applyHit(coachDps(clickNow(), cps) * simDt, false);
   if (combat.boss && !swapping) {
     const gateZone = combat.zone; // vor dem möglichen Rückwurf festhalten (P1)
     // 2a ★ „Zweiter Wind": Der Rückwurf erstattet 3 von 10 Rivalen der
@@ -4328,6 +4365,11 @@ function loop(nowMs: number): void {
     firstFrame = false;
     loadingEl?.classList.add('hidden');
     if (!effects.onboarded) onboarding.start();
+    // Ein Angebot, das beim Schließen der App offen stand, steht beim Start
+    // wieder offen. Ohne das liefe der Lauf dauerhaft OHNE Karte weiter — der
+    // Dialog käme erst mit der nächsten Aszension zurück, und die Wahl wäre
+    // stillschweigend verfallen.
+    else setlistDialog.maybeShow();
   }
 }
 requestAnimationFrame(loop);

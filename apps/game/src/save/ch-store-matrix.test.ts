@@ -31,6 +31,7 @@ import {
   createStats,
 } from '../game/ch-state';
 import { createForge } from '../game/forge';
+import { NO_SETLIST, SETLIST_CARDS, setlistEffect, setlistOffer } from '../game/setlist';
 import { createGear } from '../game/gear';
 import { createHeaven } from '../game/heaven';
 import { dustEntitlement } from '../game/constellation';
@@ -49,7 +50,7 @@ function memStorage(): ChStorage & { map: Map<string, string> } {
 }
 
 /** Every historical CH schema version, oldest first — the spine of the matrix. */
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] as const;
 type SchemaVersion = (typeof VERSIONS)[number];
 
 const LAST_SEEN = 1_752_800_000_000;
@@ -968,6 +969,25 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
       // den Einmal-Jackpot wieder scharf macht; NaN/negativ (⇒ 0) prüft die
       // repairStats-Konvention wie bei jedem anderen Zähler.
       expect(s.stats.konami).toBe(1);
+    },
+  },
+  20: {
+    what: 'Setlist-Karte, die es nicht gibt bzw. die gar nicht im Angebot stand — beide fallen heraus',
+    damage: (raw) => {
+      // Eine Karte, die im Angebot dieses Seeds NICHT steht. Genau das wäre der
+      // Weg, sich per Save-Edit die stärkste Karte des Katalogs zu geben,
+      // statt unter dreien zu wählen — die Wahl ist das Spiel, nicht die Karte.
+      const drin = setlistOffer(4711).map((c) => c.id);
+      const draussen = SETLIST_CARDS.find((c) => !drin.includes(c.id));
+      raw.setlist = { card: draussen?.id ?? 'gibtsnicht', seed: 4711 };
+    },
+    check: (s) => {
+      // Karte weg, Seed bleibt: Das Angebot ist unverändert, nur die
+      // untergeschobene Wahl ist es nicht mehr.
+      expect(s.setlist.card).toBe('');
+      expect(s.setlist.seed).toBe(4711);
+      // Und ohne Karte rechnet alles exakt wie vor dem System.
+      expect(setlistEffect(s.setlist.card)).toEqual(NO_SETLIST);
     },
   },
 };
