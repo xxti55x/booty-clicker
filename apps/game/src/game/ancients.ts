@@ -201,6 +201,26 @@ export function ancientMaxAffordable(id: string, level: number, souls: number): 
   return take;
 }
 
+/**
+ * Wie viele Level von `id` der CAP noch zulässt — ohne jede Rücksicht auf das
+ * Budget. Uncapped Ahnen liefern `Infinity`.
+ *
+ * Warum das eine eigene Funktion ist: Die Kaufmengen-Knöpfe (×1/×10/×100)
+ * brauchen genau diese Zahl — „wie viele Level gäbe es überhaupt noch?" — und
+ * haben sie sich vorher über `ancientMaxAffordable(id, level, Infinity)`
+ * geholt. Deren erste Zeile verwirft aber jedes nicht-endliche Budget und gab
+ * damit IMMER 0 zurück: Die Menge fiel auf 0, jede Karte galt als unbezahlbar
+ * und kein Ahne ließ sich mit ×1/×10/×100 kaufen (nur „Max" ging, weil es
+ * echte Seelen übergibt). Budget-Frage und Cap-Frage sind zwei Fragen; sie
+ * haben jetzt zwei Funktionen.
+ */
+export function ancientRoomToCap(id: string, level: number): number {
+  const cfg = BY_ID[id];
+  if (!cfg) return 0;
+  const lv = Math.max(0, Math.floor(level));
+  return cfg.cap === null ? Number.POSITIVE_INFINITY : Math.max(0, cfg.cap - lv);
+}
+
 /** The effective (cap-clamped, non-negative) level a config's perk uses. */
 function cappedLevel(cfg: AncientConfig, level: number): number {
   const lo = Math.max(0, level);
