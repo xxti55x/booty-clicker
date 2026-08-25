@@ -187,6 +187,8 @@ import {
   bestCrewBuy,
   clickDamageRaw,
   crewSpecialBonuses,
+  type FightCtx,
+  NO_CTX,
   grantFreeMasteryTiers,
   totalRawDps,
 } from './heroes';
@@ -907,6 +909,7 @@ function powerSplit(
   shardIdle: number,
   loadout: GearBonus,
   meta: SimMeta = NO_META,
+  ctx: FightCtx = NO_CTX,
 ): DamageSplit {
   const hpf = heaven.hpf;
   // 1d: `1 + 0.005·L`, ADDITIV, und auf BEIDE Seiten derselbe Skalar (P1-neutral).
@@ -933,7 +936,10 @@ function powerSplit(
   // `idle`-special tiers (v11.1 Groove) multiply crew DPS only — never the
   // click term (P1, M11-AC5).
   const idle =
-    totalRawDps(crew, gilds, crewUp, mastery, meta.heir) *
+    // Der Kontext entscheidet, welche EIGEN-Fähigkeiten dieser Sekunde zünden.
+    // Der Bot hält keine Umschul-Map (dokumentierte Untergrenze, wie bei 3b) —
+    // die Sorten sind also die Stock-Sorten der Mitglieder.
+    totalRawDps(crew, gilds, crewUp, mastery, meta.heir, {}, ctx) *
     sm *
     ancientDpsMult(ancients) *
     global *
@@ -946,8 +952,7 @@ function powerSplit(
     (config.idleGearMult ?? 1) *
     shardIdle *
     (econOn(config) ? permTokenDpsMult(permTokens) : 1) *
-    legend *
-    crewSpecialBonuses(crewUp).idleMult;
+    legend;
   return { click: config.clickRate * baseClick * combo * crit, idle };
 }
 
@@ -989,8 +994,36 @@ function powerFor(
   return p.click + p.idle;
 }
 
+/**
+ * Der Kampf-Kontext des Bots für diese Sekunde.
+ *
+ * Bewusst KONSERVATIV — dieselbe Disziplin wie beim Retraining (3b), das der Bot
+ * ebenfalls nicht modelliert:
+ *
+ * - `boss` und `combo` kennt er exakt (Gegnertyp bzw. sein eigener
+ *   Combo-Multiplikator) und faltet sie.
+ * - `idle` gilt nur einem Bot, der gar nicht klickt.
+ * - `ekstase` faltet er NICHT. Das Fenster ist kurz und der Bot führt es nicht
+ *   sekundengenau; es wegzulassen unterschätzt einen echten Spieler, statt ihn
+ *   zu überschätzen — die Anker bleiben damit eine Untergrenze.
+ */
+function botCtx(config: SimConfig, combat: { boss: boolean } | null, combo: number): FightCtx {
+  return {
+    boss: combat?.boss === true,
+    idle: config.clickRate <= 0,
+    combo: combo > 1,
+    ekstase: false,
+  };
+}
+
 /** Effective damage the bot deals in one second at the current state (split, A2). */
-function damageSplit(sim: Sim, config: SimConfig, combo: number, crit: number): DamageSplit {
+function damageSplit(
+  sim: Sim,
+  config: SimConfig,
+  combo: number,
+  crit: number,
+  combat: { boss: boolean } | null = null,
+): DamageSplit {
   return powerSplit(
     sim.crew,
     sim.crewUp,
@@ -1007,6 +1040,7 @@ function damageSplit(sim: Sim, config: SimConfig, combo: number, crit: number): 
     shardIdleMultFor(sim, config),
     simLoadout(sim),
     simMeta(sim),
+    botCtx(config, combat, combo),
   );
 }
 
@@ -1101,12 +1135,13 @@ function startTour(sim: Sim, globalSec: number): void {
 }
 
 /**
- * Full BP (gold) multiplier this second: Peachiel × gold-tokens × live peach ×3 ×
- * the crew's `gold`-special ability tiers (v11 — part of the core crew layer, so
- * it folds even in the no-economy calibration configs, exactly as the game does).
+ * Full BP (gold) multiplier this second: Peachiel × gold-tokens × live peach ×3.
+ *
+ * Die `gold`-Fähigkeitsstufe ist mit dem Eigen-Boost-Umbau entfallen — ein
+ * BP-Multiplikator lässt sich nicht an ein einzelnes Mitglied binden. Gold
+ * kommt weiterhin aus Ahnen, Gebieten, Truhen und Himmel.
  */
 function goldMultiplierNow(sim: Sim, config: SimConfig, nowMs: number): number {
-  const crewGold = crewSpecialBonuses(sim.crewUp).goldMult;
   // P4 „Goldene Hände" (+10 %/Stufe) trifft JEDE BP-Quelle, also auch die
   // Kalibrier-Läufe ohne Loot-Ökonomie (×1 ohne Knoten).
   const hande = goldeneHandeMult(sim.heaven);
@@ -1116,13 +1151,12 @@ function goldMultiplierNow(sim: Sim, config: SimConfig, nowMs: number): number {
   // 1c + 3a: „Trinkgeld" des Loadouts trifft wie die „Goldenen Hände" JEDE
   // BP-Quelle, also auch die Kalibrier-Läufe ohne Loot-Ökonomie.
   const affix = 1 + simLoadout(sim).goldPct;
-  if (!econOn(config)) return ancientGoldMult(sim.ancients) * crewGold * hande * sterne * affix;
+  if (!econOn(config)) return ancientGoldMult(sim.ancients) * hande * sterne * affix;
   return (
     affix *
     ancientGoldMult(sim.ancients) *
     permTokenGoldMult(sim.permTokens) *
     incomeMultiplier(sim.boostUntilMs, nowMs) *
-    crewGold *
     hande *
     sterne
   );
@@ -1439,7 +1473,7 @@ function economyStep(
     sim.constellation,
     simLoadout(sim),
   );
-  const base = damageSplit(sim, config, combo, crit);
+  const base = damageSplit(sim, config, combo, crit, combat);
   // 2a ★ „Warm-up-Start": die ersten 60 s jeder Tour zählt der Klick-Anteil ×2
   // (dasselbe Kobold-Fenster wie im Spiel). Nur der KLICK-Term — der Buff ist
   // ein Klick-Buff, die Crew merkt nichts davon (P1).

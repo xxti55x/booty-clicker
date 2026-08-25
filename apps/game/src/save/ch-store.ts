@@ -13,6 +13,7 @@ import {
   normalizePity,
 } from '../game/chests';
 import { BOSS_EVERY, goldFor, monsterHp } from '../game/combat';
+import { setlistCard, setlistOfferHas } from '../game/setlist';
 import {
   type ChStats,
   type ChState,
@@ -30,6 +31,7 @@ import { COACH_CLICK_SHARE, type HeavenState, createHeaven } from '../game/heave
 import {
   type CrewLevels,
   type CrewUps,
+  allowedKinds,
   CREW,
   abilityTiersUnlocked,
   createCrewUps,
@@ -85,7 +87,7 @@ import type { BackgroundKey, SkinKey } from '../types';
 import { createRngState, type RngState } from '../util/rng';
 
 export const CH_SAVE_KEY = 'bootyclicker.ch';
-export const CH_SCHEMA = 19;
+export const CH_SCHEMA = 20;
 
 /** Idle earnings: crew farms the current zone at reduced efficiency, hard-capped. */
 export const OFFLINE_CAP_S = 8 * 3600;
@@ -542,6 +544,14 @@ function repairCrewRetrain(v: unknown): CrewRetrain {
       if (!Number.isInteger(tier) || tier < 1 || String(tier) !== key) continue;
       if (retrainSlotOrdinal(cfg, tier) <= 0) continue; // niemals auf eine Power-Stufe
       if (!isSpecialKind(kind)) continue;
+      // Seit dem Eigen-Boost-Umbau gehört jede Sorte zu einem Mitgliedstyp:
+      // Klick-Sorten dem Klick-Helden, Eigen-Sorten den DPS-Mitgliedern. Ein
+      // alter Spielstand kann „Krit" auf einem reinen DPS-Mitglied tragen (das
+      // war früher erlaubt, weil der Effekt ohnehin global landete) — eine
+      // solche Stufe hätte jetzt schlicht keine Wirkung mehr. Sie fällt hier
+      // heraus und das Mitglied bekommt seine Stock-Sorte zurück, statt eine
+      // tote Stufe zu behalten. `gold` fällt bereits durch `isSpecialKind`.
+      if (!allowedKinds(cfg).includes(kind)) continue;
       clean[key] = kind;
       any = true;
     }
@@ -851,6 +861,26 @@ function repairLegend(v: unknown): number {
   return isFiniteNumber(v) && v > 0 ? Math.floor(v) : 0;
 }
 
+/**
+ * Repariert die Setlist-Slice (v20): eine bekannte Karten-Id und ein
+ * nicht-negativer ganzzahliger Seed.
+ *
+ * Eine unbekannte Id fällt auf „keine Karte" zurück statt auf irgendeine — ein
+ * gecrafteter Save soll sich keinen Effekt erfinden können. Und eine Karte, die
+ * gar nicht im ANGEBOT dieses Seeds stand, fällt ebenfalls heraus: Sonst könnte
+ * man sich die stärkste Karte des Katalogs eintragen, statt unter dreien zu
+ * wählen — die Wahl ist das Spiel, nicht die Karte.
+ */
+function repairSetlist(v: unknown): { card: string; seed: number } {
+  if (!isRecord(v)) return { card: '', seed: 0 };
+  const rawSeed = v.seed;
+  const seed = isFiniteNumber(rawSeed) && rawSeed > 0 ? Math.floor(rawSeed) : 0;
+  const card = typeof v.card === 'string' ? v.card : '';
+  if (!card || !setlistCard(card)) return { card: '', seed };
+  if (seed > 0 && !setlistOfferHas(seed, card)) return { card: '', seed };
+  return { card, seed };
+}
+
 /** Extract a clean `ChState` from a validated save (repairing any stale invariants). */
 function stateFromSave(save: ChSaveLatest): ChState {
   const souls = save.souls;
@@ -900,6 +930,7 @@ function stateFromSave(save: ChSaveLatest): ChState {
     skinPath: repairSkinPath(save.skinPath),
     heir: repairHeir(save.heir),
     legend: repairLegend(save.legend),
+    setlist: repairSetlist(save.setlist),
   };
 }
 
@@ -1299,6 +1330,21 @@ function migrateChV18toV19(raw: Record<string, unknown>): Record<string, unknown
   return { ...raw, v: 19 };
 }
 
+/**
+ * v19 → v20: die **Setlist** (L2-Verb) — eine Karte, die die Regeln des
+ * laufenden Laufs ändert, plus der Seed ihres Angebots.
+ *
+ * Bewusst LEER gesät (`card: ''`, `seed: 0`): Die Karte gehört zum Lauf, und der
+ * Lauf eines Alt-Saves ist bereits im Gange. Ihm nachträglich eine Karte
+ * unterzuschieben, die er nie gewählt hat, würde seine Zahlen mitten im Lauf
+ * verbiegen. Der leere Eintrag faltet überall neutral (`NO_SETLIST`); die erste
+ * echte Karte kommt mit der nächsten Aszension — genau wie bei einem neuen
+ * Profil. Für jedes bestehende Feld verlustfrei.
+ */
+function migrateChV19toV20(raw: Record<string, unknown>): Record<string, unknown> {
+  return { ...raw, v: 20, setlist: { card: '', seed: 0 } };
+}
+
 const CH_MIGRATIONS: Record<number, ChMigration> = {
   1: migrateChV1toV2,
   2: migrateChV2toV3,
@@ -1318,6 +1364,7 @@ const CH_MIGRATIONS: Record<number, ChMigration> = {
   16: migrateChV16toV17,
   17: migrateChV17toV18,
   18: migrateChV18toV19,
+  19: migrateChV19toV20,
 };
 
 /**

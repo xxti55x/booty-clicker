@@ -4,18 +4,21 @@ import {
   ABILITY_COST_MULT,
   DPS_TUNE,
   SPECIAL_BEAT_CAP_MS,
-  SPECIAL_BOSS,
-  SPECIAL_COMBO_CAP_S,
   SPECIAL_CRIT_CHANCE,
   SPECIAL_CRIT_DMG,
-  SPECIAL_GOLD,
-  SPECIAL_IDLE,
   abilityCost,
   abilityKind,
   abilityKindLabel,
   abilityLevel,
   abilityMult,
   ABILITY_FIRST_LEVEL,
+  allowedKinds,
+  CLICK_KINDS,
+  crewMilestoneMult,
+  isClickKind,
+  OWN_KINDS,
+  CREW_MILESTONES,
+  nextCrewMilestone,
   MAX_ABILITY_TIERS,
   MIN_ABILITY_TIERS,
   maxAbilityTiers,
@@ -128,9 +131,9 @@ describe('heroes — kaufbare Fähigkeiten (buyable abilities)', () => {
   it('abilityKind follows the member rhythm; tier 1 is ALWAYS power (v11.1)', () => {
     expect(abilityKind(hype, 1)).toBe('power');
     expect(abilityKind(hype, 2)).toBe('power'); // Kraft-Rush
-    expect(abilityKind(hype, 3)).toBe('combo'); // Hype-Girl keeps the crowd going
+    expect(abilityKind(hype, 3)).toBe('combo'); // Hype-Girl treibt die Combo
     expect(abilityKind(boss, 2)).toBe('critdmg');
-    expect(abilityKind(CREW[2], 2)).toBe('beat'); // DJ (Klammer): P S S P
+    expect(abilityKind(CREW[2], 2)).toBe('idle'); // DJ (Klammer): P S S P
     expect(abilityKind(CREW[2], 4)).toBe('power');
     expect(abilityKind(CREW[2], 5)).toBe('power'); // Zyklus 2 beginnt wieder mit P
     // Every member declares a themed special, starts with power, and every
@@ -140,30 +143,53 @@ describe('heroes — kaufbare Fähigkeiten (buyable abilities)', () => {
       expect(abilityKind(cfg, 1)).toBe('power');
       expect(abilityKindLabel(cfg.special, 'DPS').length).toBeGreaterThan(3);
     }
-    expect(CREW.filter((c) => c.special === 'idle').length).toBe(2); // Produzent + KI-Cluster
+    // Die vier Eigen-Sorten sind über die vierzehn DPS-Mitglieder verteilt, und
+    // jede kommt mehrfach vor — sonst hinge ein ganzer Spielstil an einem
+    // einzigen Mitglied.
+    for (const k of OWN_KINDS) {
+      expect(CREW.filter((c) => c.special === k).length).toBeGreaterThanOrEqual(3);
+    }
+    // Die Klick-Sorten trägt genau EIN Mitglied: der Klick-Held.
+    expect(CREW.filter((c) => isClickKind(c.special)).length).toBe(1);
+    expect(CREW.find((c) => isClickKind(c.special))!.click).toBe(true);
   });
 
-  it('crewSpecialBonuses aggregates bought special tiers per theme, with caps', () => {
+  // Nach dem Eigen-Boost-Umbau sammelt `crewSpecialBonuses` NUR noch die Sorten
+  // des Klick-Helden: Krit-Chance, Krit-Schaden und Beat-Fenster wirken über die
+  // Klick-Pipeline, und die ist der Ausstoß genau eines Mitglieds. Alles andere
+  // hängt an seinem Träger (`heroOwnSpecialMult`).
+  it('sammelt NUR die Klick-Sorten — und nur vom Klick-Helden', () => {
     const none = crewSpecialBonuses({});
-    expect(none.goldMult).toBe(1);
     expect(none.critChance).toBe(0);
-    expect(none.bossMult).toBe(1);
-    expect(none.idleMult).toBe(1);
-    // 4 bought tiers on the Insta-Influencerin (gold, Rhythmus P P S S) = 2 specials.
-    const gold = crewSpecialBonuses({ influencer: 4 });
-    expect(gold.goldMult).toBeCloseTo(1 + 2 * SPECIAL_GOLD, 9);
-    // Türsteher (boss) + Choreograph (crit) + Booty-Boss (critdmg) mix cleanly.
-    const mix = crewSpecialBonuses({ bouncer: 2, choreo: 2, boss: 6 });
-    expect(mix.bossMult).toBeCloseTo(1 + SPECIAL_BOSS, 9);
-    expect(mix.critChance).toBeCloseTo(SPECIAL_CRIT_CHANCE, 9);
-    expect(mix.critDmg).toBeCloseTo(3 * SPECIAL_CRIT_DMG, 9);
-    // v11.1 `idle` (Groove): Produzent (Rhythmus P S P S) mit 4 Tiers = 2 specials.
-    const groove = crewSpecialBonuses({ producer: 4 });
-    expect(groove.idleMult).toBeCloseTo(1 + 2 * SPECIAL_IDLE, 9);
-    // Window caps: a silly-deep combo/beat stack clamps at the cap.
-    const deep = crewSpecialBonuses({ hype: 200, dj: 200 });
-    expect(deep.comboWindowS).toBe(SPECIAL_COMBO_CAP_S);
+    expect(none.critDmg).toBe(0);
+    expect(none.beatWindowMs).toBe(0);
+    // Booty-Boss (Rhythmus P S P S, Stock-Sorte critdmg): 6 Stufen ⇒ 3 Specials.
+    const boss6 = crewSpecialBonuses({ boss: 6 });
+    expect(boss6.critDmg).toBeCloseTo(3 * SPECIAL_CRIT_DMG, 9);
+    // Ein reines DPS-Mitglied speist diesen Topf NICHT — egal wie viel gekauft
+    // ist. Genau das war der gemeldete Unsinn: „Krit" auf einem DPS-Mitglied.
+    const dpsOnly = crewSpecialBonuses({ bouncer: 8, choreo: 8, producer: 8, hype: 8 });
+    expect(dpsOnly.critChance).toBe(0);
+    expect(dpsOnly.critDmg).toBe(0);
+    expect(dpsOnly.beatWindowMs).toBe(0);
+    // Das Beat-Fenster bleibt gedeckelt (der Takt muss eine Prüfung bleiben).
+    const deep = crewSpecialBonuses(
+      { boss: 400 },
+      { boss: Object.fromEntries(Array.from({ length: 400 }, (_, i) => [i + 1, 'beat'])) },
+    );
     expect(deep.beatWindowMs).toBe(SPECIAL_BEAT_CAP_MS);
+  });
+
+  it('bindet jede Sorte an ihren Mitgliedstyp', () => {
+    for (const cfg of CREW) {
+      const allowed = allowedKinds(cfg);
+      // Die Stock-Sorte eines Mitglieds ist immer eine, die es tragen DARF.
+      expect(allowed).toContain(cfg.special);
+      // Klick-Sorten gehören dem Klick-Helden, Eigen-Sorten den DPS-Mitgliedern.
+      for (const k of allowed) expect(isClickKind(k)).toBe(cfg.click === true);
+    }
+    // Und beide Mengen sind disjunkt — keine Sorte gehört beiden.
+    for (const k of CLICK_KINDS) expect(OWN_KINDS).not.toContain(k);
   });
 
   it('ability price = level-cost at the unlock level × ABILITY_COST_MULT', () => {
@@ -239,7 +265,14 @@ describe('heroes — click damage', () => {
 
   it('DPS members feed the click via the share — active play keeps scaling (P1)', () => {
     const levels = { boss: 10, hype: 30 };
-    const expected = CLICK_BASE + heroClick(boss, 10) + CLICK_DPS_SHARE * totalRawDps(levels);
+    // Hype steht auf 30 und hat damit die erste crew-weite Schwelle (25) für
+    // sich erreicht: 1 von 15 ⇒ Faktor ×1.067 auf den CREW-Anteil des Klicks.
+    // `CLICK_BASE` bleibt als Sockel außen vor, der DPS-Anteil trägt den Faktor
+    // schon aus `totalRawDps`.
+    const expected =
+      CLICK_BASE +
+      heroClick(boss, 10) * crewMilestoneMult(levels) +
+      CLICK_DPS_SHARE * totalRawDps(levels);
     expect(clickDamageRaw(levels)).toBeCloseTo(expected, 6);
     expect(clickDamageRaw(levels)).toBeGreaterThan(clickDamageRaw({ boss: 10 }));
   });
@@ -262,8 +295,12 @@ describe('heroes — Crew-Meisterschaft (IDEEN-GAMEPLAY 1a)', () => {
     // Die Meisterschaft des EINEN hebt die Crew-Summe nur um seinen Anteil.
     const levels = { hype: 40, dj: 40 };
     const soloBonus = heroDps(hype, 40, 0, 0, GOLD) - plain;
+    // Der crew-weite Meilenstein liegt als Faktor auf der SUMME (hier steht die
+    // ganze angeheuerte Crew auf Lv 40, also ist die 25er-Schwelle gerissen).
+    // Der Eigen-Bonus muss ihn deshalb ebenfalls tragen — die Zusicherung ist
+    // unverändert: Die Meisterschaft des EINEN hebt nur seinen Anteil.
     expect(totalRawDps(levels, {}, {}, { hype: GOLD })).toBeCloseTo(
-      totalRawDps(levels) + soloBonus,
+      totalRawDps(levels) + soloBonus * crewMilestoneMult(levels),
       6,
     );
   });
@@ -276,7 +313,9 @@ describe('heroes — Crew-Meisterschaft (IDEEN-GAMEPLAY 1a)', () => {
     const withMastery = clickDamageRaw(levels, {}, {}, { boss: GOLD, hype: GOLD });
     const expected =
       CLICK_BASE +
-      heroClick(boss, 60, 0, 0, GOLD) +
+      // Nur der Crew-Anteil des Klicks skaliert mit dem crew-weiten
+      // Meilenstein; `CLICK_BASE` ist der Sockel und bleibt außen vor.
+      heroClick(boss, 60, 0, 0, GOLD) * crewMilestoneMult(levels) +
       CLICK_DPS_SHARE * totalRawDps(levels, {}, {}, { hype: GOLD });
     expect(withMastery).toBeCloseTo(expected, 6);
   });
@@ -372,12 +411,12 @@ describe('heroes — Crew-Umschulung: die EINE Lesekette (IDEEN-GAMEPLAY 3b)', (
   });
 
   it('lässt POWER-Stufen unantastbar — der Rhythmus rollt nie mit', () => {
-    const map = { boss: { '1': 'gold' as const, '3': 'idle' as const } };
+    const map = { boss: { '1': 'crit' as const, '3': 'beat' as const } };
     expect(abilityKind(boss, 1, map)).toBe('power');
     expect(abilityKind(boss, 3, map)).toBe('power');
     // Jedes Muster behält seine 2 P + 2 S je Zyklus, egal was die Map behauptet.
     for (const cfg of CREW) {
-      const all = { [cfg.id]: { '1': 'gold', '2': 'gold', '3': 'gold', '4': 'gold' } } as never;
+      const all = { [cfg.id]: { '1': 'boss', '2': 'boss', '3': 'boss', '4': 'boss' } } as never;
       const power = [1, 2, 3, 4].filter((t) => abilityKind(cfg, t, all) === 'power').length;
       expect(power).toBe(powerTiers(cfg, 4));
     }
@@ -410,14 +449,14 @@ describe('heroes — Crew-Umschulung: die EINE Lesekette (IDEEN-GAMEPLAY 3b)', (
     // Booty-Boss, 6 Stufen ⇒ 3 Specials (Stufen 2/4/6), Stock alle `critdmg`.
     const stock = crewSpecialBonuses({ boss: 6 });
     expect(stock.critDmg).toBeCloseTo(3 * SPECIAL_CRIT_DMG, 9);
-    expect(stock.idleMult).toBe(1);
-    // Zwei davon auf `idle` umgeschult: 1 × critdmg + 2 × idle, Summe unverändert 3.
-    const rolled = crewSpecialBonuses({ boss: 6 }, { boss: { '2': 'idle', '6': 'idle' } });
+    expect(stock.critChance).toBe(0);
+    // Zwei davon auf `crit` umgeschult: 1 × critdmg + 2 × crit, Summe bleibt 3.
+    const rolled = crewSpecialBonuses({ boss: 6 }, { boss: { '2': 'crit', '6': 'crit' } });
     expect(rolled.critDmg).toBeCloseTo(SPECIAL_CRIT_DMG, 9);
-    expect(rolled.idleMult).toBeCloseTo(1 + 2 * SPECIAL_IDLE, 9);
+    expect(rolled.critChance).toBeCloseTo(2 * SPECIAL_CRIT_CHANCE, 9);
     // Ein Override auf einem NOCH NICHT gekauften Slot zahlt nichts (er ist nicht da).
-    const unbought = crewSpecialBonuses({ boss: 2 }, { boss: { '4': 'gold' } });
-    expect(unbought.goldMult).toBe(1);
+    const unbought = crewSpecialBonuses({ boss: 2 }, { boss: { '4': 'crit' } });
+    expect(unbought.critChance).toBe(0);
     expect(unbought.critDmg).toBeCloseTo(SPECIAL_CRIT_DMG, 9);
   });
 
@@ -431,12 +470,20 @@ describe('heroes — Crew-Umschulung: die EINE Lesekette (IDEEN-GAMEPLAY 3b)', (
   it('respektiert die Fenster-Deckel auch für umgeschulte Sorten', () => {
     // Ein tiefer Stapel auf `beat` umgeschult läuft in denselben Deckel wie ein
     // von Haus aus beat-lastiger Save — die Umschulung öffnet keine Hintertür.
+    // Geprüft am KLICK-Helden: Seit dem Eigen-Boost-Umbau ist er der Einzige,
+    // der diesen Topf überhaupt speist.
     const deep = crewSpecialBonuses(
+      { boss: 200 },
+      { boss: Object.fromEntries(Array.from({ length: 200 }, (_, i) => [i + 1, 'beat'])) },
+    );
+    expect(deep.beatWindowMs).toBe(SPECIAL_BEAT_CAP_MS);
+    // Dieselbe Umschulung auf einem DPS-Mitglied zahlt hier GAR NICHTS — seine
+    // Stufen gehören seiner eigenen Linie.
+    const dps = crewSpecialBonuses(
       { influencer: 200 },
       { influencer: Object.fromEntries(Array.from({ length: 200 }, (_, i) => [i + 1, 'beat'])) },
     );
-    expect(deep.beatWindowMs).toBe(SPECIAL_BEAT_CAP_MS);
-    expect(deep.goldMult).toBe(1);
+    expect(dps.beatWindowMs).toBe(0);
   });
 });
 
@@ -464,7 +511,12 @@ describe('Erbe (3c) — die doppelte Meisterschaft in der Crew-Faltung', () => {
       0,
       gold,
     );
-    expect((withHeir - plain) / (own * (0.06 / 1.06))).toBeCloseTo(1, 5);
+    // `own` ist der Beitrag EINES Mitglieds vor der Summen-Skalierung; der
+    // crew-weite Meilenstein (ganze Crew auf Lv 40) liegt auf der Summe.
+    expect((withHeir - plain) / (own * (0.06 / 1.06) * crewMilestoneMult(levels))).toBeCloseTo(
+      1,
+      5,
+    );
   });
 
   /**
@@ -722,5 +774,82 @@ describe('Fähigkeiten-Spanne je Mitglied', () => {
       const m = nextMilestone(full);
       expect(n).toBe(m === null ? 1 : m - full);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Crew-weite Meilensteine
+// ---------------------------------------------------------------------------
+// Goal: „wenn alle charaktere auf level x z.b. 25 oder 100 dps boost für ALLE."
+// Der Kanal ersetzt die weggefallenen globalen Fähigkeits-Boni und ist der
+// einzige Term, den ein einzelnes Mitglied nicht allein auslösen kann.
+describe('Crew-weite Meilensteine', () => {
+  const all = (lv: number): Record<string, number> =>
+    Object.fromEntries(CREW.map((c) => [c.id, lv]));
+
+  it('zahlt ×2 je Schwelle, sobald die GANZE Crew sie erreicht hat', () => {
+    expect(crewMilestoneMult(all(24))).toBe(1);
+    expect(crewMilestoneMult(all(25))).toBe(2);
+    expect(crewMilestoneMult(all(50))).toBe(4);
+    expect(crewMilestoneMult(all(100))).toBe(8);
+    expect(crewMilestoneMult(all(200))).toBe(16);
+    expect(crewMilestoneMult(all(250))).toBe(2 ** CREW_MILESTONES.length);
+  });
+
+  it('bleibt bei einer leeren Crew neutral', () => {
+    expect(crewMilestoneMult({})).toBe(1);
+    expect(crewMilestoneMult(createCrew())).toBe(1);
+  });
+
+  // Der Fehler, den erst die Messung zeigte: Mit „angeheuert" als Nenner fiel
+  // der Faktor beim Anheuern des letzten Mitglieds von ×32 auf ×1 — das Spiel
+  // bestrafte damit das Vervollständigen der Crew.
+  it('wird durch ANHEUERN niemals kleiner', () => {
+    for (const cfg of CREW) {
+      const ohne = all(250);
+      delete ohne[cfg.id];
+      const frisch = { ...all(250), [cfg.id]: 1 };
+      expect(crewMilestoneMult(frisch)).toBeGreaterThanOrEqual(crewMilestoneMult(ohne));
+    }
+  });
+
+  it('gibt einem einzelnen hochgezogenen Mitglied NICHT den vollen Bonus', () => {
+    const solo = crewMilestoneMult({ boss: 250 });
+    expect(solo).toBeLessThan(2); // weit weg von ×32
+    expect(solo).toBeGreaterThan(1); // aber nicht wirkungslos
+  });
+
+  it('wächst monoton mit jedem Level, das irgendwo dazukommt', () => {
+    let prev = crewMilestoneMult({});
+    for (const lv of [1, 24, 25, 49, 50, 99, 100, 199, 200, 249, 250, 400]) {
+      const cur = crewMilestoneMult(all(lv));
+      expect(cur).toBeGreaterThanOrEqual(prev);
+      prev = cur;
+    }
+  });
+
+  it('nennt als nächstes Ziel die erste NICHT vollständig erreichte Schwelle', () => {
+    expect(nextCrewMilestone(all(0))).toBe(CREW_MILESTONES[0]);
+    expect(nextCrewMilestone(all(25))).toBe(CREW_MILESTONES[1]);
+    expect(nextCrewMilestone(all(250))).toBe(null);
+    // Ein einziges Mitglied unter der Schwelle hält das Ziel dort fest.
+    expect(nextCrewMilestone({ ...all(250), hype: 30 })).toBe(50);
+  });
+
+  it('liegt als Faktor auf der Summe — Klick wie Idle sehen dieselbe Zahl', () => {
+    const levels = all(25); // Schwelle 25 gerissen ⇒ ×2
+    const factor = crewMilestoneMult(levels);
+    expect(factor).toBe(2);
+    // Idle: die Summe trägt den Faktor …
+    let raw = 0;
+    for (const cfg of CREW) raw += heroDps(cfg, 25);
+    expect(totalRawDps(levels)).toBeCloseTo(raw * factor, 6);
+    // … Klick ebenso, aber der nackte Sockel CLICK_BASE bleibt außen vor.
+    let rawClick = 0;
+    for (const cfg of CREW) rawClick += heroClick(cfg, 25);
+    expect(clickDamageRaw(levels)).toBeCloseTo(
+      CLICK_BASE + rawClick * factor + CLICK_DPS_SHARE * totalRawDps(levels),
+      6,
+    );
   });
 });

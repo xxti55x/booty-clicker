@@ -7,6 +7,7 @@ import { PERCENT_STATS } from './gear';
 import {
   BOSS_SECONDS,
   NODE_STARS,
+  PATH_PERCENT_CAP,
   PATH_MAX_STARS,
   PATH_NODES,
   PATH_THRESHOLDS,
@@ -107,11 +108,15 @@ describe('skin-path — die Knoten-Leiter', () => {
 });
 
 describe('skin-path — die Wirkung', () => {
-  it('zahlt auf den `star.stat` jedes Skins, ein Knoten = ein Fünftel Stern', () => {
+  it('zahlt auf den `star.stat` jedes Skins — auf Prozent-Termen gedeckelt', () => {
     for (const id of IDS) {
       const cfg = SKINS[id];
       const b = skinPathBonus({ [id]: { s: PATH_THRESHOLDS[0], b: 0 } }, id);
-      expect(b[cfg.star.stat]).toBeCloseTo(cfg.star.perStar * NODE_STARS, 10);
+      // Ein Knoten von vieren ⇒ ein Viertel des Deckels auf Prozent-Termen.
+      const roh = cfg.star.perStar * NODE_STARS;
+      const istProzent = cfg.star.stat === 'allPct' || PERCENT_STATS.includes(cfg.star.stat);
+      const erwartet = istProzent ? Math.min(roh, PATH_PERCENT_CAP / 4) : roh;
+      expect(b[cfg.star.stat]).toBeCloseTo(erwartet, 10);
     }
   });
 
@@ -144,7 +149,9 @@ describe('skin-path — die Wirkung', () => {
 
   it('verteilt Diamant-Booty `allPct` wie der Gear-Fold über alle Prozent-Stats', () => {
     const b = skinPathBonus({ diamond: { s: PATH_THRESHOLDS[3], b: 0 } }, 'diamond');
-    const each = SKINS.diamond.star.perStar * NODE_STARS * 4;
+    // Der Diamant reißt den Deckel (0.15 · 0.1 · 4 = 0.06 > 0.02) — genau
+    // dafür gibt es ihn: Der Skin selbst darf OP sein, sein Pfad-Anteil nicht.
+    const each = PATH_PERCENT_CAP;
     for (const st of PERCENT_STATS) expect(b[st]).toBeCloseTo(each, 10);
   });
 

@@ -47,8 +47,15 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     outline: 0x1f130a,
     revealAt: 0,
     rarity: 'common',
-    buff: { stat: 'clickPct', perLevel: 0.08 }, // strongest buff = click (P1, §5.1)
-    star: { stat: 'clickPct', perStar: 0.1 },
+    // Der KLICK-Spezialist — dieselbe Größenordnung wie der Boss-Spezialist
+    // (Tyrann, 0.18/0.20). Er steht bewusst NEBEN der DPS-Leiter, nicht darin:
+    // Klick ist eine eigene Achse, und P1 („click is king", §5.1) verlangt, dass
+    // der beste Klick-Wert des Katalogs den besten Idle-Wert schlägt. Mit 0.08
+    // tat er das nach dem Seltenheits-Retune NICHT mehr — der Transzendenz-Skin
+    // hebt über `allPct` beide Achsen gleich, und die Space-Kulisse kippte die
+    // Summe zugunsten Idle (7.75 gegen 7.80, vom Katalog-Test gefangen).
+    buff: { stat: 'clickPct', perLevel: 0.18 },
+    star: { stat: 'clickPct', perStar: 0.2 },
   },
   disco: {
     icon: '🪩',
@@ -62,8 +69,8 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     outline: 0x160e06,
     revealAt: 0,
     rarity: 'rare',
-    buff: { stat: 'critChance', perLevel: 0.004 },
-    star: { stat: 'critMult', perStar: 0.05 },
+    buff: { stat: 'dpsPct', perLevel: 0.05 },
+    star: { stat: 'dpsPct', perStar: 0.06 },
   },
   robo: {
     icon: '🤖',
@@ -77,8 +84,8 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     outline: 0x0d1420,
     revealAt: 300,
     rarity: 'rare',
-    buff: { stat: 'dpsPct', perLevel: 0.06 }, // strictly below the click skin (P1)
-    star: { stat: 'coachCps', perStar: 0.2 },
+    buff: { stat: 'goldPct', perLevel: 0.06 }, // der BP-Spezialist der Leiter
+    star: { stat: 'goldPct', perStar: 0.07 },
   },
   host: {
     icon: '🎤',
@@ -92,8 +99,8 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     outline: 0x11101c,
     revealAt: 4000,
     rarity: 'epic',
-    buff: { stat: 'comboWindow', perLevel: 0.06 },
-    star: { stat: 'comboDecay', perStar: 0.04 },
+    buff: { stat: 'dpsPct', perLevel: 0.08 },
+    star: { stat: 'dpsPct', perStar: 0.09 },
   },
   boss: {
     icon: '👑',
@@ -108,8 +115,8 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     outline: 0x2a1504,
     revealAt: 40000,
     rarity: 'legendary',
-    buff: { stat: 'bossDmg', perLevel: 0.12 },
-    star: { stat: 'chestLuck', perStar: 0.02 },
+    buff: { stat: 'bossDmg', perLevel: 0.18 },
+    star: { stat: 'bossDmg', perStar: 0.2 },
   },
   // ---- M11 new skins (spec §5.3): each reuses an existing rig style. ----
   neon: {
@@ -125,8 +132,8 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     flair: 'ninja',
     revealAt: 0,
     rarity: 'epic',
-    buff: { stat: 'beatWindow', perLevel: 8 },
-    star: { stat: 'onBeatMult', perStar: 0.1 },
+    buff: { stat: 'chestLuck', perLevel: 0.03 },
+    star: { stat: 'chestLuck', perStar: 0.035 },
   },
   pirate: {
     icon: '🏴‍☠️',
@@ -140,9 +147,9 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     outline: 0x241008,
     flair: 'pirate',
     revealAt: 0,
-    rarity: 'rare',
-    buff: { stat: 'keyDrop', perLevel: 0.06 },
-    star: { stat: 'goldPct', perStar: 0.05 },
+    rarity: 'common',
+    buff: { stat: 'dpsPct', perLevel: 0.03 },
+    star: { stat: 'dpsPct', perStar: 0.04 },
   },
   lava: {
     icon: '🌋',
@@ -157,9 +164,9 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     bands: 3, // chunkier heat bands
     flair: 'lava',
     revealAt: 0,
-    rarity: 'epic',
-    buff: { stat: 'critMult', perLevel: 0.06 },
-    star: { stat: 'frenzyDurSec', perStar: 1 },
+    rarity: 'legendary',
+    buff: { stat: 'dpsPct', perLevel: 0.12 },
+    star: { stat: 'dpsPct', perStar: 0.14 },
   },
   gyrator: {
     icon: '🛸',
@@ -174,8 +181,8 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     flair: 'saucer',
     revealAt: 0,
     rarity: 'legendary',
-    buff: { stat: 'frenzyDur', perLevel: 0.1 },
-    star: { stat: 'frenzyCharge', perStar: 0.08 },
+    buff: { stat: 'allPct', perLevel: 0.05 },
+    star: { stat: 'allPct', perStar: 0.06 },
   },
   diamond: {
     icon: '💎',
@@ -192,7 +199,7 @@ export const SKINS: Record<SkinKey, SkinConfig> = {
     flair: 'ice',
     revealAt: 0,
     rarity: 'mythic',
-    buff: { stat: 'allPct', perLevel: 0.02 },
-    star: { stat: 'allPct', perStar: 0.03 },
+    buff: { stat: 'allPct', perLevel: 0.12 },
+    star: { stat: 'allPct', perStar: 0.15 },
   },
 };

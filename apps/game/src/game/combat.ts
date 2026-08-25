@@ -171,7 +171,19 @@ export interface HitResult {
  *     dort sofort der Boss — `bossSpawned` meldet den Betreten-Moment)
  *   · boss kill → advance to next zone
  */
-export function hit(state: CombatState, dmg: number, autoAdvance: boolean = true): HitResult {
+export function hit(
+  state: CombatState,
+  dmg: number,
+  autoAdvance: boolean = true,
+  /**
+   * Wie viele Rivalen diese Bühne hält. Standard ist {@link MONSTERS_PER_ZONE};
+   * die Setlist-Karte des Laufs (L2) kann die Bühne zum Sprint machen oder in
+   * die Länge ziehen. Als Parameter statt als Import, damit `combat.ts` pur
+   * bleibt und nichts über Prestige-Stufen wissen muss.
+   */
+  killsNeeded: number = MONSTERS_PER_ZONE,
+): HitResult {
+  const needed = Math.max(1, Math.floor(killsNeeded) || MONSTERS_PER_ZONE);
   const hp = state.hp - dmg;
   if (hp > 0) {
     return {
@@ -202,7 +214,7 @@ export function hit(state: CombatState, dmg: number, autoAdvance: boolean = true
   }
 
   const kills = state.killsThisZone + 1;
-  if (kills >= MONSTERS_PER_ZONE) {
+  if (kills >= needed) {
     if (!autoAdvance) {
       // Zähler läuft rund (10/10 ⇒ 0/10): die Bühne bleibt, die Runde beginnt
       // neu. Der Fortschrittsbalken zeigt damit weiter echte Bewegung, statt am

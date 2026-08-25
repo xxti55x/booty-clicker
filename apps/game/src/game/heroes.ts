@@ -45,7 +45,50 @@ import { HEIR_WEIGHT, type CrewMastery, masteryFreeFirstTier, masteryOwnMult } f
 import { type CrewRetrain, retrainedKind } from './retrain';
 
 export type AbilityKind =
-  'power' | 'gold' | 'crit' | 'critdmg' | 'boss' | 'combo' | 'beat' | 'ekstase' | 'idle';
+  'power' | 'crit' | 'critdmg' | 'beat' | 'boss' | 'combo' | 'ekstase' | 'idle';
+
+/**
+ * Die Sorten des KLICK-Helden. Sie wirken auf die Klick-Pipeline — und die ist
+ * sein Ausstoß, also sind auch sie eigenbezogen. Nur ein Mitglied mit
+ * `click: true` darf sie tragen.
+ */
+export type ClickKind = 'crit' | 'critdmg' | 'beat';
+
+/**
+ * Die Sorten der DPS-Mitglieder: bedingte Multiplikatoren auf den EIGENEN
+ * Ausstoß ihres Trägers ({@link heroOwnSpecialMult}).
+ */
+export type OwnKind = 'boss' | 'combo' | 'ekstase' | 'idle';
+
+const CLICK_KIND_SET: ReadonlySet<string> = new Set<string>([
+  'crit',
+  'critdmg',
+  'beat',
+] satisfies ClickKind[]);
+
+/** Ist `k` eine Klick-Sorte (gehört also dem Klick-Helden)? */
+export function isClickKind(k: AbilityKind): k is ClickKind {
+  return CLICK_KIND_SET.has(k);
+}
+
+/**
+ * Welche Sorten darf `cfg` überhaupt tragen? Der Klick-Held die Klick-Sorten,
+ * jedes DPS-Mitglied die Eigen-Sorten.
+ *
+ * Das ist die Regel, die der Umbau erzwingt: Vorher konnte ein reines
+ * DPS-Mitglied „Klick-Krit" tragen, weil der Effekt ohnehin global landete —
+ * beim Spieler, nicht bei ihm. Jetzt zahlt jede Stufe auf die Linie ihres
+ * Trägers, und eine Klick-Sorte auf einem Mitglied ohne Klick-Linie hätte
+ * schlicht keine Wirkung mehr.
+ */
+export function allowedKinds(cfg: HeroConfig): readonly SpecialKind[] {
+  return cfg.click ? CLICK_KINDS : OWN_KINDS;
+}
+
+/** Die drei Klick-Sorten in fester Reihenfolge. */
+export const CLICK_KINDS: readonly ClickKind[] = ['crit', 'critdmg', 'beat'];
+/** Die vier Eigen-Sorten in fester Reihenfolge. */
+export const OWN_KINDS: readonly OwnKind[] = ['boss', 'combo', 'ekstase', 'idle'];
 
 /**
  * Die Sorten, die eine SPEZIAL-Stufe zahlen kann — alles außer `power`. Der
@@ -110,6 +153,94 @@ export const ABILITY_SPACING = 50;
 /** Each bought POWER tier (odd tiers) adds +100 % of base output (mult = 1 + n). */
 export const ABILITY_BONUS = 1;
 
+/**
+ * **Der Kampf-Kontext einer Ausstoß-Rechnung.**
+ *
+ * Seit dem Eigen-Boost-Umbau wirkt eine Fähigkeit nur noch auf ihren TRÄGER —
+ * viele von ihnen aber nur unter einer BEDINGUNG („gegen Bosse", „im
+ * Leerlauf"). Diese Bedingungen sind Zustände des Kampfes, nicht des Mitglieds,
+ * also reicht der Aufrufer sie herein. Alles weggelassen ⇒ nichts trifft zu:
+ * Der Default ist die nüchterne Grundrechnung, die auch die Anzeige nutzt.
+ */
+export interface FightCtx {
+  /** Der aktuelle Gegner ist ein Boss. */
+  readonly boss?: boolean;
+  /** Es wird gerade NICHT geklickt (Leerlauf). */
+  readonly idle?: boolean;
+  /** Ekstase läuft. */
+  readonly ekstase?: boolean;
+  /** Eine Combo steht. */
+  readonly combo?: boolean;
+}
+
+/** Der leere Kontext — die Grundrechnung ohne jede Bedingung. */
+export const NO_CTX: FightCtx = {};
+
+/**
+ * Was eine erfüllte Spezial-Stufe dem EIGENEN Ausstoß ihres Trägers zulegt
+ * (additiv je Stufe).
+ *
+ * Deutlich kräftiger als eine Power-Stufe (+100 %) wäre zu viel, deutlich
+ * schwächer wäre die Bedingung nicht wert: +150 % trifft die Mitte — die Stufe
+ * schlägt eine Power-Stufe, wenn ihre Bedingung steht, und liegt darunter, wenn
+ * nicht. Genau diese Entscheidung soll sie sein.
+ */
+export const SPECIAL_OWN = 1.5;
+
+/**
+ * Trifft die Bedingung der Sorte `kind` im Kontext `ctx` zu?
+ *
+ * `power` hat keine Bedingung und taucht hier nicht auf (es zahlt über
+ * {@link abilityMult}). Die KLICK-Sorten (`crit`, `critdmg`, `beat`) tragen
+ * ebenfalls keine Kontext-Bedingung: Sie gehören dem Klick-Helden, und ihr
+ * Ausstoß IST der Klick.
+ */
+export function specialApplies(kind: SpecialKind, ctx: FightCtx): boolean {
+  switch (kind) {
+    case 'boss':
+      return ctx.boss === true;
+    case 'idle':
+      return ctx.idle === true;
+    case 'ekstase':
+      return ctx.ekstase === true;
+    case 'combo':
+      return ctx.combo === true;
+    // Klick-Sorten zahlen NICHT hier: Sie wirken über die Klick-Pipeline
+    // (Krit-Chance, Krit-Schaden, Beat-Fenster) und damit ohnehin nur auf den
+    // Ausstoß des Klick-Helden. Sie doppelt zu zählen wäre ein Fehler.
+    case 'crit':
+    case 'critdmg':
+    case 'beat':
+      return false;
+  }
+}
+
+/**
+ * Der EIGEN-Multiplikator der gekauften Spezial-Stufen eines Mitglieds im
+ * gegebenen Kontext: `1 + SPECIAL_OWN × (Anzahl erfüllter Stufen)`.
+ *
+ * Das ist die Stelle, an der der Umbau sitzt. Vorher schrieben alle Sorten
+ * außer `power` in einen GLOBALEN Topf (`crewSpecialBonuses`) — deshalb konnte
+ * ein reines DPS-Mitglied „Klick-Krit" tragen, ohne dass das irgendwen störte:
+ * Der Effekt landete ohnehin beim Spieler, nicht bei ihm. Jetzt zahlt jede
+ * Stufe auf die Linie ihres eigenen Trägers, und die Sorten sind entsprechend
+ * neu verteilt (Klick-Sorten nur beim Klick-Helden).
+ */
+export function heroOwnSpecialMult(
+  cfg: HeroConfig,
+  bought: number,
+  retrain: CrewRetrain = {},
+  ctx: FightCtx = NO_CTX,
+): number {
+  const n = Math.max(0, Math.floor(bought));
+  let hits = 0;
+  for (let t = 1; t <= n; t++) {
+    const kind = abilityKind(cfg, t, retrain);
+    if (kind !== 'power' && specialApplies(kind, ctx)) hits++;
+  }
+  return 1 + SPECIAL_OWN * hits;
+}
+
 // ---- v11 themed-special magnitudes (per bought EVEN tier, additive stacks) ----
 /** `gold`: +25 % BP from every kill (global income). */
 export const SPECIAL_GOLD = 0.25;
@@ -143,7 +274,7 @@ export const SPECIAL_IDLE = 0.2;
  * davon wieder ein Viertel: ×1.5 — actives feel it only via the 20 % click
  * share, so the click:idle shape stays.
  */
-export const DPS_TUNE = 0.72;
+export const DPS_TUNE = 0.3;
 /** Ability price = the level-cost at its unlock level × this factor (v12: 6 → 9). */
 export const ABILITY_COST_MULT = 9;
 
@@ -190,7 +321,7 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Legt den fetten Bass auf.',
     baseCost: 250,
     baseDps: 22,
-    special: 'beat',
+    special: 'idle',
     rhythm: 2,
     tiers: 6,
   },
@@ -210,7 +341,7 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Streamt jeden Move.',
     baseCost: 4000,
     baseDps: 245,
-    special: 'gold',
+    special: 'combo',
     rhythm: 1,
     tiers: 7,
   },
@@ -220,7 +351,7 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Perfektioniert die Routine.',
     baseCost: 20000,
     baseDps: 1100,
-    special: 'crit',
+    special: 'ekstase',
     rhythm: 2,
     tiers: 5,
   },
@@ -240,7 +371,7 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Zieht die Massen an.',
     baseCost: 500000,
     baseDps: 22000,
-    special: 'critdmg',
+    special: 'boss',
     rhythm: 1,
     tiers: 4,
   },
@@ -250,7 +381,7 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Besitzt den ganzen Laden.',
     baseCost: 3000000,
     baseDps: 120000,
-    special: 'gold',
+    special: 'idle',
     rhythm: 2,
     tiers: 8,
   },
@@ -281,7 +412,7 @@ export const CREW: readonly HeroConfig[] = [
     ds: 'Tanzt an zwei Orten zugleich.',
     baseCost: 1200000000,
     baseDps: 30000000,
-    special: 'crit',
+    special: 'boss',
     rhythm: 2,
     tiers: 6,
   },
@@ -352,6 +483,91 @@ export const LEVEL_SOFTCAP = DPS_MILESTONES[DPS_MILESTONES.length - 1]!;
 
 /** Zusätzliches Kostenwachstum je Level ÜBER dem Soft-Cap (multiplikativ). */
 export const SOFTCAP_COST_GROWTH = 1.06;
+
+/**
+ * **Crew-weite Meilensteine.** Steht die GESAMTE angeheuerte Crew auf Level 25,
+ * verdoppelt sich der Ausstoß aller Mitglieder; dasselbe bei 50/100/200/250.
+ *
+ * Warum es diesen Kanal gibt: Die Fähigkeiten wirken nur noch auf ihren eigenen
+ * Träger, und die Einzel-Meilensteine belohnen ebenfalls nur den, der sie
+ * erreicht. Ohne Gegengewicht wäre die beste Strategie, ein einziges Mitglied
+ * hochzuziehen und die anderen stehen zu lassen. Dieser Meilenstein belohnt
+ * genau das Gegenteil — BREITE — und ist der einzige Term, den ein einzelnes
+ * Mitglied nicht allein auslösen kann.
+ *
+ * Die Schwellen sind absichtlich dieselben wie bei {@link DPS_MILESTONES}: eine
+ * Zahlenreihe, die der Spieler einmal lernt und überall wiedererkennt.
+ */
+export const CREW_MILESTONES: readonly number[] = DPS_MILESTONES;
+
+/** Der Faktor je erreichtem crew-weiten Meilenstein. */
+export const CREW_MILESTONE_MULT = 2;
+
+/** Wie viele Mitglieder sind überhaupt angeheuert (Level ≥ 1)? */
+export function crewHiredCount(levels: CrewLevels): number {
+  let n = 0;
+  for (const cfg of CREW) if ((levels[cfg.id] ?? 0) >= 1) n++;
+  return n;
+}
+
+/**
+ * Der Anteil der GANZEN Crew, der Schwelle `m` erreicht hat (0…1).
+ *
+ * Der Nenner ist bewusst die volle Besetzung ({@link CREW}`.length`) und nicht
+ * die Zahl der angeheuerten Mitglieder. Zwei Fehler hängen genau daran, beide
+ * gemessen:
+ *
+ * 1. Mit „angeheuert" als Nenner bekäme ein Spieler mit einem einzigen
+ *    hochgezogenen Mitglied den vollen ×32 — der Meilenstein würde also gerade
+ *    das Gegenteil von Breite belohnen.
+ * 2. Schlimmer: Das Anheuern eines weiteren Mitglieds SENKT dann den Anteil
+ *    (14/14 → 14/15), kostet also sofort Schlagkraft, während das neue Mitglied
+ *    auf Level 1 fast nichts beiträgt. Netto ein Verlust — das Spiel bestrafte
+ *    das Vervollständigen der Crew.
+ *
+ * Mit der vollen Besetzung als Nenner kann Anheuern den Anteil nie senken, nur
+ * heben (0/15 → 1/15, sobald das neue Mitglied die Schwelle erreicht).
+ */
+export function crewReachedFrac(levels: CrewLevels, m: number): number {
+  let reached = 0;
+  for (const cfg of CREW) if ((levels[cfg.id] ?? 0) >= m) reached++;
+  return reached / CREW.length;
+}
+
+/**
+ * Der crew-weite Multiplikator: je Schwelle ein Faktor, der bei
+ * {@link CREW_MILESTONE_MULT} steht, sobald die GANZE angeheuerte Crew sie
+ * erreicht hat — und anteilig darunter.
+ *
+ * **Warum anteilig und nicht als harter Sprung am Minimum.** Gemessen: Mit dem
+ * Minimum über die angeheuerte Crew reißt jedes NEU angeheuerte Mitglied den
+ * Boden sofort auf 1 und der Faktor fällt von ×32 auf ×1. Ein neues Mitglied
+ * auf Level 25 zu ziehen kostet rund das 68-Fache seines Anheuerpreises — das
+ * Spiel stünde so lange bei einem Zweiunddreißigstel seiner Schlagkraft. Das
+ * Ergebnis wäre ein Spiel, das dafür bestraft, die Crew zu vervollständigen,
+ * also genau das Gegenteil dessen, was dieser Meilenstein belohnen soll.
+ *
+ * Anteilig kostet dasselbe Anheuern bei 15 Mitgliedern rund 16 % statt 97 %,
+ * und die Zusicherung bleibt wörtlich erhalten: **alle auf Schwelle ⇒ ×2 je
+ * Schwelle** (bei voller Crew über 250 also ×32). Rein und nie werfend.
+ */
+export function crewMilestoneMult(levels: CrewLevels): number {
+  let mult = 1;
+  for (const m of CREW_MILESTONES) {
+    mult *= 1 + (CREW_MILESTONE_MULT - 1) * crewReachedFrac(levels, m);
+  }
+  return mult;
+}
+
+/**
+ * Die nächste Schwelle, die die Crew noch NICHT vollständig erreicht hat —
+ * `null`, wenn jede angeheuerte Kraft über der letzten steht. Das ist das Ziel,
+ * das die Anzeige nennt.
+ */
+export function nextCrewMilestone(levels: CrewLevels): number | null {
+  for (const m of CREW_MILESTONES) if (crewReachedFrac(levels, m) < 1) return m;
+  return null;
+}
 
 /**
  * Der Meilenstein-Multiplikator eines Levels: ×2 je erreichtem Meilenstein.
@@ -508,23 +724,23 @@ export function abilityMult(cfg: HeroConfig, bought: number): number {
 }
 
 /** Crew-wide bonuses aggregated from every member's bought SPECIAL tiers (v11). */
+/**
+ * Die Boni des KLICK-Helden. Nach dem Eigen-Boost-Umbau ist das alles, was
+ * dieser Sammler noch führt: Krit-Chance, Krit-Schaden und Beat-Fenster wirken
+ * über die Klick-Pipeline, und die ist der Ausstoß genau eines Mitglieds.
+ *
+ * Alles andere (Boss, Combo, Ekstase, Groove) hängt jetzt an seinem Träger und
+ * läuft über {@link heroOwnSpecialMult}; `gold` ist ganz entfallen, weil ein
+ * BP-Multiplikator per Definition global ist und sich nicht an ein Mitglied
+ * binden lässt — Gold kommt weiterhin von Ahnen, Gebieten, Truhen und Himmel.
+ */
 export interface CrewSpecialBonuses {
-  /** Global BP multiplier from `gold` tiers: 1 + 0.25·n. */
-  goldMult: number;
   /** Additive click crit-chance bonus (pipeline still caps at 40 %). */
   critChance: number;
   /** Additive crit-multiplier bonus (on top of the base ×5). */
   critDmg: number;
-  /** Damage multiplier vs boss targets: 1 + 0.25·n. */
-  bossMult: number;
-  /** Extra combo grace window in seconds (capped). */
-  comboWindowS: number;
   /** Extra on-beat detection window in ms (capped). */
   beatWindowMs: number;
-  /** Ekstase charge-threshold reduction (the glue clamps the summed total at 90 %). */
-  ekstaseChargeRed: number;
-  /** Global crew-DPS multiplier from `idle` („Groove") tiers: 1 + 0.2·n. */
-  idleMult: number;
 }
 
 /**
@@ -543,37 +759,23 @@ export interface CrewSpecialBonuses {
  * schult nie um — rechnet exakt so schnell und exakt dieselben Zahlen wie vor 3b.
  */
 export function crewSpecialBonuses(ups: CrewUps, retrain: CrewRetrain = {}): CrewSpecialBonuses {
-  const n: Record<SpecialKind, number> = {
-    gold: 0,
-    crit: 0,
-    critdmg: 0,
-    boss: 0,
-    combo: 0,
-    beat: 0,
-    ekstase: 0,
-    idle: 0,
-  };
+  const n: Record<ClickKind, number> = { crit: 0, critdmg: 0, beat: 0 };
   for (const cfg of CREW) {
+    // Nur der KLICK-Held speist diesen Topf. Alle anderen Sorten sind seit dem
+    // Eigen-Boost-Umbau an ihren Träger gebunden und laufen über
+    // `heroOwnSpecialMult` — sie hier nochmals zu sammeln wäre eine doppelte
+    // Auszahlung.
+    if (!cfg.click) continue;
     const bought = Math.max(0, Math.floor(ups[cfg.id] ?? 0));
-    const slots = retrain[cfg.id];
-    if (!slots) {
-      n[cfg.special] += specialTiers(cfg, bought);
-      continue;
-    }
     for (let t = 1; t <= bought; t++) {
       const kind = abilityKind(cfg, t, retrain);
-      if (kind !== 'power') n[kind] += 1;
+      if (kind !== 'power' && isClickKind(kind)) n[kind] += 1;
     }
   }
   return {
-    goldMult: 1 + SPECIAL_GOLD * n.gold,
     critChance: SPECIAL_CRIT_CHANCE * n.crit,
     critDmg: SPECIAL_CRIT_DMG * n.critdmg,
-    bossMult: 1 + SPECIAL_BOSS * n.boss,
-    comboWindowS: Math.min(SPECIAL_COMBO_CAP_S, SPECIAL_COMBO_S * n.combo),
     beatWindowMs: Math.min(SPECIAL_BEAT_CAP_MS, SPECIAL_BEAT_MS * n.beat),
-    ekstaseChargeRed: SPECIAL_EKSTASE * n.ekstase,
-    idleMult: 1 + SPECIAL_IDLE * n.idle,
   };
 }
 
@@ -586,22 +788,20 @@ export function abilityKindName(kind: AbilityKind): string {
   switch (kind) {
     case 'power':
       return 'Verstärkung';
-    case 'gold':
-      return 'Gold';
     case 'crit':
       return 'Krit-Chance';
     case 'critdmg':
       return 'Krit-Schaden';
-    case 'boss':
-      return 'Boss-Schaden';
-    case 'combo':
-      return 'Combo-Fenster';
     case 'beat':
       return 'Beat-Fenster';
+    case 'boss':
+      return 'Rampenlicht';
+    case 'combo':
+      return 'Mitläufer';
     case 'ekstase':
-      return 'Ekstase-Ladung';
+      return 'Ekstase-Tänzer';
     case 'idle':
-      return 'Groove (Crew-DPS)';
+      return 'Dauerläufer';
   }
 }
 
@@ -610,22 +810,22 @@ export function abilityKindLabel(kind: AbilityKind, outLabel: string): string {
   switch (kind) {
     case 'power':
       return `+100% ${outLabel}`;
-    case 'gold':
-      return '+25% BP';
     case 'crit':
       return '+1,5% Krit-Chance';
     case 'critdmg':
       return '+0,5× Krit-Schaden';
-    case 'boss':
-      return '+25% Boss-Schaden';
-    case 'combo':
-      return '+0,2s Combo-Fenster';
     case 'beat':
       return '+12ms Beat-Fenster';
+    // Die Eigen-Sorten nennen BEIDES: wie viel, und wofür. Ohne die Bedingung
+    // im Label wäre „+150 %" eine Lüge — sie steht nur, wenn sie steht.
+    case 'boss':
+      return `+150% eigener ${outLabel} gegen Bosse`;
+    case 'combo':
+      return `+150% eigener ${outLabel} bei Combo`;
     case 'ekstase':
-      return '−5% Ekstase-Ladung';
+      return `+150% eigener ${outLabel} in Ekstase`;
     case 'idle':
-      return '+20% Crew-DPS';
+      return `+150% eigener ${outLabel} im Leerlauf`;
   }
 }
 
@@ -684,6 +884,8 @@ export function heroDps(
   ups = 0,
   masteryXp = 0,
   heirWeight = 1,
+  retrain: CrewRetrain = {},
+  ctx: FightCtx = NO_CTX,
 ): number {
   if (level <= 0 || cfg.click) return 0;
   return (
@@ -691,6 +893,10 @@ export function heroDps(
     DPS_TUNE *
     dpsLevelFactor(level) *
     abilityMult(cfg, ups) *
+    // Die Spezial-Stufen zahlen HIER, auf die eigene Linie — nicht mehr in
+    // einen globalen Topf. Ohne Kontext trifft keine Bedingung zu, die Zeile
+    // ist dann ×1 (genau die Grundrechnung, die die Anzeige zeigt).
+    heroOwnSpecialMult(cfg, ups, retrain, ctx) *
     gildMult(gildCount) *
     masteryOwnMult(masteryXp, heirWeight)
   );
@@ -715,6 +921,9 @@ export function heroClick(
     cfg.baseDps *
     dpsLevelFactor(level) *
     abilityMult(cfg, ups) *
+    // Kein `heroOwnSpecialMult` hier: Die Sorten des Klick-Helden sind die
+    // KLICK-Sorten, und die zahlen über die Klick-Pipeline (Krit, Beat) —
+    // `crewSpecialBonuses` sammelt sie. Beides zu addieren wäre doppelt.
     gildMult(gildCount) *
     masteryOwnMult(masteryXp, heirWeight)
   );
@@ -796,6 +1005,8 @@ export function totalRawDps(
   ups: CrewUps = {},
   mastery: CrewMastery = {},
   heir = '',
+  retrain: CrewRetrain = {},
+  ctx: FightCtx = NO_CTX,
 ): number {
   let dps = 0;
   for (const cfg of CREW)
@@ -806,8 +1017,13 @@ export function totalRawDps(
       ups[cfg.id] ?? 0,
       mastery[cfg.id] ?? 0,
       heirWeightFor(cfg.id, heir),
+      retrain,
+      ctx,
     );
-  return dps;
+  // Der crew-weite Meilenstein sitzt HIER, auf der Summe: Er gehört keinem
+  // Mitglied, sondern der Aufstellung. Klick und Idle lesen dieselbe Funktion,
+  // damit die beiden Seiten nie auseinanderlaufen.
+  return dps * crewMilestoneMult(levels);
 }
 
 /**
@@ -969,7 +1185,7 @@ export function clickDamageRaw(
   mastery: CrewMastery = {},
   heir = '',
 ): number {
-  let click = CLICK_BASE;
+  let click = 0;
   for (const cfg of CREW)
     click += heroClick(
       cfg,
@@ -979,5 +1195,14 @@ export function clickDamageRaw(
       mastery[cfg.id] ?? 0,
       heirWeightFor(cfg.id, heir),
     );
-  return click + CLICK_DPS_SHARE * totalRawDps(levels, gilds, ups, mastery, heir);
+  // `CLICK_BASE` bleibt AUSSEN vor: Es ist der nackte Sockel, den auch eine
+  // Partie ohne jede Crew hat — ihn mit einem Crew-Meilenstein zu vervielfachen
+  // wäre eine Belohnung für etwas, das mit der Crew nichts zu tun hat. Der
+  // Anteil, der aus der Crew kommt, skaliert dagegen mit; der DPS-Anteil trägt
+  // den Faktor bereits aus `totalRawDps`.
+  return (
+    CLICK_BASE +
+    click * crewMilestoneMult(levels) +
+    CLICK_DPS_SHARE * totalRawDps(levels, gilds, ups, mastery, heir)
+  );
 }

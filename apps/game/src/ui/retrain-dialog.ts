@@ -54,7 +54,6 @@ export interface RetrainDeps {
 
 /** Das kleine Sorten-Icon einer Angebots-Karte (dieselbe Sprache wie die Slots). */
 const KIND_GLYPH: Record<SpecialKind, string> = {
-  gold: '◎',
   crit: '⚡',
   critdmg: '✸',
   boss: '♛',
@@ -113,7 +112,7 @@ export class RetrainDialog {
   /** Die aktuelle (ggf. schon umgeschulte) Sorte des offenen Slots. */
   private current(): SpecialKind {
     const cfg = this.cfg;
-    if (!cfg) return 'gold';
+    if (!cfg) return 'boss';
     const k: AbilityKind = abilityKind(cfg, this.tier, this.deps.state.crewRetrain);
     return k === 'power' ? cfg.special : k;
   }

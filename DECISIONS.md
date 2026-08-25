@@ -3,6 +3,83 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Progression: zwei neue VERBEN statt zweier neuer Währungen
+
+- **Der Vorwurf war berechtigt.** Ruhm → Himmel → Transzendenz brachte je Stufe
+  eine weitere Währung und einen weiteren Prozentwert. Man spielte oben genau
+  dasselbe Spiel wie unten, nur mit größeren Zahlen. Ein Buff verschiebt eine
+  Zahl; ein Verb verschiebt, WIE man spielt — gefehlt haben Verben.
+- **L2 „Setlist": eine Karte regiert den Lauf.** Ab der ersten Himmelfahrt wählt
+  man nach jeder Aszension eine von drei Karten, die Bühnenlänge, Klick/Crew-
+  Verhältnis, Gold und Boss-Beute verschiebt. „Kurzer Auftritt" macht Bühnen zu
+  Sprints, „Rampenfieber" macht Bosse zur Hauptbeute — man farmt anders, nicht
+  nur schneller.
+- **Jede Karte gibt UND nimmt.** Eine reine Verbesserung wäre keine Wahl, nur
+  eine Verzögerung des Klickens. Ein Test hält das für den ganzen Katalog fest,
+  ein zweiter die Spürbarkeit (Faktor ≥ 1.8 — eine Karte, die man nicht merkt,
+  ändert nichts).
+- **Das Angebot hängt an einem Seed im Spielstand, nicht an einem RNG-Zug.**
+  Sonst wäre das Wegklicken des Dialogs ein Reroll. Aus demselben Grund geht der
+  Dialog beim Start wieder auf, wenn beim Schließen noch keine Karte stand.
+- **Der Seed brauchte mehr als den Lebenszeit-Rekord.** Erste Fassung mischte
+  nur `rng.cursor` und `lifetimeMaxZone` — zwei Aszensionen hintereinander
+  lassen den Rekord aber oft unverändert, es hätten also zweimal dieselben drei
+  Karten dagestanden. Jetzt fließen Lauftiefe und Himmelfahrt-Zähler mit ein.
+- **L3 „Vorsprung": die Ära beginnt, wo man will.** Nach einer Transzendenz muss
+  man sich nicht durch längst gelöste Bühnen kriechen. Der Deckel wächst mit
+  `teLifetime` (5 Bühnen je Punkt) und liegt hart bei 60 % des eigenen Rekords —
+  ohne diesen Riegel startete ein alter Spielstand auf seinem Rekord, und es
+  gäbe nichts mehr zu spielen, nur noch zuzusehen.
+- **Die Klemme sitzt in der REGEL, nicht im Dialog.** `transcendState` stutzt den
+  Wunsch selbst zurecht. Ein gecrafteter Save kann damit nicht auf Bühne 900
+  starten — dieselbe Disziplin wie bei der Setlist, wo eine Karte außerhalb des
+  Angebots beim Laden herausfällt.
+- **Zwei Anzeige-Fehler erst im Screenshot gefunden:** Der Vorsprung-Wähler stand
+  unter einer fünfzehn Karten langen Crew-Liste (ohne Scrollen unsichtbar) und
+  trug Violett-Töne aus den dunklen Trans-Panels — auf dem hellen Pergament des
+  Dialogs praktisch unlesbar. Beides gehört zur Sorte Fehler, die kein Test
+  fängt.
+
+## Fähigkeiten als Eigen-Boosts + crew-weite Meilensteine
+
+- **Der Fehler, den der Umbau behebt.** Alle Sorten außer `power` schrieben in
+  einen GLOBALEN Topf (`crewSpecialBonuses`). Deshalb konnte ein reines
+  DPS-Mitglied „Klick-Krit" tragen, ohne dass es jemandem auffiel: Der Effekt
+  landete ohnehin beim Spieler, nicht bei ihm. Jetzt zahlt jede Stufe auf die
+  Linie ihres Trägers — und damit ergab die alte Verteilung sofort keinen Sinn
+  mehr.
+- **Zwei Hälften statt einem Topf.** Klick-Sorten (`crit`/`critdmg`/`beat`)
+  gehören dem Klick-Helden; sie wirken über die Klick-Pipeline, und die IST sein
+  Ausstoß. Eigen-Sorten (`boss`/`combo`/`ekstase`/`idle`) gehören den
+  DPS-Mitgliedern als bedingte Multiplikatoren auf die eigene Linie.
+  `allowedKinds(cfg)` ist die eine Stelle, die das entscheidet — auch für die
+  Umschulung und die Save-Reparatur.
+- **`gold` ist ersatzlos entfallen.** Ein BP-Multiplikator lässt sich nicht an
+  ein Mitglied binden; er ist per Definition global. Gold kommt weiterhin aus
+  Ahnen, Gebieten, Truhen und Himmel — Systeme, bei denen ein globaler Effekt
+  auch hingehört.
+- **Der Kontext wird gereicht, nicht geraten.** `FightCtx` (`boss`/`idle`/
+  `ekstase`/`combo`) kommt vom Aufrufer. Der leere Kontext ist die nüchterne
+  Grundrechnung — genau das, was die Anzeige zeigt. Der Kampf fragt `dpsNow()`
+  und cacht bewusst NICHT: Anders als Kauf-Entscheidungen ändert sich der
+  Kontext mehrmals pro Sekunde.
+- **Die Telemetrie hätte den Spieler sonst unterschätzt.** `burstEstimate`
+  bekommt den DPS als kontextfreien Parameter von dreißig Aufrufern. Statt sie
+  alle umzubauen, holt sich die Wand-Anzeige das VERHÄLTNIS beider
+  `totalRawDps`-Rechnungen und skaliert damit — ohne Rampenlicht-Stufen ist es
+  exakt 1 und alles rechnet zahlengleich wie vorher.
+- **Der Bot modelliert konservativ.** `boss` und `combo` kennt er exakt und
+  faltet sie; `ekstase` lässt er bewusst weg. Das unterschätzt einen echten
+  Spieler, statt ihn zu überschätzen — dieselbe Disziplin wie beim Retraining.
+  Ergebnis: Die Anker hielten OHNE Nachkalibrieren (t25 24.1 min, erste
+  Himmelfahrt 10.52 h), weil der Wegfall der globalen Töpfe und die bedingten
+  Eigen-Boosts sich gegenseitig ausgleichen.
+- **Alte Spielstände werden bereinigt, nicht stillgelegt.** `repairCrewRetrain`
+  wirft jede Sorte heraus, die das Mitglied nach der neuen Regel nicht tragen
+  kann („Krit" auf einem DPS-Mitglied, `gold` überall). Sie hätte keine Wirkung
+  mehr — eine tote Stufe im Save wäre schlimmer als der Rückfall auf die
+  Stock-Sorte.
+
 ## Crew-Meilensteine + Level-Soft-Cap (Goal „charaktere lassen sich zu weit upgraden")
 
 - **Meilensteine statt gleichmäßiger Kurve.** Der Ausstoß eines Mitglieds

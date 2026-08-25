@@ -3161,6 +3161,62 @@ body {
   color: #8b3fd0;
 }
 
+/* Der crew-weite Meilenstein steht ÜBER der Liste, nicht auf einer Karte: Er
+   gehört keinem Mitglied, sondern der Aufstellung. Ein Band in Crew-Gold, das
+   den aktuellen Faktor, den Weg zur nächsten Schwelle und die Zahl der noch
+   fehlenden Mitglieder trägt. */
+.crew-ms {
+  display: flex;
+  align-items: center;
+  /* Umbrechen statt abschneiden: Auf schmalen Panels passen Faktor, Balken und
+     Text nicht in eine Zeile — ohne wrap lief der Text rechts aus dem Band. */
+  flex-wrap: wrap;
+  gap: 4px 9px;
+  margin: 0 0 8px;
+  padding: 7px 11px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 207, 94, 0.28);
+  background: linear-gradient(180deg, rgba(255, 207, 94, 0.13), rgba(255, 207, 94, 0.05));
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  color: var(--parch-soft);
+}
+.crew-ms b {
+  flex: 0 0 auto;
+  color: #ffd76a;
+  font-size: 12.5px;
+}
+.crew-ms > span:last-child {
+  flex: 0 0 auto;
+  /* Kein opacity-Schleier: Auf dem goldenen Band war der Text mit 0.9 auf
+     --parch-soft praktisch unlesbar. Die Zeile trägt das Ziel — sie muss
+     gelesen werden können. */
+  color: var(--parch);
+}
+.crew-ms-bar {
+  /* Gedeckelt: Ohne max-width dehnte sich der Balken über die ganze Breite und
+     drückte das Ziel rechts aus dem Band. */
+  flex: 1 1 40px;
+  min-width: 30px;
+  max-width: 120px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 215, 106, 0.18);
+  overflow: hidden;
+}
+.crew-ms-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #ffb347, #ffd76a);
+}
+/* Am Ende der Leiter gibt es nichts mehr zu treiben — das Band wird ruhig. */
+.crew-ms.done {
+  border-color: rgba(255, 207, 94, 0.18);
+  background: rgba(255, 207, 94, 0.06);
+}
+
 /* Meilenstein-Zeile: der ×N-Blitz, ein schmaler Weg-Balken und das Ziel-Level.
    Sie steht über der Meisterschaft, weil sie die HÄUFIGERE Entscheidung trägt
    („noch 12 Level bis +100 %") — Meisterschaft läuft über Stunden, der nächste
@@ -3226,6 +3282,13 @@ body {
 .ab .ab-av {
   width: 100%;
   height: 100%;
+}
+/* Das eigene Fähigkeits-Icon füllt die Kachel — vorher saß hier ein Portrait
+   mit einem 15-px-Badge, und acht Kacheln einer Karte sahen gleich aus. */
+.ab-ic {
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 .ab-badge {
   position: absolute;
@@ -6391,4 +6454,116 @@ body {
   .sky-node {
     transition: none;
   }
+}
+
+/* ---- Setlist-Dialog (L2-Verb): drei Karten, eine Wahl ------------------- */
+/* Er hat bewusst KEINEN Abbrechen-Knopf: Eine Karte gehört zu jedem Lauf, und
+   ein Lauf ohne Karte wäre genau der alte, eintönige Zustand. */
+.dialog.sl {
+  max-width: 560px;
+}
+.sl-lead {
+  margin: 2px 0 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--parch-soft);
+}
+.sl-cards {
+  display: grid;
+  /* Drei nebeneinander, solange Platz ist — darunter untereinander, damit der
+     Text lesbar bleibt statt in Spalten zu zerbröseln. */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+.sl-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 14px 11px 13px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 207, 94, 0.3);
+  background: linear-gradient(180deg, rgba(255, 207, 94, 0.12), rgba(255, 207, 94, 0.04));
+  color: var(--parch);
+  cursor: pointer;
+  text-align: center;
+  transition:
+    transform 0.12s ease,
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+.sl-card:hover,
+.sl-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: #ffd76a;
+  background: linear-gradient(180deg, rgba(255, 207, 94, 0.2), rgba(255, 207, 94, 0.07));
+}
+.sl-art {
+  width: 42px;
+  height: 42px;
+  color: #ffd76a;
+}
+.sl-name {
+  font-size: 13.5px;
+  font-weight: 900;
+  letter-spacing: 0.2px;
+  color: #ffd76a;
+}
+.sl-text {
+  font-size: 11.5px;
+  line-height: 1.42;
+  color: var(--parch-soft);
+}
+
+/* ---- Vorsprung-Wähler (L3-Verb) in der Transzendenz-Zeremonie ----------- */
+/* Er steht NUR da, wenn es etwas zu überspringen gibt — ein Wähler mit einer
+   einzigen Option wäre eine leere Geste und würde die Zeremonie zustellen. */
+.vs {
+  margin: 10px 0 2px;
+  padding: 10px 11px 11px;
+  border-radius: 11px;
+  border: 1px solid rgba(108, 44, 168, 0.4);
+  background: rgba(176, 107, 255, 0.14);
+}
+.vs-head {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.2px;
+  /* Der Dialog steht auf PERGAMENT (hell) — die Violett-Töne der Trans-Panels
+     wären hier fast unsichtbar. Deshalb dunkles Violett statt des hellen. */
+  color: #5b2b8a;
+}
+.vs-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.vs-step {
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(108, 44, 168, 0.42);
+  background: rgba(255, 255, 255, 0.5);
+  color: #3d1c60;
+  font-size: 11.5px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.vs-step:hover {
+  border-color: #6c2ca8;
+  background: rgba(255, 255, 255, 0.75);
+}
+/* Die gewählte Stufe kehrt den Kontrast um — auf hellem Grund liest sich das
+   deutlicher als eine hellere Füllung. */
+.vs-step.on {
+  border-color: #4a2178;
+  background: #5b2b8a;
+  color: #f4ecff;
+}
+.vs-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--parch-ink);
+  opacity: 0.78;
 }

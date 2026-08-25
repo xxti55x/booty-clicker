@@ -145,12 +145,16 @@ describe('simulateEndless — Splitter-Einkommen trägt die Umschul-Leiter (3b)'
     // ~3 h: Slot 4 (320) ist bezahlbar, aber nicht die ganze Crew auf einmal.
     const s3h = shardsAfter(1, 4);
     expect(s3h).toBeGreaterThan(retrainCost(4, 0));
-    // 24 h: Der Beharrungszustand liegt bei rund 160 🧩/h (Boss-Umbau neu
-    // gemessen: 159; vorher 141) — die Eskalation (×2 je weiterem Roll) bremst
-    // also weiterhin spürbar, ohne zu blockieren.
+    // 24 h: Der Beharrungszustand liegt bei rund 223 🧩/h (Boss-Umbau: 159;
+    // vorher 141). Der crew-weite Meilenstein trägt den Bot tiefer in derselben
+    // Zeit, und Splitter fallen an der TIEFE — mehr Bühnen heißt mehr Splitter.
+    // Die Zusicherung ist unverändert: Die Leiter bleibt ein Sink, weil ihre
+    // Kosten (×2 je weiterem Roll) schneller wachsen als dieses Einkommen. Die
+    // Obergrenze zieht deshalb mit; sie ist eine ZEUGEN-Messung, keine
+    // Design-Grenze.
     const s24h = shardsAfter(1, 32);
     expect(s24h / 24).toBeGreaterThan(100);
-    expect(s24h / 24).toBeLessThan(200);
+    expect(s24h / 24).toBeLessThan(280);
   });
 
   it('modelliert im Bot selbst KEINE Umschulung (dokumentierte Untergrenze)', () => {

@@ -7,7 +7,9 @@ import {
   abilityTiersUnlocked,
   bulkCost,
   CREW,
-  crewSpecialBonuses,
+  CREW_MILESTONES,
+  crewMilestoneMult,
+  crewReachedFrac,
   DPS_MILESTONES,
   type HeroConfig,
   heroClick,
@@ -18,6 +20,7 @@ import {
   maxAffordable,
   milestoneMult,
   nextAbility,
+  nextCrewMilestone,
   nextLevelCost,
   nextMilestone,
   retrainSlotOrdinal,
@@ -29,8 +32,9 @@ import { ancientClickMult, ancientDpsMult } from '../game/ancients';
 import { clickGearMult, dpsGearMult } from '../game/gear';
 import { heavenGlobalMult, soulBonusEff } from '../game/heaven';
 import { fmt, fmtInt } from './format';
+import { abilityIcon } from './ability-icons';
 import { abilityBurst, coinFly } from './fx';
-import { portraitSvg, portraitTile, tierClass } from './avatars';
+import { portraitTile, tierClass } from './avatars';
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -46,21 +50,6 @@ function byId(id: string): HTMLElement {
 type BuyAmount = 1 | 10 | 100 | 'next' | 'max';
 
 /** Tiny inline glyph per ability kind (rendered ~14 px inside the slot). */
-const KIND_ICON: Record<AbilityKind, string> = {
-  power:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.4 13.9 10l6.7 2-6.7 2L12 20.6 10.1 14l-6.7-2 6.7-2Z" fill="currentColor"/></svg>',
-  gold: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm0 4.4a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2Z" fill="currentColor" fill-rule="evenodd"/></svg>',
-  crit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.4 2 5.8 13.2h4.4L9.4 22l7.8-11.2h-4.4L13.4 2Z" fill="currentColor"/></svg>',
-  critdmg:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M13.2 6 9 12.6h2.7l-.9 5.4 4.2-6.6h-2.7l.9-5.4Z" fill="currentColor"/></svg>',
-  boss: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.4 17.5h15.2l1.2-9.3-4.9 3.1L12 4.9 8.1 11.3 3.2 8.2l1.2 9.3Zm0 1.6h15.2v1.8H4.4v-1.8Z" fill="currentColor"/></svg>',
-  combo:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8.6" cy="12" r="4.8" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="15.4" cy="12" r="4.8" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>',
-  beat: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3.5v11.9a3.4 3.4 0 1 0 2 3.1V8.3c2.4.4 3.9 1.5 4.7 3.2.7-3.8-1.5-6.2-4.7-6.9V3.5h-2Z" fill="currentColor"/></svg>',
-  ekstase:
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.4c1 3.3 4.3 4.8 4.3 8.8a6.6 6.6 0 0 1-1.8 4.7c.2-2.3-.7-3.7-2.5-5-1.8 1.3-2.7 2.7-2.5 5a6.6 6.6 0 0 1-1.8-4.7c0-4 3.3-5.5 4.3-8.8Zm0 19.2a4.6 4.6 0 0 1-3.4-1.5c2.3.2 4.5.2 6.8 0A4.6 4.6 0 0 1 12 21.6Z" fill="currentColor"/></svg>',
-  idle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V11h3.6v9H4Zm6.2 0V4h3.6v16h-3.6Zm6.2 0V8H20v12h-3.6Z" fill="currentColor"/></svg>',
-};
 
 /**
  * Die Rahmenfarbe je Meisterschafts-Rang (1a): Kupfer → Silber → Gold →
@@ -135,11 +124,12 @@ const TOOL_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 3.6a5.4 5.4 0 0 0-5 8.9L4 18.2l1.8 1.8 5.7-5.7a5.4 5.4 0 0 0 7.4-6.6l-3 3-2.3-2.3 3-3a5.4 5.4 0 0 0-1.9-.8Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
 
 /** Portrait + Sorten-Badge einer Fähigkeits-Kachel (Power-Stufen flexen). */
-function slotArt(id: string, kind: AbilityKind, badge: string): string {
-  return (
-    portraitSvg(id, kind === 'power' ? 'power' : 'base', 'ab-av') +
-    `<span class="ab-badge">${badge}</span>`
-  );
+function slotArt(id: string, kind: AbilityKind): string {
+  // Vorher: das Portrait des Trägers plus ein 15-px-Sorten-Badge. Auf einer
+  // Karte mit acht Kacheln stand damit acht Mal dasselbe Gesicht, und der
+  // einzige Unterschied war kleiner als die Ziffer daneben. Jetzt trägt jede
+  // Kachel ihr eigenes Motiv (Sorte + Beizeichen des Trägers).
+  return abilityIcon(id, kind);
 }
 
 export interface CrewDeps {
@@ -205,6 +195,7 @@ export class Crew {
         <button class="amt" data-a="next" type="button" title="Bis zur nächsten Fähigkeit (Lv 25, 75, 125 …)">Fähigkeit</button>
         <button class="amt" data-a="max" type="button">Max</button>
       </div>
+      <div id="crewMs"></div>
       <div id="crewList"></div>`;
     for (const b of Array.from(this.body.querySelectorAll<HTMLButtonElement>('.amt'))) {
       b.addEventListener('click', () => {
@@ -313,6 +304,40 @@ export class Crew {
     return true;
   }
 
+  /**
+   * Die Kopfzeile des crew-weiten Meilensteins.
+   *
+   * Ohne sie wäre der Bonus unsichtbar: Er hängt an keinem einzelnen Mitglied,
+   * taucht also auf keiner Karte auf — und ein Faktor, den niemand sieht,
+   * steuert auch niemanden. Die Zeile nennt drei Dinge: was gerade anliegt
+   * (×N), welche Schwelle als Nächstes zählt und wie viele Mitglieder ihr noch
+   * fehlen.
+   */
+  private renderMilestoneHead(): void {
+    const s = this.deps.state;
+    const el = byId('crewMs');
+    const mult = crewMilestoneMult(s.crew);
+    const next = nextCrewMilestone(s.crew);
+    if (next === null) {
+      el.className = 'crew-ms done';
+      el.innerHTML =
+        `<b>Crew-Bonus ×${fmt(mult)}</b>` +
+        `<span>Die ganze Crew steht über Lv ${CREW_MILESTONES[CREW_MILESTONES.length - 1]} — mehr geht hier nicht.</span>`;
+      return;
+    }
+    const fehlen = CREW.filter((c) => (s.crew[c.id] ?? 0) < next).length;
+    const frac = crewReachedFrac(s.crew, next);
+    el.className = 'crew-ms';
+    el.title = `Sobald ALLE ${CREW.length} Mitglieder Lv ${next} erreicht haben, verdoppelt sich der Ausstoß der ganzen Crew. Aktuell fehlen ${fehlen}.`;
+    el.innerHTML =
+      `<b>Crew-Bonus ×${mult < 10 ? mult.toFixed(2) : fmt(mult)}</b>` +
+      `<span class="crew-ms-bar"><i style="width:${(frac * 100).toFixed(1)}%"></i></span>` +
+      // Kurz halten: Das Crew-Panel ist schmal, und der lange Satz („… dann ×2
+      // für ALLE") lief im Test rechts aus dem Band heraus und wurde
+      // abgeschnitten. Der Titel trägt die ausführliche Fassung.
+      `<span>noch ${fehlen} × Lv ${next}</span>`;
+  }
+
   /** Buy the next unlocked ability tier for a member (in order, BP-priced). */
   private buyAbility(cfg: HeroConfig): boolean {
     const s = this.deps.state;
@@ -335,6 +360,7 @@ export class Crew {
     }
     const list = byId('crewList');
     const s = this.deps.state;
+    this.renderMilestoneHead();
     const sm = soulMult(s.souls, soulBonusEff(s.heaven.hpf));
     const global = heavenGlobalMult(s.heaven.hpf);
     // keep the per-hero display in lockstep with dpsOf/clickDamageOf (§5)
@@ -342,8 +368,9 @@ export class Crew {
       sm *
       ancientDpsMult(s.ancients) *
       global *
-      dpsGearMult(s.gear) *
-      crewSpecialBonuses(s.crewUp, s.crewRetrain).idleMult;
+      // Der `idle`-Topf ist entfallen: „Groove" wirkt seit dem Eigen-Boost-Umbau
+      // nur noch auf seinen Träger und steckt in dessen eigener Zeile.
+      dpsGearMult(s.gear);
     const clickMult = sm * ancientClickMult(s.ancients) * global * clickGearMult(s.gear);
     const rows: string[] = [];
     CREW.forEach((cfg, i) => {
@@ -393,7 +420,7 @@ export class Crew {
           // rechts bleibt das „gekauft"-Signal.
           slots.push(
             `<span class="ab done ${tierClass(t)}" title="Fähigkeit ${t}: ${abilityKindLabel(k, outLabel)} — gekauft">` +
-              `${slotArt(cfg.id, k, KIND_ICON[k])}<span class="ab-lv">${t}</span>` +
+              `${slotArt(cfg.id, k)}<span class="ab-lv">${t}</span>` +
               `<span class="ab-check">${CHECK}</span>${rt}</span>`,
           );
         }
@@ -404,7 +431,7 @@ export class Crew {
             const can = ab.cost <= s.gold;
             slots.push(
               `<button class="ab ready k-${k} ${tierClass(ab.tier)} ${can ? '' : 'poor'}" data-ab="${cfg.id}" type="button"
-               title="Fähigkeit ${ab.tier}: ${abLabel} kaufen">${slotArt(cfg.id, k, KIND_ICON[k])}` +
+               title="Fähigkeit ${ab.tier}: ${abLabel} kaufen">${slotArt(cfg.id, k)}` +
                 `<span class="ab-lv">${ab.tier}</span></button>`,
             );
             slots.push(

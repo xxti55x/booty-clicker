@@ -1,0 +1,86 @@
+import { describe, expect, it } from 'vitest';
+
+import { CREW, type AbilityKind, allowedKinds } from '../game/heroes';
+import { abilityIcon, OWNER_MARK_IDS } from './ability-icons';
+
+const ALL_KINDS: AbilityKind[] = [
+  'power',
+  'crit',
+  'critdmg',
+  'beat',
+  'boss',
+  'combo',
+  'ekstase',
+  'idle',
+];
+
+/**
+ * Goal: „custom icons für jede fähigkeit des charakters".
+ *
+ * Vorher trug jede Fähigkeits-Kachel das PORTRAIT ihres Trägers plus ein
+ * 15-px-Sorten-Badge — auf einer Karte mit acht Kacheln also acht Mal dasselbe
+ * Gesicht. Diese Anker halten fest, dass jede Kombination aus Träger und Sorte
+ * jetzt wirklich ihr eigenes Bild hat.
+ */
+describe('Fähigkeits-Icons', () => {
+  it('liefert für JEDE Sorte ein Motiv (keine Lücke im Katalog)', () => {
+    for (const kind of ALL_KINDS) {
+      const svg = abilityIcon('boss', kind);
+      expect(svg).toContain('<svg');
+      expect(svg).toContain('</svg>');
+      // Ein Icon ohne Geometrie wäre ein leerer Rahmen.
+      expect(svg).toMatch(/<(path|circle|rect|ellipse)/);
+    }
+  });
+
+  it('gibt jedem Crew-Mitglied ein eigenes Beizeichen', () => {
+    for (const cfg of CREW) expect(OWNER_MARK_IDS).toContain(cfg.id);
+    // Und keine zwei Mitglieder teilen sich eines.
+    expect(new Set(OWNER_MARK_IDS).size).toBe(OWNER_MARK_IDS.length);
+  });
+
+  // Der eigentliche Punkt: Zwei Kacheln nebeneinander müssen VERSCHIEDEN
+  // aussehen — sowohl bei gleicher Sorte auf verschiedenen Trägern als auch bei
+  // verschiedenen Sorten auf demselben Träger.
+  it('macht jede Kombination aus Träger und Sorte unterscheidbar', () => {
+    const seen = new Map<string, string>();
+    for (const cfg of CREW) {
+      for (const kind of ALL_KINDS) {
+        const svg = abilityIcon(cfg.id, kind);
+        const wo = `${cfg.id}/${kind}`;
+        const schon = seen.get(svg);
+        expect(schon, `${wo} sieht aus wie ${schon}`).toBeUndefined();
+        seen.set(svg, wo);
+      }
+    }
+    expect(seen.size).toBe(CREW.length * ALL_KINDS.length);
+  });
+
+  it('färbt das Icon in der Palette seines Trägers', () => {
+    // Ohne Tönung erbte jedes Icon die Kachelfarbe — dann unterschieden sich
+    // die Kacheln zweier Mitglieder nur noch durch das winzige Beizeichen.
+    const farben = new Set(
+      CREW.map((c) => /style="color:([^"]+)"/.exec(abilityIcon(c.id, 'power'))?.[1]),
+    );
+    for (const f of farben) expect(f).toMatch(/^#[0-9a-fA-F]{3,8}$/);
+    // Nicht alle Mitglieder müssen eine eigene Farbe haben, aber die Crew darf
+    // nicht in einer einzigen Tönung verschwimmen.
+    expect(farben.size).toBeGreaterThanOrEqual(8);
+  });
+
+  it('bleibt bei einem unbekannten Träger heil (nur die Grundform)', () => {
+    const svg = abilityIcon('gibtsnicht', 'power');
+    expect(svg).toContain('<svg');
+    expect(svg).toMatch(/<path/);
+  });
+
+  it('deckt jede Sorte ab, die ein Mitglied überhaupt tragen kann', () => {
+    // Die Zuordnung Sorte→Mitgliedstyp ist die Quelle; das Icon-Modul darf
+    // dahinter keine Lücke haben, sonst zeigt eine gültige Fähigkeit nichts.
+    for (const cfg of CREW) {
+      for (const kind of allowedKinds(cfg)) {
+        expect(abilityIcon(cfg.id, kind)).toMatch(/<(path|circle|rect|ellipse)/);
+      }
+    }
+  });
+});

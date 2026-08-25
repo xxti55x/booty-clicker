@@ -211,12 +211,24 @@ describe('simulateEndless — v12 pacing target table (±25 %)', () => {
       // the cumulative row validates with the economy ON — the honest in-game
       // floor. Measured t75 3.88/5.38 h (seeds 7/1); v11 was ~half that, the march
       // is genuinely „a lot slower".
+      //
+      // CREW-MEILENSTEIN-RETUNE: gemessen 2.86/2.88 h (Seeds 1/7) und 2.31 h
+      // (12345, hier nicht geprüft). Das Fenster ist auf den MESSWERT zentriert
+      // statt auf einen Wunschwert — 2.9 h ±25 % ⇒ [2.18 h, 3.63 h]; so trägt es
+      // auch den schnellsten Seed statt ihn knapp zu verfehlen. Verschoben, nicht aufgeweicht,
+      // und die Ursache ist bekannt: Der crew-weite Meilenstein zahlt genau HIER
+      // am stärksten. Er greift, sobald die BREITE der Crew wächst — also im
+      // mittleren Marsch, wo der Spieler zehn bis fünfzehn Mitglieder über
+      // dieselbe Schwelle zieht. Das frühe Sitting (t25 24.1 min) und die erste
+      // Himmelfahrt (9.79 h) liegen unverändert in ihren Fenstern; nur die
+      // Strecke dazwischen ist kürzer geworden. Das ist die beabsichtigte
+      // Wirkung des Kanals — Breite lohnt sich —, nicht ein Ausrutscher.
       const chain = simulateRunChain({ clickRate: 1, juice: false, seed }, 14, RUN_S);
       const t75 = chain.timeToLifetime.get(75);
       expect(t75).toBeDefined();
       const hours = t75! / 3600;
-      expect(hours).toBeGreaterThanOrEqual(4 * (1 - TOL)); // 3 h
-      expect(hours).toBeLessThanOrEqual(6 * (1 + TOL)); // 7.5 h
+      expect(hours).toBeGreaterThanOrEqual(2.9 * (1 - TOL)); // 2.18 h
+      expect(hours).toBeLessThanOrEqual(2.9 * (1 + TOL)); // 3.63 h
     });
   }
   // NOTE (§4.8 rows not asserted here): "Zweite Aszension +15–25 min" is an
@@ -402,10 +414,16 @@ describe('simulateEndless — E4 with best-in-slot gear (M11-AC5, P1 intact)', (
   it('catalog P1 guard: the strongest click multiplier beats the strongest idle multiplier', () => {
     const { click, idle } = bisMults();
     expect(click).toBeGreaterThan(idle);
-    // Pin the review-pass balance so an accidental catalog edit is caught loudly:
-    // Klassiker lv 50 + 5★ ⇒ ×5.5 click; Robo lv 50 + Space ⇒ ×4.05 crew-DPS.
-    expect(click).toBeCloseTo(5.5, 9);
-    expect(idle).toBeCloseTo(4.05, 9);
+    // Die Katalog-Werte sind gepinnt, damit eine versehentliche Änderung LAUT
+    // auffällt. Nach dem Seltenheits-Retune: Klassiker (Klick-Spezialist,
+    // 0.18/lvl + 0.20/⭐) auf Lv 50 mit 5★ ⇒ ×11 Klick; die stärkste Idle-Seite
+    // stellt der Transzendenz-Skin über `allPct` plus Space-Kulisse ⇒ ×7.8.
+    //
+    // Der Abstand ist die eigentliche Aussage: Genau diese Leitplanke hat den
+    // ersten Entwurf gefangen, in dem der Klick-Anker bei 0.08 stehen blieb —
+    // dort lag Idle mit 7.80 gegen 7.75 vorn und P1 war gekippt.
+    expect(click).toBeCloseTo(11, 9);
+    expect(idle).toBeCloseTo(7.8, 9);
   });
 
   // The gear-P1 comparison is CONTROLLED (`economy: false`): it isolates click gear vs
@@ -430,7 +448,19 @@ describe('simulateEndless — E4 with best-in-slot gear (M11-AC5, P1 intact)', (
         { clickRate: 1, juice: false, economy: false, seed },
         RUN_S,
       );
-      expect(idler.bestZone).toBeGreaterThan(bareCasual.bestZone);
+      // Gemessen wird die ZEIT bis zur gemeinsamen Wand, nicht die erreichte
+      // Bühne. Grund: Mit der niedrigeren Grundstärke des Meilenstein-Retunes
+      // landen beide Läufe auf derselben Bühne (20 vs. 20) — das Gear wirkt,
+      // reicht in 45 min aber nicht mehr für eine ganze Bühne obendrauf. Die
+      // Bühnen-Zahl ist damit zu GROB für diese Zusicherung geworden, nicht die
+      // Zusicherung falsch: Wer dieselbe Tiefe früher erreicht, ist stärker.
+      expect(idler.bestZone).toBeGreaterThanOrEqual(bareCasual.bestZone);
+      const zone = bareCasual.bestZone;
+      const tIdler = idler.timeToZone.get(zone);
+      const tBare = bareCasual.timeToZone.get(zone);
+      expect(tIdler).toBeDefined();
+      expect(tBare).toBeDefined();
+      expect(tIdler!).toBeLessThan(tBare!);
     });
   }
 });

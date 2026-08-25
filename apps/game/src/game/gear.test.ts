@@ -20,7 +20,6 @@ import {
   DUP_SHARD_VALUE,
   dpsGearMult,
   emptyGearBonus,
-  frenzyChargeReduction,
   frenzyDurBonus,
   frenzyDurSecBonus,
   type GearState,
@@ -93,21 +92,23 @@ describe('gear — level/star access (sanitised, clamped)', () => {
 });
 
 describe('gear — gearBonus folds skin (level + star) + kulisse', () => {
-  it('classic level 10 + 2⭐ on Club: clickPct 1.0, comboWindow +0.1 s', () => {
+  it('classic level 10 + 2⭐ on Club: clickPct 2.2, comboWindow +0.1 s', () => {
     const b = gearBonus(gear('classic', 'club', 10, 2));
-    // buff +8 %/lvl · 10 = 0.8, star +10 %/⭐ · 2 = 0.2 ⇒ 1.0 (P1 rebalance)
-    expect(b.clickPct).toBeCloseTo(1.0, 9);
-    expect(clickGearMult(gear('classic', 'club', 10, 2))).toBeCloseTo(2.0, 9);
+    // Klick-Spezialist: +18 %/lvl · 10 = 1.8, +20 %/⭐ · 2 = 0.4 ⇒ 2.2.
+    expect(b.clickPct).toBeCloseTo(2.2, 9);
+    expect(clickGearMult(gear('classic', 'club', 10, 2))).toBeCloseTo(3.2, 9);
     // Club mini-buff: +0.1 s combo-window (an absolute stat, untouched by allPct).
     expect(b.comboWindow).toBeCloseTo(0.1, 9);
     expect(comboWindowBonus(gear('classic', 'club', 10, 2))).toBeCloseTo(0.1, 9);
     expect(activeSets(gear('classic', 'club', 10, 2))).toHaveLength(0);
   });
 
-  it('buff and star stats can differ (Disco: critChance buff, critMult star)', () => {
+  // Seit dem Seltenheits-Retune zahlen Buff und Stern eines Skins auf DIESELBE
+  // Achse — die Rarität sagt, wie stark, nicht mehr wofür. Der Disco-King ist
+  // die `rare`-Stufe der DPS-Leiter.
+  it('faltet Buff und Stern auf dieselbe Achse (Disco: DPS-Leiter, Stufe rare)', () => {
     const b = gearBonus(gear('disco', 'synth', 10, 3));
-    expect(b.critChance).toBeCloseTo(0.04, 9); // 0.4 %/lvl · 10
-    expect(b.critMult).toBeCloseTo(0.15, 9); // 5 %/⭐ · 3
+    expect(b.dpsPct).toBeCloseTo(0.05 * 10 + 0.06 * 3, 9); // 5 %/lvl · 10 + 6 %/⭐ · 3
     // Synth mini-buff: +10 ms beat-window.
     expect(b.beatWindow).toBeCloseTo(10, 9);
     expect(activeSets(gear('disco', 'synth', 10, 3))).toHaveLength(0); // Studio 54 needs Club
@@ -118,25 +119,32 @@ describe('gear — set detection (exact) & fold (≥ 2 sets)', () => {
   it('Studio 54 (Disco + Club): +10 % crit-mult stacks with the star', () => {
     const g = gear('disco', 'club', 10, 3);
     expect(activeSets(g).map((s) => s.id)).toEqual(['studio54']);
-    // star 5 %·3 = 0.15 + set 0.10 = 0.25
-    expect(critMultBonus(g)).toBeCloseTo(0.25, 9);
-    expect(critChanceBonus(g)).toBeCloseTo(0.04, 9);
+    // Der Disco-King trägt seit dem Seltenheits-Retune DPS statt Krit; der
+    // Krit-Multiplikator kommt hier nur noch aus dem SET (+10 %).
+    expect(critMultBonus(g)).toBeCloseTo(0.1, 9);
+    expect(critChanceBonus(g)).toBeCloseTo(0, 9);
+    expect(dpsGearMult(g)).toBeCloseTo(1 + 0.05 * 10 + 0.06 * 3, 9);
     expect(comboWindowBonus(g)).toBeCloseTo(0.1, 9); // Club mini-buff
   });
 
   it('Retrowelle (Neon-Ninja + Synth): beat-window folds buff + kulisse + set', () => {
     const g = gear('neon', 'synth', 4, 2);
     expect(activeSets(g).map((s) => s.id)).toEqual(['retrowelle']);
-    // buff 8 ms·4 = 32 + Synth 10 + set 20 = 62
-    expect(beatWindowBonus(g)).toBeCloseTo(62, 9);
-    expect(onBeatMultBonus(g)).toBeCloseTo(0.2, 9); // 0.1/⭐ · 2
+    // Der Neon-Ninja ist jetzt der Truhen-Spezialist; das Beat-Fenster kommt
+    // nur noch aus Kulisse (Synth 10) + Set (20).
+    expect(beatWindowBonus(g)).toBeCloseTo(30, 9);
+    expect(onBeatMultBonus(g)).toBeCloseTo(0, 9);
+    expect(chestLuckBonus(g)).toBeCloseTo(0.03 * 4 + 0.035 * 2, 9);
   });
 
   it('Endless Summer (Pfirsich-Pirat + Beach): offline-rate + offline-cap', () => {
     const g = gear('pirate', 'beach', 5, 2);
     expect(activeSets(g).map((s) => s.id)).toEqual(['endlessSummer']);
-    expect(keyDropBonus(g)).toBeCloseTo(0.3, 9); // buff 6 %·5
-    expect(goldGearMult(g)).toBeCloseTo(1.1, 9); // star 5 %·2
+    // Der Pfirsich-Pirat ist die `common`-Stufe der DPS-Leiter; Schlüssel und
+    // Gold trägt er nicht mehr.
+    expect(keyDropBonus(g)).toBeCloseTo(0, 9);
+    expect(goldGearMult(g)).toBeCloseTo(1, 9);
+    expect(dpsGearMult(g)).toBeCloseTo(1 + 0.03 * 5 + 0.04 * 2, 9);
     expect(offlineCapBonus(g)).toBeCloseTo(2 * 3600, 9); // Beach +2 h
     expect(offlineRateBonus(g)).toBeCloseTo(0.15, 9); // set 50 % → 65 %
   });
@@ -144,9 +152,12 @@ describe('gear — set detection (exact) & fold (≥ 2 sets)', () => {
   it('Void-Funk (Gyrator + Space): crew-DPS folds kulisse + set', () => {
     const g = gear('gyrator', 'space', 3, 1);
     expect(activeSets(g).map((s) => s.id)).toEqual(['voidFunk']);
-    expect(dpsGearMult(g)).toBeCloseTo(1.2, 9); // Space 5 % + set 15 %
-    expect(frenzyDurBonus(g)).toBeCloseTo(0.3, 9); // buff 10 %·3
-    expect(frenzyChargeReduction(g)).toBeCloseTo(0.08, 9); // star 8 %·1
+    // Der Gyrator ist der HIMMELS-Skin: allPct 5 %/lvl + 6 %/⭐ zahlt auf JEDE
+    // Prozent-Achse, also auch auf Crew-DPS — oben drauf Space 5 % + Set 15 %.
+    const alles = 0.05 * 3 + 0.06 * 1; // 0.21
+    expect(dpsGearMult(g)).toBeCloseTo(1.2 + alles, 9);
+    expect(clickGearMult(g)).toBeCloseTo(1 + alles, 9);
+    expect(frenzyDurBonus(g)).toBeCloseTo(alles, 9);
   });
 
   it('Krönung (Tyrann + ANY kulisse): +10 % boss-dmg regardless of background', () => {
@@ -154,10 +165,12 @@ describe('gear — set detection (exact) & fold (≥ 2 sets)', () => {
     const space = gear('boss', 'space', 5, 4);
     expect(activeSets(club).map((s) => s.id)).toEqual(['kronung']);
     expect(activeSets(space).map((s) => s.id)).toEqual(['kronung']);
-    // buff 12 %·5 = 0.60 + set 0.10 = 0.70
-    expect(bossDmgMult(club)).toBeCloseTo(1.7, 9);
-    expect(bossDmgMult(space)).toBeCloseTo(1.7, 9);
-    expect(chestLuckBonus(club)).toBeCloseTo(0.08, 9); // star 2 %·4
+    // Der Tyrann ist der BOSS-Spezialist: 18 %/lvl · 5 + 20 %/⭐ · 4 = 1.70,
+    // plus Set 0.10.
+    expect(bossDmgMult(club)).toBeCloseTo(1 + 0.18 * 5 + 0.2 * 4 + 0.1, 9);
+    expect(bossDmgMult(space)).toBeCloseTo(bossDmgMult(club), 9);
+    // Truhenglück trägt jetzt der Neon-Ninja, nicht mehr der Tyrann.
+    expect(chestLuckBonus(club)).toBeCloseTo(0, 9);
   });
 
   it('a non-matching combo yields no set', () => {
@@ -171,17 +184,19 @@ describe('gear — Diamant-Booty "+X % ALLES"', () => {
   it('applies to every percentage stat but not to absolute stats', () => {
     const g = gear('diamond', 'club', 5, 2);
     const b = gearBonus(g);
-    // allPct = 2 %·5 + 3 %·2 = 0.10 + 0.06 = 0.16
-    expect(b.allPct).toBeCloseTo(0.16, 9);
+    // Der Transzendenz-Skin ist bewusst der stärkste im Spiel:
+    // allPct = 12 %·5 + 15 %·2 = 0.60 + 0.30 = 0.90 auf JEDER Prozent-Achse.
+    const alles = 0.12 * 5 + 0.15 * 2;
+    expect(b.allPct).toBeCloseTo(alles, 9);
     for (const s of PERCENT_STATS) {
-      expect(b[s]).toBeCloseTo(0.16, 9);
+      expect(b[s]).toBeCloseTo(alles, 9);
     }
-    expect(clickGearMult(g)).toBeCloseTo(1.16, 9);
-    expect(dpsGearMult(g)).toBeCloseTo(1.16, 9);
-    expect(goldGearMult(g)).toBeCloseTo(1.16, 9);
-    expect(bossDmgMult(g)).toBeCloseTo(1.16, 9);
-    expect(critChanceBonus(g)).toBeCloseTo(0.16, 9);
-    expect(critMultBonus(g)).toBeCloseTo(0.16, 9);
+    expect(clickGearMult(g)).toBeCloseTo(1 + alles, 9);
+    expect(dpsGearMult(g)).toBeCloseTo(1 + alles, 9);
+    expect(goldGearMult(g)).toBeCloseTo(1 + alles, 9);
+    expect(bossDmgMult(g)).toBeCloseTo(1 + alles, 9);
+    expect(critChanceBonus(g)).toBeCloseTo(alles, 9);
+    expect(critMultBonus(g)).toBeCloseTo(alles, 9);
     // Absolute stats: Club gives +0.1 s combo-window, everything else stays 0.
     expect(comboWindowBonus(g)).toBeCloseTo(0.1, 9);
     expect(beatWindowBonus(g)).toBe(0);

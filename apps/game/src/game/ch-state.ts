@@ -9,6 +9,8 @@
 import { type AbilityState, createAbility } from './ability';
 import { applyAscension, soulMult } from './ascension';
 import { BOSS_EVERY } from './combat';
+import { setlistEffect } from './setlist';
+import { vorsprungStartZone } from './vorsprung';
 import {
   type AncientLevels,
   ancientChestLuckBonus,
@@ -68,7 +70,8 @@ import {
   clickDamageRaw,
   createCrew,
   createCrewUps,
-  crewSpecialBonuses,
+  type FightCtx,
+  NO_CTX,
   totalRawDps,
 } from './heroes';
 import { type CrewMastery, createMastery } from './mastery';
@@ -359,6 +362,19 @@ export interface ChState {
    * Von keinem der drei Resets angefasst, auch nicht vom tiefsten.
    */
   legend: number;
+  /**
+   * **Setlist (L2-Verb).** Die Karte, die den AKTUELLEN Lauf regiert, und der
+   * Seed, aus dem ihr Angebot folgt.
+   *
+   * `card` ist `''`, solange keine gewählt ist — dann rechnet alles exakt wie
+   * vor diesem System. `seed` überlebt einen Reload, damit das Wegklicken des
+   * Auswahl-Dialogs kein Reroll ist: Wer die App schließt, findet dieselben
+   * drei Karten vor.
+   *
+   * Beides gehört zum LAUF und fällt mit ihm: Eine Aszension zieht eine neue
+   * Karte, eine Himmelfahrt ebenso.
+   */
+  setlist: { card: string; seed: number };
 }
 
 /** A brand-new run/profile. */
@@ -403,6 +419,7 @@ export function createChState(): ChState {
     skinPath: createSkinPath(),
     heir: '',
     legend: 0,
+    setlist: { card: '', seed: 0 },
   };
 }
 
@@ -493,7 +510,7 @@ export function skinPathOf(state: { gear?: GearState; skinPath?: SkinPath }): Ge
  * Faktor hier, sondern PRO MITGLIED in `totalRawDps` — er ist per Definition
  * kein globaler Term, sondern gehört genau dem Mitglied, das ihn erspielt hat.
  */
-export function dpsOf(state: DerivedInput): number {
+export function dpsOf(state: DerivedInput, ctx: FightCtx = NO_CTX): number {
   const hpf = state.heaven.hpf;
   return (
     totalRawDps(
@@ -502,6 +519,11 @@ export function dpsOf(state: DerivedInput): number {
       state.crewUp ?? {},
       state.crewMastery ?? {},
       state.heir ?? '',
+      state.crewRetrain ?? {},
+      // Der Kampf-Kontext entscheidet, welche Eigen-Fähigkeiten gerade zünden
+      // („gegen Bosse", „im Leerlauf", …). Ohne ihn ist das die nüchterne
+      // Grundrechnung — genau das, was die Anzeige zeigen soll.
+      ctx,
     ) *
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientDpsMult(state.ancients) *
@@ -512,10 +534,9 @@ export function dpsOf(state: DerivedInput): number {
     (state.transcend ? transcendGlobalMult(state.transcend.te) : 1) *
     (state.gear ? dpsGearMult(state.gear) : 1) *
     (state.permTokens ? permTokenDpsMult(state.permTokens) : 1) *
-    // v11.1 `idle`-Special („Groove"): hebt wie das Idle-Gear NUR die DPS-Seite.
-    // 3b: mit der Umschul-Map, damit ein auf `idle` gerollter Slot hier exakt so
-    // zählt wie ein von Haus aus `idle`-Mitglied.
-    (state.crewUp ? crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).idleMult : 1) *
+    // `idle` („Groove") ist KEIN globaler Faktor mehr: Seit dem Eigen-Boost-Umbau
+    // hebt die Stufe nur die Linie ihres Trägers und steckt oben in
+    // `totalRawDps`, wo der Kontext sie auswertet.
     // 2a: die Ausdauer-Knoten der Legenden-Konstellation (+2 %/Knoten, ×1 ohne
     // Baum). Wie der Meisterschafts-Perk bewusst NUR auf der Idle-Seite — die
     // Konstellation hat für den Klick ihre eigenen Knoten (P1 bleibt unberührt).
@@ -585,6 +606,8 @@ export function goldMult(
     permTokens?: PermTokens;
     crewUp?: CrewUps;
     crewRetrain?: CrewRetrain;
+    /** Die Setlist-Karte des Laufs (L2) — fehlend ⇒ neutral. */
+    setlist?: { card: string; seed: number };
     heaven?: HeavenState;
     constellation?: ConstellationState;
     relics?: RelicsState;
@@ -596,7 +619,11 @@ export function goldMult(
     ancientGoldMult(state.ancients) *
     goldGearMult(state.gear) *
     (state.permTokens ? permTokenGoldMult(state.permTokens) : 1) *
-    (state.crewUp ? crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).goldMult : 1) *
+    // `gold` ist als Fähigkeits-Sorte entfallen — ein BP-Multiplikator lässt
+    // sich nicht an ein Mitglied binden. Gold kommt aus Ahnen, Gebieten,
+    // Truhen und Himmel.
+    // L2-Setlist: „Kollekte" füllt die Kasse, „Kurzer Auftritt" leert sie.
+    setlistEffect(state.setlist?.card).gold *
     (state.heaven ? goldeneHandeMult(state.heaven) : 1) *
     // 2a: „Anfängerglück" + „Tantiemen" der Konstellation (+2 %/Knoten, ×1 ohne Baum).
     (state.constellation ? constellationGoldMult(state.constellation) : 1) *
@@ -745,6 +772,27 @@ export function gearUnlockCtx(
  * spent. Ancients, gilds, the L2 heaven state and all lifetime meta persist; only
  * the L1 run itself resets. `rsLifetime` is the never-shrinking earned highwater.
  */
+/**
+ * Der Seed des nächsten Setlist-Angebots.
+ *
+ * Aus dem RNG-Cursor und der bisherigen Tiefe gemischt: Er muss sich je
+ * Aszension ÄNDERN (sonst stünden immer dieselben drei Karten zur Wahl) und
+ * einen Reload ÜBERLEBEN (sonst wäre das Wegklicken des Dialogs ein Reroll).
+ * Beide Zutaten sind bereits Teil des Spielstands, es braucht also kein neues
+ * persistiertes Feld.
+ */
+function nextSetlistSeed(state: ChState): number {
+  const cursor = Math.abs(Math.floor(state.rng?.cursor ?? 0));
+  // Die Tiefe des GERADE BEENDETEN Laufs gehört mit hinein, nicht nur der
+  // Lebenszeit-Rekord: Zwei Aszensionen hintereinander lassen den Rekord oft
+  // unverändert, und ohne `runMaxZone` stünden dann zweimal dieselben drei
+  // Karten zur Wahl — der Zufall wäre tot, ohne dass es jemand merkt.
+  const run = Math.abs(Math.floor(state.runMaxZone ?? 0));
+  const depth = Math.abs(Math.floor(state.lifetimeMaxZone ?? 0));
+  const asc = Math.abs(Math.floor(state.heaven?.ascensions2 ?? 0));
+  return ((cursor * 31 + run * 13 + depth * 7 + asc * 101 + 1) % 2147483646) + 1;
+}
+
 export function ascendState(state: ChState): ChState {
   const { souls, lifetimeMaxZone, rsLifetime } = applyAscension(
     state.runMaxZone,
@@ -757,6 +805,10 @@ export function ascendState(state: ChState): ChState {
     souls,
     lifetimeMaxZone,
     rsLifetime,
+    // Die Setlist gehört zum LAUF: Die alte Karte fällt mit ihm, und ein neues
+    // Angebot wird gezogen. Der Seed kommt aus dem persistierten RNG-Strom,
+    // damit er einen Reload überlebt (sonst wäre Wegklicken ein Reroll).
+    setlist: { card: '', seed: nextSetlistSeed(state) },
     totalClicks: state.totalClicks,
     rng: state.rng,
     stats: state.stats,
@@ -878,10 +930,20 @@ export function himmelfahrtState(state: ChState): ChState {
  * MUST gate the button on `canTranscend(state.transcend, state.heaven.hpfLifetime)`
  * so the reset is never triggered without a real gain.
  */
-export function transcendState(state: ChState, heir = ''): ChState {
+export function transcendState(state: ChState, heir = '', startZone = 1): ChState {
   const transcend = bankTranscendence(state.transcend, state.heaven.hpfLifetime);
+  // L3-Verb „Vorsprung": Die neue Ära muss sich nicht durch Bühnen kriechen,
+  // die längst gelöst sind. Der Wunsch kommt vom Aufrufer, die GRENZE aus der
+  // Regel — der Deckel liegt bewusst hier und nicht im Dialog, damit ein
+  // gecrafteter Save nicht auf Bühne 900 startet. `zoneEver` ist der Rekord,
+  // der jeden Reset überlebt (`lifetimeMaxZone` fällt gleich auf 1).
+  const rekord = Math.max(state.gear.zoneEver, state.lifetimeMaxZone, state.runMaxZone);
+  const start = vorsprungStartZone(startZone, transcend.teLifetime, rekord);
   return {
     ...createChState(), // fresh L1 tour + fresh L2 heaven (createHeaven())
+    zone: start,
+    runMaxZone: start,
+    lifetimeMaxZone: start,
     transcend, // the banked L3 slice survives (held TE + Mythos ledger carry over)
     gilds: state.gilds, // Vergoldungen survive every reset
     crewMastery: state.crewMastery, // Einsatz-XP überleben auch den tiefsten Reset (1a)
