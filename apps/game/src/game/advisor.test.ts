@@ -48,10 +48,14 @@ describe('advisor — burstEstimate (P3)', () => {
   it('faltet den Boss-Schadens-Stack (Glutaeus + boss-Specials) ein', () => {
     const plain = stateWith();
     const glut = stateWith({ ancients: { glutaeus: 4 } });
-    // bouncer (Rhythmus 0): Stufe 2 ist ein `boss`-Special ⇒ +25 % Boss-Schaden.
-    const spec = stateWith({ crew: { bouncer: 80 }, crewUp: { bouncer: 2 } });
     expect(burstEstimate(glut, 100, 10)).toBeGreaterThan(burstEstimate(plain, 100, 10));
-    expect(burstEstimate(spec, 100, 10)).toBeCloseTo(burstEstimate(plain, 100, 10) * 1.25, 6);
+    // bouncer (Rhythmus 0, Stock `boss`): Stufe 2 ist „Rampenlicht". Seit dem
+    // Eigen-Boost-Umbau hebt sie nicht mehr den Boss-Schaden der ganzen Crew,
+    // sondern die EIGENE Linie ihres Trägers — die Telemetrie muss das trotzdem
+    // sehen, sonst unterschätzt sie den Spieler an der Wand.
+    const spec = stateWith({ crew: { bouncer: 80 }, crewUp: { bouncer: 2 } });
+    const specNoTier = stateWith({ crew: { bouncer: 80 }, crewUp: {} });
+    expect(burstEstimate(spec, 100, 10)).toBeGreaterThan(burstEstimate(specNoTier, 100, 10));
   });
 
   // ROADMAP-V2 P2: Spiel-Pfad (`applyHit`) und Telemetrie teilen den Boss-Stack —
@@ -212,12 +216,18 @@ describe('advisor — liest die Umschulung mit (3b)', () => {
     // Booty-Boss (Rhythmus P S P S, Stock `critdmg`) mit vier gekauften Stufen.
     const stock = stateWith({ crewUp: { boss: 4 } });
     const rolled = stateWith({ crewUp: { boss: 4 }, crewRetrain: { boss: { '2': 'boss' } } });
-    // Ein `boss`-Special ist +25 % Boss-Schaden — genau das muss die Wand-Telemetrie
-    // sehen, sonst unterschätzt sie den Spieler nach seiner Umschulung systematisch.
-    expect(burstEstimate(rolled, 100, 40)).toBeCloseTo(burstEstimate(stock, 100, 40) * 1.25, 6);
-    // Gegenprobe: eine Sorte ohne Boss-Bezug lässt den Burst unverändert.
-    const idle = stateWith({ crewUp: { boss: 4 }, crewRetrain: { boss: { '2': 'idle' } } });
-    expect(burstEstimate(idle, 100, 40)).toBeCloseTo(burstEstimate(stock, 100, 40), 6);
+    // Der Klick-Held trägt KLICK-Sorten; „boss" darf er gar nicht rollen, die
+    // Umschul-Map wird für ihn verworfen. Der Burst bleibt darum unverändert —
+    // das ist die Leitplanke, nicht ein fehlender Effekt.
+    expect(burstEstimate(rolled, 100, 40)).toBeCloseTo(burstEstimate(stock, 100, 40), 6);
+    // An einem DPS-Mitglied dagegen wirkt „Rampenlicht" sehr wohl.
+    const dpsStock = stateWith({ crew: { producer: 200 }, crewUp: { producer: 2 } });
+    const dpsRolled = stateWith({
+      crew: { producer: 200 },
+      crewUp: { producer: 2 },
+      crewRetrain: { producer: { '2': 'boss' } },
+    });
+    expect(burstEstimate(dpsRolled, 100, 40)).toBeGreaterThan(burstEstimate(dpsStock, 100, 40));
   });
 
   it('benennt im Kauf-Tipp die Sorte, die WIRKLICH kommt', () => {
@@ -241,11 +251,12 @@ describe('advisor — liest die Umschulung mit (3b)', () => {
       gold: 1e12,
       crew,
       crewUp: ups,
-      crewRetrain: { boss: { '2': 'gold' } },
+      crewRetrain: { boss: { '2': 'crit' } },
     });
     const after = bestPurchaseHint(rolled);
     expect(after!.id).toBe('boss');
     expect(after!.cost).toBe(hint!.cost); // derselbe Kauf, nur anders beschriftet
-    expect(after!.label).toContain('BP');
+    // Umgeschult auf `crit` — der Tipp nennt die Sorte, die WIRKLICH kommt.
+    expect(after!.label).toContain('Krit-Chance');
   });
 });

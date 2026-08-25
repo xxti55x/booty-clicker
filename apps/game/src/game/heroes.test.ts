@@ -4,19 +4,19 @@ import {
   ABILITY_COST_MULT,
   DPS_TUNE,
   SPECIAL_BEAT_CAP_MS,
-  SPECIAL_BOSS,
-  SPECIAL_COMBO_CAP_S,
   SPECIAL_CRIT_CHANCE,
   SPECIAL_CRIT_DMG,
-  SPECIAL_GOLD,
-  SPECIAL_IDLE,
   abilityCost,
   abilityKind,
   abilityKindLabel,
   abilityLevel,
   abilityMult,
   ABILITY_FIRST_LEVEL,
+  allowedKinds,
+  CLICK_KINDS,
   crewMilestoneMult,
+  isClickKind,
+  OWN_KINDS,
   CREW_MILESTONES,
   nextCrewMilestone,
   MAX_ABILITY_TIERS,
@@ -131,9 +131,9 @@ describe('heroes — kaufbare Fähigkeiten (buyable abilities)', () => {
   it('abilityKind follows the member rhythm; tier 1 is ALWAYS power (v11.1)', () => {
     expect(abilityKind(hype, 1)).toBe('power');
     expect(abilityKind(hype, 2)).toBe('power'); // Kraft-Rush
-    expect(abilityKind(hype, 3)).toBe('combo'); // Hype-Girl keeps the crowd going
+    expect(abilityKind(hype, 3)).toBe('combo'); // Hype-Girl treibt die Combo
     expect(abilityKind(boss, 2)).toBe('critdmg');
-    expect(abilityKind(CREW[2], 2)).toBe('beat'); // DJ (Klammer): P S S P
+    expect(abilityKind(CREW[2], 2)).toBe('idle'); // DJ (Klammer): P S S P
     expect(abilityKind(CREW[2], 4)).toBe('power');
     expect(abilityKind(CREW[2], 5)).toBe('power'); // Zyklus 2 beginnt wieder mit P
     // Every member declares a themed special, starts with power, and every
@@ -143,30 +143,53 @@ describe('heroes — kaufbare Fähigkeiten (buyable abilities)', () => {
       expect(abilityKind(cfg, 1)).toBe('power');
       expect(abilityKindLabel(cfg.special, 'DPS').length).toBeGreaterThan(3);
     }
-    expect(CREW.filter((c) => c.special === 'idle').length).toBe(2); // Produzent + KI-Cluster
+    // Die vier Eigen-Sorten sind über die vierzehn DPS-Mitglieder verteilt, und
+    // jede kommt mehrfach vor — sonst hinge ein ganzer Spielstil an einem
+    // einzigen Mitglied.
+    for (const k of OWN_KINDS) {
+      expect(CREW.filter((c) => c.special === k).length).toBeGreaterThanOrEqual(3);
+    }
+    // Die Klick-Sorten trägt genau EIN Mitglied: der Klick-Held.
+    expect(CREW.filter((c) => isClickKind(c.special)).length).toBe(1);
+    expect(CREW.find((c) => isClickKind(c.special))!.click).toBe(true);
   });
 
-  it('crewSpecialBonuses aggregates bought special tiers per theme, with caps', () => {
+  // Nach dem Eigen-Boost-Umbau sammelt `crewSpecialBonuses` NUR noch die Sorten
+  // des Klick-Helden: Krit-Chance, Krit-Schaden und Beat-Fenster wirken über die
+  // Klick-Pipeline, und die ist der Ausstoß genau eines Mitglieds. Alles andere
+  // hängt an seinem Träger (`heroOwnSpecialMult`).
+  it('sammelt NUR die Klick-Sorten — und nur vom Klick-Helden', () => {
     const none = crewSpecialBonuses({});
-    expect(none.goldMult).toBe(1);
     expect(none.critChance).toBe(0);
-    expect(none.bossMult).toBe(1);
-    expect(none.idleMult).toBe(1);
-    // 4 bought tiers on the Insta-Influencerin (gold, Rhythmus P P S S) = 2 specials.
-    const gold = crewSpecialBonuses({ influencer: 4 });
-    expect(gold.goldMult).toBeCloseTo(1 + 2 * SPECIAL_GOLD, 9);
-    // Türsteher (boss) + Choreograph (crit) + Booty-Boss (critdmg) mix cleanly.
-    const mix = crewSpecialBonuses({ bouncer: 2, choreo: 2, boss: 6 });
-    expect(mix.bossMult).toBeCloseTo(1 + SPECIAL_BOSS, 9);
-    expect(mix.critChance).toBeCloseTo(SPECIAL_CRIT_CHANCE, 9);
-    expect(mix.critDmg).toBeCloseTo(3 * SPECIAL_CRIT_DMG, 9);
-    // v11.1 `idle` (Groove): Produzent (Rhythmus P S P S) mit 4 Tiers = 2 specials.
-    const groove = crewSpecialBonuses({ producer: 4 });
-    expect(groove.idleMult).toBeCloseTo(1 + 2 * SPECIAL_IDLE, 9);
-    // Window caps: a silly-deep combo/beat stack clamps at the cap.
-    const deep = crewSpecialBonuses({ hype: 200, dj: 200 });
-    expect(deep.comboWindowS).toBe(SPECIAL_COMBO_CAP_S);
+    expect(none.critDmg).toBe(0);
+    expect(none.beatWindowMs).toBe(0);
+    // Booty-Boss (Rhythmus P S P S, Stock-Sorte critdmg): 6 Stufen ⇒ 3 Specials.
+    const boss6 = crewSpecialBonuses({ boss: 6 });
+    expect(boss6.critDmg).toBeCloseTo(3 * SPECIAL_CRIT_DMG, 9);
+    // Ein reines DPS-Mitglied speist diesen Topf NICHT — egal wie viel gekauft
+    // ist. Genau das war der gemeldete Unsinn: „Krit" auf einem DPS-Mitglied.
+    const dpsOnly = crewSpecialBonuses({ bouncer: 8, choreo: 8, producer: 8, hype: 8 });
+    expect(dpsOnly.critChance).toBe(0);
+    expect(dpsOnly.critDmg).toBe(0);
+    expect(dpsOnly.beatWindowMs).toBe(0);
+    // Das Beat-Fenster bleibt gedeckelt (der Takt muss eine Prüfung bleiben).
+    const deep = crewSpecialBonuses(
+      { boss: 400 },
+      { boss: Object.fromEntries(Array.from({ length: 400 }, (_, i) => [i + 1, 'beat'])) },
+    );
     expect(deep.beatWindowMs).toBe(SPECIAL_BEAT_CAP_MS);
+  });
+
+  it('bindet jede Sorte an ihren Mitgliedstyp', () => {
+    for (const cfg of CREW) {
+      const allowed = allowedKinds(cfg);
+      // Die Stock-Sorte eines Mitglieds ist immer eine, die es tragen DARF.
+      expect(allowed).toContain(cfg.special);
+      // Klick-Sorten gehören dem Klick-Helden, Eigen-Sorten den DPS-Mitgliedern.
+      for (const k of allowed) expect(isClickKind(k)).toBe(cfg.click === true);
+    }
+    // Und beide Mengen sind disjunkt — keine Sorte gehört beiden.
+    for (const k of CLICK_KINDS) expect(OWN_KINDS).not.toContain(k);
   });
 
   it('ability price = level-cost at the unlock level × ABILITY_COST_MULT', () => {
@@ -388,12 +411,12 @@ describe('heroes — Crew-Umschulung: die EINE Lesekette (IDEEN-GAMEPLAY 3b)', (
   });
 
   it('lässt POWER-Stufen unantastbar — der Rhythmus rollt nie mit', () => {
-    const map = { boss: { '1': 'gold' as const, '3': 'idle' as const } };
+    const map = { boss: { '1': 'crit' as const, '3': 'beat' as const } };
     expect(abilityKind(boss, 1, map)).toBe('power');
     expect(abilityKind(boss, 3, map)).toBe('power');
     // Jedes Muster behält seine 2 P + 2 S je Zyklus, egal was die Map behauptet.
     for (const cfg of CREW) {
-      const all = { [cfg.id]: { '1': 'gold', '2': 'gold', '3': 'gold', '4': 'gold' } } as never;
+      const all = { [cfg.id]: { '1': 'boss', '2': 'boss', '3': 'boss', '4': 'boss' } } as never;
       const power = [1, 2, 3, 4].filter((t) => abilityKind(cfg, t, all) === 'power').length;
       expect(power).toBe(powerTiers(cfg, 4));
     }
@@ -426,14 +449,14 @@ describe('heroes — Crew-Umschulung: die EINE Lesekette (IDEEN-GAMEPLAY 3b)', (
     // Booty-Boss, 6 Stufen ⇒ 3 Specials (Stufen 2/4/6), Stock alle `critdmg`.
     const stock = crewSpecialBonuses({ boss: 6 });
     expect(stock.critDmg).toBeCloseTo(3 * SPECIAL_CRIT_DMG, 9);
-    expect(stock.idleMult).toBe(1);
-    // Zwei davon auf `idle` umgeschult: 1 × critdmg + 2 × idle, Summe unverändert 3.
-    const rolled = crewSpecialBonuses({ boss: 6 }, { boss: { '2': 'idle', '6': 'idle' } });
+    expect(stock.critChance).toBe(0);
+    // Zwei davon auf `crit` umgeschult: 1 × critdmg + 2 × crit, Summe bleibt 3.
+    const rolled = crewSpecialBonuses({ boss: 6 }, { boss: { '2': 'crit', '6': 'crit' } });
     expect(rolled.critDmg).toBeCloseTo(SPECIAL_CRIT_DMG, 9);
-    expect(rolled.idleMult).toBeCloseTo(1 + 2 * SPECIAL_IDLE, 9);
+    expect(rolled.critChance).toBeCloseTo(2 * SPECIAL_CRIT_CHANCE, 9);
     // Ein Override auf einem NOCH NICHT gekauften Slot zahlt nichts (er ist nicht da).
-    const unbought = crewSpecialBonuses({ boss: 2 }, { boss: { '4': 'gold' } });
-    expect(unbought.goldMult).toBe(1);
+    const unbought = crewSpecialBonuses({ boss: 2 }, { boss: { '4': 'crit' } });
+    expect(unbought.critChance).toBe(0);
     expect(unbought.critDmg).toBeCloseTo(SPECIAL_CRIT_DMG, 9);
   });
 
@@ -447,12 +470,20 @@ describe('heroes — Crew-Umschulung: die EINE Lesekette (IDEEN-GAMEPLAY 3b)', (
   it('respektiert die Fenster-Deckel auch für umgeschulte Sorten', () => {
     // Ein tiefer Stapel auf `beat` umgeschult läuft in denselben Deckel wie ein
     // von Haus aus beat-lastiger Save — die Umschulung öffnet keine Hintertür.
+    // Geprüft am KLICK-Helden: Seit dem Eigen-Boost-Umbau ist er der Einzige,
+    // der diesen Topf überhaupt speist.
     const deep = crewSpecialBonuses(
+      { boss: 200 },
+      { boss: Object.fromEntries(Array.from({ length: 200 }, (_, i) => [i + 1, 'beat'])) },
+    );
+    expect(deep.beatWindowMs).toBe(SPECIAL_BEAT_CAP_MS);
+    // Dieselbe Umschulung auf einem DPS-Mitglied zahlt hier GAR NICHTS — seine
+    // Stufen gehören seiner eigenen Linie.
+    const dps = crewSpecialBonuses(
       { influencer: 200 },
       { influencer: Object.fromEntries(Array.from({ length: 200 }, (_, i) => [i + 1, 'beat'])) },
     );
-    expect(deep.beatWindowMs).toBe(SPECIAL_BEAT_CAP_MS);
-    expect(deep.goldMult).toBe(1);
+    expect(dps.beatWindowMs).toBe(0);
   });
 });
 

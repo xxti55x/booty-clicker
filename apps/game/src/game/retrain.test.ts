@@ -15,13 +15,20 @@ import {
   retrainRollCount,
   retrainedKind,
 } from './retrain';
+import { CLICK_KINDS, OWN_KINDS } from './heroes';
 
 describe('retrain — der Sorten-Pool (3b)', () => {
-  it('kennt genau die acht Spezial-Sorten und niemals `power`', () => {
-    expect(SPECIAL_KINDS).toHaveLength(8);
-    expect(new Set(SPECIAL_KINDS).size).toBe(8);
+  it('kennt genau die sieben Spezial-Sorten und niemals `power`', () => {
+    // Sieben seit dem Eigen-Boost-Umbau: drei Klick-Sorten (crit/critdmg/beat)
+    // plus vier Eigen-Sorten (boss/combo/ekstase/idle). `gold` ist entfallen —
+    // ein BP-Multiplikator lässt sich nicht an ein Mitglied binden.
+    expect(SPECIAL_KINDS).toHaveLength(7);
+    expect(new Set(SPECIAL_KINDS).size).toBe(7);
     expect(SPECIAL_KINDS).not.toContain('power');
+    expect(SPECIAL_KINDS).not.toContain('gold');
     for (const k of SPECIAL_KINDS) expect(isSpecialKind(k)).toBe(true);
+    // Die Sorte jedes Mitglieds stammt aus genau einer der beiden Hälften.
+    expect([...CLICK_KINDS, ...OWN_KINDS].sort()).toEqual([...SPECIAL_KINDS].sort());
   });
 
   it('weist alles zurück, was keine Sorte ist (der Save-Guard hängt daran)', () => {
@@ -50,12 +57,12 @@ describe('retrain — die Override-Map', () => {
 
   it('schreibt immer eine NEUE Map (die alte bleibt stehen)', () => {
     const before = { boss: { '2': 'idle' as const } };
-    const after = applyRetrain(before, 'boss', 4, 'gold');
+    const after = applyRetrain(before, 'boss', 4, 'crit');
     expect(before).toEqual({ boss: { '2': 'idle' } });
-    expect(after).toEqual({ boss: { '2': 'idle', '4': 'gold' } });
+    expect(after).toEqual({ boss: { '2': 'idle', '4': 'crit' } });
     expect(after.boss).not.toBe(before.boss);
     // Ein zweiter Roll auf denselben Slot ÜBERSCHREIBT (es gibt nur eine Sorte).
-    expect(applyRetrain(after, 'boss', 2, 'beat').boss).toEqual({ '2': 'beat', '4': 'gold' });
+    expect(applyRetrain(after, 'boss', 2, 'beat').boss).toEqual({ '2': 'beat', '4': 'crit' });
   });
 });
 
@@ -122,11 +129,12 @@ describe('retrain — das Angebot (Guardrail: kein Blind-Roll)', () => {
   });
 
   it('ist rein über die beiden Floats — derselbe Wurf, dasselbe Angebot', () => {
-    expect(retrainOffers('gold', 0.3, 0.7)).toEqual(retrainOffers('gold', 0.3, 0.7));
-    // Erste Ziehung: Pool ohne `gold` (7 Sorten) ⇒ Index ⌊0.0·7⌋ = 0 = `crit`.
-    expect(retrainOffers('gold', 0, 0).kinds[0]).toBe('crit');
-    // Zweite Ziehung aus den verbleibenden 6 ⇒ Index 0 = `critdmg`.
-    expect(retrainOffers('gold', 0, 0).kinds[1]).toBe('critdmg');
+    expect(retrainOffers('crit', 0.3, 0.7)).toEqual(retrainOffers('crit', 0.3, 0.7));
+    // Der Pool schließt die AKTUELLE Sorte aus. Ohne `crit` bleiben sechs, in
+    // der Reihenfolge von SPECIAL_KINDS ⇒ Index ⌊0·6⌋ = 0 = `critdmg`.
+    expect(retrainOffers('crit', 0, 0).kinds[0]).toBe('critdmg');
+    // Zweite Ziehung aus den verbleibenden fünf ⇒ Index 0 = `boss`.
+    expect(retrainOffers('crit', 0, 0).kinds[1]).toBe('boss');
   });
 
   it('erreicht über den Float-Bereich jede der sieben Alternativen', () => {
@@ -180,10 +188,10 @@ describe('retrainSeed — feste Angebote statt Gratis-Würfeln', () => {
 
   it('taugt als Angebots-Quelle: gleicher Seed ⇒ gleiche zwei Sorten', () => {
     const [r1, r2] = retrainSeed('boss', 3, 0);
-    const first = retrainOffers('gold', r1, r2);
-    const again = retrainOffers('gold', r1, r2);
+    const first = retrainOffers('crit', r1, r2);
+    const again = retrainOffers('crit', r1, r2);
     expect(again.kinds).toEqual(first.kinds);
     expect(first.kinds[0]).not.toBe(first.kinds[1]);
-    expect(first.kinds).not.toContain('gold');
+    expect(first.kinds).not.toContain('crit');
   });
 });

@@ -7,7 +7,6 @@ import {
   abilityTiersUnlocked,
   bulkCost,
   CREW,
-  crewSpecialBonuses,
   DPS_MILESTONES,
   type HeroConfig,
   heroClick,
@@ -53,7 +52,6 @@ type BuyAmount = 1 | 10 | 100 | 'next' | 'max';
 const KIND_ICON: Record<AbilityKind, string> = {
   power:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.4 13.9 10l6.7 2-6.7 2L12 20.6 10.1 14l-6.7-2 6.7-2Z" fill="currentColor"/></svg>',
-  gold: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm0 4.4a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2Z" fill="currentColor" fill-rule="evenodd"/></svg>',
   crit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.4 2 5.8 13.2h4.4L9.4 22l7.8-11.2h-4.4L13.4 2Z" fill="currentColor"/></svg>',
   critdmg:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M13.2 6 9 12.6h2.7l-.9 5.4 4.2-6.6h-2.7l.9-5.4Z" fill="currentColor"/></svg>',
@@ -382,8 +380,9 @@ export class Crew {
       sm *
       ancientDpsMult(s.ancients) *
       global *
-      dpsGearMult(s.gear) *
-      crewSpecialBonuses(s.crewUp, s.crewRetrain).idleMult;
+      // Der `idle`-Topf ist entfallen: „Groove" wirkt seit dem Eigen-Boost-Umbau
+      // nur noch auf seinen Träger und steckt in dessen eigener Zeile.
+      dpsGearMult(s.gear);
     const clickMult = sm * ancientClickMult(s.ancients) * global * clickGearMult(s.gear);
     const rows: string[] = [];
     CREW.forEach((cfg, i) => {

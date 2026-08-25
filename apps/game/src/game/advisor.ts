@@ -33,12 +33,12 @@ import { COMBO_CAP, CRIT_CHANCE, CRIT_MULT, comboMult } from './click';
 import { BOSS_TIME_S, type CombatState, bossHp } from './combat';
 import { bossDmgMult } from './gear';
 import {
+  totalRawDps,
   CREW,
   type CrewBuy,
   abilityKind,
   abilityKindLabel,
   bestCrewBuy,
-  crewSpecialBonuses,
 } from './heroes';
 import { bossBreakerDmgMult } from './transcend';
 
@@ -68,7 +68,23 @@ export const HINT_BUDGET_REACH = 3;
  * zählt der Mythos-Knoten „Boss-Brecher" als ungekauft (×1).
  */
 type BurstInput = Pick<ChState, 'ancients' | 'gear' | 'crewUp'> &
-  Partial<Pick<ChState, 'transcend' | 'crewRetrain' | 'skinPath' | 'relics' | 'forge'>>;
+  Partial<
+    Pick<
+      ChState,
+      // `crew`/`gilds`/`crewMastery` sind OPTIONAL: Sie kamen mit dem
+      // Eigen-Boost-Umbau dazu (die Telemetrie braucht die Roh-Linien, um den
+      // Boss-Anteil zu gewichten). Ältere Fixtures ohne sie rechnen weiter
+      // zahlengleich — der Faktor ist dann schlicht 1.
+      | 'crew'
+      | 'gilds'
+      | 'crewMastery'
+      | 'transcend'
+      | 'crewRetrain'
+      | 'skinPath'
+      | 'relics'
+      | 'forge'
+    >
+  >;
 /**
  * Die Felder, aus denen der Kauf-Tipp folgt. `crewMastery` ist optional, damit
  * ältere Aufrufer/Fixtures ohne die 1a-Tafel weiter dieselbe Rangfolge sehen
@@ -87,9 +103,10 @@ function bossDamageMult(state: BurstInput): number {
   return (
     ancientBossDmgMult(state.ancients) *
     bossDmgMult(state.gear) *
-    // 3b: mit der Umschul-Map — wer einen Slot auf `boss` gerollt hat, sieht das
-    // sofort in der Wand-Telemetrie, sonst würde sie ihn systematisch unterschätzen.
-    crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).bossMult *
+    // Der crew-weite `boss`-Topf ist entfallen: „Rampenlicht" hebt seit dem
+    // Eigen-Boost-Umbau nur die Linie seines Trägers und steckt damit schon in
+    // `dpsOf(state, { boss: true })` — ihn hier nochmals zu multiplizieren
+    // wäre eine doppelte Auszahlung.
     // V2-4: Skin-Pfad (2b, via `allPct`) und Loadout-Affixe (1c/3a,
     // „Gate-Brecher"/„Glut-Fokus") im SELBEN 1+x-Griff wie im Kampf-Stack von
     // `main.ts` — fehlt eine Slice (alte Fixtures), faltet sie ×1.
@@ -104,6 +121,23 @@ function bossDamageMult(state: BurstInput): number {
  * Annahmen, beides mit dem Boss-Schadens-Stack multipliziert. Negative/kaputte
  * Eingaben zählen als 0, das Ergebnis ist nie negativ.
  */
+/**
+ * Um wie viel die Idle-Linie gegen einen Boss stärker ist als im Normalfall —
+ * das Verhältnis der beiden `dpsOf`-Rechnungen. Ohne Rampenlicht-Stufen ist es
+ * exakt 1, und die Telemetrie rechnet zahlengleich wie vor dem Umbau.
+ */
+function bossIdleFactor(state: BurstInput): number {
+  const crew = state.crew;
+  if (!crew) return 1;
+  const args = [crew, state.gilds ?? {}, state.crewUp, state.crewMastery ?? {}, ''] as const;
+  // Nur die ROHE Crew-Summe: Jeder globale Multiplikator darüber (Seelen, Ahnen,
+  // Himmel, Gear …) steht in Zähler und Nenner und kürzt sich weg. Was bleibt,
+  // ist genau der Anteil, den die Rampenlicht-Stufen beisteuern.
+  const plain = totalRawDps(...args, state.crewRetrain ?? {});
+  if (!(plain > 0)) return 1;
+  return totalRawDps(...args, state.crewRetrain ?? {}, { boss: true }) / plain;
+}
+
 export function burstEstimate(
   state: BurstInput,
   dps: number,
@@ -111,7 +145,13 @@ export function burstEstimate(
   windowS: number = BOSS_TIME_S,
 ): number {
   const w = Math.max(0, windowS);
-  const idle = Math.max(0, dps) * w;
+  // `dps` kommt als KONTEXTFREIER Grundwert herein (der Aufrufer cacht ihn).
+  // Gegen einen Boss zünden aber die „Rampenlicht"-Stufen der Crew, und die
+  // stecken seit dem Eigen-Boost-Umbau in `dpsOf(state, { boss: true })`. Statt
+  // dreißig Aufrufer umzubauen, holt sich die Telemetrie hier das VERHÄLTNIS
+  // beider Rechnungen und skaliert den übergebenen Wert damit — sonst würde die
+  // Wand-Anzeige jeden Spieler mit Rampenlicht-Stufen systematisch unterschätzen.
+  const idle = Math.max(0, dps) * bossIdleFactor(state) * w;
   const clicks =
     ADVISOR_CLICKS_PER_SEC * w * Math.max(0, clickDmg) * ADVISOR_COMBO_MULT * ADVISOR_CRIT_EV;
   return (idle + clicks) * bossDamageMult(state);

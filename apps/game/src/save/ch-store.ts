@@ -30,6 +30,7 @@ import { COACH_CLICK_SHARE, type HeavenState, createHeaven } from '../game/heave
 import {
   type CrewLevels,
   type CrewUps,
+  allowedKinds,
   CREW,
   abilityTiersUnlocked,
   createCrewUps,
@@ -542,6 +543,14 @@ function repairCrewRetrain(v: unknown): CrewRetrain {
       if (!Number.isInteger(tier) || tier < 1 || String(tier) !== key) continue;
       if (retrainSlotOrdinal(cfg, tier) <= 0) continue; // niemals auf eine Power-Stufe
       if (!isSpecialKind(kind)) continue;
+      // Seit dem Eigen-Boost-Umbau gehört jede Sorte zu einem Mitgliedstyp:
+      // Klick-Sorten dem Klick-Helden, Eigen-Sorten den DPS-Mitgliedern. Ein
+      // alter Spielstand kann „Krit" auf einem reinen DPS-Mitglied tragen (das
+      // war früher erlaubt, weil der Effekt ohnehin global landete) — eine
+      // solche Stufe hätte jetzt schlicht keine Wirkung mehr. Sie fällt hier
+      // heraus und das Mitglied bekommt seine Stock-Sorte zurück, statt eine
+      // tote Stufe zu behalten. `gold` fällt bereits durch `isSpecialKind`.
+      if (!allowedKinds(cfg).includes(kind)) continue;
       clean[key] = kind;
       any = true;
     }

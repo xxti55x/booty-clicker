@@ -254,6 +254,7 @@ import {
   CREW,
   type CrewLevels,
   type CrewSpecialBonuses,
+  type FightCtx,
   crewSpecialBonuses,
   grantFreeMasteryTiers,
 } from './game/heroes';
@@ -587,6 +588,15 @@ function newRunCombat(): CombatState {
 
 let dps = 0;
 let clickDmg = 1;
+/**
+ * Wann zuletzt geklickt wurde — die Quelle der „Leerlauf"-Bedingung.
+ * `0` heißt „noch nie", also gilt der Lauf von Beginn an als Leerlauf.
+ */
+let lastClickMs = 0;
+/** Ab wann ohne Klick als Leerlauf gilt. Drei Sekunden: lang genug, dass eine
+ *  kurze Klickpause die Dauerläufer nicht einschaltet, kurz genug, dass ein
+ *  Idle-Spieler sie durchgehend hat. */
+const IDLE_AFTER_MS = 3000;
 // Crew-wide special-ability bonuses (v11) — cached alongside dps/clickDmg since
 // they only change on the same events (ability buy, prestige, import).
 // 3b: mit der Umschul-Map — ein umgeschulter Slot wirkt überall wie ein von Haus
@@ -596,6 +606,29 @@ function recompute(): void {
   dps = dpsOf(state);
   clickDmg = clickDamageOf(state);
   crewSpec = crewSpecialBonuses(state.crewUp, state.crewRetrain);
+}
+
+/**
+ * Der Kampf-Kontext dieses Augenblicks: Welche Bedingungen der Eigen-Fähigkeiten
+ * stehen gerade?
+ *
+ * Er wird bewusst NICHT gecacht wie `dps`: Anders als Kauf-Entscheidungen
+ * ändert er sich mehrmals pro Sekunde (Combo reißt, Ekstase endet, ein Boss
+ * betritt die Bühne). Der gecachte `dps` bleibt der nüchterne Grundwert für
+ * Anzeige und Offline-Rechnung — der Kampf fragt `dpsNow()`.
+ */
+function fightCtx(now = Date.now()): FightCtx {
+  return {
+    boss: combat.boss,
+    idle: now - lastClickMs >= IDLE_AFTER_MS,
+    ekstase: isFrenzyActive(state.ability, now),
+    combo: comboState.stacks > 0,
+  };
+}
+
+/** Die Idle-DPS dieses Augenblicks — mit allen Bedingungen, die gerade zutreffen. */
+function dpsNow(): number {
+  return dpsOf(state, fightCtx());
 }
 
 /**
@@ -713,7 +746,9 @@ function ekstaseChargeMax(): number {
       frenzyChargeReduction(state.gear) +
       // 2b: Der Gyrator-Pfad zahlt auf denselben Reduktions-Stack wie seine Sterne.
       pathB().frenzyCharge +
-      crewSpec.ekstaseChargeRed +
+      // `ekstase` als Crew-Sorte ist entfallen: „Ekstase-Tänzer" senkt keine
+      // Ladeschwelle mehr, sondern hebt den EIGENEN Ausstoß seines Trägers,
+      // solange die Ekstase läuft.
       // A1 „Konfetti-Regen": die Bühne selbst lädt die Ekstase schneller. Sie
       // hängt im GLEICHEN, gedeckelten Reduktions-Stack — kein Sonderweg.
       stageEkstaseChargeRed(stageFactors()),
@@ -2623,7 +2658,9 @@ function applyHit(dmg: number, fromClick: boolean, x?: number, y?: number): void
       // 1c/3a: „Gate-Brecher"/„Glut-Fokus" im SELBEN 1+x-Griff — additiv
       // untereinander (und strukturell gedeckelt), multiplikativ zum Rest.
       (1 + pathB().bossDmg + loadout().bossDmg) *
-      crewSpec.bossMult *
+      // Kein crew-weiter Boss-Faktor mehr: „Rampenlicht" zahlt auf die eigene
+      // Linie seines Trägers und steckt bereits im Idle-Anteil, den `dpsOf`
+      // mit `{ boss: true }` liefert.
       bossBreakerDmgMult(state.transcend)
     : dmg;
   // ROADMAP-V2 A2: Theme-Gimmick des Gates. Nur der IDLE-Anteil wird hier
@@ -2730,6 +2767,7 @@ function doShake(x?: number, y?: number): void {
   state.totalClicks += 1;
   state.meta = advanceMeta(state.meta, 'clicks'); // §7.2 „Shakes" quest (no-op if inactive)
   const now = Date.now();
+  lastClickMs = now; // treibt die „Leerlauf"-Bedingung der Dauerläufer-Fähigkeit
 
   // On-beat is judged against the CURRENT tier's (possibly widened) window,
   // before this click bumps the combo.
@@ -2752,7 +2790,8 @@ function doShake(x?: number, y?: number): void {
     COMBO_WINDOW_S +
       ancientComboWindowBonus(state.ancients) +
       comboWindowBonus(state.gear) +
-      crewSpec.comboWindowS +
+      // `combo` als Crew-Sorte ist entfallen: „Mitläufer" verlängert kein
+      // Fenster mehr, sondern hebt den eigenen Ausstoß bei stehender Combo.
       // 2a „Langer Atem"/„Roter Faden": derselbe Term, nur permanent.
       constellationComboWindowBonus(state.constellation) +
       // 1c „Langer Atem"-Affix: Sekunden im selben additiven Fenster.
@@ -3975,7 +4014,11 @@ function loop(nowMs: number): void {
   // Idle DPS chips away at the current target; the Twerk-Coach auto-clicks at
   // 25 % of the click value (no crit/beat, §4.3.5) — Robo gear stars add cps (§5),
   // the same sum the offline accrual uses; boss timer ticks down.
-  if (dps > 0 && !swapping) applyHit(dps * simDt, false);
+  // Kontext-DPS statt des gecachten Grundwerts: Genau hier entscheidet sich, ob
+  // „Rampenlicht" (Boss), „Dauerläufer" (Leerlauf), „Mitläufer" (Combo) und
+  // „Ekstase-Tänzer" zünden.
+  const idleDpsNow = dpsNow();
+  if (idleDpsNow > 0 && !swapping) applyHit(idleDpsNow * simDt, false);
   const cps =
     coachCps(state.heaven) + coachCpsBonus(state.gear) + pathB().coachCps + loadout().coachCps;
   if (cps > 0 && !swapping) applyHit(coachDps(clickDmg, cps) * simDt, false);

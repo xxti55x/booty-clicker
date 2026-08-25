@@ -68,7 +68,8 @@ import {
   clickDamageRaw,
   createCrew,
   createCrewUps,
-  crewSpecialBonuses,
+  type FightCtx,
+  NO_CTX,
   totalRawDps,
 } from './heroes';
 import { type CrewMastery, createMastery } from './mastery';
@@ -493,7 +494,7 @@ export function skinPathOf(state: { gear?: GearState; skinPath?: SkinPath }): Ge
  * Faktor hier, sondern PRO MITGLIED in `totalRawDps` — er ist per Definition
  * kein globaler Term, sondern gehört genau dem Mitglied, das ihn erspielt hat.
  */
-export function dpsOf(state: DerivedInput): number {
+export function dpsOf(state: DerivedInput, ctx: FightCtx = NO_CTX): number {
   const hpf = state.heaven.hpf;
   return (
     totalRawDps(
@@ -502,6 +503,11 @@ export function dpsOf(state: DerivedInput): number {
       state.crewUp ?? {},
       state.crewMastery ?? {},
       state.heir ?? '',
+      state.crewRetrain ?? {},
+      // Der Kampf-Kontext entscheidet, welche Eigen-Fähigkeiten gerade zünden
+      // („gegen Bosse", „im Leerlauf", …). Ohne ihn ist das die nüchterne
+      // Grundrechnung — genau das, was die Anzeige zeigen soll.
+      ctx,
     ) *
     soulMult(state.souls, soulBonusEff(hpf)) *
     ancientDpsMult(state.ancients) *
@@ -512,10 +518,9 @@ export function dpsOf(state: DerivedInput): number {
     (state.transcend ? transcendGlobalMult(state.transcend.te) : 1) *
     (state.gear ? dpsGearMult(state.gear) : 1) *
     (state.permTokens ? permTokenDpsMult(state.permTokens) : 1) *
-    // v11.1 `idle`-Special („Groove"): hebt wie das Idle-Gear NUR die DPS-Seite.
-    // 3b: mit der Umschul-Map, damit ein auf `idle` gerollter Slot hier exakt so
-    // zählt wie ein von Haus aus `idle`-Mitglied.
-    (state.crewUp ? crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).idleMult : 1) *
+    // `idle` („Groove") ist KEIN globaler Faktor mehr: Seit dem Eigen-Boost-Umbau
+    // hebt die Stufe nur die Linie ihres Trägers und steckt oben in
+    // `totalRawDps`, wo der Kontext sie auswertet.
     // 2a: die Ausdauer-Knoten der Legenden-Konstellation (+2 %/Knoten, ×1 ohne
     // Baum). Wie der Meisterschafts-Perk bewusst NUR auf der Idle-Seite — die
     // Konstellation hat für den Klick ihre eigenen Knoten (P1 bleibt unberührt).
@@ -596,7 +601,9 @@ export function goldMult(
     ancientGoldMult(state.ancients) *
     goldGearMult(state.gear) *
     (state.permTokens ? permTokenGoldMult(state.permTokens) : 1) *
-    (state.crewUp ? crewSpecialBonuses(state.crewUp, state.crewRetrain ?? {}).goldMult : 1) *
+    // `gold` ist als Fähigkeits-Sorte entfallen — ein BP-Multiplikator lässt
+    // sich nicht an ein Mitglied binden. Gold kommt aus Ahnen, Gebieten,
+    // Truhen und Himmel.
     (state.heaven ? goldeneHandeMult(state.heaven) : 1) *
     // 2a: „Anfängerglück" + „Tantiemen" der Konstellation (+2 %/Knoten, ×1 ohne Baum).
     (state.constellation ? constellationGoldMult(state.constellation) : 1) *

@@ -25,13 +25,7 @@ import {
 import { createAncients } from './ancients';
 import { createGear, skinUnlocked } from './gear';
 import { createHeaven } from './heaven';
-import {
-  SPECIAL_GOLD,
-  SPECIAL_IDLE,
-  clickDamageRaw,
-  crewMilestoneMult,
-  totalRawDps,
-} from './heroes';
+import { SPECIAL_OWN, clickDamageRaw, crewMilestoneMult, totalRawDps } from './heroes';
 import { MASTERY_RANKS, masteryOwnMult } from './mastery';
 import { PEACH_BOOST } from './peach';
 import { TRANSCEND_GLOBAL_BASE, createTranscend } from './transcend';
@@ -656,16 +650,33 @@ describe('ch-state — Crew-Umschulung im derived layer (3b)', () => {
     crewUp: { boss: 4 },
   };
 
-  it('hebt die Idle-Seite, sobald ein Slot auf `idle` gerollt ist', () => {
-    const rolled = { ...base, crewRetrain: { boss: { '2': 'idle' as const } } };
-    // Ein `idle`-Special ist +20 % CREW-DPS — der Klick bleibt unberührt (P1).
-    expect(dpsOf(rolled)).toBeCloseTo(dpsOf(base) * (1 + SPECIAL_IDLE), 6);
-    expect(clickDamageOf(rolled)).toBeCloseTo(clickDamageOf(base), 6);
+  // Seit dem Eigen-Boost-Umbau wirkt eine umgeschulte Sorte nur noch auf die
+  // Linie ihres Trägers — und nur, wenn ihre BEDINGUNG steht. Die 3b-Zusicherung
+  // („die Sorte wandert, die Anzahl nicht") gilt unverändert, sie wird nur an
+  // einer anderen Stelle sichtbar.
+  it('hebt die eigene Linie nur, wenn die Bedingung der Sorte steht', () => {
+    // Produzent (DPS, Stock `idle`), vier Stufen ⇒ zwei Specials.
+    const dpsBase = { ...createChState(), crew: { producer: 200 }, crewUp: { producer: 4 } };
+    // Ohne Kontext trifft keine Bedingung zu — die Grundrechnung.
+    const plain = dpsOf(dpsBase);
+    // Im Leerlauf zünden beide `idle`-Stufen auf SEINER Linie.
+    const idle = dpsOf(dpsBase, { idle: true });
+    expect(idle).toBeCloseTo(plain * (1 + 2 * SPECIAL_OWN), 6);
+    // Gegen einen Boss dagegen nicht — das ist eine andere Bedingung.
+    expect(dpsOf(dpsBase, { boss: true })).toBeCloseTo(plain, 6);
+    // Und der Klick bleibt unberührt (P1).
+    expect(clickDamageOf(dpsBase)).toBeCloseTo(clickDamageOf(dpsBase), 6);
   });
 
-  it('hebt den BP-Multiplikator, sobald ein Slot auf `gold` gerollt ist', () => {
-    const rolled = { ...base, crewRetrain: { boss: { '4': 'gold' as const } } };
-    expect(goldMult(rolled)).toBeCloseTo(goldMult(base) * (1 + SPECIAL_GOLD), 9);
+  it('lässt eine umgeschulte Sorte die Bedingung wechseln, nicht die Anzahl', () => {
+    const dpsBase = { ...createChState(), crew: { producer: 200 }, crewUp: { producer: 4 } };
+    const rolled = { ...dpsBase, crewRetrain: { producer: { '2': 'boss' as const } } };
+    const plain = dpsOf(dpsBase);
+    // Eine der beiden Stufen zählt jetzt gegen Bosse statt im Leerlauf.
+    expect(dpsOf(rolled, { idle: true })).toBeCloseTo(plain * (1 + SPECIAL_OWN), 6);
+    expect(dpsOf(rolled, { boss: true })).toBeCloseTo(plain * (1 + SPECIAL_OWN), 6);
+    // Stehen BEIDE Bedingungen, zahlen auch beide — die Anzahl ist unverändert 2.
+    expect(dpsOf(rolled, { idle: true, boss: true })).toBeCloseTo(plain * (1 + 2 * SPECIAL_OWN), 6);
   });
 
   it('faltet die Stock-Sorten ohne Map (jeder Aufrufer vor 3b bleibt zahlengleich)', () => {
@@ -673,7 +684,7 @@ describe('ch-state — Crew-Umschulung im derived layer (3b)', () => {
     expect(dpsOf(withoutSlice)).toBe(dpsOf(base));
     expect(goldMult(withoutSlice)).toBe(goldMult(base));
     // Ein Override auf einer POWER-Stufe ist wirkungslos (der Rhythmus bleibt).
-    expect(dpsOf({ ...base, crewRetrain: { boss: { '3': 'idle' as const } } })).toBe(dpsOf(base));
+    expect(dpsOf({ ...base, crewRetrain: { boss: { '3': 'crit' as const } } })).toBe(dpsOf(base));
   });
 
   it('ist permanent: die Sorten überleben alle drei Resets, der Eskalator nicht', () => {

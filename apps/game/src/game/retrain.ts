@@ -61,7 +61,6 @@ import type { SpecialKind } from './heroes';
  * (`heroes` → `retrain`) und der Pool hat genau EINE Definition.
  */
 export const SPECIAL_KINDS: readonly SpecialKind[] = [
-  'gold',
   'crit',
   'critdmg',
   'boss',

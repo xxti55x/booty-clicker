@@ -190,7 +190,12 @@ const MASTERY_PRE_V13 = { ...CORE.crew };
  * `gold` gerollt (Stock wäre `combo`). Dazu ein Eskalator-Stand: An `boss` wurde
  * in DIESER Aszension schon zweimal gerollt, der nächste Roll kostet also ×4.
  */
-const CREW_RETRAIN = { boss: { '2': 'idle' }, hype: { '3': 'gold' } };
+// Zulässige Sorten je Mitgliedstyp: Der Booty-Boss ist der Klick-Held und
+// trägt Klick-Sorten, das Hype-Girl ist reines DPS und trägt Eigen-Sorten.
+// Vorher standen hier `idle` auf dem Klick-Helden und `gold` — beide sind seit
+// dem Eigen-Boost-Umbau keine gültige Wahl mehr und würden (richtigerweise)
+// beim Laden verworfen; der eigene Test dafür steht in `ch-store.test.ts`.
+const CREW_RETRAIN = { boss: { '2': 'crit' }, hype: { '3': 'boss' } };
 const RETRAIN_ROLLS = { boss: 2 };
 
 /**
@@ -780,7 +785,7 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
       raw.crewRetrain = {
         boss: {
           '1': 'gold', // Stufe 1 ist im Muster 0 eine POWER-Stufe ⇒ raus
-          '2': 'idle', // echter Spezial-Slot ⇒ bleibt
+          '2': 'crit', // echter Spezial-Slot ⇒ bleibt
           '4': 'power', // `power` ist keine Spezial-Sorte ⇒ raus
           '04': 'gold', // Nicht-Normalform ⇒ raus (zwei Schlüssel, ein Slot)
           x: 'gold', // keine Stufen-Nummer ⇒ raus
@@ -792,7 +797,7 @@ const BROKEN: Record<SchemaVersion, BrokenCase> = {
     },
     check: (s) => {
       // Der Rhythmus ist unantastbar: Nur echte Spezial-Slots überleben.
-      expect(s.crewRetrain).toEqual({ boss: { '2': 'idle' } });
+      expect(s.crewRetrain).toEqual({ boss: { '2': 'crit' } });
       expect(s.retrainRolls).toEqual({ boss: 2 });
     },
   },

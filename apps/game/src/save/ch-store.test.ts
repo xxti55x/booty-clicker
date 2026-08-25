@@ -1451,12 +1451,29 @@ describe('ch-store — v14 migration & repair (Crew-Umschulung, 3b)', () => {
       ...createChState(),
       crew: { boss: 200 },
       crewUp: { boss: 4 },
-      crewRetrain: { boss: { '2': 'idle', '4': 'gold' } },
+      crewRetrain: { boss: { '2': 'crit', '4': 'beat' } },
       retrainRolls: { boss: 3 },
     };
     const round = deserializeCh(serializeCh(s, 1000));
-    expect(round!.crewRetrain).toEqual({ boss: { '2': 'idle', '4': 'gold' } });
+    expect(round!.crewRetrain).toEqual({ boss: { '2': 'crit', '4': 'beat' } });
     expect(round!.retrainRolls).toEqual({ boss: 3 });
+  });
+
+  // Seit dem Eigen-Boost-Umbau gehört jede Sorte zu einem Mitgliedstyp. Alte
+  // Spielstände können Kombinationen tragen, die früher erlaubt waren (der
+  // Effekt landete ohnehin global) und jetzt schlicht wirkungslos wären.
+  it('wirft Sorten heraus, die das Mitglied gar nicht tragen kann', () => {
+    const raw = JSON.parse(
+      serializeCh({ ...createChState(), crew: { boss: 200, producer: 200 }, crewUp: {} }, 1000),
+    ) as Record<string, unknown>;
+    // `gold` gibt es nicht mehr; „Krit" auf einem reinen DPS-Mitglied ebenfalls
+    // nicht — beide Stufen fallen weg, statt tot im Save zu stehen.
+    raw.crewUp = { boss: 4, producer: 4 };
+    raw.crewRetrain = { boss: { '2': 'gold' }, producer: { '2': 'crit', '4': 'boss' } };
+    const back = deserializeCh(JSON.stringify(raw));
+    expect(back!.crewRetrain.boss).toBeUndefined();
+    // Die ZULÄSSIGE Umschulung des Produzenten überlebt.
+    expect(back!.crewRetrain.producer).toEqual({ '4': 'boss' });
   });
 
   it('lässt keinen Override auf eine POWER-Stufe durch (die Leitplanke von 3b)', () => {
@@ -1502,9 +1519,9 @@ describe('ch-store — v14 migration & repair (Crew-Umschulung, 3b)', () => {
       ...createChState(),
       crew: {},
       crewUp: {},
-      crewRetrain: { boss: { '2': 'idle' } },
+      crewRetrain: { boss: { '2': 'crit' } },
     };
-    expect(deserializeCh(serializeCh(s, 1000))!.crewRetrain).toEqual({ boss: { '2': 'idle' } });
+    expect(deserializeCh(serializeCh(s, 1000))!.crewRetrain).toEqual({ boss: { '2': 'crit' } });
   });
 });
 
