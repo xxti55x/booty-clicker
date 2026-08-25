@@ -16,6 +16,9 @@ import {
   abilityLevel,
   abilityMult,
   ABILITY_FIRST_LEVEL,
+  crewMilestoneMult,
+  CREW_MILESTONES,
+  nextCrewMilestone,
   MAX_ABILITY_TIERS,
   MIN_ABILITY_TIERS,
   maxAbilityTiers,
@@ -239,7 +242,14 @@ describe('heroes — click damage', () => {
 
   it('DPS members feed the click via the share — active play keeps scaling (P1)', () => {
     const levels = { boss: 10, hype: 30 };
-    const expected = CLICK_BASE + heroClick(boss, 10) + CLICK_DPS_SHARE * totalRawDps(levels);
+    // Hype steht auf 30 und hat damit die erste crew-weite Schwelle (25) für
+    // sich erreicht: 1 von 15 ⇒ Faktor ×1.067 auf den CREW-Anteil des Klicks.
+    // `CLICK_BASE` bleibt als Sockel außen vor, der DPS-Anteil trägt den Faktor
+    // schon aus `totalRawDps`.
+    const expected =
+      CLICK_BASE +
+      heroClick(boss, 10) * crewMilestoneMult(levels) +
+      CLICK_DPS_SHARE * totalRawDps(levels);
     expect(clickDamageRaw(levels)).toBeCloseTo(expected, 6);
     expect(clickDamageRaw(levels)).toBeGreaterThan(clickDamageRaw({ boss: 10 }));
   });
@@ -262,8 +272,12 @@ describe('heroes — Crew-Meisterschaft (IDEEN-GAMEPLAY 1a)', () => {
     // Die Meisterschaft des EINEN hebt die Crew-Summe nur um seinen Anteil.
     const levels = { hype: 40, dj: 40 };
     const soloBonus = heroDps(hype, 40, 0, 0, GOLD) - plain;
+    // Der crew-weite Meilenstein liegt als Faktor auf der SUMME (hier steht die
+    // ganze angeheuerte Crew auf Lv 40, also ist die 25er-Schwelle gerissen).
+    // Der Eigen-Bonus muss ihn deshalb ebenfalls tragen — die Zusicherung ist
+    // unverändert: Die Meisterschaft des EINEN hebt nur seinen Anteil.
     expect(totalRawDps(levels, {}, {}, { hype: GOLD })).toBeCloseTo(
-      totalRawDps(levels) + soloBonus,
+      totalRawDps(levels) + soloBonus * crewMilestoneMult(levels),
       6,
     );
   });
@@ -276,7 +290,9 @@ describe('heroes — Crew-Meisterschaft (IDEEN-GAMEPLAY 1a)', () => {
     const withMastery = clickDamageRaw(levels, {}, {}, { boss: GOLD, hype: GOLD });
     const expected =
       CLICK_BASE +
-      heroClick(boss, 60, 0, 0, GOLD) +
+      // Nur der Crew-Anteil des Klicks skaliert mit dem crew-weiten
+      // Meilenstein; `CLICK_BASE` ist der Sockel und bleibt außen vor.
+      heroClick(boss, 60, 0, 0, GOLD) * crewMilestoneMult(levels) +
       CLICK_DPS_SHARE * totalRawDps(levels, {}, {}, { hype: GOLD });
     expect(withMastery).toBeCloseTo(expected, 6);
   });
@@ -464,7 +480,12 @@ describe('Erbe (3c) — die doppelte Meisterschaft in der Crew-Faltung', () => {
       0,
       gold,
     );
-    expect((withHeir - plain) / (own * (0.06 / 1.06))).toBeCloseTo(1, 5);
+    // `own` ist der Beitrag EINES Mitglieds vor der Summen-Skalierung; der
+    // crew-weite Meilenstein (ganze Crew auf Lv 40) liegt auf der Summe.
+    expect((withHeir - plain) / (own * (0.06 / 1.06) * crewMilestoneMult(levels))).toBeCloseTo(
+      1,
+      5,
+    );
   });
 
   /**
@@ -722,5 +743,82 @@ describe('Fähigkeiten-Spanne je Mitglied', () => {
       const m = nextMilestone(full);
       expect(n).toBe(m === null ? 1 : m - full);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Crew-weite Meilensteine
+// ---------------------------------------------------------------------------
+// Goal: „wenn alle charaktere auf level x z.b. 25 oder 100 dps boost für ALLE."
+// Der Kanal ersetzt die weggefallenen globalen Fähigkeits-Boni und ist der
+// einzige Term, den ein einzelnes Mitglied nicht allein auslösen kann.
+describe('Crew-weite Meilensteine', () => {
+  const all = (lv: number): Record<string, number> =>
+    Object.fromEntries(CREW.map((c) => [c.id, lv]));
+
+  it('zahlt ×2 je Schwelle, sobald die GANZE Crew sie erreicht hat', () => {
+    expect(crewMilestoneMult(all(24))).toBe(1);
+    expect(crewMilestoneMult(all(25))).toBe(2);
+    expect(crewMilestoneMult(all(50))).toBe(4);
+    expect(crewMilestoneMult(all(100))).toBe(8);
+    expect(crewMilestoneMult(all(200))).toBe(16);
+    expect(crewMilestoneMult(all(250))).toBe(2 ** CREW_MILESTONES.length);
+  });
+
+  it('bleibt bei einer leeren Crew neutral', () => {
+    expect(crewMilestoneMult({})).toBe(1);
+    expect(crewMilestoneMult(createCrew())).toBe(1);
+  });
+
+  // Der Fehler, den erst die Messung zeigte: Mit „angeheuert" als Nenner fiel
+  // der Faktor beim Anheuern des letzten Mitglieds von ×32 auf ×1 — das Spiel
+  // bestrafte damit das Vervollständigen der Crew.
+  it('wird durch ANHEUERN niemals kleiner', () => {
+    for (const cfg of CREW) {
+      const ohne = all(250);
+      delete ohne[cfg.id];
+      const frisch = { ...all(250), [cfg.id]: 1 };
+      expect(crewMilestoneMult(frisch)).toBeGreaterThanOrEqual(crewMilestoneMult(ohne));
+    }
+  });
+
+  it('gibt einem einzelnen hochgezogenen Mitglied NICHT den vollen Bonus', () => {
+    const solo = crewMilestoneMult({ boss: 250 });
+    expect(solo).toBeLessThan(2); // weit weg von ×32
+    expect(solo).toBeGreaterThan(1); // aber nicht wirkungslos
+  });
+
+  it('wächst monoton mit jedem Level, das irgendwo dazukommt', () => {
+    let prev = crewMilestoneMult({});
+    for (const lv of [1, 24, 25, 49, 50, 99, 100, 199, 200, 249, 250, 400]) {
+      const cur = crewMilestoneMult(all(lv));
+      expect(cur).toBeGreaterThanOrEqual(prev);
+      prev = cur;
+    }
+  });
+
+  it('nennt als nächstes Ziel die erste NICHT vollständig erreichte Schwelle', () => {
+    expect(nextCrewMilestone(all(0))).toBe(CREW_MILESTONES[0]);
+    expect(nextCrewMilestone(all(25))).toBe(CREW_MILESTONES[1]);
+    expect(nextCrewMilestone(all(250))).toBe(null);
+    // Ein einziges Mitglied unter der Schwelle hält das Ziel dort fest.
+    expect(nextCrewMilestone({ ...all(250), hype: 30 })).toBe(50);
+  });
+
+  it('liegt als Faktor auf der Summe — Klick wie Idle sehen dieselbe Zahl', () => {
+    const levels = all(25); // Schwelle 25 gerissen ⇒ ×2
+    const factor = crewMilestoneMult(levels);
+    expect(factor).toBe(2);
+    // Idle: die Summe trägt den Faktor …
+    let raw = 0;
+    for (const cfg of CREW) raw += heroDps(cfg, 25);
+    expect(totalRawDps(levels)).toBeCloseTo(raw * factor, 6);
+    // … Klick ebenso, aber der nackte Sockel CLICK_BASE bleibt außen vor.
+    let rawClick = 0;
+    for (const cfg of CREW) rawClick += heroClick(cfg, 25);
+    expect(clickDamageRaw(levels)).toBeCloseTo(
+      CLICK_BASE + rawClick * factor + CLICK_DPS_SHARE * totalRawDps(levels),
+      6,
+    );
   });
 });

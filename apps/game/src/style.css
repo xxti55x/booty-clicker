@@ -3161,6 +3161,62 @@ body {
   color: #8b3fd0;
 }
 
+/* Der crew-weite Meilenstein steht ÜBER der Liste, nicht auf einer Karte: Er
+   gehört keinem Mitglied, sondern der Aufstellung. Ein Band in Crew-Gold, das
+   den aktuellen Faktor, den Weg zur nächsten Schwelle und die Zahl der noch
+   fehlenden Mitglieder trägt. */
+.crew-ms {
+  display: flex;
+  align-items: center;
+  /* Umbrechen statt abschneiden: Auf schmalen Panels passen Faktor, Balken und
+     Text nicht in eine Zeile — ohne wrap lief der Text rechts aus dem Band. */
+  flex-wrap: wrap;
+  gap: 4px 9px;
+  margin: 0 0 8px;
+  padding: 7px 11px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 207, 94, 0.28);
+  background: linear-gradient(180deg, rgba(255, 207, 94, 0.13), rgba(255, 207, 94, 0.05));
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  color: var(--parch-soft);
+}
+.crew-ms b {
+  flex: 0 0 auto;
+  color: #ffd76a;
+  font-size: 12.5px;
+}
+.crew-ms > span:last-child {
+  flex: 0 0 auto;
+  /* Kein opacity-Schleier: Auf dem goldenen Band war der Text mit 0.9 auf
+     --parch-soft praktisch unlesbar. Die Zeile trägt das Ziel — sie muss
+     gelesen werden können. */
+  color: var(--parch);
+}
+.crew-ms-bar {
+  /* Gedeckelt: Ohne max-width dehnte sich der Balken über die ganze Breite und
+     drückte das Ziel rechts aus dem Band. */
+  flex: 1 1 40px;
+  min-width: 30px;
+  max-width: 120px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 215, 106, 0.18);
+  overflow: hidden;
+}
+.crew-ms-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #ffb347, #ffd76a);
+}
+/* Am Ende der Leiter gibt es nichts mehr zu treiben — das Band wird ruhig. */
+.crew-ms.done {
+  border-color: rgba(255, 207, 94, 0.18);
+  background: rgba(255, 207, 94, 0.06);
+}
+
 /* Meilenstein-Zeile: der ×N-Blitz, ein schmaler Weg-Balken und das Ziel-Level.
    Sie steht über der Meisterschaft, weil sie die HÄUFIGERE Entscheidung trägt
    („noch 12 Level bis +100 %") — Meisterschaft läuft über Stunden, der nächste

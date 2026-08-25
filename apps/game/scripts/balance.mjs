@@ -176,7 +176,9 @@ table(
   ['Seed', 't50 [h]', 't75 [h]', 'Beste Bühne', 'Seelen-Bank'],
   cumul.map((c) => [c.seed, hrs(c.t50), hrs(c.t75), c.best, Math.round(c.bank)]),
 );
-console.log(`   Anker: t75 in [3 h, 7.5 h] · Mittel t75 ${hrs(mean(cumul.map((c) => c.t75)))} h`);
+console.log(
+  `   Anker: t75 in [2.18 h, 3.63 h] · Mittel t75 ${hrs(mean(cumul.map((c) => c.t75)))} h`,
+);
 
 // ---------------------------------------------------------------------------
 // 3 · Erste Himmelfahrt + längste Power-Durststrecke

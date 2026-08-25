@@ -25,7 +25,13 @@ import {
 import { createAncients } from './ancients';
 import { createGear, skinUnlocked } from './gear';
 import { createHeaven } from './heaven';
-import { SPECIAL_GOLD, SPECIAL_IDLE, clickDamageRaw, totalRawDps } from './heroes';
+import {
+  SPECIAL_GOLD,
+  SPECIAL_IDLE,
+  clickDamageRaw,
+  crewMilestoneMult,
+  totalRawDps,
+} from './heroes';
 import { MASTERY_RANKS, masteryOwnMult } from './mastery';
 import { PEACH_BOOST } from './peach';
 import { TRANSCEND_GLOBAL_BASE, createTranscend } from './transcend';
@@ -590,7 +596,14 @@ describe('ch-state — Crew-Meisterschaft im derived layer (1a)', () => {
     const withMastery = { ...base, crewMastery: { hype: GOLD } };
     const gain = dpsOf(withMastery) - dpsOf(base);
     // Der Zuwachs ist exakt der Anteil der Hype-Girl-Linie × 6 %.
-    const hypeOnly = dpsOf({ ...base, crew: { hype: 50 } });
+    // Achtung beim Vergleich: Eine Crew aus EINEM Mitglied trägt einen anderen
+    // crew-weiten Meilenstein-Faktor als eine aus zweien (der Anteil der Crew
+    // über der Schwelle ist ein anderer). Die Solo-Messung wird deshalb auf den
+    // Faktor DIESER Aufstellung umgerechnet — die Zusicherung ist unverändert:
+    // Die Meisterschaft des einen hebt nur seine eigene Linie.
+    const hypeOnly =
+      dpsOf({ ...base, crew: { hype: 50 } }) *
+      (crewMilestoneMult(base.crew) / crewMilestoneMult({ hype: 50 }));
     expect(gain).toBeCloseTo(hypeOnly * (masteryOwnMult(GOLD) - 1), 6);
     expect(dpsOf(withMastery)).toBeCloseTo(
       totalRawDps(base.crew, {}, {}, { hype: GOLD }) * (dpsOf(base) / totalRawDps(base.crew)),

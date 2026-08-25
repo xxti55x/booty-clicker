@@ -15,6 +15,10 @@ import {
   LEVEL_SOFTCAP,
   levelsToNextAbility,
   maxAbilityTiers,
+  crewMilestoneMult,
+  crewReachedFrac,
+  CREW_MILESTONES,
+  nextCrewMilestone,
   maxAffordable,
   milestoneMult,
   nextAbility,
@@ -205,6 +209,7 @@ export class Crew {
         <button class="amt" data-a="next" type="button" title="Bis zur nächsten Fähigkeit (Lv 25, 75, 125 …)">Fähigkeit</button>
         <button class="amt" data-a="max" type="button">Max</button>
       </div>
+      <div id="crewMs"></div>
       <div id="crewList"></div>`;
     for (const b of Array.from(this.body.querySelectorAll<HTMLButtonElement>('.amt'))) {
       b.addEventListener('click', () => {
@@ -313,6 +318,40 @@ export class Crew {
     return true;
   }
 
+  /**
+   * Die Kopfzeile des crew-weiten Meilensteins.
+   *
+   * Ohne sie wäre der Bonus unsichtbar: Er hängt an keinem einzelnen Mitglied,
+   * taucht also auf keiner Karte auf — und ein Faktor, den niemand sieht,
+   * steuert auch niemanden. Die Zeile nennt drei Dinge: was gerade anliegt
+   * (×N), welche Schwelle als Nächstes zählt und wie viele Mitglieder ihr noch
+   * fehlen.
+   */
+  private renderMilestoneHead(): void {
+    const s = this.deps.state;
+    const el = byId('crewMs');
+    const mult = crewMilestoneMult(s.crew);
+    const next = nextCrewMilestone(s.crew);
+    if (next === null) {
+      el.className = 'crew-ms done';
+      el.innerHTML =
+        `<b>Crew-Bonus ×${fmt(mult)}</b>` +
+        `<span>Die ganze Crew steht über Lv ${CREW_MILESTONES[CREW_MILESTONES.length - 1]} — mehr geht hier nicht.</span>`;
+      return;
+    }
+    const fehlen = CREW.filter((c) => (s.crew[c.id] ?? 0) < next).length;
+    const frac = crewReachedFrac(s.crew, next);
+    el.className = 'crew-ms';
+    el.title = `Sobald ALLE ${CREW.length} Mitglieder Lv ${next} erreicht haben, verdoppelt sich der Ausstoß der ganzen Crew. Aktuell fehlen ${fehlen}.`;
+    el.innerHTML =
+      `<b>Crew-Bonus ×${mult < 10 ? mult.toFixed(2) : fmt(mult)}</b>` +
+      `<span class="crew-ms-bar"><i style="width:${(frac * 100).toFixed(1)}%"></i></span>` +
+      // Kurz halten: Das Crew-Panel ist schmal, und der lange Satz („… dann ×2
+      // für ALLE") lief im Test rechts aus dem Band heraus und wurde
+      // abgeschnitten. Der Titel trägt die ausführliche Fassung.
+      `<span>noch ${fehlen} × Lv ${next}</span>`;
+  }
+
   /** Buy the next unlocked ability tier for a member (in order, BP-priced). */
   private buyAbility(cfg: HeroConfig): boolean {
     const s = this.deps.state;
@@ -335,6 +374,7 @@ export class Crew {
     }
     const list = byId('crewList');
     const s = this.deps.state;
+    this.renderMilestoneHead();
     const sm = soulMult(s.souls, soulBonusEff(s.heaven.hpf));
     const global = heavenGlobalMult(s.heaven.hpf);
     // keep the per-hero display in lockstep with dpsOf/clickDamageOf (§5)

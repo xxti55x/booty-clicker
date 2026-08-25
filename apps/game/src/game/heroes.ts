@@ -143,7 +143,7 @@ export const SPECIAL_IDLE = 0.2;
  * davon wieder ein Viertel: ×1.5 — actives feel it only via the 20 % click
  * share, so the click:idle shape stays.
  */
-export const DPS_TUNE = 0.72;
+export const DPS_TUNE = 0.3;
 /** Ability price = the level-cost at its unlock level × this factor (v12: 6 → 9). */
 export const ABILITY_COST_MULT = 9;
 
@@ -352,6 +352,91 @@ export const LEVEL_SOFTCAP = DPS_MILESTONES[DPS_MILESTONES.length - 1]!;
 
 /** Zusätzliches Kostenwachstum je Level ÜBER dem Soft-Cap (multiplikativ). */
 export const SOFTCAP_COST_GROWTH = 1.06;
+
+/**
+ * **Crew-weite Meilensteine.** Steht die GESAMTE angeheuerte Crew auf Level 25,
+ * verdoppelt sich der Ausstoß aller Mitglieder; dasselbe bei 50/100/200/250.
+ *
+ * Warum es diesen Kanal gibt: Die Fähigkeiten wirken nur noch auf ihren eigenen
+ * Träger, und die Einzel-Meilensteine belohnen ebenfalls nur den, der sie
+ * erreicht. Ohne Gegengewicht wäre die beste Strategie, ein einziges Mitglied
+ * hochzuziehen und die anderen stehen zu lassen. Dieser Meilenstein belohnt
+ * genau das Gegenteil — BREITE — und ist der einzige Term, den ein einzelnes
+ * Mitglied nicht allein auslösen kann.
+ *
+ * Die Schwellen sind absichtlich dieselben wie bei {@link DPS_MILESTONES}: eine
+ * Zahlenreihe, die der Spieler einmal lernt und überall wiedererkennt.
+ */
+export const CREW_MILESTONES: readonly number[] = DPS_MILESTONES;
+
+/** Der Faktor je erreichtem crew-weiten Meilenstein. */
+export const CREW_MILESTONE_MULT = 2;
+
+/** Wie viele Mitglieder sind überhaupt angeheuert (Level ≥ 1)? */
+export function crewHiredCount(levels: CrewLevels): number {
+  let n = 0;
+  for (const cfg of CREW) if ((levels[cfg.id] ?? 0) >= 1) n++;
+  return n;
+}
+
+/**
+ * Der Anteil der GANZEN Crew, der Schwelle `m` erreicht hat (0…1).
+ *
+ * Der Nenner ist bewusst die volle Besetzung ({@link CREW}`.length`) und nicht
+ * die Zahl der angeheuerten Mitglieder. Zwei Fehler hängen genau daran, beide
+ * gemessen:
+ *
+ * 1. Mit „angeheuert" als Nenner bekäme ein Spieler mit einem einzigen
+ *    hochgezogenen Mitglied den vollen ×32 — der Meilenstein würde also gerade
+ *    das Gegenteil von Breite belohnen.
+ * 2. Schlimmer: Das Anheuern eines weiteren Mitglieds SENKT dann den Anteil
+ *    (14/14 → 14/15), kostet also sofort Schlagkraft, während das neue Mitglied
+ *    auf Level 1 fast nichts beiträgt. Netto ein Verlust — das Spiel bestrafte
+ *    das Vervollständigen der Crew.
+ *
+ * Mit der vollen Besetzung als Nenner kann Anheuern den Anteil nie senken, nur
+ * heben (0/15 → 1/15, sobald das neue Mitglied die Schwelle erreicht).
+ */
+export function crewReachedFrac(levels: CrewLevels, m: number): number {
+  let reached = 0;
+  for (const cfg of CREW) if ((levels[cfg.id] ?? 0) >= m) reached++;
+  return reached / CREW.length;
+}
+
+/**
+ * Der crew-weite Multiplikator: je Schwelle ein Faktor, der bei
+ * {@link CREW_MILESTONE_MULT} steht, sobald die GANZE angeheuerte Crew sie
+ * erreicht hat — und anteilig darunter.
+ *
+ * **Warum anteilig und nicht als harter Sprung am Minimum.** Gemessen: Mit dem
+ * Minimum über die angeheuerte Crew reißt jedes NEU angeheuerte Mitglied den
+ * Boden sofort auf 1 und der Faktor fällt von ×32 auf ×1. Ein neues Mitglied
+ * auf Level 25 zu ziehen kostet rund das 68-Fache seines Anheuerpreises — das
+ * Spiel stünde so lange bei einem Zweiunddreißigstel seiner Schlagkraft. Das
+ * Ergebnis wäre ein Spiel, das dafür bestraft, die Crew zu vervollständigen,
+ * also genau das Gegenteil dessen, was dieser Meilenstein belohnen soll.
+ *
+ * Anteilig kostet dasselbe Anheuern bei 15 Mitgliedern rund 16 % statt 97 %,
+ * und die Zusicherung bleibt wörtlich erhalten: **alle auf Schwelle ⇒ ×2 je
+ * Schwelle** (bei voller Crew über 250 also ×32). Rein und nie werfend.
+ */
+export function crewMilestoneMult(levels: CrewLevels): number {
+  let mult = 1;
+  for (const m of CREW_MILESTONES) {
+    mult *= 1 + (CREW_MILESTONE_MULT - 1) * crewReachedFrac(levels, m);
+  }
+  return mult;
+}
+
+/**
+ * Die nächste Schwelle, die die Crew noch NICHT vollständig erreicht hat —
+ * `null`, wenn jede angeheuerte Kraft über der letzten steht. Das ist das Ziel,
+ * das die Anzeige nennt.
+ */
+export function nextCrewMilestone(levels: CrewLevels): number | null {
+  for (const m of CREW_MILESTONES) if (crewReachedFrac(levels, m) < 1) return m;
+  return null;
+}
 
 /**
  * Der Meilenstein-Multiplikator eines Levels: ×2 je erreichtem Meilenstein.
@@ -807,7 +892,10 @@ export function totalRawDps(
       mastery[cfg.id] ?? 0,
       heirWeightFor(cfg.id, heir),
     );
-  return dps;
+  // Der crew-weite Meilenstein sitzt HIER, auf der Summe: Er gehört keinem
+  // Mitglied, sondern der Aufstellung. Klick und Idle lesen dieselbe Funktion,
+  // damit die beiden Seiten nie auseinanderlaufen.
+  return dps * crewMilestoneMult(levels);
 }
 
 /**
@@ -969,7 +1057,7 @@ export function clickDamageRaw(
   mastery: CrewMastery = {},
   heir = '',
 ): number {
-  let click = CLICK_BASE;
+  let click = 0;
   for (const cfg of CREW)
     click += heroClick(
       cfg,
@@ -979,5 +1067,14 @@ export function clickDamageRaw(
       mastery[cfg.id] ?? 0,
       heirWeightFor(cfg.id, heir),
     );
-  return click + CLICK_DPS_SHARE * totalRawDps(levels, gilds, ups, mastery, heir);
+  // `CLICK_BASE` bleibt AUSSEN vor: Es ist der nackte Sockel, den auch eine
+  // Partie ohne jede Crew hat — ihn mit einem Crew-Meilenstein zu vervielfachen
+  // wäre eine Belohnung für etwas, das mit der Crew nichts zu tun hat. Der
+  // Anteil, der aus der Crew kommt, skaliert dagegen mit; der DPS-Anteil trägt
+  // den Faktor bereits aus `totalRawDps`.
+  return (
+    CLICK_BASE +
+    click * crewMilestoneMult(levels) +
+    CLICK_DPS_SHARE * totalRawDps(levels, gilds, ups, mastery, heir)
+  );
 }
