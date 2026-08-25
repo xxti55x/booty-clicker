@@ -135,9 +135,15 @@ export class Heaven {
     const globalPct = Math.round(h.hpf * 2);
     const soulBonusPct = Math.round((0.1 + 0.002 * h.hpf) * 100);
 
+    // Ohne Himmelspfirsiche gibt es nichts zu vergleichen: „wirkt 10 % statt
+    // 10 %" ist keine Auskunft, sondern eine Zeile, die den Leser rätseln
+    // lässt, ob etwas kaputt ist. Der Vergleich erscheint erst, wenn er einen
+    // Unterschied benennt.
+    const seelen =
+      h.hpf > 0 ? ` · jede Seele wirkt ${soulBonusPct}% statt 10%` : ' · jede Seele wirkt 10%';
     const held =
       `Gehaltene <b>${fmt(h.hpf)}</b> Himmelspfirsiche 🍑 ` +
-      `(+${globalPct}% globaler Schaden · jede Seele wirkt ${soulBonusPct}% statt 10%).<br>` +
+      `(+${globalPct}% globaler Schaden${seelen}).<br>` +
       `Lebenszeit-RS <b>${fmt(state.rsLifetime)}</b> → gesamt <b>${fmt(hpfForRsLifetime(state.rsLifetime))}</b> HPF.<br>`;
     // Vor dem Gate zeigt die Card den FORTSCHRITT statt „+0 HPF" — der Tab öffnet seit
     // ROADMAP-V2 P2a schon mit der ersten Aszension, also braucht der gesperrte Zustand
