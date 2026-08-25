@@ -16,6 +16,7 @@ import {
   heroDps,
   LEVEL_SOFTCAP,
   levelsToNextAbility,
+  levelTier,
   maxAbilityTiers,
   maxAffordable,
   milestoneMult,
@@ -35,6 +36,7 @@ import { fmt, fmtInt } from './format';
 import { abilityIcon } from './ability-icons';
 import { abilityBurst, coinFly } from './fx';
 import { portraitTile, tierClass } from './avatars';
+import { levelFrame } from './cartoon';
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -50,13 +52,6 @@ function byId(id: string): HTMLElement {
 type BuyAmount = 1 | 10 | 100 | 'next' | 'max';
 
 /** Tiny inline glyph per ability kind (rendered ~14 px inside the slot). */
-
-/**
- * Die Rahmenfarbe je Meisterschafts-Rang (1a): Kupfer → Silber → Gold →
- * Legende. Der Legenden-Wert ist nur der FALLBACK — seinen Regenbogen-Schimmer
- * malt die CSS-Animation `.av.mr4` (Animationen schlagen die Inline-Variable).
- */
-const MASTERY_FRAME: readonly string[] = ['', '#c47a3a', '#cfd8e0', '#ffcf5e', '#c79bf0'];
 
 /** Die Meisterschafts-Zeile einer Crew-Card („Meisterschaft: Silber · 1.240/8.000"). */
 function masteryLine(p: MasteryProgress): string {
@@ -382,6 +377,7 @@ export class Crew {
       const affordable = count > 0 && cost <= s.gold;
       const gild = s.gilds[cfg.id] ?? 0;
       const mp = masteryProgress(s.crewMastery[cfg.id] ?? 0);
+      const lvTier = levelTier(level);
       const out = cfg.click
         ? heroClick(cfg, level, gild, ups, mp.xp) * clickMult
         : heroDps(cfg, level, gild, ups, mp.xp) * dpsMult;
@@ -478,8 +474,10 @@ export class Crew {
             ${portraitTile(
               cfg.id,
               'base',
-              `av-lg${mp.rank > 0 ? ` mr mr${mp.rank}` : ''}`,
-              mp.rank > 0 ? MASTERY_FRAME[mp.rank] : undefined,
+              // Zwei Kanäle, zwei Aussagen: Der RAHMEN gehört dem Level (`lv1`…
+              // `lv5` an den Crew-Schwellen), der SCHEIN der Meisterschaft.
+              `av-lg${lvTier > 0 ? ` lv lv${lvTier}` : ''}${mp.rank > 0 ? ` mr mr${mp.rank}` : ''}`,
+              levelFrame(lvTier),
             )}
             <div class="crew-id">
               <div class="nm" title="${cfg.ds}">${cfg.name}${gildBadge}<span class="lv">Lv ${level}${ups > 0 ? ` · ×${abilityMult(cfg, ups)}` : ''}</span></div>
