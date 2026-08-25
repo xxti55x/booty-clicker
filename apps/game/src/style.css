@@ -6514,3 +6514,56 @@ body {
   line-height: 1.42;
   color: var(--parch-soft);
 }
+
+/* ---- Vorsprung-Wähler (L3-Verb) in der Transzendenz-Zeremonie ----------- */
+/* Er steht NUR da, wenn es etwas zu überspringen gibt — ein Wähler mit einer
+   einzigen Option wäre eine leere Geste und würde die Zeremonie zustellen. */
+.vs {
+  margin: 10px 0 2px;
+  padding: 10px 11px 11px;
+  border-radius: 11px;
+  border: 1px solid rgba(108, 44, 168, 0.4);
+  background: rgba(176, 107, 255, 0.14);
+}
+.vs-head {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.2px;
+  /* Der Dialog steht auf PERGAMENT (hell) — die Violett-Töne der Trans-Panels
+     wären hier fast unsichtbar. Deshalb dunkles Violett statt des hellen. */
+  color: #5b2b8a;
+}
+.vs-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.vs-step {
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(108, 44, 168, 0.42);
+  background: rgba(255, 255, 255, 0.5);
+  color: #3d1c60;
+  font-size: 11.5px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.vs-step:hover {
+  border-color: #6c2ca8;
+  background: rgba(255, 255, 255, 0.75);
+}
+/* Die gewählte Stufe kehrt den Kontrast um — auf hellem Grund liest sich das
+   deutlicher als eine hellere Füllung. */
+.vs-step.on {
+  border-color: #4a2178;
+  background: #5b2b8a;
+  color: #f4ecff;
+}
+.vs-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--parch-ink);
+  opacity: 0.78;
+}

@@ -585,7 +585,11 @@ combat = withBossTimerBonus(combat);
  */
 function newRunCombat(): CombatState {
   runRemix = remixSeedFor(state.rng.seed, state.stats.ascensions);
-  return withBossTimerBonus(spawnFor(1, 0, 1, runRemix, runWeek));
+  // Die Startbühne kommt aus dem State: Normalerweise 1, nach einer
+  // Transzendenz mit gewähltem Vorsprung (L3) tiefer. `transcendState` hat den
+  // Wunsch bereits auf das Erlaubte geklemmt — hier wird nur noch gelesen.
+  const z = Math.max(1, Math.floor(state.zone) || 1);
+  return withBossTimerBonus(spawnFor(z, 0, z, runRemix, runWeek));
 }
 
 let dps = 0;
@@ -1577,7 +1581,7 @@ const heirDialog = new HeirDialog({ state });
  * Dialog je übersprungen würde — den Panel-Knopf selbst. Die Gutschrift
  * passiert wie gehabt VOR der Blende (G4-Vertrag).
  */
-function doTranscend(heir: string): void {
+function doTranscend(heir: string, startZone = 1): void {
   {
     {
       // Gate the deep reset on a real TE gain (the panel button is disabled otherwise,
@@ -1585,7 +1589,7 @@ function doTranscend(heir: string): void {
       if (!canTranscend(state.transcend, state.heaven.hpfLifetime)) return;
       syncMaxZones(); // fold live combat maxzones + RNG cursor + combo into state first
       const teBefore = state.transcend.te; // G4: Betrag für den Aufzähler (nur Anzeige)
-      Object.assign(state, transcendState(state, heir)); // banks TE, wipes L1+L2, setzt den Erben
+      Object.assign(state, transcendState(state, heir, startZone)); // banks TE, wipes L1+L2, setzt Erbe + Vorsprung
       applyMythosFruhstart(); // P2: der Knoten überlebt den tiefsten Reset und greift hier
       applyMasteryFreeTiers(); // 1a: die Meisterschaft überlebt auch den tiefsten Reset
       applyConstellationStart(); // 2a: der Baum überlebt auch den tiefsten Reset
@@ -1639,7 +1643,7 @@ if (transcendEnabled) {
     // eine Entscheidung macht.
     onTranscend: () => {
       if (!canTranscend(state.transcend, state.heaven.hpfLifetime)) return;
-      heirDialog.show((heir) => doTranscend(heir));
+      heirDialog.show((heir, startZone) => doTranscend(heir, startZone));
     },
     // ROADMAP-V2 P2 — Mythos-Shop: gehaltenes TE gegen einen permanenten Wahl-Knoten.
     // Der Kauf senkt `te` und damit den ×3^TE-Boost, deshalb muss der HUD-Multiplikator

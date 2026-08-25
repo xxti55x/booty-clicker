@@ -10,6 +10,7 @@ import { type AbilityState, createAbility } from './ability';
 import { applyAscension, soulMult } from './ascension';
 import { BOSS_EVERY } from './combat';
 import { setlistEffect } from './setlist';
+import { vorsprungStartZone } from './vorsprung';
 import {
   type AncientLevels,
   ancientChestLuckBonus,
@@ -929,10 +930,20 @@ export function himmelfahrtState(state: ChState): ChState {
  * MUST gate the button on `canTranscend(state.transcend, state.heaven.hpfLifetime)`
  * so the reset is never triggered without a real gain.
  */
-export function transcendState(state: ChState, heir = ''): ChState {
+export function transcendState(state: ChState, heir = '', startZone = 1): ChState {
   const transcend = bankTranscendence(state.transcend, state.heaven.hpfLifetime);
+  // L3-Verb „Vorsprung": Die neue Ära muss sich nicht durch Bühnen kriechen,
+  // die längst gelöst sind. Der Wunsch kommt vom Aufrufer, die GRENZE aus der
+  // Regel — der Deckel liegt bewusst hier und nicht im Dialog, damit ein
+  // gecrafteter Save nicht auf Bühne 900 startet. `zoneEver` ist der Rekord,
+  // der jeden Reset überlebt (`lifetimeMaxZone` fällt gleich auf 1).
+  const rekord = Math.max(state.gear.zoneEver, state.lifetimeMaxZone, state.runMaxZone);
+  const start = vorsprungStartZone(startZone, transcend.teLifetime, rekord);
   return {
     ...createChState(), // fresh L1 tour + fresh L2 heaven (createHeaven())
+    zone: start,
+    runMaxZone: start,
+    lifetimeMaxZone: start,
     transcend, // the banked L3 slice survives (held TE + Mythos ledger carry over)
     gilds: state.gilds, // Vergoldungen survive every reset
     crewMastery: state.crewMastery, // Einsatz-XP überleben auch den tiefsten Reset (1a)

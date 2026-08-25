@@ -3,6 +3,43 @@
 Log of non-obvious engineering decisions, newest first. Each milestone appends
 here (spec §7).
 
+## Progression: zwei neue VERBEN statt zweier neuer Währungen
+
+- **Der Vorwurf war berechtigt.** Ruhm → Himmel → Transzendenz brachte je Stufe
+  eine weitere Währung und einen weiteren Prozentwert. Man spielte oben genau
+  dasselbe Spiel wie unten, nur mit größeren Zahlen. Ein Buff verschiebt eine
+  Zahl; ein Verb verschiebt, WIE man spielt — gefehlt haben Verben.
+- **L2 „Setlist": eine Karte regiert den Lauf.** Ab der ersten Himmelfahrt wählt
+  man nach jeder Aszension eine von drei Karten, die Bühnenlänge, Klick/Crew-
+  Verhältnis, Gold und Boss-Beute verschiebt. „Kurzer Auftritt" macht Bühnen zu
+  Sprints, „Rampenfieber" macht Bosse zur Hauptbeute — man farmt anders, nicht
+  nur schneller.
+- **Jede Karte gibt UND nimmt.** Eine reine Verbesserung wäre keine Wahl, nur
+  eine Verzögerung des Klickens. Ein Test hält das für den ganzen Katalog fest,
+  ein zweiter die Spürbarkeit (Faktor ≥ 1.8 — eine Karte, die man nicht merkt,
+  ändert nichts).
+- **Das Angebot hängt an einem Seed im Spielstand, nicht an einem RNG-Zug.**
+  Sonst wäre das Wegklicken des Dialogs ein Reroll. Aus demselben Grund geht der
+  Dialog beim Start wieder auf, wenn beim Schließen noch keine Karte stand.
+- **Der Seed brauchte mehr als den Lebenszeit-Rekord.** Erste Fassung mischte
+  nur `rng.cursor` und `lifetimeMaxZone` — zwei Aszensionen hintereinander
+  lassen den Rekord aber oft unverändert, es hätten also zweimal dieselben drei
+  Karten dagestanden. Jetzt fließen Lauftiefe und Himmelfahrt-Zähler mit ein.
+- **L3 „Vorsprung": die Ära beginnt, wo man will.** Nach einer Transzendenz muss
+  man sich nicht durch längst gelöste Bühnen kriechen. Der Deckel wächst mit
+  `teLifetime` (5 Bühnen je Punkt) und liegt hart bei 60 % des eigenen Rekords —
+  ohne diesen Riegel startete ein alter Spielstand auf seinem Rekord, und es
+  gäbe nichts mehr zu spielen, nur noch zuzusehen.
+- **Die Klemme sitzt in der REGEL, nicht im Dialog.** `transcendState` stutzt den
+  Wunsch selbst zurecht. Ein gecrafteter Save kann damit nicht auf Bühne 900
+  starten — dieselbe Disziplin wie bei der Setlist, wo eine Karte außerhalb des
+  Angebots beim Laden herausfällt.
+- **Zwei Anzeige-Fehler erst im Screenshot gefunden:** Der Vorsprung-Wähler stand
+  unter einer fünfzehn Karten langen Crew-Liste (ohne Scrollen unsichtbar) und
+  trug Violett-Töne aus den dunklen Trans-Panels — auf dem hellen Pergament des
+  Dialogs praktisch unlesbar. Beides gehört zur Sorte Fehler, die kein Test
+  fängt.
+
 ## Fähigkeiten als Eigen-Boosts + crew-weite Meilensteine
 
 - **Der Fehler, den der Umbau behebt.** Alle Sorten außer `power` schrieben in

@@ -26,6 +26,8 @@
  * passiert.
  */
 import type { ChState } from '../game/ch-state';
+import { bankTranscendence } from '../game/transcend';
+import { vorsprungSteps, vorsprungUnlocked } from '../game/vorsprung';
 import { CREW } from '../game/heroes';
 import {
   HEIR_WEIGHT,
@@ -55,13 +57,26 @@ function heirGainPct(rank: number): number {
 export class HeirDialog {
   private readonly overlay = byId('heirOverlay');
   /** Der Rückruf der laufenden Zeremonie (null = Dialog zu). */
-  private done: ((heir: string) => void) | null = null;
+  private done: ((heir: string, startZone: number) => void) | null = null;
   /** Die aktuell markierte Wahl ('' = kein Erbe). */
   private picked = '';
+  /**
+   * Die gewählte Startbühne der neuen Ära (L3-Verb „Vorsprung").
+   * Immer 1, solange nichts freigeschaltet ist — dann ist der Block versteckt.
+   */
+  private startZone = 1;
 
   constructor(private readonly deps: HeirDeps) {
     byId('heirConfirm').addEventListener('click', () => this.confirm());
     byId('heirCancel').addEventListener('click', () => this.close());
+    byId('vsSteps').addEventListener('click', (ev) => {
+      const b = (ev.target as HTMLElement).closest<HTMLElement>('.vs-step');
+      const z = Number(b?.dataset.zone);
+      if (Number.isFinite(z) && z > 0) {
+        this.startZone = z;
+        this.render();
+      }
+    });
     byId('heirList').addEventListener('click', (ev) => {
       const card = (ev.target as HTMLElement).closest<HTMLElement>('.heir-card');
       if (!card) return;
@@ -82,8 +97,12 @@ export class HeirDialog {
    * Öffnen. `then` bekommt die gewählte Crew-Id (oder `''` für „kein Erbe") und
    * führt die Transzendenz aus; Abbrechen ruft sie nie.
    */
-  show(then: (heir: string) => void): void {
+  show(then: (heir: string, startZone: number) => void): void {
     this.done = then;
+    // Der Vorsprung startet bei Bühne 1: Der Sprung ist ein ANGEBOT, keine
+    // Voreinstellung. Wer ihn will, wählt ihn — wer die Ära von unten spielen
+    // will, muss nichts zurückstellen.
+    this.startZone = 1;
     // Vorschlag: das Mitglied mit den meisten Einsatz-XP — dieselbe Heuristik,
     // die der Sim-Bot fährt. Vorgeschlagen, nicht gesetzt: Ein Klick auf „Kein
     // Erbe" bleibt einen Klick weit weg.
@@ -102,8 +121,44 @@ export class HeirDialog {
     const then = this.done;
     if (!then) return;
     const heir = this.picked;
+    const zone = this.startZone;
     this.close();
-    then(heir);
+    then(heir, zone);
+  }
+
+  /**
+   * Der Vorsprung-Block: die Stufen, auf denen die neue Ära beginnen darf.
+   *
+   * Er bleibt versteckt, solange es nichts zu überspringen gibt — ein Wähler
+   * mit einer einzigen Option wäre eine leere Geste und würde die Zeremonie
+   * nur zustellen.
+   */
+  private renderVorsprung(): void {
+    const s = this.deps.state;
+    // `zoneEver` ist der Rekord, der jeden Reset überlebt — dieselbe Zahl, die
+    // auch `transcendState` als Deckel liest.
+    const rekord = Math.max(s.gear.zoneEver, s.lifetimeMaxZone, s.runMaxZone);
+    const te = bankTranscendence(s.transcend, s.heaven.hpfLifetime).teLifetime;
+    const block = byId('vsBlock');
+    if (!vorsprungUnlocked(te, rekord)) {
+      block.classList.add('hidden');
+      this.startZone = 1;
+      return;
+    }
+    block.classList.remove('hidden');
+    const steps = vorsprungSteps(te, rekord);
+    byId('vsSteps').innerHTML = steps
+      .map(
+        (z) =>
+          `<button class="vs-step${z === this.startZone ? ' on' : ''}" data-zone="${z}" type="button">` +
+          (z === 1 ? 'Bühne 1' : `Bühne ${z}`) +
+          `</button>`,
+      )
+      .join('');
+    byId('vsHint').textContent =
+      this.startZone > 1
+        ? `Die neue Ära beginnt auf Bühne ${this.startZone} — alles davor ist übersprungen.`
+        : 'Von ganz unten. Wähle eine Bühne, um den Vorsprung zu nutzen.';
   }
 
   /** Die Id mit den meisten Einsatz-XP ('' wenn niemand welche hat). */
@@ -139,6 +194,7 @@ export class HeirDialog {
   }
 
   private render(): void {
+    this.renderVorsprung();
     const none =
       `<button class="heir-card none${this.picked === '' ? ' on' : ''}" data-id="" type="button">` +
       `<span class="heir-x">∅</span><span class="heir-nm">Kein Erbe</span>` +
