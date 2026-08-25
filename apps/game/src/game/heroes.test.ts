@@ -17,6 +17,8 @@ import {
   abilityMult,
   ABILITY_FIRST_LEVEL,
   MAX_ABILITY_TIERS,
+  MIN_ABILITY_TIERS,
+  maxAbilityTiers,
   dpsLevelFactor,
   DPS_MILESTONES,
   LEVEL_SOFTCAP,
@@ -85,15 +87,15 @@ describe('heroes — kaufbare Fähigkeiten (buyable abilities)', () => {
     expect(abilityLevel(1)).toBe(25);
     expect(abilityLevel(2)).toBe(75);
     expect(abilityLevel(3)).toBe(125);
-    expect(abilityTiersUnlocked(24)).toBe(0);
-    expect(abilityTiersUnlocked(25)).toBe(1);
-    expect(abilityTiersUnlocked(74)).toBe(1);
-    expect(abilityTiersUnlocked(75)).toBe(2);
-    expect(abilityTiersUnlocked(125)).toBe(3);
+    expect(abilityTiersUnlocked(boss, 24)).toBe(0);
+    expect(abilityTiersUnlocked(boss, 25)).toBe(1);
+    expect(abilityTiersUnlocked(boss, 74)).toBe(1);
+    expect(abilityTiersUnlocked(boss, 75)).toBe(2);
+    expect(abilityTiersUnlocked(boss, 125)).toBe(3);
     // Seit dem Fähigkeiten-Deckel ist bei acht Schluss — ein Mitglied kann
     // fertig ausgebaut sein, statt endlos neue Stufen zu bekommen.
-    expect(abilityTiersUnlocked(375)).toBe(MAX_ABILITY_TIERS);
-    expect(abilityTiersUnlocked(1025)).toBe(MAX_ABILITY_TIERS);
+    expect(abilityTiersUnlocked(boss, 375)).toBe(MAX_ABILITY_TIERS);
+    expect(abilityTiersUnlocked(boss, 1025)).toBe(MAX_ABILITY_TIERS);
   });
 
   it('only POWER tiers raise output — mult follows the member RHYTHM (v11.1)', () => {
@@ -174,7 +176,7 @@ describe('heroes — kaufbare Fähigkeiten (buyable abilities)', () => {
   });
 
   it('nextAbility reports the next tier in order with its gate', () => {
-    expect(nextAbility(hype, 24, 0).unlocked).toBe(false);
+    expect(nextAbility(hype, 24, 0)!.unlocked).toBe(false);
     expect(nextAbility(hype, 25, 0)).toMatchObject({ tier: 1, level: 25, unlocked: true });
     expect(nextAbility(hype, 25, 1)).toMatchObject({ tier: 2, level: 75, unlocked: false });
     expect(nextAbility(hype, 80, 1)).toMatchObject({ tier: 2, level: 75, unlocked: true });
@@ -512,17 +514,17 @@ describe('Erbe (3c) — die doppelte Meisterschaft in der Crew-Faltung', () => {
 // Kaufmenge „Fähigkeit": bis exakt auf den nächsten Freischalt-Meilenstein.
 describe('levelsToNextAbility — die Kaufmenge bis zur nächsten Fähigkeit', () => {
   it('führt von Level 0 genau auf die erste Freischaltung', () => {
-    expect(levelsToNextAbility(0)).toBe(ABILITY_FIRST_LEVEL);
-    expect(levelsToNextAbility(10)).toBe(ABILITY_FIRST_LEVEL - 10);
-    expect(levelsToNextAbility(24)).toBe(1);
+    expect(levelsToNextAbility(boss, 0)).toBe(ABILITY_FIRST_LEVEL);
+    expect(levelsToNextAbility(boss, 10)).toBe(ABILITY_FIRST_LEVEL - 10);
+    expect(levelsToNextAbility(boss, 24)).toBe(1);
   });
 
   it('landet immer EXAKT auf einer Freischaltung, solange es noch eine gibt', () => {
     for (let lv = 0; lv < 400; lv++) {
-      if (abilityTiersUnlocked(lv) >= MAX_ABILITY_TIERS) continue; // alles offen
-      const target = lv + levelsToNextAbility(lv);
-      expect(abilityTiersUnlocked(target)).toBeGreaterThan(abilityTiersUnlocked(lv));
-      expect(abilityTiersUnlocked(target - 1)).toBe(abilityTiersUnlocked(lv));
+      if (abilityTiersUnlocked(boss, lv) >= MAX_ABILITY_TIERS) continue; // alles offen
+      const target = lv + levelsToNextAbility(boss, lv);
+      expect(abilityTiersUnlocked(boss, target)).toBeGreaterThan(abilityTiersUnlocked(boss, lv));
+      expect(abilityTiersUnlocked(boss, target - 1)).toBe(abilityTiersUnlocked(boss, lv));
     }
   });
 
@@ -530,8 +532,8 @@ describe('levelsToNextAbility — die Kaufmenge bis zur nächsten Fähigkeit', (
   // statt ins Leere — der Knopf bleibt sinnvoll.
   it('zielt nach der letzten Fähigkeit auf den nächsten DPS-Meilenstein', () => {
     const full = abilityLevel(MAX_ABILITY_TIERS); // Lv 375
-    expect(abilityTiersUnlocked(full)).toBe(MAX_ABILITY_TIERS);
-    const target = full + levelsToNextAbility(full);
+    expect(abilityTiersUnlocked(boss, full)).toBe(MAX_ABILITY_TIERS);
+    const target = full + levelsToNextAbility(boss, full);
     // 375 liegt über dem Soft-Cap: dort gibt es keinen Meilenstein mehr, also
     // kauft die Menge genau ein Level.
     expect(target).toBe(full + 1);
@@ -542,13 +544,13 @@ describe('levelsToNextAbility — die Kaufmenge bis zur nächsten Fähigkeit', (
   });
 
   it('zeigt auf einer Freischaltung auf die NÄCHSTE (kein No-Op-Knopf)', () => {
-    expect(levelsToNextAbility(ABILITY_FIRST_LEVEL)).toBe(ABILITY_SPACING);
-    expect(levelsToNextAbility(75)).toBe(ABILITY_SPACING);
+    expect(levelsToNextAbility(boss, ABILITY_FIRST_LEVEL)).toBe(ABILITY_SPACING);
+    expect(levelsToNextAbility(boss, 75)).toBe(ABILITY_SPACING);
   });
 
   it('bleibt bei kaputten Eingaben eine sinnvolle Zahl', () => {
-    expect(levelsToNextAbility(-5)).toBe(ABILITY_FIRST_LEVEL);
-    expect(levelsToNextAbility(Number.NaN)).toBe(ABILITY_FIRST_LEVEL);
+    expect(levelsToNextAbility(boss, -5)).toBe(ABILITY_FIRST_LEVEL);
+    expect(levelsToNextAbility(boss, Number.NaN)).toBe(ABILITY_FIRST_LEVEL);
   });
 });
 
@@ -647,8 +649,78 @@ describe('DPS-Meilensteine und Soft-Cap', () => {
     // restlichen Fähigkeiten. Ohne das wäre alles über Lv 250 sinnlos.
     const last = abilityLevel(MAX_ABILITY_TIERS);
     expect(last).toBeGreaterThan(LEVEL_SOFTCAP);
-    expect(abilityTiersUnlocked(last)).toBe(MAX_ABILITY_TIERS);
-    expect(abilityTiersUnlocked(last - 1)).toBe(MAX_ABILITY_TIERS - 1);
-    expect(abilityTiersUnlocked(last + 5000)).toBe(MAX_ABILITY_TIERS);
+    expect(abilityTiersUnlocked(boss, last)).toBe(MAX_ABILITY_TIERS);
+    expect(abilityTiersUnlocked(boss, last - 1)).toBe(MAX_ABILITY_TIERS - 1);
+    expect(abilityTiersUnlocked(boss, last + 5000)).toBe(MAX_ABILITY_TIERS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fähigkeiten-Spanne 4…8 je Mitglied
+// ---------------------------------------------------------------------------
+// Goal: „fähigkeiten soll es auch MAX 8 geben also für alle zwischen 4-8."
+// Vorher lernten alle 15 Mitglieder dieselbe Zahl — sie unterschieden sich
+// damit nur noch in Grundwerten. Die Spanne gibt jedem ein Profil.
+describe('Fähigkeiten-Spanne je Mitglied', () => {
+  it('gibt jedem Mitglied eine Zahl INNERHALB der Spanne', () => {
+    for (const cfg of CREW) {
+      expect(maxAbilityTiers(cfg)).toBeGreaterThanOrEqual(MIN_ABILITY_TIERS);
+      expect(maxAbilityTiers(cfg)).toBeLessThanOrEqual(MAX_ABILITY_TIERS);
+    }
+  });
+
+  it('nutzt die Spanne wirklich aus (nicht alle auf demselben Wert)', () => {
+    const seen = new Set(CREW.map(maxAbilityTiers));
+    // Beide Ränder kommen vor — sonst wäre die Spanne nur Dekoration.
+    expect(seen.has(MIN_ABILITY_TIERS)).toBe(true);
+    expect(seen.has(MAX_ABILITY_TIERS)).toBe(true);
+    expect(seen.size).toBeGreaterThanOrEqual(4);
+  });
+
+  it('klemmt kaputte Tabellen-Werte, statt die Anzeige zu sprengen', () => {
+    const bad = { ...CREW[0], tiers: 99 };
+    const worse = { ...CREW[0], tiers: 0 };
+    const nan = { ...CREW[0], tiers: Number.NaN };
+    expect(maxAbilityTiers(bad)).toBe(MAX_ABILITY_TIERS);
+    expect(maxAbilityTiers(worse)).toBe(MIN_ABILITY_TIERS);
+    expect(maxAbilityTiers(nan)).toBe(MIN_ABILITY_TIERS);
+  });
+
+  it('schaltet nie mehr Stufen frei, als das Mitglied lernen kann', () => {
+    for (const cfg of CREW) {
+      const cap = maxAbilityTiers(cfg);
+      // Weit über jedem denkbaren Level bleibt der Deckel stehen.
+      expect(abilityTiersUnlocked(cfg, 10_000)).toBe(cap);
+      // Und genau AUF seinem Level ist er erreicht, einen darunter nicht.
+      expect(abilityTiersUnlocked(cfg, abilityLevel(cap))).toBe(cap);
+      expect(abilityTiersUnlocked(cfg, abilityLevel(cap) - 1)).toBe(cap - 1);
+    }
+  });
+
+  // Der gemeldete Fehler: „warum sieht man bei der crew mehr als 8 fähigkeiten
+  // nachdem man alle 8 gekauft hat?" — `nextAbility` lieferte stur gekauft+1.
+  it('meldet KEINE weitere Fähigkeit, wenn das Mitglied fertig ist', () => {
+    for (const cfg of CREW) {
+      const cap = maxAbilityTiers(cfg);
+      // Eine Stufe vor Schluss gibt es noch etwas …
+      expect(nextAbility(cfg, 10_000, cap - 1)).not.toBeNull();
+      expect(nextAbility(cfg, 10_000, cap - 1)!.tier).toBe(cap);
+      // … danach nichts mehr, egal wie hoch das Level steigt.
+      expect(nextAbility(cfg, 10_000, cap)).toBeNull();
+      expect(nextAbility(cfg, 99_999, cap + 5)).toBeNull();
+    }
+  });
+
+  it('lässt die Kaufmenge „Fähigkeit" bei einem fertigen Mitglied nicht ins Leere zeigen', () => {
+    for (const cfg of CREW) {
+      const cap = maxAbilityTiers(cfg);
+      const full = abilityLevel(cap);
+      // Alles freigeschaltet ⇒ die Menge zielt auf den Meilenstein bzw. 1 Level,
+      // niemals auf eine Fähigkeit, die es nicht gibt.
+      const n = levelsToNextAbility(cfg, full);
+      expect(n).toBeGreaterThanOrEqual(1);
+      const m = nextMilestone(full);
+      expect(n).toBe(m === null ? 1 : m - full);
+    }
   });
 });

@@ -82,6 +82,16 @@ export interface HeroConfig {
   readonly special: SpecialKind;
   /** Tier-Rhythmus-Index in `TIER_PATTERNS` (v11.1 Abwechslung). */
   readonly rhythm: 0 | 1 | 2;
+  /**
+   * Wie viele Fähigkeiten dieses Mitglied ÜBERHAUPT lernen kann (4…8).
+   *
+   * Vorher galt für alle 15 Mitglieder dieselbe Zahl — jeder konnte alles, und
+   * damit unterschieden sie sich nur noch in ihren Grundwerten. Die Spanne gibt
+   * jedem ein Profil: Ein Mitglied mit vier Fähigkeiten ist früh fertig und
+   * lebt von seinem Grundwert, eines mit acht bleibt über die ganze Partie ein
+   * Ausbau-Ziel.
+   */
+  readonly tiers: number;
 }
 
 /**
@@ -162,6 +172,7 @@ export const CREW: readonly HeroConfig[] = [
     click: true,
     special: 'critdmg',
     rhythm: 0,
+    tiers: 8,
   },
   {
     id: 'hype',
@@ -171,6 +182,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 5,
     special: 'combo',
     rhythm: 1,
+    tiers: 5,
   },
   {
     id: 'dj',
@@ -180,6 +192,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 22,
     special: 'beat',
     rhythm: 2,
+    tiers: 6,
   },
   {
     id: 'bouncer',
@@ -189,6 +202,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 74,
     special: 'boss',
     rhythm: 0,
+    tiers: 4,
   },
   {
     id: 'influencer',
@@ -198,6 +212,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 245,
     special: 'gold',
     rhythm: 1,
+    tiers: 7,
   },
   {
     id: 'choreo',
@@ -207,6 +222,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 1100,
     special: 'crit',
     rhythm: 2,
+    tiers: 5,
   },
   {
     id: 'producer',
@@ -216,6 +232,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 5000,
     special: 'idle',
     rhythm: 0,
+    tiers: 6,
   },
   {
     id: 'promi',
@@ -225,6 +242,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 22000,
     special: 'critdmg',
     rhythm: 1,
+    tiers: 4,
   },
   {
     id: 'tycoon',
@@ -234,6 +252,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 120000,
     special: 'gold',
     rhythm: 2,
+    tiers: 8,
   },
   {
     id: 'legend',
@@ -243,6 +262,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 700000,
     special: 'ekstase',
     rhythm: 0,
+    tiers: 7,
   },
   // M9 crew expansion (spec §4.3.3): +5 endless tiers, ~×6–8 cost / ~×6–7 DPS each.
   {
@@ -253,6 +273,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 4500000,
     special: 'combo',
     rhythm: 1,
+    tiers: 5,
   },
   {
     id: 'hologram',
@@ -262,6 +283,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 30000000,
     special: 'crit',
     rhythm: 2,
+    tiers: 6,
   },
   {
     id: 'aicluster',
@@ -271,6 +293,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 220000000,
     special: 'idle',
     rhythm: 0,
+    tiers: 4,
   },
   {
     id: 'orbital',
@@ -280,6 +303,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 1600000000,
     special: 'boss',
     rhythm: 1,
+    tiers: 7,
   },
   {
     id: 'cosmic',
@@ -289,6 +313,7 @@ export const CREW: readonly HeroConfig[] = [
     baseDps: 12000000000,
     special: 'ekstase',
     rhythm: 2,
+    tiers: 8,
   },
 ];
 
@@ -367,6 +392,22 @@ export function nextMilestone(level: number): number | null {
  * fertig, und „vollständig ausgebaut" wird ein erreichbarer Zustand.
  */
 export const MAX_ABILITY_TIERS = 8;
+/** Die wenigsten Fähigkeiten, die ein Mitglied haben darf. */
+export const MIN_ABILITY_TIERS = 4;
+
+/**
+ * Wie viele Fähigkeiten `cfg` lernen kann — sein eigenes {@link HeroConfig.tiers},
+ * hart geklemmt auf {@link MIN_ABILITY_TIERS}…{@link MAX_ABILITY_TIERS}.
+ *
+ * Die Klemme ist kein Misstrauen gegen die eigene Tabelle, sondern die Stelle,
+ * an der die Spanne GILT: Jede Rechnung fragt hier, niemand liest `cfg.tiers`
+ * direkt. Ein Tippfehler in der Tabelle verschiebt damit die Balance, sprengt
+ * aber nie die Anzeige.
+ */
+export function maxAbilityTiers(cfg: HeroConfig): number {
+  const t = Number.isFinite(cfg.tiers) ? Math.floor(cfg.tiers) : MIN_ABILITY_TIERS;
+  return Math.max(MIN_ABILITY_TIERS, Math.min(MAX_ABILITY_TIERS, t));
+}
 
 /** Unlock level of ability tier `n` (1-based): 25, 75, 125, … */
 export function abilityLevel(tier: number): number {
@@ -377,10 +418,10 @@ export function abilityLevel(tier: number): number {
  * Wie viele Fähigkeiten `level` freigeschaltet hat — 0 unter Lv 25, danach eine
  * je {@link ABILITY_SPACING} Level, gedeckelt bei {@link MAX_ABILITY_TIERS}.
  */
-export function abilityTiersUnlocked(level: number): number {
-  if (level < ABILITY_FIRST_LEVEL) return 0;
+export function abilityTiersUnlocked(cfg: HeroConfig, level: number): number {
+  if (!Number.isFinite(level) || level < ABILITY_FIRST_LEVEL) return 0;
   const n = Math.floor((level - ABILITY_FIRST_LEVEL) / ABILITY_SPACING) + 1;
-  return Math.min(MAX_ABILITY_TIERS, n);
+  return Math.min(maxAbilityTiers(cfg), n);
 }
 
 /**
@@ -393,13 +434,14 @@ export function abilityTiersUnlocked(level: number): number {
  * zeigt er auf den übernächsten — sonst wäre der Knopf auf einem Meilenstein
  * ein No-Op.
  */
-export function levelsToNextAbility(level: number): number {
+export function levelsToNextAbility(cfg: HeroConfig, level: number): number {
   const lv = Number.isFinite(level) ? Math.max(0, Math.floor(level)) : 0;
   if (lv < ABILITY_FIRST_LEVEL) return ABILITY_FIRST_LEVEL - lv;
-  const tiers = abilityTiersUnlocked(lv);
-  // Alle Fähigkeiten freigeschaltet? Dann gibt es kein Ziel mehr — der Knopf
-  // zielt stattdessen auf den nächsten Meilenstein bzw. ein einzelnes Level.
-  if (tiers >= MAX_ABILITY_TIERS) {
+  const tiers = abilityTiersUnlocked(cfg, level);
+  // Alle Fähigkeiten DIESES Mitglieds freigeschaltet? Dann gibt es kein Ziel
+  // mehr — der Knopf zielt stattdessen auf den nächsten Meilenstein bzw. ein
+  // einzelnes Level. Die Grenze ist mitgliedsabhängig (4…8), nicht global.
+  if (tiers >= maxAbilityTiers(cfg)) {
     const m = nextMilestone(lv);
     return m === null ? 1 : m - lv;
   }
@@ -603,8 +645,12 @@ export function nextAbility(
   cfg: HeroConfig,
   level: number,
   bought: number,
-): { tier: number; level: number; cost: number; unlocked: boolean } {
+): { tier: number; level: number; cost: number; unlocked: boolean } | null {
   const tier = Math.max(0, Math.floor(bought)) + 1;
+  // Über der Grenze dieses Mitglieds gibt es NICHTS mehr — vorher lieferte die
+  // Funktion stur `gekauft + 1` und die Crew-Card zeichnete daraufhin eine
+  // neunte Kachel („ab Lv 425"), die niemand je kaufen konnte.
+  if (tier > maxAbilityTiers(cfg)) return null;
   const lv = abilityLevel(tier);
   return { tier, level: lv, cost: abilityCost(cfg, tier), unlocked: level >= lv };
 }
@@ -882,7 +928,7 @@ export function bestCrewBuy(
       }
     }
     const ab = nextAbility(cfg, lvl, bought);
-    if (ab.unlocked && ab.cost <= budget && bought < abilityTiersUnlocked(lvl)) {
+    if (ab && ab.unlocked && ab.cost <= budget && bought < abilityTiersUnlocked(cfg, lvl)) {
       const direct =
         outputAt(cfg, lvl, gild, bought + 1, xp) - outputAt(cfg, lvl, gild, bought, xp);
       let roi = direct / ab.cost;
@@ -893,7 +939,7 @@ export function bestCrewBuy(
         let costSum = ab.cost;
         for (let k = bought + 1; k - bought <= 4; k++) {
           const nxt = nextAbility(cfg, lvl, k);
-          if (!nxt.unlocked || k >= abilityTiersUnlocked(lvl)) break;
+          if (!nxt || !nxt.unlocked || k >= abilityTiersUnlocked(cfg, lvl)) break;
           costSum += nxt.cost;
           const gain = outputAt(cfg, lvl, gild, k + 1, xp) - outputAt(cfg, lvl, gild, bought, xp);
           if (gain > 0) {

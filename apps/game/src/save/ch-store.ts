@@ -477,7 +477,7 @@ function repairCrewUps(v: unknown, crew: Record<string, number>): CrewUps {
   for (const cfg of CREW) {
     const raw = v[cfg.id];
     if (!isFiniteNumber(raw) || raw <= 0) continue;
-    const unlocked = abilityTiersUnlocked(crew[cfg.id] ?? 0);
+    const unlocked = abilityTiersUnlocked(cfg, crew[cfg.id] ?? 0);
     const n = Math.min(Math.floor(raw), unlocked);
     if (n > 0) out[cfg.id] = n;
   }
