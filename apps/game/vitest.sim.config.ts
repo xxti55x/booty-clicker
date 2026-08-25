@@ -13,22 +13,22 @@ import { defineConfig } from 'vitest/config';
  * Tests. Genau so ist die CI gefallen, und genau so ließ es sich lokal
  * nachstellen (vier Fremdlasten + `npm test` ⇒ derselbe Fehler).
  *
- * Getrennt gefahren bleibt der Unit-Lauf bei rund fünf Sekunden Testzeit, und
- * dieser Lauf hier hat den Hauptprozess für sich.
+ * Getrennt gefahren bleibt der Unit-Lauf bei rund fünf Sekunden Testzeit; die
+ * Sim-Dateien laufen einzeln — siehe `scripts/test-sim.mjs`.
  */
 export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/game/sim*.test.ts'],
     /**
-     * Ein Kern bleibt dem Hauptprozess.
+     * Ein Worker — der Rest der Maschine gehört dem Hauptprozess.
      *
-     * Mit einem Worker je Kern rechnen die Sims den Prozess tot, der ihre
-     * Task-Updates entgegennehmen soll — dieselbe Sättigung, nur in kleinerem
-     * Rahmen. Zwei Worker kosten ein paar Sekunden Wanduhr und nehmen dem
-     * Fehler die Grundlage.
+     * `scripts/test-sim.mjs` ruft diese Konfiguration mit GENAU EINER Datei je
+     * Prozess auf; mehr als ein Worker gäbe es hier ohnehin nicht zu verteilen.
+     * Zwei Worker über alle vier Dateien waren gemessen zu wenig: Unter Last
+     * riss die RPC-Frist weiterhin.
      */
-    maxWorkers: 2,
+    maxWorkers: 1,
     minWorkers: 1,
     /** Wie im Unit-Lauf: 30 s sind großzügig für die Sims und trotzdem eine Grenze. */
     testTimeout: 30_000,
