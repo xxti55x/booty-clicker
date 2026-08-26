@@ -77,7 +77,7 @@
  *    dieselbe `abilityKind`-Kette wie das Spiel, ein Save mit Overrides rechnet
  *    also überall korrekt (`heroes.test.ts`, `ch-state.test.ts`).
  */
-import { applyAscension, soulMult, soulsForMaxZone } from './ascension';
+import { type FameBreadth, applyAscension, soulMult, soulsForMaxZone } from './ascension';
 import {
   ANCIENTS,
   type AncientLevels,
@@ -137,6 +137,7 @@ import {
   goldFor,
   hit,
   hpFraction,
+  killsInSeconds,
   monsterHp,
   spawnFor,
   tickBoss,
@@ -192,7 +193,7 @@ import {
   grantFreeMasteryTiers,
   totalRawDps,
 } from './heroes';
-import { type CrewMastery, addMastery, createMastery } from './mastery';
+import { type CrewMastery, addMastery, createMastery, masteryRank } from './mastery';
 import { legendGlobalMult } from './legend';
 import { BOSS_SECONDS, PATH_NODES, SIM_SKIN, nodesForScore, pathAmount } from './skin-path';
 import {
@@ -449,6 +450,16 @@ function modsOn(config: SimConfig): boolean {
 /** The mutable bot state that persists across ascensions within a chain. */
 interface Sim {
   gold: number;
+  /**
+   * Übertrag des Kill-Budgets zwischen zwei simulierten Sekunden.
+   *
+   * Das Spiel lässt höchstens `1 / RIVAL_MIN_SECONDS` Rivalen je Sekunde fallen
+   * — rund 6,67. Schnitte man den Bruchteil je Sekunde einfach ab, liefe der
+   * Bot systematisch 10 % langsamer als das Spiel, und jede daran kalibrierte
+   * Zahl wäre um denselben Betrag falsch. Der Rest wandert deshalb in die
+   * nächste Sekunde.
+   */
+  killCarry: number;
   crew: Record<string, number>;
   /** Bought crew abilities (v10 — paid milestone tiers, reset with `crew`). */
   crewUp: Record<string, number>;
@@ -657,6 +668,7 @@ function newSim(
 ): Sim {
   return {
     gold: 0,
+    killCarry: 0,
     crew: {},
     crewUp: {},
     crewMastery: createMastery(),
@@ -898,7 +910,12 @@ function powerSplit(
   crewUp: Record<string, number>,
   mastery: CrewMastery,
   gilds: Gilds,
-  souls: number,
+  /**
+   * Die VERDIENTEN Seelen (`rsLifetime`), nicht der gehaltene Bestand: Der
+   * globale Multiplikator hängt seit dem Sparanreiz-Umbau am Verdienst, damit
+   * ein Ahnen-Kauf kein Schadensverlust mehr ist (siehe `soulMult`).
+   */
+  earnedSouls: number,
   ancients: AncientLevels,
   heaven: HeavenState,
   constellation: ConstellationState,
@@ -914,7 +931,7 @@ function powerSplit(
   const hpf = heaven.hpf;
   // 1d: `1 + 0.005·L`, ADDITIV, und auf BEIDE Seiten derselbe Skalar (P1-neutral).
   const legend = legendGlobalMult(meta.legend);
-  const sm = soulMult(souls, soulBonusEff(hpf));
+  const sm = soulMult(earnedSouls, soulBonusEff(hpf));
   const global = heavenGlobalMult(hpf);
   // Click gear (§5) multiplies the click term only (P1: the strongest gear is click).
   const baseClick =
@@ -962,7 +979,12 @@ function powerFor(
   crewUp: Record<string, number>,
   mastery: CrewMastery,
   gilds: Gilds,
-  souls: number,
+  /**
+   * Die VERDIENTEN Seelen (`rsLifetime`), nicht der gehaltene Bestand: Der
+   * globale Multiplikator hängt seit dem Sparanreiz-Umbau am Verdienst, damit
+   * ein Ahnen-Kauf kein Schadensverlust mehr ist (siehe `soulMult`).
+   */
+  earnedSouls: number,
   ancients: AncientLevels,
   heaven: HeavenState,
   constellation: ConstellationState,
@@ -979,7 +1001,7 @@ function powerFor(
     crewUp,
     mastery,
     gilds,
-    souls,
+    earnedSouls,
     ancients,
     heaven,
     constellation,
@@ -1029,7 +1051,7 @@ function damageSplit(
     sim.crewUp,
     sim.crewMastery,
     sim.gilds,
-    sim.souls,
+    sim.rsLifetime,
     sim.ancients,
     sim.heaven,
     sim.constellation,
@@ -1262,6 +1284,23 @@ function openChestsGreedy(sim: Sim, incomePerSec: number, nowMs: number): void {
  * derselben Bühne. Die Ausdauer-Seite (`hp`) rechnet `combat.spawnFor` über
  * `combat.remix` — eine Quelle für Spiel und Bot, hier ist nichts zu tun.
  */
+/**
+ * Die Breite des Bots — dieselben drei Achsen wie im Spiel (`ch-state.breadthOf`).
+ *
+ * Sie muss hier eigens gebildet werden, weil der Bot keinen `ChState` führt,
+ * sondern seinen eigenen, schlankeren Zustand. Dieselbe Rechnung, andere
+ * Herkunft: Weicht sie ab, misst der Bot ein Spiel, das es nicht gibt.
+ */
+function breadthOfSim(sim: Sim): FameBreadth {
+  let masteryRanks = 0;
+  for (const xp of Object.values(sim.crewMastery)) masteryRanks += masteryRank(xp);
+  let reputation = 0;
+  for (const rep of Object.values(sim.territory)) {
+    if (typeof rep === 'number' && Number.isFinite(rep)) reputation += rep;
+  }
+  return { masteryRanks, reputation, chestsOpened: sim.chestsOpened };
+}
+
 function stepSecond(
   sim: Sim,
   combat: CombatState,
@@ -1313,8 +1352,15 @@ function stepSecond(
   };
 
   let remaining = dmg.click + dmg.idle;
+  // Dieselbe Kill-Sperre wie im Spiel (`RIVAL_MIN_SECONDS`): Sonst räumte der
+  // Bot je Sekunde beliebig viele Rivalen und die gemessene Kurve beschriebe
+  // ein Spiel, das es nicht gibt. Der Bruchteil wandert als `killCarry` in die
+  // nächste Sekunde, damit kein systematischer Rückstand entsteht.
+  sim.killCarry += killsInSeconds(1);
   let guard = 50000; // bounds a runaway burst; ×1.6/zone means it always terminates
   while (remaining > 0 && guard-- > 0) {
+    // Bosse haben ihre eigene Uhr und zählen nicht gegen das Budget.
+    if (!combat.boss && sim.killCarry < 1) break;
     // Ein Boss, der MITTEN in dieser Sekunde spawnt (die Welle fiel gerade), ist
     // ein eigener Kampf mit eigenem Faktor — volle Ausdauer, keine Phase, keine Welle.
     if (combat.boss && combat.zone !== sim.gimmickZone) {
@@ -1352,7 +1398,12 @@ function stepSecond(
           if (drop.relic) sim.relicsFound += 1;
         }
       }
-      const r = hit(combat, combat.hp);
+      // Der Bot schlägt mit voller Ausdauer zu (Ein-Schuss-Kill) — die Sperre
+      // des Kampf-Moduls würde ihn hier ausbremsen, obwohl das Budget oben
+      // schon zählt. Sie wird deshalb für diesen Schlag abgetragen; gedeckelt
+      // wird über `killCarry`, nicht doppelt.
+      const r = hit({ ...combat, killCooldown: 0 }, combat.hp);
+      if (!combat.boss) sim.killCarry -= 1;
       sim.gold += Math.floor(
         r.gold * goldMult * (stage?.f.gold ?? 1) * territoryGoldMult(sim.territory, killZone),
       );
@@ -1632,7 +1683,13 @@ export function simulateRunChain(config: SimConfig, runs: number, runSeconds: nu
     globalT += runSeconds;
     maxBestZone = Math.max(maxBestZone, res.bestZone);
     const before = sim.souls;
-    const asc = applyAscension(res.bestZone, sim.lifetimeMaxZone, sim.souls, sim.rsLifetime);
+    const asc = applyAscension(
+      res.bestZone,
+      sim.lifetimeMaxZone,
+      sim.souls,
+      sim.rsLifetime,
+      breadthOfSim(sim),
+    );
     sim.souls = asc.souls;
     sim.lifetimeMaxZone = asc.lifetimeMaxZone;
     sim.rsLifetime = asc.rsLifetime;
@@ -1775,7 +1832,13 @@ export function simulateContinuous(config: SimConfig, opts: ContinuousOptions): 
     }
 
     if (globalT - lastAdvanceT >= opts.stallSeconds) {
-      const asc = applyAscension(combat.maxZone, sim.lifetimeMaxZone, sim.souls, sim.rsLifetime);
+      const asc = applyAscension(
+        combat.maxZone,
+        sim.lifetimeMaxZone,
+        sim.souls,
+        sim.rsLifetime,
+        breadthOfSim(sim),
+      );
       const gained = asc.souls - sim.souls;
       sim.souls = asc.souls;
       sim.lifetimeMaxZone = asc.lifetimeMaxZone;
@@ -2064,7 +2127,13 @@ export function simulateAscensionEra(config: SimConfig, opts: EraOptions): EraRe
     }
 
     if (globalT - lastAdvanceT >= opts.stallSeconds) {
-      const asc = applyAscension(combat.maxZone, sim.lifetimeMaxZone, sim.souls, sim.rsLifetime);
+      const asc = applyAscension(
+        combat.maxZone,
+        sim.lifetimeMaxZone,
+        sim.souls,
+        sim.rsLifetime,
+        breadthOfSim(sim),
+      );
       sim.souls = asc.souls;
       sim.lifetimeMaxZone = asc.lifetimeMaxZone;
       sim.rsLifetime = asc.rsLifetime;

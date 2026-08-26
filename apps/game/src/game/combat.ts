@@ -79,6 +79,21 @@ export interface CombatState {
   /** Seconds left on the boss timer (0 when not a boss). */
   bossTimer: number;
   /**
+   * Restzeit, bis der nächste Rivale fallen DARF (Sekunden).
+   *
+   * Ohne diesen Riegel hing die Vorstoß-Geschwindigkeit an der Bildwiederhol-
+   * rate: Der Frame-Tick bringt EINEN Schadensschub, und `hit` tötet daraufhin
+   * höchstens einen Gegner. Bei 60 fps sind das 60 Rivalen je Sekunde, also
+   * sechs Bühnen — gemeldet als „von Bühne 13 direkt zu 19". Auf einem
+   * 144-Hz-Gerät wäre derselbe Spielstand 2,4-mal schneller gewesen.
+   *
+   * Mit dem Riegel folgt das Tempo der UHR statt der Hardware, und jede Bühne
+   * ist lang genug, um sie zu sehen. Überschüssiger Schaden geht dabei nicht
+   * verloren — er liegt auf dem Ziel und schlägt durch, sobald die Sperre
+   * fällt.
+   */
+  killCooldown: number;
+  /**
    * Remix-Seed der Bühnen-Modifikatoren (ROADMAP-V2 A1; `REMIX_OFF` = keine).
    *
    * Er steht hier, weil `hit`/`tickBoss`/`travelTo` das NÄCHSTE Ziel selbst
@@ -119,6 +134,18 @@ export interface CombatState {
  * mit dem A1-Modifikator. Default `WEEK_OFF` ⇒ exakt `stageHpScale`, also
  * byte-gleich zu A1.
  */
+/**
+ * Die Mindestzeit zwischen zwei Rivalen-Kills (Sekunden).
+ *
+ * 0,15 s ⇒ höchstens rund sieben Rivalen je Sekunde, eine 10er-Bühne also nie
+ * schneller als in etwa anderthalb Sekunden. Das ist schnell genug, dass sich
+ * Überschuss-Schaden weiter lohnt, und langsam genug, dass man jede Bühne
+ * vorbeiziehen sieht — genau der Punkt, an dem die Meldung hing.
+ *
+ * Bosse haben ihre eigene Uhr (`bossTimer`) und sind hiervon nicht betroffen.
+ */
+export const RIVAL_MIN_SECONDS = 0.15;
+
 export function spawnFor(
   zone: number,
   killsThisZone: number,
@@ -138,6 +165,9 @@ export function spawnFor(
     hpMax,
     boss,
     bossTimer: boss ? BOSS_TIME_S : 0,
+    // Ein frisch gespawnter Gegner startet ohne Sperre: Der erste Treffer soll
+    // sofort sitzen, gebremst wird erst der Nachschub.
+    killCooldown: 0,
     remix,
     week,
   };
@@ -194,6 +224,20 @@ export function hit(
       bossSpawned: false,
     };
   }
+  // Der Rivale ist am Boden, darf aber noch nicht fallen: Die Sperre hält das
+  // Tempo an der Uhr statt an der Bildwiederholrate. Der Schaden ist NICHT
+  // verloren — er liegt auf dem Ziel (`hp` bleibt im Minus) und schlägt durch,
+  // sobald `tickKillCooldown` die Sperre abgetragen hat. Bosse sind
+  // ausgenommen, sie haben ihre eigene Uhr.
+  if (!state.boss && state.killCooldown > 0) {
+    return {
+      state: { ...state, hp },
+      killed: false,
+      gold: 0,
+      advancedZone: false,
+      bossSpawned: false,
+    };
+  }
 
   const gold = goldFor(state.zone, state.boss);
 
@@ -220,17 +264,59 @@ export function hit(
       // neu. Der Fortschrittsbalken zeigt damit weiter echte Bewegung, statt am
       // Anschlag zu kleben.
       const again = spawnFor(state.zone, 0, state.maxZone, state.remix, state.week);
-      return { state: again, killed: true, gold, advancedZone: false, bossSpawned: false };
+      return {
+        state: { ...again, killCooldown: RIVAL_MIN_SECONDS },
+        killed: true,
+        gold,
+        advancedZone: false,
+        bossSpawned: false,
+      };
     }
     // Boss-Umbau: normale Bühnen sind NIE Gate-Bühnen — der Vorstoß auf eine
     // Gate-Bühne spawnt den Boss direkt in `spawnFor` (bossSpawned meldet den
     // Betreten-Moment für Banner/Stinger).
     const next = spawnFor(state.zone + 1, 0, state.maxZone, state.remix, state.week);
-    return { state: next, killed: true, gold, advancedZone: true, bossSpawned: next.boss };
+    return {
+      // Auch über die Bühnengrenze hinweg: Sonst wäre der erste Rivale der
+      // neuen Bühne gratis und das Tempo bliebe an der Bildrate hängen.
+      state: { ...next, killCooldown: next.boss ? 0 : RIVAL_MIN_SECONDS },
+      killed: true,
+      gold,
+      advancedZone: true,
+      bossSpawned: next.boss,
+    };
   }
 
   const same = spawnFor(state.zone, kills, state.maxZone, state.remix, state.week);
-  return { state: same, killed: true, gold, advancedZone: false, bossSpawned: false };
+  return {
+    state: { ...same, killCooldown: RIVAL_MIN_SECONDS },
+    killed: true,
+    gold,
+    advancedZone: false,
+    bossSpawned: false,
+  };
+}
+
+/**
+ * Die Sperre um `dt` abtragen — einmal je Tick, in Sekunden.
+ *
+ * Rein und ohne Kenntnis der Bildrate: Spiel und Simulations-Bot lesen dieselbe
+ * Rechnung, damit die gemessene Kurve und das gespielte Tempo dieselben sind.
+ */
+export function tickKillCooldown(state: CombatState, dt: number): CombatState {
+  if (state.killCooldown <= 0) return state;
+  const d = Number.isFinite(dt) && dt > 0 ? dt : 0;
+  return { ...state, killCooldown: Math.max(0, state.killCooldown - d) };
+}
+
+/**
+ * Wie viele Rivalen `dt` Sekunden höchstens hergeben — die Sperre als reine
+ * Zahl, für Rechenwege, die nicht Treffer für Treffer simulieren (Sim-Bot,
+ * Offline-Fortschritt).
+ */
+export function killsInSeconds(dt: number): number {
+  const d = Number.isFinite(dt) && dt > 0 ? dt : 0;
+  return d / RIVAL_MIN_SECONDS;
 }
 
 export interface BossTickResult {

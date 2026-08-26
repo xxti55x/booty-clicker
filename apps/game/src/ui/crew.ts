@@ -356,7 +356,7 @@ export class Crew {
     const list = byId('crewList');
     const s = this.deps.state;
     this.renderMilestoneHead();
-    const sm = soulMult(s.souls, soulBonusEff(s.heaven.hpf));
+    const sm = soulMult(s.rsLifetime, soulBonusEff(s.heaven.hpf));
     const global = heavenGlobalMult(s.heaven.hpf);
     // keep the per-hero display in lockstep with dpsOf/clickDamageOf (§5)
     const dpsMult =

@@ -92,6 +92,7 @@ import {
   peachIncomeMult,
   rivalChestChance,
   transcendState,
+  breadthOf,
 } from './game/ch-state';
 import {
   CHEST_TIERS,
@@ -194,6 +195,7 @@ import {
   spawnFor,
   tickBoss,
   travelTo,
+  tickKillCooldown,
 } from './game/combat';
 import { setlistEffect, setlistZoneKills } from './game/setlist';
 import {
@@ -1897,7 +1899,8 @@ function tabUnlocked(key: string): boolean {
       return state.lifetimeMaxZone >= 5 || state.stats.ascensions > 0;
     case 'pr': // ✨ Ruhm: the first time an ascension is worth doing, or ever done
       return (
-        state.rsLifetime > 0 || canAscend(state.runMaxZone, state.lifetimeMaxZone, state.rsLifetime)
+        state.rsLifetime > 0 ||
+        canAscend(state.runMaxZone, state.lifetimeMaxZone, state.rsLifetime, breadthOf(state))
       );
     case 'anc': // 🌀 Ahnen: the soul sink — only after a first ascension banks souls
       return state.stats.ascensions > 0 || Object.keys(state.ancients).length > 0;
@@ -4058,6 +4061,10 @@ function loop(nowMs: number): void {
   // Kontext-DPS statt des gecachten Grundwerts: Genau hier entscheidet sich, ob
   // „Rampenlicht" (Boss), „Dauerläufer" (Leerlauf), „Mitläufer" (Combo) und
   // „Ekstase-Tänzer" zünden.
+  // Die Kill-Sperre zuerst abtragen: Sie hält das Bühnen-Tempo an der Uhr statt
+  // an der Bildwiederholrate (siehe `RIVAL_MIN_SECONDS`). Ohne diesen Aufruf
+  // stünde sie nach dem ersten Kill für immer.
+  combat = tickKillCooldown(combat, simDt);
   const idleDpsNow = dpsNow();
   if (idleDpsNow > 0 && !swapping) applyHit(idleDpsNow * simDt, false);
   const cps =

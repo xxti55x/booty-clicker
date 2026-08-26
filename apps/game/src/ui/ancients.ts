@@ -106,10 +106,15 @@ export class Ancients {
 
   render(): void {
     const { state } = this.deps;
-    const bonusPct = Math.round(state.souls * soulBonusEff(state.heaven.hpf) * 100);
+    // Der Bonus hängt seit dem Sparanreiz-Umbau am VERDIENST, nicht am
+    // gehaltenen Bestand — und die Kopfzeile muss das sagen, sonst rechnet der
+    // Spieler weiter mit der alten Regel und spart sich arm.
+    const verdient = Math.max(state.rsLifetime, state.souls);
+    const bonusPct = Math.round(verdient * soulBonusEff(state.heaven.hpf) * 100);
     byId('ancInfo').innerHTML =
-      `Gehaltene <b>${fmt(state.souls)}</b> Ruhm-Seelen (+${bonusPct}% Schaden über <span class="dim">soulMult</span>).<br>` +
-      `<span class="dim">Ausgegebene Seelen buffen nicht mehr über soulMult — sie kaufen dafür dauerhafte Ahnen-Perks (überleben jede Aszension; erst eine Himmelfahrt setzt sie zurück).</span>`;
+      `Verdiente <b>${fmt(verdient)}</b> Ruhm-Seelen (+${bonusPct}% Schaden über <span class="dim">soulMult</span>) · ` +
+      `davon <b>${fmt(state.souls)}</b> frei zum Ausgeben.<br>` +
+      `<span class="dim">Ausgeben kostet KEINEN Schaden: Der Multiplikator zählt, was du verdient hast, nicht was übrig ist. Ahnen-Perks kommen obendrauf und überleben jede Aszension; erst eine Himmelfahrt setzt sie zurück.</span>`;
 
     const rows = ANCIENTS.map((cfg) => {
       const level = ancientLevel(state.ancients, cfg.id);

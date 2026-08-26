@@ -15,12 +15,23 @@ import {
   monsterHp,
   spawnFor,
   tickBoss,
+  RIVAL_MIN_SECONDS,
+  tickKillCooldown,
   travelTo,
 } from './combat';
 
-/** Kill the current target outright (one huge hit). */
+/**
+ * Kill the current target outright (one huge hit).
+ *
+ * Die Kill-Sperre (`RIVAL_MIN_SECONDS`) wird vorher abgetragen: Sie hält das
+ * Bühnen-Tempo an der Uhr, und diese Tests prüfen die Zonen-LOGIK, nicht das
+ * Tempo. Ohne den Vorlauf hinge jeder Kill nach dem ersten an der Sperre — was
+ * genau richtig ist, hier aber die Frage verfehlt. Das Tempo selbst hat eigene
+ * Anker weiter unten.
+ */
 function oneShot(state: ReturnType<typeof createCombat>) {
-  return hit(state, state.hp);
+  const ready = tickKillCooldown(state, RIVAL_MIN_SECONDS);
+  return hit(ready, ready.hp);
 }
 
 describe('combat — zones & HP scaling', () => {
