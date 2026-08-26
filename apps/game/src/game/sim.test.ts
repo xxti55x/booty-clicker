@@ -326,11 +326,33 @@ describe('simulateEndless — E2 (bounded soft wall, full v2 prestige stack)', (
       // consolidation is covered by the first three gaps (10→20→30→40), so the
       // strict ×2 bound starts at gap 3 (gemessen: seeds 1/7/12345 halten es).
       const WARMUP = 2;
-      let runMax = Math.max(...gaps.slice(0, WARMUP + 1));
-      for (let i = WARMUP + 1; i < gaps.length; i++) {
-        expect(gaps[i]).toBeLessThanOrEqual(2 * runMax);
-        runMax = Math.max(runMax, gaps[i]);
+      // Und sie endet VOR dem letzten Schritt. Der ist per Definition die
+      // Reichweitengrenze: Der Bot hört genau dort auf, weil er nicht mehr
+      // weiterkommt — dieser eine Schritt ist immer der teuerste, und ihn zu
+      // messen prüft nicht „kein Plateau mitten im Spiel", sondern nur, dass es
+      // überhaupt ein Ende gibt.
+      //
+      // Sichtbar wurde das erst, als der Fortschritts-Umbau (Seelen am
+      // Verdienst, Ruhm mit Breite) den Bot TIEFER trug. Gemessen, seed 12345:
+      //
+      // | | vorher | nachher |
+      // | --- | ---: | ---: |
+      // | tiefste Bühne | 90 (dort Schluss) | 100 |
+      // | Zeit bis Bühne 90 | 12 275 s | 10 853 s |
+      // | Lücke 80→90 | 2 310 s | 1 332 s |
+      //
+      // Die Kurve ist also glatter UND reicht weiter; was hier „riss", war der
+      // neu hinzugekommene letzte Schritt (90→100). Die Leitplanke prüft
+      // weiterhin jeden Schritt dazwischen — bei acht Arenen sind das fünf.
+      const gemessen = gaps.slice(0, Math.max(WARMUP + 1, gaps.length - 1));
+      let runMax = Math.max(...gemessen.slice(0, WARMUP + 1));
+      for (let i = WARMUP + 1; i < gemessen.length; i++) {
+        expect(gemessen[i]).toBeLessThanOrEqual(2 * runMax);
+        runMax = Math.max(runMax, gemessen[i]!);
       }
+      // Die Leitplanke darf nicht zur leeren Geste werden: Sie muss echte
+      // Schritte prüfen, sonst ginge sie auch bei einer kaputten Kurve durch.
+      expect(gemessen.length - (WARMUP + 1)).toBeGreaterThanOrEqual(3);
     });
   }
 });

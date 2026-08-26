@@ -7,7 +7,7 @@
  * damage) are NEVER persisted — they're recomputed from crew levels + souls.
  */
 import { type AbilityState, createAbility } from './ability';
-import { applyAscension, soulMult } from './ascension';
+import { type FameBreadth, applyAscension, soulMult } from './ascension';
 import { BOSS_EVERY } from './combat';
 import { setlistEffect } from './setlist';
 import { vorsprungStartZone } from './vorsprung';
@@ -74,7 +74,7 @@ import {
   NO_CTX,
   totalRawDps,
 } from './heroes';
-import { type CrewMastery, createMastery } from './mastery';
+import { type CrewMastery, createMastery, masteryRank } from './mastery';
 import { gainLegend, legendGlobalMult } from './legend';
 import { type SkinPath, createSkinPath, skinPathBonus } from './skin-path';
 import { type CrewRetrain, type RetrainRolls, createRetrain, createRetrainRolls } from './retrain';
@@ -430,6 +430,13 @@ export function createChState(): ChState {
  * `transcend` the neutral ×1 global mult, matching a fresh classic/club default.
  */
 type DerivedInput = Pick<ChState, 'crew' | 'souls' | 'gilds' | 'ancients' | 'heaven'> & {
+  /**
+   * Die VERDIENTEN Seelen. Optional, damit ältere Fixtures ohne dieses Feld
+   * weiter rechnen — sie fallen auf `souls` zurück, und ohne Ahnen-Ausgaben ist
+   * das dieselbe Zahl. Der globale Multiplikator hängt seit dem
+   * Sparanreiz-Umbau hier und nicht mehr am gehaltenen Bestand.
+   */
+  rsLifetime?: number;
   gear?: GearState;
   permTokens?: PermTokens;
   transcend?: TranscendState;
@@ -481,6 +488,22 @@ export function loadoutBonus(
   return foldAffixes(list);
 }
 
+/**
+ * Die verdienten Seelen eines Zustands — die Grundlage des globalen
+ * Multiplikators seit dem Sparanreiz-Umbau.
+ *
+ * `Math.max` statt eines einfachen Feldzugriffs, weil „verdient ≥ gehalten"
+ * eine INVARIANTE ist: Der gehaltene Bestand entsteht ja gerade dadurch, dass
+ * vom Verdienst etwas abgezogen wird. Ein Spielstand oder ein Fixture, in dem
+ * `rsLifetime` hinter `souls` zurückfällt, ist in sich widersprüchlich — hier
+ * wird er repariert statt bestraft. Das erspart zugleich eine Migration: Kein
+ * Altbestand verliert Schaden, nur weil sein Zähler anders geführt wurde.
+ */
+function earnedSoulsOf(state: DerivedInput): number {
+  const earned = typeof state.rsLifetime === 'number' ? state.rsLifetime : 0;
+  return Math.max(earned, state.souls);
+}
+
 /** Derselbe Fold für die optionale `DerivedInput`-Form (fehlendes Gear ⇒ leer). */
 function loadoutOf(state: DerivedInput | { gear?: GearState }): GearBonus {
   const s = state as { gear?: GearState; relics?: RelicsState; forge?: ForgeState };
@@ -525,7 +548,7 @@ export function dpsOf(state: DerivedInput, ctx: FightCtx = NO_CTX): number {
       // Grundrechnung — genau das, was die Anzeige zeigen soll.
       ctx,
     ) *
-    soulMult(state.souls, soulBonusEff(hpf)) *
+    soulMult(earnedSoulsOf(state), soulBonusEff(hpf)) *
     ancientDpsMult(state.ancients) *
     heavenGlobalMult(hpf) *
     // ROADMAP-V2 P4 (Kampf-Ast): „Schwerer Bass" × „Crew-Doktrin" — die einzigen
@@ -570,7 +593,7 @@ export function clickDamageOf(state: DerivedInput): number {
       state.crewMastery ?? {},
       state.heir ?? '',
     ) *
-    soulMult(state.souls, soulBonusEff(hpf)) *
+    soulMult(earnedSoulsOf(state), soulBonusEff(hpf)) *
     ancientClickMult(state.ancients) *
     heavenGlobalMult(hpf) *
     // ROADMAP-V2 P4 (Kampf-Ast): die „Klick-Doktrin" — Gegenstück zur „Crew-Doktrin"
@@ -799,6 +822,8 @@ export function ascendState(state: ChState): ChState {
     state.lifetimeMaxZone,
     state.souls,
     state.rsLifetime,
+    // Seit dem Breiten-Umbau zahlt nicht mehr nur die Tiefe auf Ruhm ein.
+    breadthOf(state),
   );
   return {
     ...createChState(),
@@ -989,5 +1014,27 @@ export function transcendState(state: ChState, heir = '', startZone = 1): ChStat
     // 1d: unendlich und nie gewipet — der tiefste Reset des Spiels lässt ihn
     // stehen. Die Transzendenz selbst zahlt KEIN Level (nur Himmelfahrten tun das).
     legend: state.legend,
+  };
+}
+
+/**
+ * Die Breite eines Spielstands — die Achsen, die neben der Tiefe auf Ruhm
+ * einzahlen (siehe `ascension.fameBreadth`).
+ *
+ * Sie steht hier und nicht in `ascension.ts`, weil nur der Spielstand weiß, wo
+ * Meisterschaft, Ruf und Truhen geführt werden; `ascension.ts` bleibt frei von
+ * Kenntnissen über die Zustandsform und rechnet nur mit Zahlen.
+ */
+export function breadthOf(state: ChState): FameBreadth {
+  let masteryRanks = 0;
+  for (const xp of Object.values(state.crewMastery ?? {})) masteryRanks += masteryRank(xp);
+  let reputation = 0;
+  for (const rep of Object.values(state.territory ?? {})) {
+    if (typeof rep === 'number' && Number.isFinite(rep)) reputation += rep;
+  }
+  return {
+    masteryRanks,
+    reputation,
+    chestsOpened: state.stats?.chestsOpened ?? 0,
   };
 }

@@ -1,5 +1,11 @@
-import { ASCEND_MIN_ZONE, canAscend, nextSoulZone, pendingSouls } from '../game/ascension';
-import type { ChState } from '../game/ch-state';
+import {
+  ASCEND_MIN_ZONE,
+  canAscend,
+  fameBreadth,
+  nextSoulZone,
+  pendingSouls,
+} from '../game/ascension';
+import { type ChState, breadthOf } from '../game/ch-state';
 import { soulBonusEff } from '../game/heaven';
 import { emptyState } from './empty';
 import { fmt } from './format';
@@ -52,7 +58,15 @@ export class Prestige {
     const btn = byId('ascendBtn') as HTMLButtonElement;
     btn.addEventListener('click', () => {
       const { state } = this.deps;
-      if (!canAscend(this.deps.getRunMaxZone(), state.lifetimeMaxZone, state.rsLifetime)) return;
+      if (
+        !canAscend(
+          this.deps.getRunMaxZone(),
+          state.lifetimeMaxZone,
+          state.rsLifetime,
+          breadthOf(state),
+        )
+      )
+        return;
       if (!this.armed) {
         this.armed = true;
         btn.classList.add('armed');
@@ -78,10 +92,15 @@ export class Prestige {
   refresh(): void {
     const { state } = this.deps;
     const runMax = this.deps.getRunMaxZone();
-    const pending = pendingSouls(runMax, state.lifetimeMaxZone, state.rsLifetime);
+    const pending = pendingSouls(runMax, state.lifetimeMaxZone, state.rsLifetime, breadthOf(state));
     const bonus = soulBonusEff(state.heaven.hpf); // HPF-amplified per-soul bonus
-    const bonusNow = Math.round(state.souls * bonus * 100);
-    const bonusAfter = Math.round((state.souls + pending) * bonus * 100);
+    // Der Bonus zählt seit dem Sparanreiz-Umbau den VERDIENST, nicht den Rest
+    // im Beutel — die Anzeige muss dieselbe Zahl nennen wie die Rechnung.
+    const verdient = Math.max(state.rsLifetime, state.souls);
+    const bonusNow = Math.round(verdient * bonus * 100);
+    const bonusAfter = Math.round((verdient + pending) * bonus * 100);
+    // Die Breite ist eine unsichtbare Regel, solange man sie nicht sieht.
+    const breite = fameBreadth(breadthOf(state));
 
     // ROADMAP-V2 G6: Solange nie aszendiert wurde, trägt der Tab nur Nullen —
     // und genau dann sieht man ihn zum ERSTEN Mal (er erscheint, sobald sich
@@ -97,9 +116,12 @@ export class Prestige {
 
     byId('prInfo').innerHTML =
       empty +
-      `Aktuell <b>${fmt(state.souls)}</b> gehaltene Seelen (+${bonusNow}% Schaden).<br>` +
+      `Verdient <b>${fmt(verdient)}</b> Seelen (+${bonusNow}% Schaden) · ` +
+      `<b>${fmt(state.souls)}</b> frei für Ahnen.<br>` +
       `Beim Neustart deiner Tournee gibt es <b>+${fmt(pending)}</b> Seelen ` +
       `(→ +${bonusAfter}% dauerhaft). Deine Crew, Bühne & BP werden zurückgesetzt; Ahnen bleiben.<br>` +
+      `<span class="dim">Ruhm zählt nicht nur die Tiefe: Meisterschaft, Ruf und Truhen bringen gerade ` +
+      `<b>×${breite.toFixed(2)}</b>${breite >= 1.99 ? ' (Maximum)' : ''}.</span><br>` +
       // Vor der ersten Aszension ist die Bühnen-Schwelle die einzige Frage, die
       // dieser Tab beantworten muss — derselbe Balken wie beim Transzendenz-Gate.
       (runMax < ASCEND_MIN_ZONE
@@ -111,7 +133,7 @@ export class Prestige {
 
     if (!this.armed) {
       const btn = byId('ascendBtn') as HTMLButtonElement;
-      const ok = canAscend(runMax, state.lifetimeMaxZone, state.rsLifetime);
+      const ok = canAscend(runMax, state.lifetimeMaxZone, state.rsLifetime, breadthOf(state));
       btn.disabled = !ok;
       // M-08: Der gesperrte Zustand nennt den WEG statt nur das Nein — vor
       // Bühne 10 die Schwelle samt eigenem Stand, danach (PLAYTEST G-04) die

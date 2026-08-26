@@ -50,12 +50,111 @@ export function soulsForMaxZone(zone: number): number {
 }
 
 /**
- * Global damage multiplier from `souls` held. `bonusPerSoul` defaults to the base
- * +10 %; the HPF soul-amplifier (`soulBonusEff`, §4.5.2) passes a larger value so
- * L1 (more souls) and L2 (fatter souls) *multiply* rather than add.
+ * Globaler Schadens-Multiplikator aus den **verdienten** Seelen (`rsLifetime`).
+ *
+ * **Warum verdient und nicht gehalten.** Bis hierher hing der Multiplikator am
+ * gehaltenen Bestand — und damit war jeder Ahnen-Kauf ein direkter
+ * Schadensverlust. Gemessen war Sparen deshalb IMMER besser, und der Abstand
+ * öffnete sich mit jedem Lauf weiter:
+ *
+ * | Seelen | behalten | alles ausgeben | Sparen ist … |
+ * | ---: | ---: | ---: | ---: |
+ * | 100 | ×11 | ×2,95 (Lv 13) | 3,7× besser |
+ * | 1 000 | ×101 | ×7,6 (Lv 44) | 13,3× besser |
+ * | 1 000 000 | ×100 001 | ×213 (Lv 1413) | **469× besser** |
+ *
+ * Das ist keine Kalibrierungsfrage, sondern Mathematik: Sparen wächst LINEAR in
+ * n, Ausgeben nur mit √n (die Ahnen-Leiter kostet `level + 1`, ihre Summe ist
+ * eine Dreieckszahl). Eine Wurzel holt eine Gerade nie ein — auch nicht mit
+ * zehnmal stärkeren Ahnen.
+ *
+ * Am verdienten Stand ist der Multiplikator unverlierbar, Ausgeben kostet
+ * nichts mehr, und die Entscheidung verschiebt sich von „ausgeben oder sparen?"
+ * (die keine war) zu „welcher Ahne?" — die eigentlich gemeinte Frage.
+ *
+ * Wer nie ausgibt, merkt keinen Unterschied: Ohne Ausgaben sind verdient und
+ * gehalten dieselbe Zahl. Die Obergrenze der Kurve bleibt damit unverändert,
+ * und nichts muss neu kalibriert werden.
+ *
+ * `bonusPerSoul` ist der Grundwert +10 %; der HPF-Verstärker (`soulBonusEff`,
+ * §4.5.2) reicht am Aufrufort einen größeren Wert durch, damit L1 (mehr Seelen)
+ * und L2 (fettere Seelen) sich MULTIPLIZIEREN statt zu addieren.
  */
-export function soulMult(souls: number, bonusPerSoul: number = SOUL_BONUS): number {
-  return 1 + bonusPerSoul * Math.max(0, souls);
+export function soulMult(earnedSouls: number, bonusPerSoul: number = SOUL_BONUS): number {
+  return 1 + bonusPerSoul * Math.max(0, earnedSouls);
+}
+
+// ---------------------------------------------------------------------------
+// Die BREITE: Ruhm hängt nicht mehr nur an der Bühne
+// ---------------------------------------------------------------------------
+
+/**
+ * Was ein Spieler AUSSER der Tiefe vorzuweisen hat.
+ *
+ * Alle drei Achsen sind Lebenszeit-Highwater und überleben jede Aszension —
+ * genau wie die tiefste Bühne. Das ist keine Formsache: `pendingSouls` rechnet
+ * „Gesamtanspruch minus schon verdient", und dieser Trick trägt nur, solange
+ * der Anspruch nie fällt. Eine Achse, die sich zurücksetzt (Crew-Level, Gold
+ * des Laufs), wäre hier eine Farm-Lücke.
+ */
+export interface FameBreadth {
+  /** Summe der Crew-Meisterschafts-Ränge — Zeit im Einsatz. */
+  readonly masteryRanks: number;
+  /** Gesammelter Ruf über alle Bühnen-Themen — wo man gefarmt hat. */
+  readonly reputation: number;
+  /** Geöffnete Truhen — was man eingesammelt statt überrannt hat. */
+  readonly chestsOpened: number;
+}
+
+/** Ein Spieler ohne jede Breite — der Faktor bleibt dann ×1. */
+export const NO_BREADTH: FameBreadth = { masteryRanks: 0, reputation: 0, chestsOpened: 0 };
+
+/**
+ * Die Normierungen der drei Achsen (Nenner: „hier ist die Achse voll").
+ *
+ * Gemessen an echten Ketten statt geschätzt. Eine 4×45-Minuten-Kette bringt
+ * Σ18 Ränge, 3 883 Ruf und 45 Truhen; eine 8×45-Kette Σ30, 9 282 und 78. Die
+ * Nenner sind so gesetzt, dass die erste Kette bei rund ×1,6 landet und die
+ * zweite den Deckel erreicht — spürbar, aber nie die Hauptsache.
+ */
+export const BREADTH_MASTERY_FULL = 60; // 15 Mitglieder × Rang 4
+export const BREADTH_REPUTATION_FULL = 400; // auf die Wurzel des Rufs
+export const BREADTH_CHESTS_FULL = 300;
+
+/** Wie weit die Breite den Ruhm höchstens hebt (×2 bei voller Breite). */
+export const BREADTH_MAX_BONUS = 1;
+
+/**
+ * Der Breiten-Faktor: 1 (nur Tiefe) bis 2 (alle Achsen voll).
+ *
+ * **Warum ein Faktor und keine Summanden.** Der Tiefen-Term ist exponentiell
+ * (`1,10^z`): Bei Bühne 90 stammen 99,3 % des Ruhms aus ihm. Additive Achsen
+ * hätten dagegen keine Chance — man müsste sie selbst exponentiell wachsen
+ * lassen, und dann wäre die Tiefe wieder egal. Als Faktor wirkt die Breite in
+ * JEDER Größenordnung gleich stark, ganz gleich, wie tief jemand schon steht.
+ *
+ * Die Wurzel auf dem Ruf, weil er als Einziger ungebremst mitläuft: Er zählt
+ * jeden Kill, also müsste er sonst als Zahl schlicht alles andere erschlagen.
+ *
+ * Nie werfend; kaputte Eingaben zählen als null.
+ */
+export function fameBreadth(b: FameBreadth = NO_BREADTH): number {
+  const ok = (v: number): number => (Number.isFinite(v) && v > 0 ? v : 0);
+  const anteil =
+    ok(b.masteryRanks) / BREADTH_MASTERY_FULL +
+    Math.sqrt(ok(b.reputation)) / BREADTH_REPUTATION_FULL +
+    ok(b.chestsOpened) / BREADTH_CHESTS_FULL;
+  return 1 + Math.min(BREADTH_MAX_BONUS, anteil);
+}
+
+/**
+ * Der Gesamtanspruch auf Ruhm: Tiefe × Breite.
+ *
+ * Monoton in beiden Argumenten — die Voraussetzung dafür, dass `pendingSouls`
+ * weiter „Anspruch minus verdient" rechnen darf, ohne je negativ zu werden.
+ */
+export function soulsForProgress(zone: number, breadth: FameBreadth = NO_BREADTH): number {
+  return Math.floor(soulsForMaxZone(zone) * fameBreadth(breadth));
 }
 
 /**
@@ -63,14 +162,18 @@ export function soulMult(souls: number, bonusPerSoul: number = SOUL_BONUS): numb
  * deepest zone (including the current run) minus what you have **already earned**
  * (`rsLifetime`). Spending souls on Ancients lowers your held balance but not
  * `rsLifetime`, so it can never be farmed back by re-ascending.
+ *
+ * Seit dem Breiten-Umbau zählt nicht mehr nur, wie tief jemand stand, sondern
+ * auch, was er auf dem Weg getan hat — siehe {@link fameBreadth}.
  */
 export function pendingSouls(
   runMaxZone: number,
   lifetimeMaxZone: number,
   rsLifetime: number,
+  breadth: FameBreadth = NO_BREADTH,
 ): number {
   const deepest = Math.max(runMaxZone, lifetimeMaxZone);
-  return Math.max(0, soulsForMaxZone(deepest) - rsLifetime);
+  return Math.max(0, soulsForProgress(deepest, breadth) - rsLifetime);
 }
 
 /** Whether ascending is worth it (at least one newly-earned soul, past the gate). */
@@ -78,8 +181,9 @@ export function canAscend(
   runMaxZone: number,
   lifetimeMaxZone: number,
   rsLifetime: number,
+  breadth: FameBreadth = NO_BREADTH,
 ): boolean {
-  return pendingSouls(runMaxZone, lifetimeMaxZone, rsLifetime) >= 1;
+  return pendingSouls(runMaxZone, lifetimeMaxZone, rsLifetime, breadth) >= 1;
 }
 
 /**
@@ -116,9 +220,10 @@ export function applyAscension(
   lifetimeMaxZone: number,
   currentSouls: number,
   rsLifetime: number,
+  breadth: FameBreadth = NO_BREADTH,
 ): AscendResult {
   const deepest = Math.max(runMaxZone, lifetimeMaxZone);
-  const earnedTotal = soulsForMaxZone(deepest);
+  const earnedTotal = soulsForProgress(deepest, breadth);
   const gain = Math.max(0, earnedTotal - rsLifetime);
   return {
     souls: currentSouls + gain,
